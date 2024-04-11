@@ -38,7 +38,7 @@ func NewConfig() (*Config, bool, error) {
 
 	viper.SetConfigName("campux")
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath(".")
+	viper.AddConfigPath("./data/")
 
 	// 设置默认配置
 	SetDefault()
@@ -46,7 +46,7 @@ func NewConfig() (*Config, bool, error) {
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			// Config file not found; write default config
-			if err := viper.WriteConfigAs("campux.yaml"); err != nil {
+			if err := viper.WriteConfigAs("./data/campux.yaml"); err != nil {
 				return nil, false, err
 			}
 			return nil, true, nil
