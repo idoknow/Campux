@@ -1,0 +1,13 @@
+services:
+  minio:
+    image: quay.io/minio/minio
+    container_name: minio
+    environment:
+      - MINIO_ROOT_USER=root
+      - MINIO_ROOT_PASSWORD=campux
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+    volumes:
+      - './data/minio:/data'
+    command: server /data --console-address ":9090"
