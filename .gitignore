@@ -24,3 +24,5 @@ campux.yaml
 # container files
 docker/mongodb/mongodata
 docker/minio/data
+
+/bin
