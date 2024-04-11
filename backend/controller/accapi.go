@@ -21,6 +21,7 @@ func NewAccountRouter(rg *gin.RouterGroup, as service.AccountService) *AccountRo
 	group.POST("/create", ar.CreateAccount)
 	group.POST("/login", ar.LoginAccount)
 	group.PUT("/reset", ar.ResetPassword)
+	group.PUT("/change-pwd", ar.ChangePassword)
 
 	return ar
 }
@@ -92,4 +93,32 @@ func (ar *AccountRouter) ResetPassword(c *gin.Context) {
 	ar.Success(c, gin.H{
 		"passwd": pwd,
 	})
+}
+
+// 修改密码
+func (ar *AccountRouter) ChangePassword(c *gin.Context) {
+	uin, err := ar.GetUin(c)
+
+	if err != nil {
+		ar.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	// 取body的json里的uin和pwd
+	var body AccountChangePasswordBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	// 修改密码
+	err = ar.AccountService.ChangePassword(uin, body.NewPasswd)
+
+	if err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	ar.Success(c, nil)
 }

@@ -13,6 +13,11 @@ type AccountLoginBody struct {
 	Passwd string `json:"passwd" binding:"required"`
 }
 
+type AccountChangePasswordBody struct {
+	// 新密码
+	NewPasswd string `json:"new_passwd" binding:"required"`
+}
+
 type PostNewBody struct {
 
 	// UUID UUID 必须

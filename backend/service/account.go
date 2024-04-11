@@ -89,3 +89,25 @@ func (as *AccountService) ResetPassword(uin int64) (string, error) {
 
 	return newPwd, err
 }
+
+// 修改密码
+func (as *AccountService) ChangePassword(uin int64, newPwd string) error {
+	acc, err := as.DB.GetAccountByUIN(uin)
+
+	if err != nil {
+		return err
+	}
+
+	if acc == nil {
+		return ErrAccountNotFound
+	}
+
+	salt := util.GenerateRandomSalt()
+
+	encryptedPwd := util.EncryptPassword(newPwd, salt)
+
+	// 更新密码
+	err = as.DB.UpdatePassword(uin, encryptedPwd, salt)
+
+	return err
+}
