@@ -19,3 +19,8 @@
 
 # Go workspace file
 go.work
+campux.yaml
+
+# container files
+docker/mongodb/mongodata
+docker/minio/data
