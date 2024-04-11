@@ -30,7 +30,7 @@ func (as *AccountService) CreateAccount(uin int64) (string, error) {
 		salt := util.GenerateRandomSalt()
 
 		acc := &database.AccountPO{
-			UIN:       uin,
+			Uin:       uin,
 			Pwd:       util.EncryptPassword(initPwd, salt),
 			UserGroup: database.USER_GROUP_USER,
 			Salt:      salt,
