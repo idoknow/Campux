@@ -4,7 +4,7 @@ services:
     container_name: minio
     environment:
       - MINIO_ROOT_USER=root
-      - MINIO_ROOT_PASSWORD=campux
+      - MINIO_ROOT_PASSWORD=campux-dev
     ports:
       - "9000:9000"
       - "9090:9090"
