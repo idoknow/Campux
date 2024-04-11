@@ -11,6 +11,7 @@ import (
 
 const (
 	ACCOUNT_COLLECTION = "account"
+	POST_COLLECTION    = "post"
 )
 
 type MongoDBManager struct {
@@ -21,6 +22,21 @@ func NewMongoDBManager() *MongoDBManager {
 	client, err := mongo.Connect(
 		context.TODO(),
 		options.Client().ApplyURI(viper.GetString("database.mongo.uri")),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// 创建索引
+	// post的uuid
+	_, err = client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).Indexes().CreateOne(
+		context.TODO(),
+		mongo.IndexModel{
+			Keys: bson.M{
+				"uuid": 1,
+			},
+			Options: options.Index().SetUnique(true),
+		},
 	)
 	if err != nil {
 		panic(err)
@@ -72,5 +88,15 @@ func (m *MongoDBManager) UpdatePassword(uin int64, pwd, salt string) error {
 			},
 		},
 	)
+	return err
+}
+
+func (m *MongoDBManager) CountPost() (int, error) {
+	count, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).CountDocuments(context.TODO(), bson.M{})
+	return int(count), err
+}
+
+func (m *MongoDBManager) AddPost(post *PostPO) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).InsertOne(context.TODO(), post)
 	return err
 }

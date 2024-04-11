@@ -2,6 +2,7 @@ package controller
 
 import (
 	"github.com/RockChinQ/Campux/backend/service"
+	"github.com/RockChinQ/Campux/backend/util"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,6 +30,18 @@ func NewApiController(
 type APIRouter struct {
 }
 
+// 从jwt取uin
+func (ar *APIRouter) GetUin(c *gin.Context) (int64, error) {
+	jwtToken := c.GetHeader("Authorization")
+
+	// 删除Bearer
+	jwtToken = jwtToken[7:]
+
+	uin, err := util.ParseJWTToken(jwtToken)
+
+	return uin, err
+}
+
 func (ar *APIRouter) Success(c *gin.Context, data interface{}) {
 	c.JSON(200, gin.H{
 		"code": 0,
@@ -40,6 +53,14 @@ func (ar *APIRouter) Success(c *gin.Context, data interface{}) {
 func (ar *APIRouter) Fail(c *gin.Context, code int, msg string) {
 	c.JSON(200, gin.H{
 		"code": code,
+		"msg":  msg,
+		"data": gin.H{},
+	})
+}
+
+func (ar *APIRouter) StatusCode(c *gin.Context, code int, msg string) {
+	c.JSON(code, gin.H{
+		"code": -1,
 		"msg":  msg,
 		"data": gin.H{},
 	})
