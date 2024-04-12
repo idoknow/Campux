@@ -5,10 +5,10 @@
         投稿
     </v-btn>
 
-    <v-btn @click="go('/user')">
-        <v-icon>mdi-account</v-icon>
+    <v-btn @click="go('/world')">
+        <v-icon>mdi-earth</v-icon>
 
-        我的
+        动态
     </v-btn>
 
     <v-btn @click="go('/service')">

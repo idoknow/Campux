@@ -70,6 +70,10 @@ export default {
     },
 
     mounted() {
+        // get param
+        if (this.$route.query.hint) {
+            this.toast(this.$route.query.hint)
+        }
     },
 
     methods: {
@@ -133,4 +137,6 @@ export default {
 .cursor:hover {
     color: #3f51b5;
 }
+
+
 </style>

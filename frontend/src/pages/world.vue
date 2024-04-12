@@ -20,14 +20,28 @@
           text: '',
           color: ''
         },
-        value: 1
+        value: 1,
+        filter: {
+          "uin": -1, // -1 means all,
+
+        }
       }
     },
   
     mounted() {
+      this.getPosts()
     },
   
     methods: {
+      getPosts() {
+        this.$axios.post('/v1/post/get-posts')
+          .then((response) => {
+            console.log(response.data)
+          })
+          .catch((error) => {
+            console.log(error)
+          })
+      },
       toast(text, color = 'error') {
         this.snackbar.text = text
         this.snackbar.color = color
