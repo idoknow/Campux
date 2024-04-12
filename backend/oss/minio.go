@@ -53,3 +53,16 @@ func (m *MinioClient) UploadFromIO(ioReader io.Reader, suffix string) (string, e
 	_, err := m.Client.PutObject(context.Background(), m.Bucket, objectName, ioReader, -1, minio.PutObjectOptions{})
 	return objectName, err
 }
+
+// 下载文件到io.Writer
+func (m *MinioClient) DownloadToIO(objectName string, ioWriter io.Writer) error {
+	obj, err := m.Client.GetObject(context.Background(), m.Bucket, objectName, minio.GetObjectOptions{})
+
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(ioWriter, obj)
+
+	return err
+}
