@@ -36,13 +36,14 @@ const (
 )
 
 type PostPO struct {
-	ID     int        `json:"id" bson:"id"`         // 稿件ID
-	UUID   string     `json:"uuid" bson:"uuid"`     // UUID
-	Uin    int64      `json:"uin" bson:"uin"`       // 作者QQ号
-	Text   string     `json:"text" bson:"text"`     // 正文
-	Images []string   `json:"images" bson:"images"` // 图片
-	Anon   bool       `json:"anon" bson:"anon"`     // 是否匿名
-	Status PostStatus `json:"status" bson:"status"` // 状态
+	ID        int        `json:"id" bson:"id"`                 // 稿件ID
+	UUID      string     `json:"uuid" bson:"uuid"`             // UUID
+	Uin       int64      `json:"uin" bson:"uin"`               // 作者QQ号
+	Text      string     `json:"text" bson:"text"`             // 正文
+	Images    []string   `json:"images" bson:"images"`         // 图片
+	Anon      bool       `json:"anon" bson:"anon"`             // 是否匿名
+	Status    PostStatus `json:"status" bson:"status"`         // 状态
+	CreatedAt time.Time  `json:"created_at" bson:"created_at"` // CST时间
 }
 
 type PostLogPO struct {

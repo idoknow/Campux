@@ -48,13 +48,14 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 	// TODO 检查图片是否存在
 
 	err = ps.DB.AddPost(&database.PostPO{
-		ID:     id,
-		UUID:   uuid,
-		Uin:    uin,
-		Text:   text,
-		Images: images,
-		Anon:   anon,
-		Status: database.POST_STATUS_PENDING_APPROVAL,
+		ID:        id,
+		UUID:      uuid,
+		Uin:       uin,
+		Text:      text,
+		Images:    images,
+		Anon:      anon,
+		Status:    database.POST_STATUS_PENDING_APPROVAL,
+		CreatedAt: util.GetCSTTime(),
 	})
 
 	if err != nil {
@@ -77,4 +78,9 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 	}
 
 	return id, nil
+}
+
+// 获取用户的帖子
+func (ps *PostService) GetPosts(uin int64, status database.PostStatus, timeOrder int, page, pageSize int) ([]database.PostPO, error) {
+	return ps.DB.GetPosts(uin, status, timeOrder, page, pageSize)
 }

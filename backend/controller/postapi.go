@@ -24,6 +24,8 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
 	group.POST("/post-new", pr.PostNew)
 	// download-image/{image-key}
 	group.GET("/download-image/:key", pr.DownloadImage)
+	group.POST("/get-self-posts", pr.GetSelfPosts)
+	group.POST("/get-posts", pr.GetPosts)
 
 	return pr
 }
@@ -115,4 +117,69 @@ func (pr *PostRouter) DownloadImage(c *gin.Context) {
 	c.Writer.Header().Set("Content-Type", "image/jpeg")
 
 	c.Data(200, "application/octet-stream", buf.Bytes())
+}
+
+// 获取用户自己的帖子
+func (pr *PostRouter) GetSelfPosts(c *gin.Context) {
+	// 从jwt取uin
+	uin, err := pr.GetUin(c)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	// 取body的json里的status, time_order, page, page_size
+	var body GetSelfPostsBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	// 获取用户自己的帖子
+	posts, err := pr.PostService.GetPosts(
+		uin,
+		body.Status,
+		*body.TimeOrder,
+		*body.Page,
+		*body.PageSize,
+	)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{
+		"list": posts,
+	})
+}
+
+// 获取稿件列表
+func (pr *PostRouter) GetPosts(c *gin.Context) {
+	var body GetPostsBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	// 获取稿件列表
+	posts, err := pr.PostService.GetPosts(
+		body.Uin,
+		body.Status,
+		*body.TimeOrder,
+		*body.Page,
+		*body.PageSize,
+	)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{
+		"list": posts,
+	})
 }

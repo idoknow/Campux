@@ -1,5 +1,7 @@
 package controller
 
+import "github.com/RockChinQ/Campux/backend/database"
+
 type AccountCreateBody struct {
 	// Uin 账户的uin 必须
 	Uin int64 `json:"uin" binding:"required"`
@@ -31,4 +33,25 @@ type PostNewBody struct {
 
 	// Images 图片
 	Images []string `json:"images"`
+}
+
+type GetSelfPostsBody struct {
+	// 状态
+	Status database.PostStatus `json:"status" binding:"required"`
+
+	// 时间排序
+	TimeOrder *int `json:"time_order" binding:"required"`
+
+	// 页码
+	Page *int `json:"page" binding:"required"`
+
+	// 每页数量
+	PageSize *int `json:"page_size" binding:"required"`
+}
+
+type GetPostsBody struct {
+	// uin
+	Uin int64 `json:"uin" binding:"required"`
+
+	GetSelfPostsBody
 }
