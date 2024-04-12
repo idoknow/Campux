@@ -30,6 +30,10 @@ func (ps *PostService) UploadImage(ioReader io.Reader, suffix string) (string, e
 	return ps.OSS.UploadFromIO(ioReader, suffix)
 }
 
+func (ps *PostService) DownloadImage(key string, ioWriter io.Writer) error {
+	return ps.OSS.DownloadToIO(key, ioWriter)
+}
+
 func (ps *PostService) PostNew(uuid string, uin int64, text string, images []string, anon bool) (int, error) {
 
 	id, err := ps.DB.CountPost()
