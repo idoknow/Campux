@@ -23,15 +23,15 @@ func NewApiController(
 		r.Use(
 			cors.New(
 				cors.Config{
-					AllowOrigins:     []string{"*"},
-					AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-					AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
-					ExposeHeaders:    []string{"Content-Length"},
-					AllowCredentials: true,
-					AllowOriginFunc: func(origin string) bool {
-						return true
+					AllowOrigins: []string{
+						"http://localhost:3000",
+						"http://127.0.0.1:3000",
 					},
-					MaxAge: 12 * time.Hour,
+					AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"},
+					AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Cookie"},
+					ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+					AllowCredentials: true,
+					MaxAge:           12 * time.Hour,
 				},
 			),
 		)
