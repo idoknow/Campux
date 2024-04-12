@@ -22,6 +22,7 @@ func NewAccountRouter(rg *gin.RouterGroup, as service.AccountService) *AccountRo
 	group.POST("/login", ar.LoginAccount)
 	group.PUT("/reset", ar.ResetPassword)
 	group.PUT("/change-pwd", ar.ChangePassword)
+	group.GET("/token-check", ar.CheckToken)
 
 	return ar
 }
@@ -66,6 +67,9 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 		ar.Fail(c, 1, err.Error())
 		return
 	}
+
+	// set-cookie
+	c.SetCookie("access-token", token, 3600, "/", c.Request.Host, false, true)
 
 	ar.Success(c, gin.H{
 		"token": token,
@@ -121,4 +125,31 @@ func (ar *AccountRouter) ChangePassword(c *gin.Context) {
 	}
 
 	ar.Success(c, nil)
+}
+
+// 检查token
+func (ar *AccountRouter) CheckToken(c *gin.Context) {
+	uin, err := ar.GetUin(c)
+
+	if err != nil {
+		ar.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	acc, err := ar.AccountService.DB.GetAccountByUIN(uin)
+
+	if err != nil {
+		ar.StatusCode(c, 500, err.Error())
+		return
+	}
+
+	if acc == nil {
+		ar.StatusCode(c, 401, service.ErrAccountNotFound.Error())
+		return
+	}
+
+	ar.Success(c, gin.H{
+		"uin":        uin,
+		"user_group": acc.UserGroup,
+	})
 }

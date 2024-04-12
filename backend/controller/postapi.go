@@ -26,6 +26,13 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
 
 // 上传图片
 func (pr *PostRouter) UploadImage(c *gin.Context) {
+	_, err := pr.GetUin(c)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
 	// 取body的json里的图片数据
 	file, _, err := c.Request.FormFile("image")
 	if err != nil {
