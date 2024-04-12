@@ -67,12 +67,14 @@ func (pr *PostRouter) PostNew(c *gin.Context) {
 	}
 
 	// 发布新稿件
-	err = pr.PostService.PostNew(body.UUID, uin, body.Text, body.Images, *body.Anon)
+	id, err := pr.PostService.PostNew(body.UUID, uin, body.Text, body.Images, *body.Anon)
 
 	if err != nil {
 		pr.Fail(c, 1, err.Error())
 		return
 	}
 
-	pr.Success(c, gin.H{})
+	pr.Success(c, gin.H{
+		"id": id,
+	})
 }

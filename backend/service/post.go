@@ -30,23 +30,47 @@ func (ps *PostService) UploadImage(ioReader io.Reader, suffix string) (string, e
 	return ps.OSS.UploadFromIO(ioReader, suffix)
 }
 
-func (ps *PostService) PostNew(uuid string, uin int64, text string, images []string, anon bool) error {
+func (ps *PostService) PostNew(uuid string, uin int64, text string, images []string, anon bool) (int, error) {
 
 	id, err := ps.DB.CountPost()
 
 	if err != nil {
-		return err
+		return -1, err
 	}
+
+	id += 1
 
 	// TODO 检查这个用户是否有未过审的帖子
 	// TODO 检查图片是否存在
 
-	return ps.DB.AddPost(&database.PostPO{
-		ID:     id + 1,
+	err = ps.DB.AddPost(&database.PostPO{
+		ID:     id,
 		UUID:   uuid,
 		Uin:    uin,
 		Text:   text,
 		Images: images,
 		Anon:   anon,
+		Status: database.POST_STATUS_PENDING_APPROVAL,
 	})
+
+	if err != nil {
+		return -1, err
+	}
+
+	err = ps.DB.AddPostLog(
+		&database.PostLogPO{
+			PostID:    id,
+			Op:        uin,
+			OldStat:   database.POST_STATUS_ANY,
+			NewStat:   database.POST_STATUS_PENDING_APPROVAL,
+			Comment:   "新稿件",
+			CreatedAt: util.GetCSTTime(),
+		},
+	)
+
+	if err != nil {
+		return -1, err
+	}
+
+	return id, nil
 }
