@@ -84,3 +84,8 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 func (ps *PostService) GetPosts(uin int64, status database.PostStatus, timeOrder int, page, pageSize int) ([]database.PostPO, error) {
 	return ps.DB.GetPosts(uin, status, timeOrder, page, pageSize)
 }
+
+// 获取单个稿件信息
+func (ps *PostService) GetPost(id int) (*database.PostPO, error) {
+	return ps.DB.GetPost(id)
+}

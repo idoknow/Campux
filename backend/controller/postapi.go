@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"strconv"
 
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,7 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
 	group.GET("/download-image/:key", pr.DownloadImage)
 	group.POST("/get-self-posts", pr.GetSelfPosts)
 	group.POST("/get-posts", pr.GetPosts)
+	group.GET("/get-post-info/:id", pr.GetPostInfo)
 
 	return pr
 }
@@ -181,5 +183,34 @@ func (pr *PostRouter) GetPosts(c *gin.Context) {
 
 	pr.Success(c, gin.H{
 		"list": posts,
+	})
+}
+
+func (pr *PostRouter) GetPostInfo(c *gin.Context) {
+	_, err := pr.GetUin(c)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	id := c.Param("id")
+
+	idInt, err := strconv.Atoi(id)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	post, err := pr.PostService.GetPost(idInt)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{
+		"post": post,
 	})
 }
