@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
 )
@@ -68,8 +70,19 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 		return
 	}
 
+	domain := c.Request.Header.Get("Origin")
+
 	// set-cookie
-	c.SetCookie("access-token", token, 3600, "/", c.Request.Host, false, true)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "access-token",
+		Value:    token,
+		Path:     "/",
+		Domain:   domain,
+		Secure:   false,
+		SameSite: http.SameSiteNoneMode,
+		HttpOnly: true,
+		MaxAge:   3600,
+	})
 
 	ar.Success(c, gin.H{
 		"token": token,
