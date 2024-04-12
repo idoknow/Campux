@@ -37,14 +37,30 @@ type APIRouter struct {
 
 // 从jwt取uin
 func (ar *APIRouter) GetUin(c *gin.Context) (int64, error) {
-	jwtToken := c.GetHeader("Authorization")
 
-	// 删除Bearer
-	jwtToken = jwtToken[7:]
+	// 尝试从header取jwt token
+	if c.GetHeader("Authorization") != "" {
 
-	uin, err := util.ParseJWTToken(jwtToken)
+		jwtToken := c.GetHeader("Authorization")
 
-	return uin, err
+		// 删除Bearer
+		jwtToken = jwtToken[7:]
+
+		uin, err := util.ParseJWTToken(jwtToken)
+
+		return uin, err
+	} else {
+		// 尝试从cookies取jwt token
+		jwtToken, err := c.Cookie("access-token")
+
+		if err != nil {
+			return -1, err
+		}
+
+		uin, err := util.ParseJWTToken(jwtToken)
+
+		return uin, err
+	}
 }
 
 func (ar *APIRouter) Success(c *gin.Context, data interface{}) {
