@@ -3,6 +3,7 @@ package controller
 import (
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/RockChinQ/Campux/backend/util"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,6 +16,10 @@ func NewApiController(
 	ps service.PostService,
 ) *APIController {
 	r := gin.Default()
+
+	if gin.Mode() == gin.DebugMode {
+		r.Use(cors.Default())
+	}
 
 	rg := r.Group("/v1")
 
