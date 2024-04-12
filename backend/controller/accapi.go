@@ -70,7 +70,8 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 
 	// set-cookie
 	c.SetCookie("access-token", token, 3600, "/", c.Request.Host, false, true)
-
+	c.SetCookie("SameSite", "None", 3600, "/", c.Request.Host, false, true)
+	
 	ar.Success(c, gin.H{
 		"token": token,
 	})
