@@ -78,7 +78,7 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 		Value:    token,
 		Path:     "/",
 		Domain:   domain,
-		Secure:   false,
+		Secure:   true,
 		SameSite: http.SameSiteNoneMode,
 		HttpOnly: true,
 		MaxAge:   3600,
