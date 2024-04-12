@@ -50,3 +50,4 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+frontend/package-lock.json

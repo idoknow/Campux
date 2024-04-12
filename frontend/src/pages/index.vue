@@ -5,10 +5,36 @@
   </v-banner>
 
   <!-- input area -->
-  <textarea style="" name="textarea" v-model="post.text" placeholder="有什么新鲜事？！" class="post"></textarea>
-  <div style="margin-left: 16px">
+  <div style="display: flex; padding: 16px">
+    <v-dialog max-width="500">
+      <template v-slot:activator="{ props: activatorProps }">
+        <img v-bind="activatorProps"  :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
+      </template>
+
+      <template v-slot:default="{ isActive }">
+        <v-card title="😉 提示">
+
+          <v-card-text>
+            真的要退出吗
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn text="取消" @click="isActive.value = false"></v-btn>
+            <v-btn text="是的" @click="isActive.value = false; logout()"></v-btn>
+          </v-card-actions>
+        </v-card>
+      </template>
+    </v-dialog>
+    <textarea style="" name="textarea" v-model="post.text" placeholder="有什么新鲜事？！" class="post"></textarea>
+  </div>
+
+  <!-- 自动换行 -->
+  <div style="margin-left: 16px; display: flex; flex-wrap: wrap;">
     <!-- 图片上传 -->
-    <svg t="1712897639010" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
+    <!-- 长按图片可删除 -->
+    <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70" style="margin-right: 8px;" @click="selectedIndex = index; showDeleteImageDialog = true">
+    <svg @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
       p-id="1448" width="70" height="70">
       <path
         d="M85.312 85.312v853.376h853.376V85.312H85.312zM0 0h1024v1024H0V0z m554.624 213.312v256h256v85.376h-256v256H469.312v-256h-256V469.376h256v-256h85.312z"
@@ -23,23 +49,97 @@
         <v-icon icon="mdi-label" start></v-icon>
         标签
       </v-chip>
-      <v-chip @click="selectTag(index)" :ripple="true" style="margin-right: 4px;" v-for="(tag, index) in tags" :key="index" size="x-small" :variant="tag.selected ? 'primary' : 'outlined'" :color="tag.selected ? 'primary' : 'pink'" label>
+      <v-chip @click="selectTag(index)" :ripple="true" style="margin-right: 4px;" v-for="(tag, index) in tags"
+        :key="index" size="x-small" :variant="tag.selected ? 'primary' : 'outlined'"
+        :color="tag.selected ? 'primary' : 'pink'" label>
         {{ tag.name }}
       </v-chip>
     </div>
     <small class="taghint">🤔 添加标签可更快过审，不要选择不完全符合内容的标签。</small>
 
+    <div class="rect" style="background-color: #8BC34A;">
+      <p style="display: inline-block;">🫥 匿名投稿</p>
+      <input type="checkbox" v-model="post.anon" style="margin-left: 16px; display: inline-block;">
+    </div>
+
+    <v-dialog max-width="500">
+      <template v-slot:activator="{ props: activatorProps }">
+        <div v-bind="activatorProps" class="rect" style="background-color: #FF8A65; font-size: 16px;">
+          <p style="display: inline-block;">🪧 请务必遵守 <strong>投稿礼仪</strong></p>
+        </div>
+      </template>
+
+      <template v-slot:default="{ isActive }">
+        <v-card title="😉 投稿礼仪">
+
+          <v-card-text>
+            <p>1. 发表针对特定人的负面信息或发表任何人的照片，不允许匿名，同时要求 QQ 等级高于一个太阳</p>
+            <p>2. 请勿选择不完全符合内容的标签，否则可能导致封禁</p>
+            <p>3. 以下情形拒绝:涉及政论、主义、国、党等一切敏感内容</p>
+            <p>4. 涉及时事敏感话题或有带节奏嫌疑将经过长时间讨论</p>
+            <p>5. 对于以上所有规则，运营团队保留所有解释权</p>
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer></v-spacer>
+
+            <v-btn text="好的👌" @click="isActive.value = false"></v-btn>
+          </v-card-actions>
+        </v-card>
+      </template>
+    </v-dialog>
+
+    <div style="display: flex; align-items: center;">
+      <button @click="letsPost" class="postbtn" style="margin: 8px; margin-top: 16px">
+        <span> 投稿
+        </span>
+      </button>
+      <v-progress-circular
+        v-if="loading"
+        :size="25"
+        color="primary"
+        indeterminate
+      ></v-progress-circular>
+    </div>
+
+    <v-dialog
+      v-model="showDeleteImageDialog"
+      width="auto"
+    >
+      <v-card
+        text="要删除吗？"
+        title="提示"
+      >
+        <template v-slot:actions>
+          <v-btn
+            class="ms-auto"
+            text="不是"
+            @click="showDeleteImageDialog = false"
+          ></v-btn>
+          <v-btn
+            class="ms-auto"
+            text="是的"
+            @click="showDeleteImageDialog = false; removeImage(selectedIndex)"
+          ></v-btn>
+        </template>
+      </v-card>
+    </v-dialog>
+
+
   </div>
-
-  <BottomNavBar v-model="value" @input="go" />
-
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout">
     {{ snackbar.text }}
   </v-snackbar>
+
+  <BottomNavBar v-model="value" />
+
+
 </template>
 
 <script>
 import BottomNavBar from '@/components/BottomNavBar.vue'
+import Cookies from "js-cookie";
+
 export default {
   components: {
     BottomNavBar
@@ -53,7 +153,9 @@ export default {
       },
       value: 0,
       post: {
+        uuid: '',
         text: '',
+        anon: false,
         images: [],
       },
       tags: [
@@ -69,25 +171,122 @@ export default {
           name: '食堂品质',
           selected: false
         }
-      ]
+      ],
+      avatarUrl: 'http://q1.qlogo.cn/g?b=qq&nk=905617992&s=100',
+      uin: '',
+      loading: false,
+      showDeleteImageDialog: false,
+      selectedIndex: -1,
     }
   },
 
   mounted() {
+    this.tokenLogin()
   },
 
   methods: {
+    removeImage(index) {
+      if (index === -1) {
+        return
+      }
+      this.post.images.splice(index, 1)
+    },
+    generateUUID4() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0,
+          v = c == 'x' ? r : (r & 0x3 | 0x8)
+        return v.toString(16)
+      })
+    },
+    letsPost() {
+      if (this.post.text === '') {
+        this.toast('内容不能为空')
+        return
+      }
+      // random generate uuid4
+      this.loading = true
+      this.post.uuid = this.generateUUID4()
+
+      // 将images中的baseurl去掉
+      this.post.images = this.post.images.map(image => {
+        return image.replace(this.$baseurl.value, '')
+      })
+
+      this.$axios.post('/v1/post/post-new', this.post)
+        .then(res => {
+          if (res.data.code === 0) {
+            this.toast('🥰 投稿成功', 'success')
+            this.post.text = ''
+            this.post.images = []
+            this.tags.forEach(tag => {
+              tag.selected = false
+            })
+            this.loading = false
+          } else {
+            this.toast('投稿失败：' + res.data.msg)
+          }
+        })
+        .catch(err => {
+          this.toast('投稿失败：' + err.response.data.msg)
+          console.error(err)
+          this.loading = false
+        })
+      
+    },
+    selectImage() {
+      // file select
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/*'
+      input.onchange = (e) => {
+        this.loading = true
+        const file = e.target.files[0]
+        this.$axios.post('/v1/post/upload-image', {
+            image: file,
+            suffix: file.type.split('/')[1]
+          },
+          {
+            headers: {
+              'Content-Type': 'multipart/form-data'
+            }
+          })
+            .then(res => {
+              if (res.data.code === 0) {
+                let url = this.$baseurl.value + '/v1/post/download-image/' + res.data.data.key
+                console.log(url)
+                this.post.images.push(url)
+                this.loading = false
+              } else {
+                this.toast('上传失败：' + res.data.msg)
+                this.loading = false
+              }
+            })
+            .catch(err => {
+              this.toast('上传失败：' + err.response.data.msg)
+              console.error(err)
+              this.loading = false
+            })
+      }
+      input.click()
+    },
     selectTag(index) {
       this.tags[index].selected = !this.tags[index].selected
     },
     tokenLogin() {
-      this.$axios.post('/v1/account/tokenlogin', { token: this.$route.query.token })
+      this.$axios.get('/v1/account/token-check')
         .then(res => {
-          if (res.data.code === 1) {
-            this.$router.push('/auth')
+          if (res.data.code === 0) {
+            this.uin = res.data.data.uin
+            this.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
+          } else {
+            this.toast('登录失败：' + res.data.msg)
           }
         })
         .catch(err => {
+          if (err.response.data.code === -1) {
+            this.$router.push('/auth?hint=请先登录嗷')
+            return
+          } 
           this.toast('登录失败：' + err.response.data.msg)
           console.error(err)
         })
@@ -95,7 +294,14 @@ export default {
     toast(text, color = 'error') {
       this.snackbar.text = text
       this.snackbar.color = color
+      this.snackbar.show = true
     },
+    logout() {
+      Cookies.remove("access-token");
+      // reload
+      window.location.reload()
+    },
+    
   }
 }
 </script>
@@ -119,4 +325,46 @@ export default {
   color: #666;
   margin-left: 8px;
 }
+
+.rect {
+  padding: 4px;
+  font-size: 18px;
+  margin-left: 8px;
+  border-radius: 5px;
+  color: #fff;
+  margin-top: 8px;
+  width: fit-content;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+button {
+ border: none;
+ border-radius: 20px;
+ background: linear-gradient(32deg,#03a9f4,#f441a5,#ffeb3b,#03a9f4);
+ transition: all 1.5s ease;
+ font-family: 'Ropa Sans', sans-serif;
+ font-weight: bold;
+ letter-spacing: 0.05rem;
+ padding: 0;
+}
+
+.postbtn span {
+ display: inline-block;
+ padding: 10px 50px;
+ font-size: 17px;
+ border-radius: 10px;
+ background: #ffffff10;
+ backdrop-filter: blur(20px);
+ transition: 0.4s ease-in-out;
+ transition-property: color;
+ height: 100%;
+ width: 100%;
+ color: #fff
+}
+
+.postbtn span:hover {
+ backdrop-filter: blur(10px);
+ color: #ffffff;
+}
+
 </style>
