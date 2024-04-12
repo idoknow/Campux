@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	ACCOUNT_COLLECTION = "account"
-	POST_COLLECTION    = "post"
+	ACCOUNT_COLLECTION  = "account"
+	POST_COLLECTION     = "post"
+	POST_LOG_COLLECTION = "post_log"
 )
 
 type MongoDBManager struct {
@@ -98,5 +99,10 @@ func (m *MongoDBManager) CountPost() (int, error) {
 
 func (m *MongoDBManager) AddPost(post *PostPO) error {
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).InsertOne(context.TODO(), post)
+	return err
+}
+
+func (m *MongoDBManager) AddPostLog(log *PostLogPO) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_LOG_COLLECTION).InsertOne(context.TODO(), log)
 	return err
 }
