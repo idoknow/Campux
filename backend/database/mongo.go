@@ -147,3 +147,19 @@ func (m *MongoDBManager) GetPosts(
 
 	return posts, nil
 }
+
+func (m *MongoDBManager) GetPost(id int) (*PostPO, error) {
+	var post PostPO
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).FindOne(
+		context.TODO(),
+		bson.M{"id": id},
+	).Decode(&post)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		} else {
+			return nil, err
+		}
+	}
+	return &post, nil
+}
