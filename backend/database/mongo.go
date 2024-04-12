@@ -106,3 +106,44 @@ func (m *MongoDBManager) AddPostLog(log *PostLogPO) error {
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_LOG_COLLECTION).InsertOne(context.TODO(), log)
 	return err
 }
+
+func (m *MongoDBManager) GetPosts(
+	uin int64,
+	status PostStatus,
+	timeOrder int,
+	page, pageSize int,
+) ([]PostPO, error) {
+	var posts []PostPO
+
+	condition := bson.M{}
+
+	if uin != -1 {
+		condition["uin"] = uin
+	}
+
+	if status != POST_STATUS_ANY {
+		condition["status"] = status
+	}
+
+	findOptions := options.Find()
+	findOptions.SetSort(bson.M{"created_at": timeOrder})
+	findOptions.SetSkip(int64((page - 1) * pageSize))
+	findOptions.SetLimit(int64(pageSize))
+
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).Find(
+		context.TODO(),
+		condition,
+		findOptions,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &posts)
+	if err != nil {
+		return nil, err
+	}
+
+	return posts, nil
+}
