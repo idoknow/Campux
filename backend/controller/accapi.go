@@ -73,16 +73,30 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 	domain := c.Request.Header.Get("Origin")
 
 	// set-cookie
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     "access-token",
-		Value:    token,
-		Path:     "/",
-		Domain:   domain,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
-		HttpOnly: true,
-		MaxAge:   3600,
-	})
+	if gin.Mode() == gin.DebugMode {
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     "access-token",
+			Value:    token,
+			Path:     "/",
+			Domain:   domain,
+			Secure:   true,
+			SameSite: http.SameSiteNoneMode,
+			HttpOnly: true,
+			MaxAge:   3600,
+		})
+	} else {
+		// 正式环境用strict模式
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     "access-token",
+			Value:    token,
+			Path:     "/",
+			Domain:   domain,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+			HttpOnly: true,
+			MaxAge:   3600,
+		})
+	}
 
 	ar.Success(c, gin.H{
 		"token": token,
