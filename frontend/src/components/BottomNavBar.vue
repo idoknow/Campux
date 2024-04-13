@@ -8,7 +8,7 @@
     <v-btn @click="go('/world')">
         <v-icon>mdi-earth</v-icon>
 
-        动态
+        稿件
     </v-btn>
 
     <v-btn @click="go('/service')">
