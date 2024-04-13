@@ -33,8 +33,8 @@
   <div style="margin-left: 16px; display: flex; flex-wrap: wrap;">
     <!-- 图片上传 -->
     <!-- 长按图片可删除 -->
-    <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70" style="margin-right: 8px;" @click="selectedIndex = index; showDeleteImageDialog = true">
-    <svg @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
+    <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70" style="margin-right: 8px; margin-top:4px; border-radius: 10px;" @click="selectedIndex = index; showDeleteImageDialog = true">
+    <svg style="margin-top: 8px" @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
       p-id="1448" width="70" height="70">
       <path
         d="M85.312 85.312v853.376h853.376V85.312H85.312zM0 0h1024v1024H0V0z m554.624 213.312v256h256v85.376h-256v256H469.312v-256h-256V469.376h256v-256h85.312z"
@@ -270,6 +270,7 @@ export default {
       input.click()
     },
     selectTag(index) {
+      this.toast("标签功能暂时关闭", "warning")
       this.tags[index].selected = !this.tags[index].selected
     },
     tokenLogin() {
