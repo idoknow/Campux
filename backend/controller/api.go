@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/RockChinQ/Campux/backend/service"
@@ -36,6 +38,14 @@ func NewApiController(
 			),
 		)
 	}
+
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/v1") {
+			c.Next()
+			return
+		}
+		http.ServeFile(c.Writer, c.Request, "./frontend/dist"+c.Request.URL.Path)
+	})
 
 	rg := r.Group("/v1")
 
