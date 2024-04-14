@@ -5,11 +5,18 @@
     max-width="400"
     style="border-radius: 10px; color: #fff"
   >
-    <template v-slot:prepend>
-      <v-icon color="white" style="font-size: 25px">mdi-pin</v-icon>
-      <h3 style="margin-left: 8px">稿件</h3>
-    </template>
+    <div style="width: 100%; padding: 8px 8px 0px 8px">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center;">
+          <v-icon color="white" style="font-size: 25px">mdi-pin</v-icon>
+          <h3 style="margin-left: 8px">稿件</h3>
+        </div>
+        <!-- 取消投稿 -->
+        <v-btn v-if="post.status == '待审核'" text="撤回" @click="recall" variant="plain"></v-btn>
+      </div>
 
+    </div>
+    
     <v-card-text class="py-2" style="font-size: 16px; font-weight: bold; line-height: 1.5; word-spacing: 2px">
       {{post.text}}
     </v-card-text>
@@ -72,6 +79,9 @@
             randomColor() {
                 let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#76FF03", "#9E9E9E", "#8D6E63"]
                 return colors[Math.floor(Math.random() * colors.length)]
+            },
+            recall() {
+                this.$emit('recall', this.post.id)
             }
         }
     }

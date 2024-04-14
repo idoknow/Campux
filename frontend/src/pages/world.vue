@@ -17,7 +17,7 @@
           variant="solo"
           @update:model-value="getPosts"
         ></v-select>
-        <PostCard v-for="p in posts" :key="p.id" :post="p" style="margin-top: 16px" />
+        <PostCard v-for="p in posts" :key="p.id" :post="p" style="margin-top: 16px" @recall="recallPost" />
       </div>
     </v-window-item>
     <v-window-item value="2">
@@ -125,7 +125,25 @@ export default {
     toast(text, color = 'error') {
       this.snackbar.text = text
       this.snackbar.color = color
-    }
+    },
+    recallPost(post) {
+      console.log(post)
+      this.$axios.post('/v1/post/cancel', {
+        "post_id": post.id
+      })
+        .then((response) => {
+          if (response.data.code === 0) {
+            this.toast('撤回成功', 'success')
+            this.getPosts()
+          } else {
+            this.toast('撤回失败：' + response.data.msg)
+          }
+        })
+        .catch((error) => {
+          this.toast('撤回失败：' + error.response.data.msg)
+          console.error(error)
+        })
+    },
   }
 }
 </script>
