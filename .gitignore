@@ -51,3 +51,4 @@ pnpm-debug.log*
 *.sln
 *.sw?
 frontend/package-lock.json
+dist/
