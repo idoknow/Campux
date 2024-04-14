@@ -7,6 +7,7 @@ import (
 type UserGroup string
 
 const (
+	USER_GROUP_ANY    UserGroup = "any"
 	USER_GROUP_ADMIN  UserGroup = "admin"
 	USER_GROUP_MEMBER UserGroup = "member"
 	USER_GROUP_USER   UserGroup = "user"

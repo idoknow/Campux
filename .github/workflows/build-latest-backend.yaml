@@ -21,10 +21,21 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.22.1
+
+      - name: Set up Node.js 20.12
+        uses: actions/setup-node@v2
+        with:
+          node-version: 20.12
         
       - name: Build the backend
         run: |
           go build -o bin/campux main.go
+
+      - name: Build the frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
       
       - name: Log in to the Container registry
         uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
