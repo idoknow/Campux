@@ -28,6 +28,7 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
 	group.POST("/get-self-posts", pr.GetSelfPosts)
 	group.POST("/get-posts", pr.GetPosts)
 	group.GET("/get-post-info/:id", pr.GetPostInfo)
+	group.POST("/user-cancel", pr.UserCancelPost)
 
 	return pr
 }
@@ -213,4 +214,33 @@ func (pr *PostRouter) GetPostInfo(c *gin.Context) {
 	pr.Success(c, gin.H{
 		"post": post,
 	})
+}
+
+// 取消投稿
+func (pr *PostRouter) UserCancelPost(c *gin.Context) {
+	// 从jwt取uin
+	uin, err := pr.GetUin(c)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	// 取body的json里的id
+	var body UserCancelPostBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	// 用户取消投稿
+	err = pr.PostService.UserCancelPost(uin, *body.PostID)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{})
 }

@@ -163,3 +163,12 @@ func (m *MongoDBManager) GetPost(id int) (*PostPO, error) {
 	}
 	return &post, nil
 }
+
+func (m *MongoDBManager) UpdatePostStatus(id int, status PostStatus) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).UpdateOne(
+		context.TODO(),
+		bson.M{"id": id},
+		bson.M{"$set": bson.M{"status": status}},
+	)
+	return err
+}
