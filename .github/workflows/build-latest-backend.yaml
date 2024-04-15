@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/build-latest-backend.yaml'
+      - 'main.go'
   workflow_dispatch:
 
 env:
