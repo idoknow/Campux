@@ -59,3 +59,15 @@ type GetPostsBody struct {
 type UserCancelPostBody struct {
 	PostID *int `json:"post_id" binding:"required"`
 }
+
+// 稿件审核
+type PostReviewBody struct {
+	// 稿件id
+	PostID int `json:"post_id" binding:"required"`
+
+	// 审核选项
+	Option database.ReviewOption `json:"option" binding:"required"`
+
+	// 审核意见
+	Comment *string `json:"comment" binding:"required"`
+}
