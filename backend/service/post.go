@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"io"
 
 	"github.com/RockChinQ/Campux/backend/database"
@@ -88,4 +89,40 @@ func (ps *PostService) GetPosts(uin int64, status database.PostStatus, timeOrder
 // 获取单个稿件信息
 func (ps *PostService) GetPost(id int) (*database.PostPO, error) {
 	return ps.DB.GetPost(id)
+}
+
+// 用户取消投稿
+func (ps *PostService) UserCancelPost(uin int64, id int) error {
+	// 检查状态是不是 待审核
+	post, err := ps.DB.GetPost(id)
+
+	if err != nil {
+		return nil
+	}
+
+	if post.Status != database.POST_STATUS_PENDING_APPROVAL {
+		return errors.New("稿件的状态不是 未审核")
+	}
+
+	if post.Uin != uin {
+		return errors.New("无权操作他人稿件")
+	}
+
+	// 记录日志
+	err = ps.DB.AddPostLog(
+		&database.PostLogPO{
+			PostID:    id,
+			Op:        uin,
+			OldStat:   database.POST_STATUS_PENDING_APPROVAL,
+			NewStat:   database.POST_STATUS_CANCELLED,
+			Comment:   "用户取消投稿",
+			CreatedAt: util.GetCSTTime(),
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return ps.DB.UpdatePostStatus(id, database.POST_STATUS_CANCELLED)
 }

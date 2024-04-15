@@ -55,3 +55,7 @@ type GetPostsBody struct {
 
 	GetSelfPostsBody
 }
+
+type UserCancelPostBody struct {
+	PostID *int `json:"post_id" binding:"required"`
+}
