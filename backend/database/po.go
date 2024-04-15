@@ -55,3 +55,10 @@ type PostLogPO struct {
 	Comment   string     `json:"comment" bson:"comment"`       // 备注
 	CreatedAt time.Time  `json:"created_at" bson:"created_at"` // CST时间
 }
+
+type ReviewOption string
+
+const (
+	REVIEW_OPTION_APPROVE ReviewOption = "approve"
+	REVIEW_OPTION_REJECT  ReviewOption = "reject"
+)

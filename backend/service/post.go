@@ -101,7 +101,7 @@ func (ps *PostService) UserCancelPost(uin int64, id int) error {
 	}
 
 	if post.Status != database.POST_STATUS_PENDING_APPROVAL {
-		return errors.New("稿件的状态不是 未审核")
+		return errors.New("稿件的状态不是 待审核")
 	}
 
 	if post.Uin != uin {
@@ -125,4 +125,49 @@ func (ps *PostService) UserCancelPost(uin int64, id int) error {
 	}
 
 	return ps.DB.UpdatePostStatus(id, database.POST_STATUS_CANCELLED)
+}
+
+// 审核
+func (ps *PostService) PostReview(uin int64, id int, option database.ReviewOption, comment string) error {
+	// 检查状态是不是 待审核
+	post, err := ps.DB.GetPost(id)
+
+	if err != nil {
+		return nil
+	}
+
+	if post.Status != database.POST_STATUS_PENDING_APPROVAL {
+		return errors.New("稿件的状态不是 待审核")
+	}
+
+	newStat := database.POST_STATUS_APPROVED
+
+	if option == database.REVIEW_OPTION_REJECT {
+
+		if comment == "" {
+			return errors.New("拒绝时必须填写理由")
+		}
+
+		newStat = database.POST_STATUS_REJECTED
+	} else if option != database.REVIEW_OPTION_APPROVE {
+		return errors.New("审核选项不合法")
+	}
+
+	// 记录日志
+	err = ps.DB.AddPostLog(
+		&database.PostLogPO{
+			PostID:    id,
+			Op:        uin,
+			OldStat:   database.POST_STATUS_PENDING_APPROVAL,
+			NewStat:   newStat,
+			Comment:   comment,
+			CreatedAt: util.GetCSTTime(),
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return ps.DB.UpdatePostStatus(id, database.POST_STATUS_APPROVED)
 }
