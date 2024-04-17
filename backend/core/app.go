@@ -19,8 +19,10 @@ func NewApplication() *Application {
 	fs := oss.NewMinioClient()
 	ps := service.NewPostService(*db, *fs)
 
+	ms := service.NewMiscService(*db)
+
 	return &Application{
-		API: controller.NewApiController(*as, *ps),
+		API: controller.NewApiController(*as, *ps, *ms),
 	}
 }
 
