@@ -169,5 +169,5 @@ func (ps *PostService) PostReview(uin int64, id int, option database.ReviewOptio
 		return err
 	}
 
-	return ps.DB.UpdatePostStatus(id, database.POST_STATUS_APPROVED)
+	return ps.DB.UpdatePostStatus(id, newStat)
 }
