@@ -23,7 +23,7 @@ func NewAccountRouter(rg *gin.RouterGroup, as service.AccountService) *AccountRo
 	group.POST("/create", ar.CreateAccount)
 	group.POST("/login", ar.LoginAccount)
 	group.PUT("/reset", ar.ResetPassword)
-	group.PUT("/change-pwd", ar.ChangePassword)
+	group.PUT("/update-pwd", ar.ChangePassword)
 	group.GET("/token-check", ar.CheckToken)
 
 	return ar
