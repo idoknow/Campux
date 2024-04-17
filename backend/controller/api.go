@@ -18,6 +18,7 @@ type APIController struct {
 func NewApiController(
 	as service.AccountService,
 	ps service.PostService,
+	ms service.MiscService,
 ) *APIController {
 	r := gin.Default()
 
@@ -45,7 +46,7 @@ func NewApiController(
 			return
 		}
 		// 没有文件都返回/
-		if util.IsFileExist("./frontend/dist"+c.Request.URL.Path) == false {
+		if !util.IsFileExist("./frontend/dist" + c.Request.URL.Path) {
 			http.ServeFile(c.Writer, c.Request, "./frontend/dist/index.html")
 		} else {
 			http.ServeFile(c.Writer, c.Request, "./frontend/dist"+c.Request.URL.Path)
@@ -57,6 +58,7 @@ func NewApiController(
 	// bind routes
 	NewAccountRouter(rg, as)
 	NewPostRouter(rg, ps)
+	NewMiscRouter(rg, ms)
 
 	return &APIController{
 		R: r,

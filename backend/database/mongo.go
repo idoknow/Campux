@@ -13,6 +13,7 @@ const (
 	ACCOUNT_COLLECTION  = "account"
 	POST_COLLECTION     = "post"
 	POST_LOG_COLLECTION = "post_log"
+	METADATA_COLLECTION = "metadata"
 )
 
 type MongoDBManager struct {
@@ -171,4 +172,18 @@ func (m *MongoDBManager) UpdatePostStatus(id int, status PostStatus) error {
 		bson.M{"$set": bson.M{"status": status}},
 	)
 	return err
+}
+
+func (m *MongoDBManager) GetMetadata(key string) (string, error) {
+	var meta struct {
+		Value string `bson:"value"`
+	}
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).FindOne(
+		context.TODO(),
+		bson.M{"key": key},
+	).Decode(&meta)
+	if err != nil {
+		return "", err
+	}
+	return meta.Value, nil
 }
