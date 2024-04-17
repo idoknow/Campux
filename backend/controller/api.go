@@ -44,7 +44,12 @@ func NewApiController(
 			c.Next()
 			return
 		}
-		http.ServeFile(c.Writer, c.Request, "./frontend/dist"+c.Request.URL.Path)
+		// 没有文件都返回/
+		if util.IsFileExist("./frontend/dist"+c.Request.URL.Path) == false {
+			http.ServeFile(c.Writer, c.Request, "./frontend/dist/index.html")
+		} else {
+			http.ServeFile(c.Writer, c.Request, "./frontend/dist"+c.Request.URL.Path)
+		}
 	})
 
 	rg := r.Group("/v1")
