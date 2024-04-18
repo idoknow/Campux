@@ -1,7 +1,7 @@
 <template>
 
-  <v-banner style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
-    text="📢 投稿前请阅读投稿规则" :stacked="false">
+  <v-banner v-if="metadata.banner !== ''" style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
+    :text="metadata.banner" :stacked="false">
   </v-banner>
 
   <!-- input area -->
@@ -73,12 +73,14 @@
         <v-card title="😉 投稿礼仪">
 
           <v-card-text>
-            <p>0. 有诉求请使用正确的语言合理表达，我们讨厌无实际意义的情绪宣泄。</p>
+            <!-- <p>0. 有诉求请使用正确的语言合理表达，我们讨厌无实际意义的情绪宣泄。</p>
             <p>1. 发表针对特定人的负面信息或发表任何人的照片，不允许匿名，同时要求 QQ 等级高于一个太阳</p>
             <p>2. 请勿选择不完全符合内容的标签，否则可能导致封禁</p>
             <p>3. 以下情形拒绝:涉及政论、主义、国、党等一切敏感内容</p>
             <p>4. 涉及时事敏感话题或有带节奏嫌疑将经过长时间讨论</p>
-            <p>5. 对于以上所有规则，运营团队保留所有解释权</p>
+            <p>5. 对于以上所有规则，运营团队保留所有解释权</p> -->
+
+            <p v-for="(rule, index) in metadata.post_rules" :key="index">{{ index }}. {{ rule }}</p>
           </v-card-text>
 
           <v-card-actions>
@@ -126,6 +128,24 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog
+      v-model="showPopupAN"
+      width="auto"
+    >
+      <v-card
+        :text="metadata.popup_announcement"
+        title="提示"
+      >
+        <template v-slot:actions>
+          <v-btn
+            class="ms-auto"
+            text="1 天内不再提醒"
+            @click="showPopupAN = false;"
+          ></v-btn>
+        </template>
+      </v-card>
+    </v-dialog>
+
 
   </div>
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout">
@@ -147,6 +167,13 @@ export default {
   },
   data() {
     return {
+      showPopupAN: false,
+      metadata: {
+        "banner": "",
+        "popup_announcement": "",
+        "post_rules": ""
+      },
+
       snackbar: {
         show: false,
         text: '',
@@ -183,9 +210,35 @@ export default {
 
   mounted() {
     this.tokenLogin()
+    this.getMetadata_("banner")
+    this.getMetadata_("popup_announcement")
+    this.getMetadata_("post_rules")
   },
 
   methods: {
+    getMetadata_(key) {
+      this.$axios.get('/v1/misc/get-metadata?key='+key)
+        .then(res => {
+          if (res.data.code === 0) {
+            if (key == "post_rules") {
+              this.metadata[key] = JSON.parse(res.data.data.value)
+            } else {
+              this.metadata[key] = res.data.data.value
+            }
+
+            let last_an_ts = localStorage.getItem("popup_announcement_ts")
+            if (key == "popup_announcement" && (last_an_ts == null || new Date().getTime() - last_an_ts > 86400000)) {
+              this.showPopupAN = true
+              localStorage.setItem("popup_announcement_ts", new Date().getTime())
+            }
+          }
+        })
+        .catch(err => {
+          this.toast('获取失败：' + err)
+          console.error(err)
+        })
+    },
+
     removeImage(index) {
       if (index === -1) {
         return

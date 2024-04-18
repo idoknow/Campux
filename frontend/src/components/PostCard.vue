@@ -88,7 +88,7 @@ export default {
       dialog: false,
       reason: "",
 
-      filterStatus: ['通过', '拒绝'],
+      filterStatus: ['通过', '拒绝', '无理由拒绝'],
       backgrouldColor: "",
       avatarBaseUrl: "http://q1.qlogo.cn/g?b=qq&nk="
     }
@@ -99,7 +99,7 @@ export default {
   methods: {
     randomColor() {
       let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#76FF03", "#9E9E9E", "#8D6E63"]
-      return colors[Math.floor(Math.random() * colors.length)]
+      return colors[Math.floor(Math.random() * 100) % colors.length]
     },
     recall() {
       this.$emit('recall', this.post.id)
