@@ -46,7 +46,7 @@
   </div>
 
 
-  <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout">
+  <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
     {{ snackbar.text }}
   </v-snackbar>
 
