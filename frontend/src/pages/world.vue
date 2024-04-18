@@ -92,7 +92,7 @@ export default {
       avatarUrl: "",
       userGroup: "user",
       judgePosts: [],
-      pullLoading: false
+      pullLoading: false,
     }
   },
 
@@ -110,6 +110,9 @@ export default {
         if (p.reason === "") {
           p.reason = "无理由"
         }
+      } else if (p.status === "无理由拒绝") {
+        p.status = 'reject'
+        p.reason = "无理由"
       }
 
       let form = {
