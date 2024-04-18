@@ -129,6 +129,7 @@ export default {
     toast(text, color = 'error') {
       this.snackbar.text = text
       this.snackbar.color = color
+      this.snackbar.show = true
     },
 
     go(url) {
