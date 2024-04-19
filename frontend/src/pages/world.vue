@@ -269,8 +269,8 @@ export default {
     },
     recallPost(post) {
       console.log(post)
-      this.$axios.post('/v1/post/cancel', {
-        "post_id": post.id
+      this.$axios.post('/v1/post/user-cancel', {
+          "post_id": post
       })
         .then((response) => {
           if (response.data.code === 0) {
