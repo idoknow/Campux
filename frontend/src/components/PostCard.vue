@@ -99,8 +99,20 @@ export default {
   },
   methods: {
     randomColor() {
-      let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#76FF03", "#9E9E9E", "#8D6E63"]
-      return colors[Math.floor(Math.random() * 100) % colors.length]
+      let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#9E9E9E", "#8D6E63"]
+      switch (this.post.status) {
+        case '待审核':
+          return colors[1]
+        case '已通过':
+          return colors[2]
+        case '已拒绝':
+          return colors[3]
+        case '已取消':
+          return colors[0]
+        default:
+          return colors[4]
+      }
+      // return colors[Math.floor(Math.random() * 100) % colors.length]
     },
     recall() {
       this.$emit('recall', this.post.id)
