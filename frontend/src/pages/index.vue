@@ -4,7 +4,15 @@
     :text="metadata.banner" :stacked="false">
   </v-banner>
 
-  <!-- input area -->
+  <v-alert
+      style="margin: 16px;"
+      v-if="isPending"
+      density="compact"
+      text="你当前有一条待审核的投稿，请等待审核后再来投稿。"
+      title="稿件待审核"
+      type="warning"
+  ></v-alert>
+
   <div style="display: flex; padding: 16px">
     <v-dialog max-width="500">
       <template v-slot:activator="{ props: activatorProps }">
@@ -26,13 +34,10 @@
         </v-card>
       </template>
     </v-dialog>
-    <textarea style="" name="textarea" v-model="post.text" placeholder="有什么新鲜事？！" class="post"></textarea>
+    <textarea :readonly="isPending" style="" name="textarea" v-model="post.text" placeholder="有什么新鲜事？！" class="post"></textarea>
   </div>
 
-  <!-- 自动换行 -->
   <div style="margin-left: 16px; display: flex; flex-wrap: wrap;">
-    <!-- 图片上传 -->
-    <!-- 长按图片可删除 -->
     <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70" style="margin-right: 8px; margin-top:4px; border-radius: 10px;" @click="selectedIndex = index; showDeleteImageDialog = true">
     <svg style="margin-top: 8px" @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
       p-id="1448" width="70" height="70">
@@ -86,7 +91,7 @@
     </v-dialog>
 
     <div style="display: flex; align-items: center;">
-      <button @click="letsPost" class="postbtn" style="margin: 8px; margin-top: 16px">
+      <button v-if="!isPending" @click="letsPost" class="postbtn" style="margin: 8px; margin-top: 16px">
         <span> 投稿
         </span>
       </button>
@@ -193,16 +198,18 @@ export default {
           selected: false
         }
       ],
-      avatarUrl: 'http://q1.qlogo.cn/g?b=qq&nk=905617992&s=100',
+      avatarUrl: '',
       uin: '',
       loading: false,
       showDeleteImageDialog: false,
       selectedIndex: -1,
+      isPending: false
     }
   },
 
   mounted() {
     this.tokenLogin()
+    this.getPosts()
     this.getMetadata_("banner")
     this.getMetadata_("popup_announcement")
     this.getMetadata_("post_rules")
@@ -229,6 +236,29 @@ export default {
         .catch(err => {
           this.toast('获取失败：' + err)
           console.error(err)
+        })
+    },
+
+    getPosts() {
+      let filter = {
+        "status": "pending_approval",
+        "time_order": 1,
+        "page": 1,
+        "page_size": 1
+      }
+      this.$axios.post('/v1/post/get-self-posts', filter)
+        .then((response) => {
+          if (response.data.code === 0) {
+            let p = response.data.data.list
+            if (p !== null) {
+              this.isPending = true
+            }
+          } else {
+            this.toast(response.data.msg)
+          }
+        })
+        .catch((error) => {
+          console.log(error)
         })
     },
 
@@ -269,6 +299,7 @@ export default {
               tag.selected = false
             })
             this.loading = false
+            this.getPosts()
           } else {
             this.toast('投稿失败：' + res.data.msg)
           }

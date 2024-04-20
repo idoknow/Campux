@@ -31,7 +31,8 @@
         </template>
 
         <v-list-item-title v-if="!post.anon">{{ post.uin }}</v-list-item-title>
-        <v-list-item-title v-else>匿名</v-list-item-title>
+        <v-list-item-title v-if="post.anon && typ==='self'">匿名</v-list-item-title>
+        <v-list-item-title v-if="post.anon && typ!=='self'">匿名({{ post.uin }})</v-list-item-title>
 
         <v-list-item-subtitle>{{ post.created_at }}</v-list-item-subtitle>
 

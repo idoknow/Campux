@@ -8,7 +8,7 @@
     <v-tab v-if="userGroup === 'admin'" value="3">审核稿件</v-tab>
   </v-tabs>
 
-  <v-window v-model="tab">
+  <v-window v-model="tab" disabled>
     <v-window-item value="1" style="overflow-y: scroll">
       <div style="padding: 16px;">
         <v-select v-model="filter.status" label="按条件筛选" :items="filterStatus" variant="solo"
@@ -96,8 +96,18 @@ export default {
     }
   },
 
+  // watch tab
+  watch: {
+    tab: function (val) {
+      if (val === '1') {
+        this.getPosts()
+      } else if (val === '3') {
+        this.getJudgePosts()
+      }
+    }
+  },
+
   mounted() {
-    this.getPosts()
     this.tokenLogin()
   },
 
