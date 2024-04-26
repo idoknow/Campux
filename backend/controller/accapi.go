@@ -31,6 +31,14 @@ func NewAccountRouter(rg *gin.RouterGroup, as service.AccountService) *AccountRo
 
 // 创建账户
 func (ar *AccountRouter) CreateAccount(c *gin.Context) {
+
+	_, err := ar.Auth(c, ServiceOnly)
+
+	if err != nil {
+		ar.StatusCode(c, 401, err.Error())
+		return
+	}
+
 	// 取body的json里的uin
 	var body AccountCreateBody
 
@@ -105,6 +113,14 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 
 // 重置密码
 func (ar *AccountRouter) ResetPassword(c *gin.Context) {
+
+	_, err := ar.Auth(c, ServiceOnly)
+
+	if err != nil {
+		ar.StatusCode(c, 401, err.Error())
+		return
+	}
+
 	// 取body的json里的uin
 	var body AccountCreateBody
 
