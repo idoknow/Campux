@@ -98,7 +98,8 @@ func (pr *PostRouter) PostNew(c *gin.Context) {
 
 // 下载图片
 func (pr *PostRouter) DownloadImage(c *gin.Context) {
-	_, err := pr.GetUin(c)
+
+	_, err := pr.Auth(c, Both)
 
 	if err != nil {
 		pr.StatusCode(c, 401, err.Error())
@@ -162,6 +163,16 @@ func (pr *PostRouter) GetSelfPosts(c *gin.Context) {
 
 // 获取稿件列表
 func (pr *PostRouter) GetPosts(c *gin.Context) {
+
+	_, err := pr.Auth(c, Both)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	// TODO 检查用户权限
+
 	var body GetPostsBody
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -189,12 +200,14 @@ func (pr *PostRouter) GetPosts(c *gin.Context) {
 }
 
 func (pr *PostRouter) GetPostInfo(c *gin.Context) {
-	_, err := pr.GetUin(c)
+	_, err := pr.Auth(c, Both)
 
 	if err != nil {
 		pr.StatusCode(c, 401, err.Error())
 		return
 	}
+
+	// TODO 检查用户权限
 
 	id := c.Param("id")
 
@@ -255,6 +268,8 @@ func (pr *PostRouter) ReviewPost(c *gin.Context) {
 		pr.StatusCode(c, 401, err.Error())
 		return
 	}
+
+	// TODO 检查用户权限
 
 	// 取body的json里的id, status, comment
 	var body PostReviewBody
