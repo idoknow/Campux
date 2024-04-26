@@ -286,7 +286,7 @@ export default {
 
       // 将images中的baseurl去掉
       this.post.images = this.post.images.map(image => {
-        return image.replace(this.$baseurl.value, '')
+        return image.replace(this.$baseurl.value + "/v1/post/download-image/", '')
       })
 
       this.$axios.post('/v1/post/post-new', this.post)
