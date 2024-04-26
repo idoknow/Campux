@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/RockChinQ/Campux/backend/util"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 type APIController struct {
@@ -40,6 +42,8 @@ func NewApiController(
 		)
 	}
 
+	// 鉴权中间件
+
 	r.Use(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/v1") {
 			c.Next()
@@ -66,6 +70,45 @@ func NewApiController(
 }
 
 type APIRouter struct {
+}
+
+type AuthenticationType int
+
+const (
+	UserOnly    AuthenticationType = 1
+	ServiceOnly AuthenticationType = 2
+	Both        AuthenticationType = 3
+)
+
+// 鉴权
+// 如果是服务鉴权，则拿Authorization头对比service.token
+// 其他的都是用户鉴权，直接尝试从GetUin取uin
+func (ar *APIRouter) Auth(c *gin.Context, authType AuthenticationType) (int64, error) {
+	serviceToken := viper.GetString("service.token")
+
+	uin, err := int64(-1), errors.New("authentication failed")
+
+	if authType&ServiceOnly == ServiceOnly {
+		bearer := c.GetHeader("Authorization")
+		if bearer != "" {
+			bearer = bearer[7:]
+
+			if bearer == serviceToken {
+				uin = 0
+				err = nil
+			}
+		}
+	}
+
+	if err == nil {
+		return uin, err
+	}
+
+	if authType&UserOnly == UserOnly {
+		uin, err = ar.GetUin(c)
+	}
+
+	return uin, err
 }
 
 // 从jwt取uin

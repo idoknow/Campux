@@ -28,6 +28,13 @@ func SetDefault() {
 	viper.SetDefault("oss.minio.secret_key", "minio123")
 	viper.SetDefault("oss.minio.bucket", "campux")
 	viper.SetDefault("oss.minio.use_ssl", false)
+
+	// redis
+	viper.SetDefault("mq.redis.addr", "localhost:6379")
+	viper.SetDefault("mq.redis.password", "")
+	viper.SetDefault("mq.redis.db", 0)
+	viper.SetDefault("mq.redis.stream.publish_post", "campux_publish_post")
+
 }
 
 // 创建配置文件对象
