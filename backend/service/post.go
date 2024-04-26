@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/RockChinQ/Campux/backend/database"
+	"github.com/RockChinQ/Campux/backend/mq"
 	"github.com/RockChinQ/Campux/backend/oss"
 	"github.com/RockChinQ/Campux/backend/util"
 )
@@ -12,12 +13,14 @@ import (
 type PostService struct {
 	DB  database.MongoDBManager
 	OSS oss.MinioClient
+	MQ  mq.RedisStreamMQ
 }
 
-func NewPostService(db database.MongoDBManager, oss oss.MinioClient) *PostService {
+func NewPostService(db database.MongoDBManager, oss oss.MinioClient, mq mq.RedisStreamMQ) *PostService {
 	return &PostService{
 		DB:  db,
 		OSS: oss,
+		MQ:  mq,
 	}
 }
 
@@ -73,6 +76,13 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 			CreatedAt: util.GetCSTTime(),
 		},
 	)
+
+	if err != nil {
+		return -1, err
+	}
+
+	// 通知到mq
+	err = ps.MQ.NewPost(id)
 
 	if err != nil {
 		return -1, err
