@@ -181,7 +181,7 @@ export default {
               p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
               p[i].status = this.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
-                p[i].images[j] = this.$baseurl.value + p[i].images[j]
+                p[i].images[j] = this.$baseurl.value + "/v1/post/download-image/" + p[i].images[j]
               }
             }
             console.log(p)
@@ -251,7 +251,7 @@ export default {
               p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
               p[i].status = this.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
-                p[i].images[j] = this.$baseurl.value + p[i].images[j]
+                p[i].images[j] = this.$baseurl.value + "/v1/post/download-image/" + p[i].images[j]
               }
             }
             console.log(p)
