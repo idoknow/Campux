@@ -23,7 +23,7 @@ func NewApplication() *Application {
 	msq := mq.NewRedisStreamMQ()
 
 	as := service.NewAccountService(*db)
-	ps := service.NewPostService(*db, *fs)
+	ps := service.NewPostService(*db, *fs, *msq)
 	ms := service.NewMiscService(*db)
 
 	err := ScheduleRoutines(*db, *msq)
