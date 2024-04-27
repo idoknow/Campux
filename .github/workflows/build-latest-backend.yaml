@@ -70,5 +70,5 @@ jobs:
             --header 'Authorization: Bearer ${{ secrets.ONEBOT_V11_TOKEN }}' \
             --data '{
                 "group_id": ${{ secrets.ONEBOT_V11_GROUP_ID }},
-                "message": "CampuxBot 构建完成。"
+                "message": "Campux 构建完成。"
             }'
