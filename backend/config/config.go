@@ -17,6 +17,7 @@ func SetDefault() {
 
 	// 服务token
 	viper.SetDefault("service.token", "campux")
+	viper.SetDefault("service.bots", []int64{123456789})
 
 	// 数据库
 	viper.SetDefault("database.mongo.uri", "mongodb://localhost:27017")
