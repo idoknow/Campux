@@ -2,6 +2,7 @@ package mq
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
@@ -38,7 +39,29 @@ func (r *RedisStreamMQ) PublishPost(postID int) error {
 			"post_id": postID,
 		},
 	}).Result()
-	return err
+
+	if err != nil {
+		return err
+	}
+
+	// 创建散列表跟踪发布状态 HSET publish_post_status:post_id campuxbot_1234567 0 campuxbot_1234568 0
+	var bots []int64
+
+	err = viper.UnmarshalKey("service.bots", &bots)
+
+	if err != nil {
+		return err
+	}
+
+	for _, bot := range bots {
+		err = r.Client.HSet(context.Background(), "publish_post_status:"+strconv.Itoa(postID), "campuxbot_"+strconv.FormatInt(bot, 10), 0).Err()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *RedisStreamMQ) NewPost(postID int) error {
