@@ -262,7 +262,7 @@ func (pr *PostRouter) UserCancelPost(c *gin.Context) {
 // 提交稿件审核
 func (pr *PostRouter) ReviewPost(c *gin.Context) {
 	// 从jwt取uin
-	uin, err := pr.GetUin(c)
+	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
 		pr.StatusCode(c, 401, err.Error())
