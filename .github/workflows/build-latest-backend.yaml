@@ -62,3 +62,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Push Finish Notification
+        run: |
+          curl --location '${{ secrets.ONEBOT_V11_ENDPOINT }}/send_group_msg' \
+            --header 'Content-Type: application/json' \
+            --header 'Authorization: Bearer ${{ secrets.ONEBOT_V11_TOKEN }}' \
+            --data '{
+                "group_id": ${{ secrets.ONEBOT_V11_GROUP_ID }},
+                "message": "CampuxBot 构建完成。"
+            }'
