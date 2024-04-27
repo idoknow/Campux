@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strconv"
 
+	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
 )
@@ -164,14 +165,21 @@ func (pr *PostRouter) GetSelfPosts(c *gin.Context) {
 // 获取稿件列表
 func (pr *PostRouter) GetPosts(c *gin.Context) {
 
-	_, err := pr.Auth(c, Both)
+	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
 		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
-	// TODO 检查用户权限
+	// 检查用户权限
+	if !pr.PostService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+		database.USER_GROUP_MEMBER,
+	}) {
+		pr.StatusCode(c, 401, "权限不足")
+		return
+	}
 
 	var body GetPostsBody
 
@@ -200,14 +208,21 @@ func (pr *PostRouter) GetPosts(c *gin.Context) {
 }
 
 func (pr *PostRouter) GetPostInfo(c *gin.Context) {
-	_, err := pr.Auth(c, Both)
+	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
 		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
-	// TODO 检查用户权限
+	// 检查用户权限
+	if !pr.PostService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+		database.USER_GROUP_MEMBER,
+	}) {
+		pr.StatusCode(c, 401, "权限不足")
+		return
+	}
 
 	id := c.Param("id")
 
@@ -274,7 +289,14 @@ func (pr *PostRouter) ReviewPost(c *gin.Context) {
 		return
 	}
 
-	// TODO 检查用户权限
+	// 检查用户权限
+	if !pr.PostService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+		database.USER_GROUP_MEMBER,
+	}) {
+		pr.StatusCode(c, 401, "权限不足")
+		return
+	}
 
 	// 取body的json里的id, status, comment
 	var body PostReviewBody

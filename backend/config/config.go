@@ -13,7 +13,7 @@ func SetDefault() {
 
 	// jwt
 	viper.SetDefault("auth.jwt.secret", "campux")
-	viper.SetDefault("auth.jwt.expire", 3600)
+	viper.SetDefault("auth.jwt.expire", 3600*6)
 
 	// 服务token
 	viper.SetDefault("service.token", "campux")

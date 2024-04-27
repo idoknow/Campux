@@ -66,3 +66,15 @@ func (m *MinioClient) DownloadToIO(objectName string, ioWriter io.Writer) error 
 
 	return err
 }
+
+// 检查文件是否存在
+func (m *MinioClient) CheckObjectExist(objectName string) (bool, error) {
+	_, err := m.Client.StatObject(context.Background(), m.Bucket, objectName, minio.StatObjectOptions{})
+	if err != nil {
+		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

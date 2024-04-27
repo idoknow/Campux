@@ -11,14 +11,16 @@ import (
 )
 
 type PostService struct {
-	DB  database.MongoDBManager
+	CommonService
 	OSS oss.MinioClient
 	MQ  mq.RedisStreamMQ
 }
 
 func NewPostService(db database.MongoDBManager, oss oss.MinioClient, mq mq.RedisStreamMQ) *PostService {
 	return &PostService{
-		DB:  db,
+		CommonService: CommonService{
+			DB: db,
+		},
 		OSS: oss,
 		MQ:  mq,
 	}
@@ -48,8 +50,30 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 
 	id += 1
 
-	// TODO 检查这个用户是否有未过审的帖子
-	// TODO 检查图片是否存在
+	// 检查这个用户是否有未过审的帖子
+
+	posts, err := ps.DB.GetPosts(uin, database.POST_STATUS_PENDING_APPROVAL, 1, 1, 1)
+
+	if err != nil {
+		return -1, err
+	}
+
+	if len(posts) > 0 {
+		return -1, errors.New("此用户有待审核状态的稿件")
+	}
+
+	// 检查图片是否存在
+	for _, img := range images {
+		exist, err := ps.OSS.CheckObjectExist(img)
+
+		if err != nil {
+			return -1, err
+		}
+
+		if !exist {
+			return -1, errors.New("图片不存在")
+		}
+	}
 
 	err = ps.DB.AddPost(&database.PostPO{
 		ID:        id,
