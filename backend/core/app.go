@@ -45,18 +45,33 @@ func ScheduleRoutines(
 		return err
 	}
 
-	_, err = s.NewJob(
-		gocron.DurationJob(
-			20*time.Second,
-		),
-		gocron.NewTask(
-			routine.SchedulePublishing,
-			db,
-			msq,
-		),
-	)
-	if err != nil {
-		return err
+	type Job struct {
+		Duration time.Duration
+		Task     gocron.Task
+	}
+
+	jobs := []Job{
+		{
+			Duration: 20 * time.Second,
+			Task:     gocron.NewTask(routine.SchedulePublishing, db, msq),
+		},
+		{
+			Duration: 20 * time.Second,
+			Task:     gocron.NewTask(routine.ConfirmPosted, db, msq),
+		},
+	}
+
+	for _, job := range jobs {
+		_, err = s.NewJob(
+			gocron.DurationJob(
+				job.Duration,
+			),
+			job.Task,
+		)
+
+		if err != nil {
+			return err
+		}
 	}
 
 	s.Start()

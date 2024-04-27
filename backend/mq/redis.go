@@ -73,3 +73,26 @@ func (r *RedisStreamMQ) NewPost(postID int) error {
 	}).Result()
 	return err
 }
+
+func (r *RedisStreamMQ) CheckPostPublishStatus(postID int) (bool, error) {
+	// HGETALL publish_post_status:77
+	status, err := r.Client.HGetAll(context.Background(), "publish_post_status:"+strconv.Itoa(postID)).Result()
+
+	if err != nil {
+		return false, err
+	}
+
+	for _, v := range status {
+		if v != "1" {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// 删除稿件发布跟踪hash表
+func (r *RedisStreamMQ) DeletePostPublishStatus(postID int) error {
+	_, err := r.Client.Del(context.Background(), "publish_post_status:"+strconv.Itoa(postID)).Result()
+	return err
+}
