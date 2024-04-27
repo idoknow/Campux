@@ -225,8 +225,13 @@ func (pr *PostRouter) GetPostInfo(c *gin.Context) {
 		return
 	}
 
+	postInfo := &PostInfo{
+		PostPO:    *post,
+		TimeStamp: post.CreatedAt.Unix(),
+	}
+
 	pr.Success(c, gin.H{
-		"post": post,
+		"post": postInfo,
 	})
 }
 

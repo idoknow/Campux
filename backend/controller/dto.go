@@ -1,6 +1,8 @@
 package controller
 
-import "github.com/RockChinQ/Campux/backend/database"
+import (
+	"github.com/RockChinQ/Campux/backend/database"
+)
 
 type AccountCreateBody struct {
 	// Uin 账户的uin 必须
@@ -70,4 +72,10 @@ type PostReviewBody struct {
 
 	// 审核意见
 	Comment *string `json:"comment" binding:"required"`
+}
+
+// 稿件信息响应
+type PostInfo struct {
+	database.PostPO
+	TimeStamp int64 `json:"time_stamp" bson:"time_stamp"` // 时间戳
 }
