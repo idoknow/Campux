@@ -1,47 +1,106 @@
 <template>
 
-  <BottomNavBar v-model="value" @input="go" />
+  <BottomNavBar id="bnb" v-model="value" @input="go" />
 
-  <v-tabs v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
-    <v-tab value="1">你的稿件</v-tab>
-    <v-tab value="2">动态</v-tab>
-    <v-tab v-if="userGroup === 'admin'" value="3">审核稿件</v-tab>
-  </v-tabs>
+  <div id="container-wrap" style="height: calc(100vh - 64px)">
 
-  <v-window v-model="tab" disabled>
-    <v-window-item value="1" style="overflow-y: scroll">
-      <div style="padding: 16px;">
-        <v-select v-model="filter.status" label="按条件筛选" :items="filterStatus" variant="solo"
-          @update:model-value="refreshPosts"></v-select>
-        <div style="overflow-y: scroll; max-height: 74vh;">
-          <PostCard v-for="p in posts" :key="p.id" :post="p" typ="self" style="margin-top: 16px" @recall="recallPost" />
+    <div id="pctabs">
+      <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
+      <div
+        style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
+        <div>
+          <div id="pctab-btn" @click="$router.push('/');">
+            <span>📝 投稿</span>
+          </div>
+          <div id="pctab-btn" @click="$router.push('/world');">
+            <span style="font-weight: 1000">🌏 稿件</span>
+          </div>
+          <div id="pctab-btn" @click="$router.push('/service');">
+            <span>🛠 服务</span>
+          </div>
+        </div>
+
+        <div style="display: flex;">
+          <img :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
+          <div>
+            <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ uin }}</p>
+            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{userGroup}}</p>
+          </div>
         </div>
       </div>
-    </v-window-item>
-    <v-window-item value="2">
-      <div style="display: flex; justify-content: center; align-items: center;">
-        <p style="margin-top: 64px; font-weight: bold">前面的区域，以后再来探索吧</p>
-      </div>
-    </v-window-item>
-    <v-window-item value="3">
-      <div style="padding: 16px;">
-        <v-select v-model="filterForJudge.status" label="按条件筛选" :items="filterStatus" variant="solo"
-          @update:model-value="refreshPosts"></v-select>
-        <div style="overflow-y: scroll; max-height: 74vh;">
-          <PostCard v-for="p in judgePosts" :key="p.id" :post="p" typ="judge" style="margin-top: 16px" @updateJudgePost="updateJudgePost" />
-        </div>
-      </div>
-    </v-window-item>
-  </v-window>
 
-  <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
-    {{ snackbar.text }}
-  </v-snackbar>
 
-  <!-- fix在屏幕右下方 -->
+    </div>
+
+    <!-- 纵向分割线 -->
+    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5; margin-left: 16px">
+    </div>
+
+    <div id="container">
+      <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One">Campux</h2>
+      <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
+        <v-tab value="1">📰 你的稿件</v-tab>
+        <v-tab value="2">🌏 动态</v-tab>
+        <v-tab v-if="userGroup === 'admin'" value="3">🤵 审核稿件</v-tab>
+      </v-tabs>
+
+      <v-divider id="hdivider"></v-divider>
+
+      <v-window v-model="tab" disabled>
+        <v-window-item value="1">
+          <div style="padding: 16px;">
+            <!-- <v-select v-model="filter.status" label="按条件筛选" :items="filterStatus" variant="solo"
+              @update:model-value="refreshPosts"></v-select> -->
+            <div style="overflow-y: scroll; max-height: calc(100vh - 140px); min-height: calc(100vh - 140px);">
+              <PostCard v-for="p in posts" :key="p.id" :post="p" typ="self" style="margin-top: 16px"
+                @recall="recallPost" />
+            </div>
+          </div>
+        </v-window-item>
+        <v-window-item value="2">
+          <div
+            style="display: flex; justify-content: center; align-items: center; min-height: calc(100vh - 140px); margin-top: 32px;">
+            <p style="font-weight: bold">前面的区域，以后再来探索吧</p>
+          </div>
+        </v-window-item>
+        <v-window-item value="3">
+          <div style="padding: 16px;">
+            <!-- <v-select v-model="filterForJudge.status" label="按条件筛选" :items="filterStatus" variant="solo"
+              @update:model-value="refreshPosts"></v-select> -->
+            <div style="overflow-y: scroll; max-height: calc(100vh - 140px); min-height: calc(100vh - 140px);">
+              <PostCard v-for="p in judgePosts" :key="p.id" :post="p" typ="judge" style="margin-top: 16px"
+                @updateJudgePost="updateJudgePost" />
+            </div>
+          </div>
+        </v-window-item>
+      </v-window>
+
+      <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
+        style="margin-bottom: 64px">
+        {{ snackbar.text }}
+      </v-snackbar>
+
+    </div>
+  </div>
+
+  <v-menu>
+    <template v-slot:activator="{ props }">
+      <div style="position: fixed; right: 32px; bottom: 150px;">
+        <v-btn v-bind="props" density="default" icon="mdi-filter" size="large" :loading="pullLoading" color="#42A5F5">
+        </v-btn>
+      </div>
+    </template>
+    <v-list @click:select="onFilterChange">
+      <v-list-item v-for="(item, index) in filterStatus" :key="index" :value="index">
+        <v-list-item-title>{{ item }}</v-list-item-title>
+      </v-list-item>
+    </v-list>
+  </v-menu>
+
   <div style="position: fixed; right: 32px; bottom: 80px;">
     <v-btn density="default" icon="mdi-refresh" size="large" :loading="pullLoading" color="primary"
-      @click="refreshPosts"></v-btn>
+      @click="refreshPosts">
+    </v-btn>
   </div>
 </template>
 
@@ -112,6 +171,17 @@ export default {
   },
 
   methods: {
+    onFilterChange(e) {
+      // console.log(e)
+      let status = this.filterStatus[e.id]
+      if (this.tab === '1') {
+        this.filter.status = status
+        this.getPosts()
+      } else if (this.tab === '3') {
+        this.filterForJudge.status = status
+        this.getJudgePosts()
+      }
+    },
     updateJudgePost(p) {
       if (p.status === "通过") {
         p.status = 'approve'
@@ -280,7 +350,7 @@ export default {
     recallPost(post) {
       console.log(post)
       this.$axios.post('/v1/post/user-cancel', {
-          "post_id": post
+        "post_id": post
       })
         .then((response) => {
           if (response.data.code === 0) {
@@ -298,3 +368,72 @@ export default {
   }
 }
 </script>
+
+<style>
+#container-wrap {
+  min-height: 74vh;
+}
+
+/* 适配pc端 */
+@media (min-width: 600px) {
+
+  #mt {
+    display: none;
+  }
+
+
+  #bnb {
+    display: none;
+  }
+
+  #pctabs {
+    display: block;
+    min-width: 200px;
+  }
+
+  #container-wrap {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  #container {
+    height: 100%;
+    margin-left: 16px;
+    width: 60%;
+  }
+
+  #pctab-btn {
+    padding: 12px 28px;
+    margin-top: 16px;
+    text-align: center;
+    font-size: 18px;
+    border-radius: 24px;
+    cursor: pointer;
+  }
+
+  #pctab-btn:hover {
+    background-color: #f5f5f5;
+  }
+
+  #vdivider {
+    display: block;
+  }
+}
+
+/* 适配移动端 */
+@media (max-width: 600px) {
+  #tabs {
+    display: block;
+  }
+
+  #pctabs {
+    display: none;
+  }
+
+  #vdivider {
+    display: none;
+  }
+}
+</style>

@@ -7,7 +7,7 @@
           <h3 style="margin-left: 8px">稿件 #{{ post.id }}</h3>
         </div>
         <!-- 取消投稿 -->
-        <v-btn v-if="typ === 'self' && post.status == '待审核'" text="撤回" @click="recall" variant="plain"></v-btn>
+        <v-btn v-if="typ === 'self' && post.status == '待审核'" text="取消" @click="recall" variant="plain"></v-btn>
       </div>
 
     </div>
@@ -102,13 +102,15 @@ export default {
       let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#9E9E9E", "#8D6E63"]
       switch (this.post.status) {
         case '待审核':
-          return colors[1]
+          return colors[5]
         case '已通过':
           return colors[2]
         case '已拒绝':
           return colors[3]
         case '已取消':
           return colors[0]
+        case '已发布':
+          return colors[1]
         default:
           return colors[4]
       }
