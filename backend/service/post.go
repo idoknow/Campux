@@ -72,7 +72,7 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 		Text:      text,
 		Images:    images,
 		Anon:      anon,
-		Status:    database.POST_STATUS_ANY,
+		Status:    database.POST_STATUS_PENDING_APPROVAL,
 		CreatedAt: util.GetCSTTime(),
 	}
 
