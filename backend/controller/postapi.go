@@ -33,6 +33,7 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
 	group.POST("/user-cancel", pr.UserCancelPost)
 	group.POST("/review-post", pr.ReviewPost)
 	group.POST("/post-log", pr.PostPostLog)
+	group.GET("/post-log/:id", pr.GetPostLog)
 
 	return pr
 }
@@ -357,4 +358,36 @@ func (pr *PostRouter) PostPostLog(c *gin.Context) {
 	}
 
 	pr.Success(c, gin.H{})
+}
+
+// 获取稿件日志
+func (pr *PostRouter) GetPostLog(c *gin.Context) {
+
+	_, err := pr.Auth(c, Both)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	id := c.Param("id")
+
+	idInt, err := strconv.Atoi(id)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	// 获取稿件日志
+	logs, err := pr.PostService.DB.GetPostLogs(idInt)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{
+		"list": logs,
+	})
 }

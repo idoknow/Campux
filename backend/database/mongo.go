@@ -108,6 +108,25 @@ func (m *MongoDBManager) AddPostLog(log *PostLogPO) error {
 	return err
 }
 
+func (m *MongoDBManager) GetPostLogs(postID int) ([]PostLogPO, error) {
+	var logs []PostLogPO
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_LOG_COLLECTION).Find(
+		context.TODO(),
+		bson.M{"post_id": postID},
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &logs)
+	if err != nil {
+		return nil, err
+	}
+
+	return logs, nil
+}
+
 func (m *MongoDBManager) GetPosts(
 	uin int64,
 	status PostStatus,
