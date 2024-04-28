@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"sync"
 
+	"github.com/RockChinQ/Campux/backend/util"
 	"github.com/spf13/viper"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -62,6 +64,8 @@ var PresetMetadata = []Metadata{
 
 type MongoDBManager struct {
 	Client *mongo.Client
+
+	PostLock sync.Mutex
 }
 
 func NewMongoDBManager() *MongoDBManager {
@@ -74,7 +78,8 @@ func NewMongoDBManager() *MongoDBManager {
 	}
 
 	m := &MongoDBManager{
-		Client: client,
+		Client:   client,
+		PostLock: sync.Mutex{},
 	}
 
 	// 检查连接
@@ -183,9 +188,65 @@ func (m *MongoDBManager) CountPost() (int, error) {
 	return int(count), err
 }
 
-func (m *MongoDBManager) AddPost(post *PostPO) error {
-	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).InsertOne(context.TODO(), post)
-	return err
+// 获取当前最大的post id
+func (m *MongoDBManager) GetMaxPostID() (int, error) {
+	var post struct {
+		ID int `bson:"id"`
+	}
+
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).FindOne(
+		context.TODO(),
+		bson.M{},
+		options.FindOne().SetSort(bson.M{"id": -1}),
+	).Decode(&post)
+	if err != nil {
+		return 0, err
+	}
+
+	return post.ID, nil
+}
+
+func (m *MongoDBManager) AddPost(post *PostPO) (int, error) {
+	// 加锁
+	m.PostLock.Lock()
+
+	// 取 id
+	id, err := m.GetMaxPostID()
+
+	if err != nil {
+		m.PostLock.Unlock()
+		return -1, err
+	}
+
+	id += 1
+
+	post.ID = id
+
+	_, err = m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).InsertOne(context.TODO(), post)
+
+	if err != nil {
+		m.PostLock.Unlock()
+		return -1, err
+	}
+
+	err = m.AddPostLog(
+		&PostLogPO{
+			PostID:    id,
+			Op:        post.Uin,
+			OldStat:   POST_STATUS_ANY,
+			NewStat:   POST_STATUS_PENDING_APPROVAL,
+			Comment:   "新稿件",
+			CreatedAt: util.GetCSTTime(),
+		},
+	)
+
+	if err != nil {
+		m.PostLock.Unlock()
+		return -1, err
+	}
+
+	m.PostLock.Unlock()
+	return id, nil
 }
 
 func (m *MongoDBManager) AddPostLog(log *PostLogPO) error {
