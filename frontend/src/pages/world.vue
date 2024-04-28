@@ -123,14 +123,14 @@ export default {
         "status": "全部", // 状态
         "time_order": 1, // 时间排序
         "page": 1,
-        "page_size": 999
+        "page_size": 9999
       },
       filterForJudge: {
         "uin": -1,
         "status": "待审核", // 状态
         "time_order": 1, // 时间排序
         "page": 1,
-        "page_size": 10
+        "page_size": 9999
       },
       posts: [],
       statusMap: {
