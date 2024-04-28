@@ -16,6 +16,50 @@ const (
 	METADATA_COLLECTION = "metadata"
 )
 
+type Metadata struct {
+	Key string `bson:"key"`
+
+	Value string `bson:"value"`
+}
+
+var PresetMetadata = []Metadata{
+	{
+		Key:   "banner",
+		Value: "投稿前请阅读投稿规则！",
+	},
+	{
+		Key:   "popup_announcement",
+		Value: "欢迎使用 Campux！",
+	},
+	{
+		Key: "post_rules",
+		Value: `[
+			"投稿规则是数组",
+			"每个元素是一个字符串"
+		]`,
+	},
+	{
+		Key: "services",
+		Value: `[
+			{
+				"name": "服务名称",
+				"description": "服务也是数组形式，会显示在服务tab",
+				"link": "https://url.to.service",
+				"toast": "点击时的提示",
+				"emoji": "🗺️"
+			}
+		]`,
+	},
+	{
+		Key:   "brand",
+		Value: "Campux 这个是你的墙的名称",
+	},
+	{
+		Key:   "beianhao",
+		Value: "桂ICP备1145141919号-1",
+	},
+}
+
 type MongoDBManager struct {
 	Client *mongo.Client
 }
@@ -25,6 +69,24 @@ func NewMongoDBManager() *MongoDBManager {
 		context.TODO(),
 		options.Client().ApplyURI(viper.GetString("database.mongo.uri")),
 	)
+	if err != nil {
+		panic(err)
+	}
+
+	m := &MongoDBManager{
+		Client: client,
+	}
+
+	// 检查连接
+	err = client.Ping(context.TODO(), nil)
+	if err != nil {
+		panic(err)
+	}
+
+	// 元数据
+
+	err = m.CheckMetadata()
+
 	if err != nil {
 		panic(err)
 	}
@@ -44,9 +106,32 @@ func NewMongoDBManager() *MongoDBManager {
 		panic(err)
 	}
 
-	return &MongoDBManager{
-		Client: client,
+	return m
+}
+
+// 检查所有元数据的key是否存在，不存在则插入预设的
+func (m *MongoDBManager) CheckMetadata() error {
+	// 创建collection
+	err := m.Client.Database(viper.GetString("database.mongo.db")).CreateCollection(context.TODO(), METADATA_COLLECTION)
+	if err != nil {
+		return err
 	}
+	for _, meta := range PresetMetadata {
+		exist, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).CountDocuments(
+			context.TODO(),
+			bson.M{"key": meta.Key},
+		)
+		if err != nil {
+			return err
+		}
+		if exist == 0 {
+			_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).InsertOne(context.TODO(), meta)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (m *MongoDBManager) AddAccount(acc *AccountPO) error {
