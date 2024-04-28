@@ -29,14 +29,17 @@
     </div>
 
     <!-- 纵向分割线 -->
-    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5; margin-left: 16px">
+    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
     </div>
 
     <div id="container">
-      <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One">Campux</h2>
-      <v-banner v-if="metadata.banner !== ''"
+      <div>
+        <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
+        <span>{{ $store.state.metadata.brand }}</span>
+      </div>
+      <v-banner v-if="$store.state.metadata.banner !== ''"
         style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
-        :text="metadata.banner" :stacked="false">
+        :text="$store.state.metadata.banner" :stacked="false">
       </v-banner>
 
       <v-alert style="margin: 16px;" v-if="isPending" density="compact" text="你当前有一条待审核的投稿，请等待审核后再来投稿。" title="稿件待审核"
@@ -102,7 +105,7 @@
         <v-dialog max-width="500">
           <template v-slot:activator="{ props: activatorProps }">
             <div v-bind="activatorProps" class="rect" style="background-color: #FF8A65; font-size: 16px;">
-              <p style="display: inline-block;">🪧 请务必遵守 <strong>投稿礼仪</strong></p>
+              <p style="display: inline-block;">🪧 请务必遵守 <strong>投稿规则</strong></p>
             </div>
           </template>
 
@@ -110,7 +113,7 @@
             <v-card title="😉 投稿礼仪">
 
               <v-card-text>
-                <p v-for="(rule, index) in metadata.post_rules" :key="index">{{ index }}. {{ rule }}</p>
+                <p v-for="(rule, index) in $store.state.metadata.post_rules" :key="index">{{ index }}. {{ rule }}</p>
               </v-card-text>
 
               <v-card-actions>
@@ -131,6 +134,10 @@
           <v-progress-circular v-if="loading" :size="25" color="primary" indeterminate></v-progress-circular>
         </div>
 
+        <div>
+          <span style="font-size: 12px; color: #c3c3c3; margin-left: 8px">{{ $store.state.metadata.beianhao }}</span>
+        </div>
+
         <v-dialog v-model="showDeleteImageDialog" width="auto">
           <v-card text="要删除吗？" title="提示">
             <template v-slot:actions>
@@ -142,13 +149,12 @@
         </v-dialog>
 
         <v-dialog v-model="showPopupAN" width="auto">
-          <v-card :text="metadata.popup_announcement" title="提示">
+          <v-card :text="$store.state.metadata.popup_announcement" title="提示">
             <template v-slot:actions>
               <v-btn class="ms-auto" text="1 天内不再提醒" @click="showPopupAN = false;"></v-btn>
             </template>
           </v-card>
         </v-dialog>
-
 
       </div>
       <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
@@ -175,12 +181,6 @@ export default {
   data() {
     return {
       showPopupAN: false,
-      metadata: {
-        "banner": "",
-        "popup_announcement": "",
-        "post_rules": ""
-      },
-
       snackbar: {
         show: false,
         text: '',
@@ -220,35 +220,16 @@ export default {
   mounted() {
     this.tokenLogin()
     this.getPosts()
-    this.getMetadata_("banner")
-    this.getMetadata_("popup_announcement")
-    this.getMetadata_("post_rules")
+    this.$store.commit('initMetadata', 'banner')
+    this.$store.commit('initMetadata', 'brand')
+    this.$store.commit('initMetadata', 'popup_announcement')
+    this.$store.commit('initMetadata', 'post_rules')
+    this.$store.commit('initMetadata', 'beianhao')
+    console.log(this.$store.state.metadata)
+
   },
 
   methods: {
-    getMetadata_(key) {
-      this.$axios.get('/v1/misc/get-metadata?key=' + key)
-        .then(res => {
-          if (res.data.code === 0) {
-            if (key == "post_rules") {
-              this.metadata[key] = JSON.parse(res.data.data.value)
-            } else {
-              this.metadata[key] = res.data.data.value
-            }
-
-            let last_an_ts = localStorage.getItem("popup_announcement_ts")
-            if (key == "popup_announcement" && (last_an_ts == null || new Date().getTime() - last_an_ts > 86400000)) {
-              this.showPopupAN = true
-              localStorage.setItem("popup_announcement_ts", new Date().getTime())
-            }
-          }
-        })
-        .catch(err => {
-          this.toast('获取失败：' + err)
-          console.error(err)
-        })
-    },
-
     getPosts() {
       let filter = {
         "status": "pending_approval",
@@ -483,7 +464,7 @@ button {
 
   #container {
     margin-left: 16px;
-    ;
+    height: 100%;
     width: 60%;
   }
 
