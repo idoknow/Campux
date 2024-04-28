@@ -134,12 +134,12 @@ func (ps *PostService) UserCancelPost(uin int64, id int) error {
 		return nil
 	}
 
-	if post.Status != database.POST_STATUS_PENDING_APPROVAL {
-		return errors.New("稿件的状态不是 待审核")
-	}
-
 	if post.Uin != uin {
 		return errors.New("无权操作他人稿件")
+	}
+
+	if post.Status != database.POST_STATUS_PENDING_APPROVAL {
+		return errors.New("稿件的状态不是 待审核")
 	}
 
 	// 记录日志

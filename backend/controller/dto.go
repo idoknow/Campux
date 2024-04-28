@@ -79,3 +79,11 @@ type PostInfo struct {
 	database.PostPO
 	TimeStamp int64 `json:"time_stamp" bson:"time_stamp"` // 时间戳
 }
+
+type PostLogBody struct {
+	PostID  int                 `json:"post_id" bson:"post_id"`   // 稿件ID
+	Op      int64               `json:"op" bson:"op"`             // 操作者ID -1表示系统
+	OldStat database.PostStatus `json:"old_stat" bson:"old_stat"` // 旧状态
+	NewStat database.PostStatus `json:"new_stat" bson:"new_stat"` // 新状态
+	Comment string              `json:"comment" bson:"comment"`   // 备注
+}
