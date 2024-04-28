@@ -23,7 +23,7 @@
           <img :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
           <div>
             <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ uin }}</p>
-            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{userGroup}}</p>
+            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{ userGroup }}</p>
           </div>
         </div>
       </div>
@@ -31,11 +31,14 @@
     </div>
 
     <!-- 纵向分割线 -->
-    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5; margin-left: 16px">
+    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
     </div>
 
     <div id="container">
-      <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One">Campux</h2>
+      <div>
+        <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
+        <span>{{ $store.state.metadata.brand }}</span>
+      </div>
       <div style="padding: 16px;">
 
         <h1 style="margin-bottom: 16px">🎲 服务</h1>
