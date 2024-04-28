@@ -6,6 +6,7 @@ import (
 
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
+	"github.com/RockChinQ/Campux/backend/util"
 	"github.com/gin-gonic/gin"
 )
 
@@ -31,6 +32,7 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
 	group.GET("/get-post-info/:id", pr.GetPostInfo)
 	group.POST("/user-cancel", pr.UserCancelPost)
 	group.POST("/review-post", pr.ReviewPost)
+	group.POST("/post-log", pr.PostPostLog)
 
 	return pr
 }
@@ -308,6 +310,46 @@ func (pr *PostRouter) ReviewPost(c *gin.Context) {
 
 	// 提交稿件审核
 	err = pr.PostService.PostReview(uin, body.PostID, body.Option, *body.Comment)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{})
+}
+
+// 推送稿件日志
+func (pr *PostRouter) PostPostLog(c *gin.Context) {
+
+	_, err := pr.Auth(c, ServiceOnly)
+
+	if err != nil {
+		pr.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	// 取body的json里的id, op, old_stat, new_stat, comment
+	var body PostLogBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	timeObj := util.GetCSTTime()
+
+	log := database.PostLogPO{
+		PostID:    body.PostID,
+		Op:        body.Op,
+		OldStat:   body.OldStat,
+		NewStat:   body.NewStat,
+		Comment:   body.Comment,
+		CreatedAt: timeObj,
+	}
+
+	// 推送稿件日志
+	err = pr.PostService.DB.AddPostLog(&log)
 
 	if err != nil {
 		pr.Fail(c, 1, err.Error())
