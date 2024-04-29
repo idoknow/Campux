@@ -136,18 +136,6 @@ export default {
         "page_size": 9999
       },
       posts: [],
-      statusMap: {
-        "pending_approval": "待审核",
-        "approved": "已通过",
-        "rejected": "已拒绝",
-        "cancelled": "已取消",
-        "in_queue": "队列中",
-        "published": "已发布",
-        "failed": "失败",
-        "any": "全部",
-        "pending_recall": "待撤回",
-        "recalled": "已撤回"
-      },
       filterStatus: ['全部', '待审核', '已通过', '已拒绝', '已取消', '队列中', '已发布', '失败', '待撤回', '已撤回'],
       tab: null,
       uin: "",
@@ -229,8 +217,8 @@ export default {
       console.log(this.filterForJudge)
       // 检查status
       let filter = JSON.parse(JSON.stringify(this.filterForJudge))
-      for (let key in this.statusMap) {
-        if (this.statusMap[key] === this.filterForJudge.status) {
+      for (let key in this.$store.state.statusMap) {
+        if (this.$store.state.statusMap[key] === this.filterForJudge.status) {
           filter.status = key
           break
         }
@@ -252,7 +240,7 @@ export default {
               // 2024-04-12T08:19:51.096Z 转成日期，再转成字符串
               let date = new Date(p[i].created_at)
               p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
-              p[i].status = this.statusMap[p[i].status]
+              p[i].status = this.$store.state.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
                 p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
               }
@@ -299,8 +287,8 @@ export default {
       console.log(this.filter)
       // 检查status
       let filter = JSON.parse(JSON.stringify(this.filter))
-      for (let key in this.statusMap) {
-        if (this.statusMap[key] === this.filter.status) {
+      for (let key in this.$store.state.statusMap) {
+        if (this.$store.state.statusMap[key] === this.filter.status) {
           filter.status = key
           break
         }
@@ -322,7 +310,7 @@ export default {
               // 2024-04-12T08:19:51.096Z 转成日期，再转成字符串，转成 YYYY-MM-DD HH:MM:SS UTC+8
               let date = new Date(p[i].created_at)
               p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
-              p[i].status = this.statusMap[p[i].status]
+              p[i].status = this.$store.state.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
                 p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
               }
