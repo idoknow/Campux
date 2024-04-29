@@ -3,7 +3,7 @@ import axios from 'axios'
 
 export default createStore({
     state: {
-        base_url: "https://dev.campux.idoknow.top",
+        base_url: "https://gz.idoknow.top",
         metadata: {
             "banner": "",
             "popup_announcement": "",
