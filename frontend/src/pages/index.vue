@@ -277,7 +277,7 @@ export default {
 
       // 将images中的baseurl去掉
       this.post.images = this.post.images.map(image => {
-        return image.replace(this.$baseurl.value + "/v1/post/download-image/", '')
+        return image.replace(this.$store.state.base_url + "/v1/post/download-image/", '')
       })
 
       this.$axios.post('/v1/post/post-new', this.post)
@@ -321,7 +321,7 @@ export default {
           })
           .then(res => {
             if (res.data.code === 0) {
-              let url = this.$baseurl.value + '/v1/post/download-image/' + res.data.data.key
+              let url = this.$store.state.base_url + '/v1/post/download-image/' + res.data.data.key
               console.log(url)
               this.post.images.push(url)
               this.loading = false

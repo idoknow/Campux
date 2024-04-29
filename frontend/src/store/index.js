@@ -3,6 +3,7 @@ import axios from 'axios'
 
 export default createStore({
     state: {
+        base_url: "https://dev.campux.idoknow.top",
         metadata: {
             "banner": "",
             "popup_announcement": "",
@@ -15,7 +16,7 @@ export default createStore({
         initMetadata(state, key) {
             console.log(key)
             if (this.state.metadata[key] === "") {
-                axios.get('https://dev.campux.idoknow.top/v1/misc/get-metadata?key=' + key)
+                axios.get(this.state.base_url + '/v1/misc/get-metadata?key=' + key)
                     .then(res => {
                         if (res.data.code === 0) {
                             if (key == "post_rules") {
