@@ -8,6 +8,7 @@
         </div>
         <!-- 取消投稿 -->
         <v-btn v-if="typ === 'self' && post.status == '待审核'" text="取消" @click="recall" variant="plain"></v-btn>
+        <v-btn v-else variant="plain" @click="showLogs">日志</v-btn>
       </div>
 
     </div>
@@ -16,7 +17,6 @@
       {{ post.text }}
     </v-card-text>
 
-    <!-- 图片显示，横向滑动，圆角 -->
     <div
       style="display: flex; margin-left: 16px; margin-right: 16px; margin-top: 8px; overflow-x: auto; white-space: nowrap;">
       <img v-for="img in post.images" :key="img" :src="img"
@@ -43,10 +43,7 @@
             <span class="me-1">·</span>
             <v-icon class="me-1" icon="mdi-share-variant"></v-icon>
             <span class="subheading">45</span> -->
-            <span v-if="typ === 'self'" class="subheading" style="font-weight: bold">{{ post.status }}</span>
-            <!-- <v-select v-else v-model="post.status" label="标记为" :items="filterStatus" variant="outlined" size="small"
-            @update:model-value="updateJudgePost">
-            </v-select> -->
+            <span @click="showLogs" v-if="typ === 'self'" class="subheading" style="font-weight: bold; text-decoration: underline">{{ post.status }}</span>
 
             <v-menu v-else>
               <template v-slot:activator="{ props }">
@@ -78,6 +75,23 @@
       </template>
     </v-card>
   </v-dialog>
+
+  <v-dialog v-model="logDialog" variant="outlined" persistent>
+    <v-card
+      title="日志">
+      <v-card-text>
+        <div class="logCard" v-for="(l,index) in log" :key="index">
+          <h3>{{ l.comment }}</h3>
+          <p><strong>时间: </strong>{{ l.created_at }}</p>
+          <p v-if="l.op !== -1"><strong>操作者: </strong>{{ l.op }}</p>
+          <p><strong>状态: </strong> {{ this.$store.state.statusMap[l.new_stat] }}</p>
+        </div>
+      </v-card-text>
+      <template v-slot:actions>
+        <v-btn class="ms-auto" text="OK" @click="logDialog = false"></v-btn>
+      </template>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script>
@@ -91,7 +105,9 @@ export default {
 
       filterStatus: ['通过', '拒绝', '无理由拒绝'],
       backgrouldColor: "",
-      avatarBaseUrl: "http://q1.qlogo.cn/g?b=qq&nk="
+      avatarBaseUrl: "http://q1.qlogo.cn/g?b=qq&nk=",
+      logDialog: false,
+      log: []
     }
   },
   mounted() {
@@ -132,6 +148,33 @@ export default {
     emitJudgePost() {
       this.post.reason = this.reason
       this.$emit('updateJudgePost', this.post)
+    },
+    showLogs() {
+      this.$axios.get('/v1/post/post-log/' + this.post.id)
+        .then(res => {
+          if (res.data.code === 0) {
+            let logs = res.data.data.list.reverse()
+            for (let i = 0; i < logs.length; i++) {
+              logs[i].created_at = new Date(logs[i].created_at).toLocaleString()
+              if (logs[i].comment === '') {
+                if (logs[i].new_stat === 'approved') {
+                  logs[i].comment = '通过'
+                } else if (logs[i].new_stat === 'rejected') {
+                  logs[i].comment = '拒绝（无理由）'
+                }
+              }
+            }
+            this.log = logs
+            this.logDialog = true
+
+          } else {
+            this.$toast('获取日志失败：' + res.data.msg)
+          }
+        })
+        .catch(err => {
+          this.$toast('获取日志失败：' + err.response.data.msg)
+          console.error(err)
+        })
     }
   }
 }
@@ -141,5 +184,12 @@ export default {
 .postcard {
   margin-bottom: 16px;
   box-shadow: 0px 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.logCard {
+  margin-bottom: 16px;
+  padding: 8px;
+  border-radius: 10px;
+  background-color: #f5f5f5;
 }
 </style>

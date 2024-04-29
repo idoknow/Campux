@@ -1,6 +1,6 @@
 <template>
 
-  <BottomNavBar id="bnb" v-model="value" @input="go" />
+  <BottomNavBar id="bnb" v-model="value" />
 
   <div id="container-wrap" style="height: calc(100vh - 64px)">
 
