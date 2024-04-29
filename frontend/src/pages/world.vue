@@ -254,7 +254,7 @@ export default {
               p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
               p[i].status = this.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
-                p[i].images[j] = this.$baseurl.value + "/v1/post/download-image/" + p[i].images[j]
+                p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
               }
             }
             console.log(p)
@@ -324,7 +324,7 @@ export default {
               p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
               p[i].status = this.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
-                p[i].images[j] = this.$baseurl.value + "/v1/post/download-image/" + p[i].images[j]
+                p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
               }
             }
             console.log(p)
@@ -337,11 +337,11 @@ export default {
         })
         .catch((error) => {
           this.pullLoading = false
-          if (error.response.data.code === -1) {
-            this.$router.push('/auth?hint=请先登录嗷')
-            return
-          }
-          this.toast('获取稿件失败')
+          this.toast(error)
+          // if (error.response.data.code === -1) {
+          //   this.$router.push('/auth?hint=请先登录嗷')
+          //   return
+          // }
           console.log(error)
         })
     },
