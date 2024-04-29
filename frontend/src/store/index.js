@@ -3,13 +3,25 @@ import axios from 'axios'
 
 export default createStore({
     state: {
-        base_url: "https://gz.idoknow.top",
+        base_url: "https://dev.campux.idoknow.top",
         metadata: {
             "banner": "",
             "popup_announcement": "",
             "post_rules": "",
             "brand": "",
             "beianhao": "",
+        },
+        statusMap: {
+            "pending_approval": "待审核",
+            "approved": "已通过",
+            "rejected": "已拒绝",
+            "cancelled": "已取消",
+            "in_queue": "队列中",
+            "published": "已发布",
+            "failed": "失败",
+            "any": "全部",
+            "pending_recall": "待撤回",
+            "recalled": "已撤回"
         },
     },
     mutations: {
