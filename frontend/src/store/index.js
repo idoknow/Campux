@@ -3,7 +3,7 @@ import axios from 'axios'
 
 export default createStore({
     state: {
-        base_url: "https://gz.idoknow.top",
+        base_url: "",
         metadata: {
             "banner": "",
             "popup_announcement": "",
@@ -48,6 +48,9 @@ export default createStore({
                         console.error(err)
                     })
             }
+        },
+        setBaseURL(state, url) {
+            state.base_url = url
         }
     },
 })
