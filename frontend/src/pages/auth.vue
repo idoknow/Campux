@@ -19,7 +19,7 @@
 
                                 <v-card-text>
                                     <p>请给墙号(QQ: 2297454588)发送</p>
-                                    <p><strong>#注册</strong></p>
+                                    <p><strong>#注册账号</strong></p>
                                     <p>来获得初始密码。</p>
                                 </v-card-text>
 
