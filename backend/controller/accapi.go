@@ -89,7 +89,7 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 			Domain:   domain,
 			Secure:   true,
 			SameSite: http.SameSiteNoneMode,
-			HttpOnly: true,
+			HttpOnly: false,
 			MaxAge:   3600,
 		})
 	} else {
@@ -101,7 +101,7 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 			Domain:   domain,
 			Secure:   true,
 			SameSite: http.SameSiteStrictMode,
-			HttpOnly: true,
+			HttpOnly: false,
 			MaxAge:   3600,
 		})
 	}
