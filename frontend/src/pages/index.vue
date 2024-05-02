@@ -110,10 +110,10 @@
           </template>
 
           <template v-slot:default="{ isActive }">
-            <v-card title="😉 投稿礼仪">
+            <v-card title="😉 投稿规则">
 
               <v-card-text>
-                <p v-for="(rule, index) in $store.state.metadata.post_rules" :key="index">{{ index }}. {{ rule }}</p>
+                <p v-for="(rule, index) in $store.state.metadata.post_rules" :key="index">{{ index + 1 }}. {{ rule }}</p>
               </v-card-text>
 
               <v-card-actions>

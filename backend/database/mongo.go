@@ -200,6 +200,9 @@ func (m *MongoDBManager) GetMaxPostID() (int, error) {
 		options.FindOne().SetSort(bson.M{"id": -1}),
 	).Decode(&post)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, nil
+		}
 		return 0, err
 	}
 
