@@ -164,6 +164,10 @@ func (ps *PostService) PostReview(uin int64, id int, option database.ReviewOptio
 		return errors.New("审核选项不合法")
 	}
 
+	if comment == "" {
+		comment = "审核通过"
+	}
+
 	// 记录日志
 	err = ps.DB.AddPostLog(
 		&database.PostLogPO{
