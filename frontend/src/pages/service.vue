@@ -70,6 +70,32 @@
           </template>
         </v-dialog>
 
+        <v-dialog max-width="500">
+          <template v-slot:activator="{ props: activatorProps }">
+            <div class="rect1" style="background-color: #2196F3;" v-bind="activatorProps">
+              <div>
+                <p style="font-weight: bold; font-size: 16px">退出登录</p>
+              </div>
+              <a style="font-size: 16px; cursor:pointer; font-weight: bold;">></a>
+            </div>
+          </template>
+
+          <template v-slot:default="{ isActive }">
+            <v-card title="提示">
+
+              <v-card-text>
+                真的要退出吗？
+              </v-card-text>
+
+              <v-card-actions>
+                <v-spacer></v-spacer>
+                <v-btn text="取消" @click="isActive.value = false"></v-btn>
+                <v-btn text="确认" @click="isActive.value = false; logout()"></v-btn>
+              </v-card-actions>
+            </v-card>
+          </template>
+        </v-dialog>
+
         <h2 style="margin-top: 16px">🤩 推荐网站</h2>
         <div class="rect1" v-for="(service, index) in services" :style="service.color">
           <div>
@@ -106,6 +132,7 @@
 
 <script>
 import BottomNavBar from '@/components/BottomNavBar.vue'
+
 export default {
   components: {
     BottomNavBar
@@ -135,6 +162,11 @@ export default {
   },
 
   methods: {
+    logout() {
+      this.$cookies.remove('access-token')
+      window.location.reload()
+    },
+
     tokenLogin() {
       this.$axios.get('/v1/account/token-check')
         .then(res => {

@@ -14,10 +14,12 @@
     "js-cookie": "^3.0.5",
     "roboto-fontface": "*",
     "vue": "^3.4.0",
+    "vue-cookies": "^1.8.4",
     "vuetify": "^3.5.0",
     "vuex": "^4.1.0"
   },
   "devDependencies": {
+    "@types/js-cookie": "^3.0.6",
     "@vitejs/plugin-vue": "^5.0.4",
     "eslint": "^8.57.0",
     "eslint-config-standard": "^17.1.0",
