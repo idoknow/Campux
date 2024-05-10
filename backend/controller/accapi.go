@@ -81,14 +81,18 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 	domain := c.Request.Header.Get("Origin")
 
 	// set-cookie
+	// 要求：
+	// 1. 调试模式时允许跨域
+	// 2. 设置的域为请求的域
+	// 3. 允许js修改
 	if gin.Mode() == gin.DebugMode {
 		http.SetCookie(c.Writer, &http.Cookie{
 			Name:     "access-token",
 			Value:    token,
 			Path:     "/",
 			Domain:   domain,
-			Secure:   true,
-			SameSite: http.SameSiteNoneMode,
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
 			HttpOnly: false,
 			MaxAge:   3600,
 		})
@@ -99,7 +103,7 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 			Value:    token,
 			Path:     "/",
 			Domain:   domain,
-			Secure:   true,
+			Secure:   false,
 			SameSite: http.SameSiteStrictMode,
 			HttpOnly: false,
 			MaxAge:   3600,
