@@ -5,6 +5,7 @@ import (
 
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 type AccountRouter struct {
@@ -94,7 +95,7 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 			Secure:   false,
 			SameSite: http.SameSiteLaxMode,
 			HttpOnly: false,
-			MaxAge:   3600,
+			MaxAge:   viper.GetInt("auth.jwt.expire"),
 		})
 	} else {
 		// 正式环境用strict模式
@@ -106,7 +107,7 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 			Secure:   false,
 			SameSite: http.SameSiteStrictMode,
 			HttpOnly: false,
-			MaxAge:   3600,
+			MaxAge:   viper.GetInt("auth.jwt.expire"),
 		})
 	}
 
