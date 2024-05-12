@@ -83,7 +83,7 @@
         <div class="logCard" v-for="(l,index) in log" :key="index">
           <h3>{{ l.comment }}</h3>
           <p><strong>时间: </strong>{{ l.created_at }}</p>
-          <p v-if="l.op !== -1"><strong>操作者: </strong>{{ l.op }}</p>
+          <p v-if="l.op !== -1 && typ != 'self'"><strong>操作者: </strong>{{ l.op }}</p>
           <p><strong>状态: </strong> {{ this.$store.state.statusMap[l.new_stat] }}</p>
         </div>
       </v-card-text>

@@ -195,3 +195,37 @@ func (ps *PostService) PostReview(uin int64, id int, option database.ReviewOptio
 
 	return ps.DB.UpdatePostStatus(id, newStat)
 }
+
+// 获取稿件日志
+func (ps *PostService) GetPostLogs(uin int64, postID int) ([]database.PostLogPO, error) {
+	// 取出稿件日志
+	logs, err := ps.DB.GetPostLogs(postID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 检查权限
+	if !ps.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+		database.USER_GROUP_MEMBER,
+	}) {
+		// 检查是否是本人稿件
+		post, err := ps.DB.GetPost(postID)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if post.Uin != uin {
+			return nil, errors.New("无权查看他人稿件日志")
+		}
+
+		// 改写所有操作者
+		for i := range logs {
+			logs[i].Op = -10 // 掩盖操作者
+		}
+	}
+
+	return logs, nil
+}

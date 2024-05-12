@@ -363,7 +363,7 @@ func (pr *PostRouter) PostPostLog(c *gin.Context) {
 // 获取稿件日志
 func (pr *PostRouter) GetPostLog(c *gin.Context) {
 
-	_, err := pr.Auth(c, Both)
+	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
 		pr.StatusCode(c, 401, err.Error())
@@ -380,7 +380,7 @@ func (pr *PostRouter) GetPostLog(c *gin.Context) {
 	}
 
 	// 获取稿件日志
-	logs, err := pr.PostService.DB.GetPostLogs(idInt)
+	logs, err := pr.PostService.GetPostLogs(uin, idInt)
 
 	if err != nil {
 		pr.Fail(c, 1, err.Error())
