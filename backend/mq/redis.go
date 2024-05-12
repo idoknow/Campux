@@ -25,6 +25,7 @@ func NewRedisStreamMQ() *RedisStreamMQ {
 	// 检查流是否存在
 	client.XGroupCreateMkStream(context.Background(), viper.GetString("mq.redis.stream.publish_post"), "campux", "0")
 	client.XGroupCreateMkStream(context.Background(), viper.GetString("mq.redis.stream.new_post"), "campux", "0")
+	client.XGroupCreateMkStream(context.Background(), viper.GetString("mq.redis.stream.post_cancel"), "campux", "0")
 
 	return &RedisStreamMQ{
 		Client:            client,
