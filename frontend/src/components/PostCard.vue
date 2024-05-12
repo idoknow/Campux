@@ -43,9 +43,7 @@
             <span class="me-1">·</span>
             <v-icon class="me-1" icon="mdi-share-variant"></v-icon>
             <span class="subheading">45</span> -->
-            <span @click="showLogs" v-if="typ === 'self'" class="subheading" style="font-weight: bold; text-decoration: underline">{{ post.status }}</span>
-
-            <v-menu v-else>
+            <v-menu v-if="typ === 'judge' && post.status === '待审核'">
               <template v-slot:activator="{ props }">
                 <v-btn v-bind="props">
                   标记为
@@ -57,6 +55,8 @@
                 </v-list-item>
               </v-list>
             </v-menu>
+            <span @click="showLogs" v-else class="subheading" style="font-weight: bold; text-decoration: underline">{{ post.status }}</span>
+
           </div>
         </template>
       </v-list-item>
@@ -97,7 +97,7 @@
 <script>
 export default {
   name: 'PostCard',
-  props: ['post', 'typ'],
+  props: ['post', 'typ', 'currentFilterStatus'],
   data() {
     return {
       dialog: false,
