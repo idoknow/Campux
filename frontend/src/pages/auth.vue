@@ -18,7 +18,7 @@
                             <v-card title="提示">
 
                                 <v-card-text>
-                                    <p>请给墙号(QQ: 2297454588)发送</p>
+                                    <p>请给墙号发送</p>
                                     <p><strong>#注册账号</strong></p>
                                     <p>来获得初始密码。</p>
                                 </v-card-text>
@@ -32,7 +32,28 @@
                         </template>
                     </v-dialog>
                     /
-                    <small class="cursor" @click="resetPassword">重置密码</small>
+                    <v-dialog max-width="500">
+                        <template v-slot:activator="{ props: activatorProps }">
+                            <small v-bind="activatorProps" class="cursor">忘记密码</small>
+                        </template>
+
+                        <template v-slot:default="{ isActive }">
+                            <v-card title="提示">
+
+                                <v-card-text>
+                                    <p>请给墙号发送</p>
+                                    <p><strong>#重置密码</strong></p>
+                                    <p>以重置密码为随机密码</p>
+                                </v-card-text>
+
+                                <v-card-actions>
+                                    <v-spacer></v-spacer>
+
+                                    <v-btn text="好的👌" @click="isActive.value = false"></v-btn>
+                                </v-card-actions>
+                            </v-card>
+                        </template>
+                    </v-dialog>
                 </div>
 
 
