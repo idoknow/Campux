@@ -72,6 +72,7 @@
               @update:model-value="refreshPosts"></v-select> -->
             <div style="overflow-y: scroll; max-height: calc(100vh - 140px); min-height: calc(100vh - 140px);">
               <PostCard v-for="p in judgePosts" :key="p.id" :post="p" typ="judge" style="margin-top: 16px"
+              currentFilterStatus="{{ filterForJudge.status }}"
                 @updateJudgePost="updateJudgePost" />
             </div>
           </div>
