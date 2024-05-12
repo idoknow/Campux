@@ -12,6 +12,7 @@ type RedisStreamMQ struct {
 	Client            *redis.Client
 	PublishPostStream string
 	NewPostStream     string
+	PostCancelStream  string
 }
 
 func NewRedisStreamMQ() *RedisStreamMQ {
@@ -29,6 +30,7 @@ func NewRedisStreamMQ() *RedisStreamMQ {
 		Client:            client,
 		PublishPostStream: viper.GetString("mq.redis.stream.publish_post"),
 		NewPostStream:     viper.GetString("mq.redis.stream.new_post"),
+		PostCancelStream:  viper.GetString("mq.redis.stream.post_cancel"),
 	}
 }
 
@@ -67,6 +69,16 @@ func (r *RedisStreamMQ) PublishPost(postID int) error {
 func (r *RedisStreamMQ) NewPost(postID int) error {
 	_, err := r.Client.XAdd(context.Background(), &redis.XAddArgs{
 		Stream: r.NewPostStream,
+		Values: map[string]interface{}{
+			"post_id": postID,
+		},
+	}).Result()
+	return err
+}
+
+func (r *RedisStreamMQ) PostCancel(postID int) error {
+	_, err := r.Client.XAdd(context.Background(), &redis.XAddArgs{
+		Stream: r.PostCancelStream,
 		Values: map[string]interface{}{
 			"post_id": postID,
 		},
