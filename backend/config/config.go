@@ -36,6 +36,7 @@ func SetDefault() {
 	viper.SetDefault("mq.redis.db", 0)
 	viper.SetDefault("mq.redis.stream.publish_post", "campux_publish_post")
 	viper.SetDefault("mq.redis.stream.new_post", "campux_new_post")
+	viper.SetDefault("mq.redis.stream.post_cancel", "campux_post_cancel")
 
 }
 

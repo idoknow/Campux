@@ -119,6 +119,12 @@ func (ps *PostService) UserCancelPost(uin int64, id int) error {
 		return errors.New("稿件的状态不是 待审核")
 	}
 
+	err = ps.DB.UpdatePostStatus(id, database.POST_STATUS_CANCELLED)
+
+	if err != nil {
+		return err
+	}
+
 	// 记录日志
 	err = ps.DB.AddPostLog(
 		&database.PostLogPO{
@@ -135,7 +141,10 @@ func (ps *PostService) UserCancelPost(uin int64, id int) error {
 		return err
 	}
 
-	return ps.DB.UpdatePostStatus(id, database.POST_STATUS_CANCELLED)
+	// 推送到mq
+	err = ps.MQ.PostCancel(id)
+
+	return err
 }
 
 // 审核
