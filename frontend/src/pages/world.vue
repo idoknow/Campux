@@ -345,14 +345,14 @@ export default {
       })
         .then((response) => {
           if (response.data.code === 0) {
-            this.toast('撤回成功', 'success')
+            this.toast('取消成功', 'success')
             this.getPosts()
           } else {
-            this.toast('撤回失败：' + response.data.msg)
+            this.toast('取消失败：' + response.data.msg)
           }
         })
         .catch((error) => {
-          this.toast('撤回失败：' + error.response.data.msg)
+          this.toast('取消失败：' + error.response.data.msg)
           console.error(error)
         })
     },
