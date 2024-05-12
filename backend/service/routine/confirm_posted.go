@@ -12,7 +12,7 @@ func ConfirmPosted(db database.MongoDBManager, msq mq.RedisStreamMQ) {
 	// 取出状态为“队列中”的稿件
 	// 检查消息队列中HGETALL publish_post_status:post_id 的所有值是否都是1
 	// 如果是, 则更新稿件状态为“已发布”
-	inQueuePosts, err := db.GetPosts(-1, database.POST_STATUS_IN_QUEUE, 1, 1, 10)
+	inQueuePosts, _, err := db.GetPosts(-1, database.POST_STATUS_IN_QUEUE, 1, 1, 10)
 	if err != nil {
 		return
 	}

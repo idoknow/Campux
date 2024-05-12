@@ -281,7 +281,7 @@ func (m *MongoDBManager) GetPosts(
 	status PostStatus,
 	timeOrder int,
 	page, pageSize int,
-) ([]PostPO, error) {
+) ([]PostPO, int, error) {
 	var posts []PostPO
 
 	condition := bson.M{}
@@ -296,6 +296,16 @@ func (m *MongoDBManager) GetPosts(
 
 	findOptions := options.Find()
 	findOptions.SetSort(bson.M{"created_at": timeOrder})
+
+	// 获取符合条件的总数
+	totalResult, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_COLLECTION).CountDocuments(context.TODO(), condition)
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total := int(totalResult)
+
 	findOptions.SetSkip(int64((page - 1) * pageSize))
 	findOptions.SetLimit(int64(pageSize))
 
@@ -305,16 +315,16 @@ func (m *MongoDBManager) GetPosts(
 		findOptions,
 	)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer cursor.Close(context.Background())
 
 	err = cursor.All(context.Background(), &posts)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return posts, nil
+	return posts, total, nil
 }
 
 func (m *MongoDBManager) GetPost(id int) (*PostPO, error) {

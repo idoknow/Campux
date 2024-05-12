@@ -147,7 +147,7 @@ func (pr *PostRouter) GetSelfPosts(c *gin.Context) {
 	}
 
 	// 获取用户自己的帖子
-	posts, err := pr.PostService.GetPosts(
+	posts, total, err := pr.PostService.GetPosts(
 		uin,
 		body.Status,
 		*body.TimeOrder,
@@ -161,7 +161,8 @@ func (pr *PostRouter) GetSelfPosts(c *gin.Context) {
 	}
 
 	pr.Success(c, gin.H{
-		"list": posts,
+		"list":  posts,
+		"total": total,
 	})
 }
 
@@ -192,7 +193,7 @@ func (pr *PostRouter) GetPosts(c *gin.Context) {
 	}
 
 	// 获取稿件列表
-	posts, err := pr.PostService.GetPosts(
+	posts, total, err := pr.PostService.GetPosts(
 		body.Uin,
 		body.Status,
 		*body.TimeOrder,
@@ -206,7 +207,8 @@ func (pr *PostRouter) GetPosts(c *gin.Context) {
 	}
 
 	pr.Success(c, gin.H{
-		"list": posts,
+		"list":  posts,
+		"total": total,
 	})
 }
 

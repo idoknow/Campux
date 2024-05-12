@@ -12,7 +12,7 @@ func SchedulePublishing(db database.MongoDBManager, msq mq.RedisStreamMQ) {
 	// 从数据库中查询出所有待发布的稿件
 	// 遍历稿件, 发布到消息队列
 	// 更新稿件状态
-	approvedPosts, err := db.GetPosts(-1, database.POST_STATUS_APPROVED, 1, 1, 10)
+	approvedPosts, _, err := db.GetPosts(-1, database.POST_STATUS_APPROVED, 1, 1, 10)
 	if err != nil {
 		return
 	}

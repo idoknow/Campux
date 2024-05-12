@@ -43,7 +43,7 @@ func (ps *PostService) DownloadImage(key string, ioWriter io.Writer) error {
 func (ps *PostService) PostNew(uuid string, uin int64, text string, images []string, anon bool) (int, error) {
 
 	// 检查这个用户是否有未过审的帖子
-	posts, err := ps.DB.GetPosts(uin, database.POST_STATUS_PENDING_APPROVAL, 1, 1, 1)
+	posts, _, err := ps.DB.GetPosts(uin, database.POST_STATUS_PENDING_APPROVAL, 1, 1, 1)
 
 	if err != nil {
 		return -1, err
@@ -93,7 +93,7 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 }
 
 // 获取用户的帖子
-func (ps *PostService) GetPosts(uin int64, status database.PostStatus, timeOrder int, page, pageSize int) ([]database.PostPO, error) {
+func (ps *PostService) GetPosts(uin int64, status database.PostStatus, timeOrder int, page, pageSize int) ([]database.PostPO, int, error) {
 	return ps.DB.GetPosts(uin, status, timeOrder, page, pageSize)
 }
 

@@ -67,10 +67,13 @@
           </div>
         </v-window-item>
         <v-window-item value="3">
-          <div style="padding: 16px;">
+          <div style="padding-inline: 16px;">
+            <v-pagination :length="judgePages" v-model="judgeCurrentPage"
+            @update:model-value="getJudgePosts"
+            ></v-pagination>
             <!-- <v-select v-model="filterForJudge.status" label="按条件筛选" :items="filterStatus" variant="solo"
               @update:model-value="refreshPosts"></v-select> -->
-            <div style="overflow-y: scroll; max-height: calc(100vh - 140px); min-height: calc(100vh - 140px);">
+            <div style="overflow-y: scroll; max-height: calc(100vh - 180px); min-height: calc(100vh - 200px);">
               <PostCard v-for="p in judgePosts" :key="p.id" :post="p" typ="judge" style="margin-top: 16px"
               currentFilterStatus="{{ filterForJudge.status }}"
                 @updateJudgePost="updateJudgePost" />
@@ -132,9 +135,9 @@ export default {
       filterForJudge: {
         "uin": -1,
         "status": "待审核", // 状态
-        "time_order": 1, // 时间排序
+        "time_order": -1, // 时间排序
         "page": 1,
-        "page_size": 9999
+        "page_size": 10
       },
       posts: [],
       filterStatus: ['全部', '待审核', '已通过', '已拒绝', '已取消', '队列中', '已发布', '失败', '待撤回', '已撤回'],
@@ -143,6 +146,8 @@ export default {
       avatarUrl: "",
       userGroup: "user",
       judgePosts: [],
+      judgePages: 1,
+      judgeCurrentPage: 1,
       pullLoading: false,
     }
   },
@@ -224,6 +229,9 @@ export default {
           break
         }
       }
+
+      filter.page = this.judgeCurrentPage
+
       this.pullLoading = true
       this.$axios.post('/v1/post/get-posts', filter)
         .then((response) => {
@@ -235,8 +243,6 @@ export default {
               this.pullLoading = false
               return
             }
-            // reverse
-            p.reverse()
             for (let i = 0; i < p.length; i++) {
               // 2024-04-12T08:19:51.096Z 转成日期，再转成字符串
               let date = new Date(p[i].created_at)
@@ -248,6 +254,9 @@ export default {
             }
             console.log(p)
             this.judgePosts = p
+
+            // 计算页数
+            this.judgePages = Math.ceil(response.data.data.total / this.filterForJudge.page_size)
           } else {
             this.toast(response.data.msg)
           }
