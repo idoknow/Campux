@@ -13,12 +13,27 @@ const (
 	USER_GROUP_USER   UserGroup = "user"
 )
 
+type BanInfo struct {
+	Uin       int64     `json:"uin" bson:"uin"`               // QQ号
+	Op        int64     `json:"op" bson:"op"`                 // 操作者QQ号
+	Comment   string    `json:"comment" bson:"comment"`       // 备注
+	StartTime time.Time `json:"start_time" bson:"start_time"` // 开始时间
+	EndTime   time.Time `json:"end_time" bson:"end_time"`     // 结束时间
+}
+
 type AccountPO struct {
 	Uin       int64     `json:"uin" bson:"uin"`               // QQ号
 	Pwd       string    `json:"pwd" bson:"pwd"`               // 数据库存md5之后的密码
 	CreatedAt time.Time `json:"created_at" bson:"created_at"` // CST时间
 	UserGroup UserGroup `json:"user_group" bson:"user_group"` // 用户组
 	Salt      string    `json:"salt" bson:"salt"`             // 加盐
+}
+
+type AccountExpose struct {
+	Uin       int64     `json:"uin" bson:"uin"`               // QQ号
+	UserGroup UserGroup `json:"user_group" bson:"user_group"` // 用户组
+	CreatedAt time.Time `json:"created_at" bson:"created_at"` // CST时间
+	BanRecord []BanInfo `json:"ban_record"`                   // 封禁记录
 }
 
 type PostStatus string

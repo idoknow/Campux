@@ -16,6 +16,7 @@ const (
 	POST_COLLECTION     = "post"
 	POST_LOG_COLLECTION = "post_log"
 	METADATA_COLLECTION = "metadata"
+	BAN_LIST_COLLECTION = "ban_list"
 )
 
 type Metadata struct {
@@ -181,6 +182,140 @@ func (m *MongoDBManager) UpdatePassword(uin int64, pwd, salt string) error {
 		},
 	)
 	return err
+}
+
+func (m *MongoDBManager) GetAccounts(
+	uin int64,
+	userGroup UserGroup,
+	timeOrder int,
+	page, pageSize int,
+) ([]AccountExpose, int, error) {
+	var accounts []AccountExpose
+
+	condition := bson.M{}
+
+	if uin != -1 {
+		condition["uin"] = uin
+	}
+
+	if userGroup != USER_GROUP_ANY {
+		condition["user_group"] = userGroup
+	}
+
+	findOptions := options.Find()
+
+	findOptions.SetSort(bson.M{"created_at": timeOrder})
+
+	// 获取符合条件的总数
+	totalResult, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(ACCOUNT_COLLECTION).CountDocuments(context.TODO(), condition)
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total := int(totalResult)
+
+	findOptions.SetSkip(int64((page - 1) * pageSize))
+	findOptions.SetLimit(int64(pageSize))
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(ACCOUNT_COLLECTION).Find(
+		context.TODO(),
+		condition,
+		findOptions,
+	)
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &accounts)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 获取ban_list中与账号uin相同的记录
+	for i := range accounts {
+		banCursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(BAN_LIST_COLLECTION).Find(
+			context.TODO(),
+			bson.M{"uin": accounts[i].Uin},
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		var banList []BanInfo
+		err = banCursor.All(context.Background(), &banList)
+		if err != nil {
+			return nil, 0, err
+		}
+		accounts[i].BanRecord = banList
+	}
+
+	return accounts, total, nil
+}
+
+func (m *MongoDBManager) BanAccount(banInfo BanInfo) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(BAN_LIST_COLLECTION).InsertOne(context.TODO(), banInfo)
+	return err
+}
+
+func (m *MongoDBManager) UnbanAccount(uin int64) error {
+	// 把最后一个此账号的封禁记录的结束时间设置为当前
+	crtTime := util.GetCSTTime()
+
+	filter := bson.M{
+		"uin": uin,
+		"end_time": bson.M{
+			"$gt": crtTime,
+		},
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"end_time": crtTime,
+		},
+	}
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(BAN_LIST_COLLECTION).UpdateMany(
+		context.TODO(),
+		filter,
+		update,
+	)
+	return err
+}
+
+// 更改账户的用户组
+func (m *MongoDBManager) UpdateUserGroup(uin int64, userGroup UserGroup) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(ACCOUNT_COLLECTION).UpdateOne(
+		context.TODO(),
+		bson.M{"uin": uin},
+		bson.M{"$set": bson.M{"user_group": userGroup}},
+	)
+	return err
+}
+
+func (m *MongoDBManager) GetCurrentBanInfo(uin int64) (*BanInfo, error) {
+	var banInfo BanInfo
+
+	// 获取此账号所有的结束时间大于当前时间的封禁记录
+	crtTime := util.GetCSTTime()
+
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(BAN_LIST_COLLECTION).FindOne(
+		context.TODO(),
+		bson.M{
+			"uin": uin,
+			"end_time": bson.M{
+				"$gt": crtTime,
+			},
+		},
+	).Decode(&banInfo)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &banInfo, nil
 }
 
 func (m *MongoDBManager) CountPost() (int, error) {

@@ -22,6 +22,47 @@ type AccountChangePasswordBody struct {
 	NewPasswd string `json:"new_passwd" binding:"required"`
 }
 
+type GetAccountsBody struct {
+	// uin
+	Uin int64 `json:"uin" binding:"required"`
+
+	// 用户组
+	UserGroup database.UserGroup `json:"user_group" binding:"required"`
+
+	// time_order
+	TimeOrder *int `json:"time_order" binding:"required"`
+
+	// page
+	Page *int `json:"page" binding:"required"`
+
+	// page_size
+	PageSize *int `json:"page_size" binding:"required"`
+}
+
+type AccountBanBody struct {
+	// 被封禁的uin
+	Uin int64 `json:"uin" binding:"required"`
+
+	// 封禁原因
+	Comment string `json:"comment" binding:"required"`
+
+	// 结束时间
+	EndTime int64 `json:"end_time" binding:"required"`
+}
+
+type AccountUnbanBody struct {
+	// 被封禁的uin
+	Uin int64 `json:"uin" binding:"required"`
+}
+
+type ChangeUserGroupBody struct {
+	// 被操作的uin
+	Uin int64 `json:"uin" binding:"required"`
+
+	// 新的用户组
+	NewGroup database.UserGroup `json:"new_group" binding:"required"`
+}
+
 type PostNewBody struct {
 
 	// UUID UUID 必须

@@ -12,12 +12,14 @@ import (
 
 type PostRouter struct {
 	APIRouter
-	PostService service.PostService
+	PostService    service.PostService
+	AccountService service.AccountService
 }
 
-func NewPostRouter(rg *gin.RouterGroup, ps service.PostService) *PostRouter {
+func NewPostRouter(rg *gin.RouterGroup, ps service.PostService, as service.AccountService) *PostRouter {
 	pr := &PostRouter{
-		PostService: ps,
+		PostService:    ps,
+		AccountService: as,
 	}
 
 	group := rg.Group("/post")
@@ -79,6 +81,11 @@ func (pr *PostRouter) PostNew(c *gin.Context) {
 		return
 	}
 
+	// 检查是否被ban
+	if pr.CheckIfBanned(c, pr.AccountService, uin) {
+		return
+	}
+
 	// 取body的json里的uuid, uin, text, images, anon
 	var body PostNewBody
 
@@ -106,7 +113,6 @@ func (pr *PostRouter) DownloadImage(c *gin.Context) {
 	_, err := pr.Auth(c, Both)
 
 	if err != nil {
-		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
@@ -172,7 +178,6 @@ func (pr *PostRouter) GetPosts(c *gin.Context) {
 	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
-		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
@@ -216,7 +221,6 @@ func (pr *PostRouter) GetPostInfo(c *gin.Context) {
 	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
-		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
@@ -290,7 +294,6 @@ func (pr *PostRouter) ReviewPost(c *gin.Context) {
 	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
-		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
@@ -328,7 +331,6 @@ func (pr *PostRouter) PostPostLog(c *gin.Context) {
 	_, err := pr.Auth(c, ServiceOnly)
 
 	if err != nil {
-		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
@@ -368,7 +370,6 @@ func (pr *PostRouter) GetPostLog(c *gin.Context) {
 	uin, err := pr.Auth(c, Both)
 
 	if err != nil {
-		pr.StatusCode(c, 401, err.Error())
 		return
 	}
 
