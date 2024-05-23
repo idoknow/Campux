@@ -9,6 +9,10 @@ func GetCSTTime() time.Time {
 	return cstTime
 }
 
+func GetCSTTimeFromUnix(unix int64) time.Time {
+	return time.Unix(unix, 0).In(GetCSTTimeLocation())
+}
+
 func GetCSTTimeLocation() *time.Location {
 	return time.FixedZone("CST", 8*3600)
 }

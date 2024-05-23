@@ -61,7 +61,7 @@ func NewApiController(
 
 	// bind routes
 	NewAccountRouter(rg, as)
-	NewPostRouter(rg, ps)
+	NewPostRouter(rg, ps, as)
 	NewMiscRouter(rg, ms)
 
 	return &APIController{
@@ -79,6 +79,8 @@ const (
 	ServiceOnly AuthenticationType = 2
 	Both        AuthenticationType = 3
 )
+
+var ErrAccountBanned = errors.New("账户已被封禁")
 
 // 鉴权
 // 如果是服务鉴权，则拿Authorization头对比service.token
@@ -108,7 +110,48 @@ func (ar *APIRouter) Auth(c *gin.Context, authType AuthenticationType) (int64, e
 		uin, err = ar.GetUin(c)
 	}
 
-	return uin, err
+	if err == nil {
+		return uin, err
+	} else {
+		ar.StatusCode(c, 401, err.Error())
+		return -1, err
+	}
+}
+
+// 检查当前用户是否被封禁
+func (ar *APIRouter) CheckIfBanned(c *gin.Context, as service.AccountService, uin int64) bool {
+	if uin == 0 {
+		return false
+	}
+
+	acc, err := as.DB.GetAccountByUIN(uin)
+
+	if err != nil {
+		ar.StatusCode(c, 500, err.Error())
+		return true
+	}
+
+	if acc == nil {
+		ar.StatusCode(c, 401, service.ErrAccountNotFound.Error())
+		return true
+	}
+
+	// 判断是否被封禁
+	crtTime := util.GetCSTTime()
+
+	bannedInfo, err := as.DB.GetCurrentBanInfo(uin)
+
+	if err != nil {
+		ar.StatusCode(c, 500, err.Error())
+		return true
+	}
+
+	if bannedInfo != nil && bannedInfo.EndTime.After(crtTime) {
+		ar.StatusCode(c, 403, ErrAccountBanned.Error())
+		return true
+	}
+
+	return false
 }
 
 // 从jwt取uin
