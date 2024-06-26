@@ -98,8 +98,8 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 			Value:    token,
 			Path:     "/",
 			Domain:   domain,
-			Secure:   false,
-			SameSite: http.SameSiteLaxMode,
+			Secure:   true,
+			SameSite: http.SameSiteNoneMode,
 			HttpOnly: false,
 			MaxAge:   viper.GetInt("auth.jwt.expire"),
 		})
