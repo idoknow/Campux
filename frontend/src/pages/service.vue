@@ -17,6 +17,9 @@
           <div id="pctab-btn" @click="$router.push('/service');">
             <span style="font-weight: 1000">🛠 服务</span>
           </div>
+          <div id="pctab-btn" v-if="userGroup === 'admin' || userGroup === 'member'" @click="$router.push('/admin');">
+            <span>🔐 管理</span>
+          </div>
         </div>
 
         <div style="display: flex;">
