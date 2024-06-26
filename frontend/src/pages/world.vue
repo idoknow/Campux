@@ -18,6 +18,9 @@
           <div id="pctab-btn" @click="$router.push('/service');">
             <span>🛠 服务</span>
           </div>
+          <div id="pctab-btn" v-if="userGroup === 'admin' || userGroup === 'member'" @click="$router.push('/admin');">
+            <span>🔐 管理</span>
+          </div>
         </div>
 
         <div style="display: flex;">
@@ -44,7 +47,7 @@
       <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
         <v-tab value="1">📰 你的稿件</v-tab>
         <v-tab value="2">🌏 动态</v-tab>
-        <v-tab v-if="userGroup === 'admin'" value="3">🤵 审核稿件</v-tab>
+        <v-tab v-if="userGroup === 'admin' || userGroup === 'member'" value="3">🤵 审核稿件</v-tab>
       </v-tabs>
 
       <v-divider id="hdivider"></v-divider>
