@@ -44,6 +44,7 @@
             </div>
             <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
                 <v-tab value="1">🪪 账号</v-tab>
+                <v-tab value="2">🚫 封禁记录</v-tab>
             </v-tabs>
 
             <v-divider id="hdivider"></v-divider>
@@ -77,6 +78,30 @@
                         </div>
                     </div>
                 </v-window-item>
+                <v-window-item value="2">
+                    <div style="padding: 16px;">
+                        <!--UIN搜索框-->
+                        <div id="accountFilter">
+                            <div style="display: flex;flex-direction: row;">
+
+                                <v-text-field v-model="filter.uin" label="输入UIN搜索" variant="solo"></v-text-field>
+
+                                <v-checkbox v-model="banListFilter.only_valid" label="仅生效中的"
+                                    style="margin-inline: 10px;" @change="getBanList"></v-checkbox>
+                                <v-btn @click="getBanList" color="primary" style="margin-top: 8px; "
+                                    size="large">查找</v-btn>
+                            </div>
+                        </div>
+
+                        <v-pagination :length="banPages" v-model="banListFilter.page" style="margin-top: -10px"
+                            @update:model-value="getBanList"></v-pagination>
+                        <div
+                            style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 10px">
+                            <BanRecordCard v-for="b in banRecords" :key="b.id" :banRecord="b" style="margin-top: 16px"
+                                @unban="unban" @toast="toast" />
+                        </div>
+                    </div>
+                </v-window-item>
             </v-window>
 
             <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
@@ -102,6 +127,7 @@
 <script>
 import BottomNavBar from '@/components/BottomNavBar.vue';
 import AccountCard from '@/components/AccountCard.vue';
+import BanRecordCard from '@/components/BanRecordCard.vue';
 
 export default {
     components: {
@@ -133,6 +159,25 @@ export default {
                 page_size: 10
             },
             accountPages: 1,
+            banListFilter: {
+                uin: -1,
+                only_valid: true,
+                page: 1,
+                page_size: 10,
+                time_order: -1
+            },
+            banRecords: [],
+            banPages: 1
+        }
+    },
+
+    watch: {
+        tab() {
+            if (this.tab === '1') {
+                this.getAccounts()
+            } else if (this.tab === '2') {
+                this.getBanList()
+            }
         }
     },
 
@@ -209,7 +254,7 @@ export default {
                     if (res.data.code === 0) {
                         this.accounts = res.data.data.list
 
-                        for (let i = 0; i < this.accounts.length; i++) {
+                        for (let i = 0; this.accounts!=null && i < this.accounts.length; i++) {
                             let date = new Date(this.accounts[i].created_at)
 
                             this.accounts[i].created_at = date.toLocaleString()
@@ -260,6 +305,59 @@ export default {
                 })
                 .catch(err => {
                     this.toast('封禁失败：' + err)
+                    console.error(err)
+                })
+        },
+
+
+        getBanList() {
+
+            if (this.banListFilter.uin === '') {
+                this.banListFilter.uin = -1
+            } else {
+                this.banListFilter.uin = parseInt(this.banListFilter.uin)
+            }
+            this.$axios.post('/v1/account/get-ban-list', this.banListFilter)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.banRecords = res.data.data.list
+
+                        let now = new Date()
+
+                        for (let i = 0; this.banRecords != null && i < this.banRecords.length; i++) {
+                            let startDateTime = new Date(this.banRecords[i].start_time)
+                            let endDateTime = new Date(this.banRecords[i].end_time)
+
+                            this.banRecords[i].start_time = startDateTime.toLocaleString()
+                            this.banRecords[i].end_time = endDateTime.toLocaleString()
+                            this.banRecords[i].valid = endDateTime > now
+                        }
+
+                        this.banPages = Math.ceil(res.data.data.total / this.banListFilter.page_size)
+                    } else {
+                        this.toast('获取封禁列表失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('获取封禁列表失败：' + err)
+                    console.error(err)
+                })
+        },
+
+        unban(uin) {
+            this.$axios.put('/v1/account/unban-account', {
+                uin: uin
+            })
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('解封成功', 'success')
+                        this.getBanList()
+                    } else {
+                        this.toast('解封失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('解封失败：' + err)
                     console.error(err)
                 })
         }
