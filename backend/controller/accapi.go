@@ -33,6 +33,7 @@ func NewAccountRouter(rg *gin.RouterGroup, as service.AccountService) *AccountRo
 	group.POST("/ban-account", ar.BanAccount)
 	group.PUT("/unban-account", ar.UnbanAccount)
 	group.PUT("/change-group", ar.ChangeUserGroup)
+	group.POST("/get-ban-list", ar.GetBanList)
 
 	return ar
 }
@@ -369,4 +370,40 @@ func (ar *AccountRouter) ChangeUserGroup(c *gin.Context) {
 	}
 
 	ar.Success(c, nil)
+}
+
+// 获取封禁记录
+func (ar *AccountRouter) GetBanList(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+
+	if err != nil {
+		return
+	}
+
+	if !ar.AccountService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+		database.USER_GROUP_MEMBER,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	var body GetBanListBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	banList, total, err := ar.AccountService.GetBanList(body.Uin, *body.OnlyValid, *body.TimeOrder, *body.Page, *body.PageSize)
+
+	if err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	ar.Success(c, gin.H{
+		"list":  banList,
+		"total": total,
+	})
 }
