@@ -128,3 +128,20 @@ type PostLogBody struct {
 	NewStat database.PostStatus `json:"new_stat" bson:"new_stat"` // 新状态
 	Comment string              `json:"comment" bson:"comment"`   // 备注
 }
+
+type GetBanListBody struct {
+	// uin
+	Uin int64 `json:"uin" binding:"required"`
+
+	// 仅有效的
+	OnlyValid *bool `json:"only_valid" binding:"required"`
+
+	// 页码
+	Page *int `json:"page" binding:"required"`
+
+	// 每页数量
+	PageSize *int `json:"page_size" binding:"required"`
+
+	// 时间排序
+	TimeOrder *int `json:"time_order" binding:"required"`
+}

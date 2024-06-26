@@ -198,3 +198,13 @@ func (as *AccountService) ChangeUserGroup(uin int64, userGroup database.UserGrou
 
 	return err
 }
+
+// 获取封禁记录
+func (as *AccountService) GetBanList(
+	uin int64,
+	onlyValid bool,
+	timeOrder int,
+	page, pageSize int,
+) ([]database.BanInfo, int, error) {
+	return as.DB.GetBanList(uin, onlyValid, timeOrder, page, pageSize)
+}
