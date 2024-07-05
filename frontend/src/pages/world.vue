@@ -249,7 +249,7 @@ export default {
             for (let i = 0; i < p.length; i++) {
               // 2024-04-12T08:19:51.096Z 转成日期，再转成字符串
               let date = new Date(p[i].created_at)
-              p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
+              p[i].created_at = date.toLocaleString()
               p[i].status = this.$store.state.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
                 p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
@@ -322,7 +322,7 @@ export default {
             for (let i = 0; i < p.length; i++) {
               // 2024-04-12T08:19:51.096Z 转成日期，再转成字符串，转成 YYYY-MM-DD HH:MM:SS UTC+8
               let date = new Date(p[i].created_at)
-              p[i].created_at = date.getUTCFullYear() + "-" + (date.getUTCMonth() + 1) + "-" + date.getUTCDate() + " " + date.getUTCHours() + ":" + date.getUTCMinutes() + ":" + date.getUTCSeconds()
+              p[i].created_at = date.toLocaleString()
               p[i].status = this.$store.state.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
                 p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
