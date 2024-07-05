@@ -2,96 +2,51 @@
 
   <BottomNavBar id="bnb" v-model="value" />
 
-  <div id="container-wrap" style="height: calc(100vh - 64px)">
-
-    <div id="pctabs">
-      <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
-      <div
-        style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
-        <div>
-          <div id="pctab-btn" @click="$router.push('/');">
-            <span>📝 投稿</span>
-          </div>
-          <div id="pctab-btn" @click="$router.push('/world');">
-            <span style="font-weight: 1000">🌏 稿件</span>
-          </div>
-          <div id="pctab-btn" @click="$router.push('/service');">
-            <span>🛠 服务</span>
-          </div>
-          <div id="pctab-btn" v-if="userGroup === 'admin' || userGroup === 'member'" @click="$router.push('/admin');">
-            <span>🔐 管理</span>
-          </div>
-        </div>
-
-        <div style="display: flex;">
-          <img :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
-          <div>
-            <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ uin }}</p>
-            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{ userGroup }}</p>
-          </div>
-        </div>
-      </div>
-
-
-    </div>
-
-    <!-- 纵向分割线 -->
-    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
-    </div>
-
-    <div id="container">
-      <div>
-        <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
-        <span>{{ $store.state.metadata.brand }}</span>
-      </div>
-      <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
-        <v-tab value="1">📰 你的稿件</v-tab>
-        <v-tab value="2">🌏 动态</v-tab>
-        <v-tab v-if="userGroup === 'admin' || userGroup === 'member'" value="3">🤵 审核稿件</v-tab>
-      </v-tabs>
-
-      <v-divider id="hdivider"></v-divider>
-
-      <v-window v-model="tab" disabled>
-        <v-window-item value="1">
-          <div style="padding: 16px;">
-            <!-- <v-select v-model="filter.status" label="按条件筛选" :items="filterStatus" variant="solo"
-              @update:model-value="refreshPosts"></v-select> -->
-            <div style="overflow-y: scroll; max-height: calc(100vh - 140px); min-height: calc(100vh - 140px);">
-              <PostCard v-for="p in posts" :key="p.id" :post="p" typ="self" style="margin-top: 16px"
-                @recall="recallPost" />
-            </div>
-          </div>
-        </v-window-item>
-        <v-window-item value="2">
-          <div
-            style="display: flex; justify-content: center; align-items: center; min-height: calc(100vh - 140px); margin-top: 32px;">
-            <p style="font-weight: bold">前面的区域，以后再来探索吧</p>
-          </div>
-        </v-window-item>
-        <v-window-item value="3">
-          <div style="padding-inline: 16px;">
-            <v-pagination :length="judgePages" v-model="judgeCurrentPage"
-            @update:model-value="getJudgePosts"
-            ></v-pagination>
-            <!-- <v-select v-model="filterForJudge.status" label="按条件筛选" :items="filterStatus" variant="solo"
-              @update:model-value="refreshPosts"></v-select> -->
-            <div style="overflow-y: scroll; max-height: calc(100vh - 180px); min-height: calc(100vh - 200px);">
-              <PostCard v-for="p in judgePosts" :key="p.id" :post="p" typ="judge" style="margin-top: 16px"
-              currentFilterStatus="{{ filterForJudge.status }}"
-                @updateJudgePost="updateJudgePost" />
-            </div>
-          </div>
-        </v-window-item>
-      </v-window>
-
-      <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
-        style="margin-bottom: 64px">
-        {{ snackbar.text }}
-      </v-snackbar>
-
-    </div>
+  <div>
+    <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
+    <span>{{ $store.state.metadata.brand }}</span>
   </div>
+  <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
+    <v-tab value="1">📰 你的稿件</v-tab>
+    <v-tab value="2">🌏 动态</v-tab>
+    <v-tab v-if="userGroup === 'admin' || userGroup === 'member'" value="3">🤵 审核稿件</v-tab>
+  </v-tabs>
+
+  <v-divider id="hdivider"></v-divider>
+
+  <v-window v-model="tab" disabled>
+    <v-window-item value="1">
+      <div style="padding: 16px;">
+        <!-- <v-select v-model="filter.status" label="按条件筛选" :items="filterStatus" variant="solo"
+              @update:model-value="refreshPosts"></v-select> -->
+        <div style="overflow-y: scroll; max-height: calc(100vh - 140px); min-height: calc(100vh - 140px);">
+          <PostCard v-for="p in posts" :key="p.id" :post="p" typ="self" style="margin-top: 16px" @recall="recallPost" />
+        </div>
+      </div>
+    </v-window-item>
+    <v-window-item value="2">
+      <div
+        style="display: flex; justify-content: center; align-items: center; min-height: calc(100vh - 140px); margin-top: 32px;">
+        <p style="font-weight: bold">前面的区域，以后再来探索吧</p>
+      </div>
+    </v-window-item>
+    <v-window-item value="3">
+      <div style="padding-inline: 16px;">
+        <v-pagination :length="judgePages" v-model="judgeCurrentPage"
+          @update:model-value="getJudgePosts"></v-pagination>
+        <!-- <v-select v-model="filterForJudge.status" label="按条件筛选" :items="filterStatus" variant="solo"
+              @update:model-value="refreshPosts"></v-select> -->
+        <div style="overflow-y: scroll; max-height: calc(100vh - 180px); min-height: calc(100vh - 200px);">
+          <PostCard v-for="p in judgePosts" :key="p.id" :post="p" typ="judge" style="margin-top: 16px"
+            currentFilterStatus="{{ filterForJudge.status }}" @updateJudgePost="updateJudgePost" />
+        </div>
+      </div>
+    </v-window-item>
+  </v-window>
+
+  <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
+    {{ snackbar.text }}
+  </v-snackbar>
 
   <v-menu>
     <template v-slot:activator="{ props }">

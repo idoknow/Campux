@@ -2,125 +2,82 @@
 
     <BottomNavBar id="bnb" v-model="value" @input="go" />
 
-    <div id="container-wrap" style="height: calc(100vh - 64px)">
-        <div id="pctabs">
-            <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
-            <div
-                style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
-                <div>
-                    <div id="pctab-btn" @click="$router.push('/');">
-                        <span>📝 投稿</span>
-                    </div>
-                    <div id="pctab-btn" @click="$router.push('/world');">
-                        <span>🌏 稿件</span>
-                    </div>
-                    <div id="pctab-btn" @click="$router.push('/service');">
-                        <span>🛠 服务</span>
-                    </div>
-                    <div id="pctab-btn" @click="$router.push('/service');">
-                        <span style="font-weight: 1000">🔐 管理</span>
+    <div>
+        <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
+        <span>{{ $store.state.metadata.brand }}</span>
+    </div>
+    <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
+        <v-tab value="1">🪪 账号</v-tab>
+        <v-tab value="2">🚫 封禁记录</v-tab>
+    </v-tabs>
+
+    <v-divider id="hdivider"></v-divider>
+
+    <v-window v-model="tab" disabled>
+        <v-window-item value="1">
+            <div style="padding: 16px;">
+                <!--UIN搜索框-->
+                <div id="accountFilter">
+                    <div style="display: flex;flex-direction: row;">
+
+                        <v-text-field v-model="filter.uin" label="输入UIN搜索" variant="solo"
+                            style="margin-bottom: 0px"></v-text-field>
+                        <v-select v-model="filter.user_group" label="按用户组筛选" style="margin-inline: 10px;width: 30px"
+                            :items="['any', 'user', 'member', 'admin']" variant="solo"></v-select>
+
+                        <v-btn @click="getAccounts" color="primary" style="margin-top: 8px; " size="large">查找</v-btn>
                     </div>
                 </div>
-
-                <div style="display: flex;">
-                    <img :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
-                    <div>
-                        <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ uin }}</p>
-                        <p style="margin-left: 16px; font-size: 12px; color: #666;">{{ userGroup }}</p>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-
-        <!-- 纵向分割线 -->
-        <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
-        </div>
-
-        <div id="container">
-            <div>
-                <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
-                <span>{{ $store.state.metadata.brand }}</span>
-            </div>
-            <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
-                <v-tab value="1">🪪 账号</v-tab>
-                <v-tab value="2">🚫 封禁记录</v-tab>
-            </v-tabs>
-
-            <v-divider id="hdivider"></v-divider>
-
-            <v-window v-model="tab" disabled>
-                <v-window-item value="1">
-                    <div style="padding: 16px;">
-                        <!--UIN搜索框-->
-                        <div id="accountFilter">
-                            <div style="display: flex;flex-direction: row;">
-
-                                <v-text-field v-model="filter.uin" label="输入UIN搜索" variant="solo"
-                                    style="margin-bottom: 0px"></v-text-field>
-                                <v-select v-model="filter.user_group" label="按用户组筛选"
-                                    style="margin-inline: 10px;width: 30px" :items="['any', 'user', 'member', 'admin']"
-                                    variant="solo"></v-select>
-
-                                <v-btn @click="getAccounts" color="primary" style="margin-top: 8px; "
-                                    size="large">查找</v-btn>
-                            </div>
-                        </div>
-                        <v-pagination :length="accountPages" v-model="filter.page" style="margin-top: -10px"
-                            @update:model-value="getAccounts"></v-pagination>
-                        <div
-                            style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 10px">
-                            <!-- <PostCard v-for="p in posts" :key="p.id" :post="p" typ="self" style="margin-top: 16px"
+                <v-pagination :length="accountPages" v-model="filter.page" style="margin-top: -10px"
+                    @update:model-value="getAccounts"></v-pagination>
+                <div
+                    style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 10px">
+                    <!-- <PostCard v-for="p in posts" :key="p.id" :post="p" typ="self" style="margin-top: 16px"
                                 @recall="recallPost" /> -->
 
-                            <AccountCard v-for="a in accounts" :key="a.id" :account="a" style="margin-top: 16px"
-                                @changeGroup="changeGroup" @banAccount="banAccount" @toast="toast" />
-                        </div>
+                    <AccountCard v-for="a in accounts" :key="a.id" :account="a" style="margin-top: 16px"
+                        @changeGroup="changeGroup" @banAccount="banAccount" @toast="toast" />
+                </div>
+            </div>
+        </v-window-item>
+        <v-window-item value="2">
+            <div style="padding: 16px;">
+                <!--UIN搜索框-->
+                <div id="accountFilter">
+                    <div style="display: flex;flex-direction: row;">
+
+                        <v-text-field v-model="filter.uin" label="输入UIN搜索" variant="solo"></v-text-field>
+
+                        <v-checkbox v-model="banListFilter.only_valid" label="仅生效中的" style="margin-inline: 10px;"
+                            @change="getBanList"></v-checkbox>
+                        <v-btn @click="getBanList" color="primary" style="margin-top: 8px; " size="large">查找</v-btn>
                     </div>
-                </v-window-item>
-                <v-window-item value="2">
-                    <div style="padding: 16px;">
-                        <!--UIN搜索框-->
-                        <div id="accountFilter">
-                            <div style="display: flex;flex-direction: row;">
+                </div>
 
-                                <v-text-field v-model="filter.uin" label="输入UIN搜索" variant="solo"></v-text-field>
+                <v-pagination :length="banPages" v-model="banListFilter.page" style="margin-top: -10px"
+                    @update:model-value="getBanList"></v-pagination>
+                <div
+                    style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 10px">
+                    <BanRecordCard v-for="b in banRecords" :key="b.id" :banRecord="b" style="margin-top: 16px"
+                        @unban="unban" @toast="toast" />
+                </div>
+            </div>
+        </v-window-item>
+    </v-window>
 
-                                <v-checkbox v-model="banListFilter.only_valid" label="仅生效中的"
-                                    style="margin-inline: 10px;" @change="getBanList"></v-checkbox>
-                                <v-btn @click="getBanList" color="primary" style="margin-top: 8px; "
-                                    size="large">查找</v-btn>
-                            </div>
-                        </div>
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
+        {{ snackbar.text }}
+    </v-snackbar>
 
-                        <v-pagination :length="banPages" v-model="banListFilter.page" style="margin-top: -10px"
-                            @update:model-value="getBanList"></v-pagination>
-                        <div
-                            style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 10px">
-                            <BanRecordCard v-for="b in banRecords" :key="b.id" :banRecord="b" style="margin-top: 16px"
-                                @unban="unban" @toast="toast" />
-                        </div>
-                    </div>
-                </v-window-item>
-            </v-window>
-
-            <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
-                style="margin-bottom: 64px">
-                {{ snackbar.text }}
-            </v-snackbar>
-
-            <v-dialog v-model="showServiceHint" width="auto">
-                <v-card :text="services[selectedService].toast" title="提示">
-                    <template v-slot:actions>
-                        <v-btn text="取消" @click="showServiceHint = false;"></v-btn>
-                        <v-btn class="ms-auto" text="确定"
-                            @click="showServiceHint = false; go(services[selectedService].link)"></v-btn>
-                    </template>
-                </v-card>
-            </v-dialog>
-
-        </div>
-    </div>
+    <v-dialog v-model="showServiceHint" width="auto">
+        <v-card :text="services[selectedService].toast" title="提示">
+            <template v-slot:actions>
+                <v-btn text="取消" @click="showServiceHint = false;"></v-btn>
+                <v-btn class="ms-auto" text="确定"
+                    @click="showServiceHint = false; go(services[selectedService].link)"></v-btn>
+            </template>
+        </v-card>
+    </v-dialog>
 
 </template>
 
@@ -254,7 +211,7 @@ export default {
                     if (res.data.code === 0) {
                         this.accounts = res.data.data.list
 
-                        for (let i = 0; this.accounts!=null && i < this.accounts.length; i++) {
+                        for (let i = 0; this.accounts != null && i < this.accounts.length; i++) {
                             let date = new Date(this.accounts[i].created_at)
 
                             this.accounts[i].created_at = date.toLocaleString()

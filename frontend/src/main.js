@@ -19,6 +19,7 @@ import VueCookies from 'vue-cookies'
 
 
 const app = createApp(App)
+
 app.use(store)
 app.use(VueCookies)
 
