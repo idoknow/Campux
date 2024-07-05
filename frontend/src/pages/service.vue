@@ -2,134 +2,95 @@
 
   <BottomNavBar id="bnb" v-model="value" @input="go" />
 
-  <div id="container-wrap" style="height: calc(100vh - 64px)">
-    <div id="pctabs">
-      <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
-      <div
-        style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
-        <div>
-          <div id="pctab-btn" @click="$router.push('/');">
-            <span>📝 投稿</span>
-          </div>
-          <div id="pctab-btn" @click="$router.push('/world');">
-            <span>🌏 稿件</span>
-          </div>
-          <div id="pctab-btn" @click="$router.push('/service');">
-            <span style="font-weight: 1000">🛠 服务</span>
-          </div>
-          <div id="pctab-btn" v-if="userGroup === 'admin' || userGroup === 'member'" @click="$router.push('/admin');">
-            <span>🔐 管理</span>
-          </div>
-        </div>
 
-        <div style="display: flex;">
-          <img :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
-          <div>
-            <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ uin }}</p>
-            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{ userGroup }}</p>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- 纵向分割线 -->
-    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
-    </div>
-
-    <div id="container">
-      <div>
-        <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
-        <span>{{ $store.state.metadata.brand }}</span>
-      </div>
-      <div style="padding: 16px;">
-
-        <h1 style="margin-bottom: 16px">🎲 服务</h1>
-
-        <h2 style="margin-top: 16px">🙂 账号服务</h2>
-        <v-dialog max-width="500">
-          <template v-slot:activator="{ props: activatorProps }">
-            <div class="rect1" style="background-color: #2196F3;" v-bind="activatorProps">
-              <div>
-                <p style="font-weight: bold; font-size: 16px">修改密码</p>
-              </div>
-              <a style="font-size: 16px; cursor:pointer; font-weight: bold;">></a>
-            </div>
-          </template>
-
-          <template v-slot:default="{ isActive }">
-            <v-card title="修改密码">
-
-              <v-card-text>
-                <v-text-field variant="outlined" v-model="password" label="新密码" type="password"></v-text-field>
-              </v-card-text>
-
-              <v-card-actions>
-                <v-spacer></v-spacer>
-                <v-btn text="取消" @click="isActive.value = false"></v-btn>
-                <v-btn text="确认" @click="isActive.value = false; updatePassword()"></v-btn>
-              </v-card-actions>
-            </v-card>
-          </template>
-        </v-dialog>
-
-        <v-dialog max-width="500">
-          <template v-slot:activator="{ props: activatorProps }">
-            <div class="rect1" style="background-color: #2196F3;" v-bind="activatorProps">
-              <div>
-                <p style="font-weight: bold; font-size: 16px">退出登录</p>
-              </div>
-              <a style="font-size: 16px; cursor:pointer; font-weight: bold;">></a>
-            </div>
-          </template>
-
-          <template v-slot:default="{ isActive }">
-            <v-card title="提示">
-
-              <v-card-text>
-                真的要退出吗？
-              </v-card-text>
-
-              <v-card-actions>
-                <v-spacer></v-spacer>
-                <v-btn text="取消" @click="isActive.value = false"></v-btn>
-                <v-btn text="确认" @click="isActive.value = false; logout()"></v-btn>
-              </v-card-actions>
-            </v-card>
-          </template>
-        </v-dialog>
-
-        <h2 style="margin-top: 16px">🤩 推荐网站</h2>
-        <div class="rect1" v-for="(service, index) in services" :style="service.color">
-          <div>
-            <p style="font-weight: bold; font-size: 16px">{{ service.emoji }} {{ service.name }}</p>
-            <small style="color: #fff; font-size: 13px">{{ service.link }}</small>
-          </div>
-          <a style="font-size: 16px; cursor:pointer; font-weight: bold;"
-            @click="selectedService = index; showServiceHint = true">点击查看</a>
-        </div>
-
-        <p style="text-align: center; margin-top: 16px; color: #c3c3c3">更多服务正在开发...</p>
-      </div>
-
-
-      <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
-        style="margin-bottom: 64px">
-        {{ snackbar.text }}
-      </v-snackbar>
-
-      <v-dialog v-model="showServiceHint" width="auto">
-        <v-card :text="services[selectedService].toast" title="提示">
-          <template v-slot:actions>
-            <v-btn text="取消" @click="showServiceHint = false;"></v-btn>
-            <v-btn class="ms-auto" text="确定"
-              @click="showServiceHint = false; go(services[selectedService].link)"></v-btn>
-          </template>
-        </v-card>
-      </v-dialog>
-
-    </div>
+  <div>
+    <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
+    <span>{{ $store.state.metadata.brand }}</span>
   </div>
+  <div style="padding: 16px;">
+
+    <h1 style="margin-bottom: 16px">🎲 服务</h1>
+
+    <h2 style="margin-top: 16px">🙂 账号服务</h2>
+    <v-dialog max-width="500">
+      <template v-slot:activator="{ props: activatorProps }">
+        <div class="rect1" style="background-color: #2196F3;" v-bind="activatorProps">
+          <div>
+            <p style="font-weight: bold; font-size: 16px">修改密码</p>
+          </div>
+          <a style="font-size: 16px; cursor:pointer; font-weight: bold;">></a>
+        </div>
+      </template>
+
+      <template v-slot:default="{ isActive }">
+        <v-card title="修改密码">
+
+          <v-card-text>
+            <v-text-field variant="outlined" v-model="password" label="新密码" type="password"></v-text-field>
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn text="取消" @click="isActive.value = false"></v-btn>
+            <v-btn text="确认" @click="isActive.value = false; updatePassword()"></v-btn>
+          </v-card-actions>
+        </v-card>
+      </template>
+    </v-dialog>
+
+    <v-dialog max-width="500">
+      <template v-slot:activator="{ props: activatorProps }">
+        <div class="rect1" style="background-color: #2196F3;" v-bind="activatorProps">
+          <div>
+            <p style="font-weight: bold; font-size: 16px">退出登录</p>
+          </div>
+          <a style="font-size: 16px; cursor:pointer; font-weight: bold;">></a>
+        </div>
+      </template>
+
+      <template v-slot:default="{ isActive }">
+        <v-card title="提示">
+
+          <v-card-text>
+            真的要退出吗？
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn text="取消" @click="isActive.value = false"></v-btn>
+            <v-btn text="确认" @click="isActive.value = false; logout()"></v-btn>
+          </v-card-actions>
+        </v-card>
+      </template>
+    </v-dialog>
+
+    <h2 style="margin-top: 16px">🤩 推荐网站</h2>
+    <div class="rect1" v-for="(service, index) in services" :style="service.color">
+      <div>
+        <p style="font-weight: bold; font-size: 16px">{{ service.emoji }} {{ service.name }}</p>
+        <small style="color: #fff; font-size: 13px">{{ service.link }}</small>
+      </div>
+      <a style="font-size: 16px; cursor:pointer; font-weight: bold;"
+        @click="selectedService = index; showServiceHint = true">点击查看</a>
+    </div>
+
+    <p style="text-align: center; margin-top: 16px; color: #c3c3c3">更多服务正在开发...</p>
+  </div>
+
+
+  <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
+    {{ snackbar.text }}
+  </v-snackbar>
+
+  <v-dialog v-model="showServiceHint" width="auto">
+    <v-card :text="services[selectedService].toast" title="提示">
+      <template v-slot:actions>
+        <v-btn text="取消" @click="showServiceHint = false;"></v-btn>
+        <v-btn class="ms-auto" text="确定" @click="showServiceHint = false; go(services[selectedService].link)"></v-btn>
+      </template>
+    </v-card>
+  </v-dialog>
+
 
 </template>
 
