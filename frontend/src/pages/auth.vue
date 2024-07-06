@@ -1,5 +1,5 @@
 <template style="">
-    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background-color: #f8f8f8;">
+    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background-color: #fff;">
         <div class="auth-card">
             <h2 style="margin-bottom: 32px;">{{ authTitle }}</h2>
             <v-form v-if="!authMode">
@@ -118,6 +118,7 @@ export default {
                 .then(res => {
                     if (res.data.code === 0) {
                         this.toast('登录成功', 'success')
+                        this.$store.commit('tokenCheck')
                         this.$router.push('/')
                     } else {
                         this.toast('登录失败：' + res.data.msg)
@@ -147,7 +148,7 @@ export default {
     padding: 20px;
     border-radius: 9px;
     background-color: #fff;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .cursor {

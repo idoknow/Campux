@@ -1,4 +1,5 @@
 import { createStore } from 'vuex'
+import router from '@/router'
 import axios from 'axios'
 
 export default createStore({
@@ -23,6 +24,11 @@ export default createStore({
             "pending_recall": "待撤回",
             "recalled": "已撤回"
         },
+        account: {
+            "uin": 0,
+            "avatarUrl": '',
+            "userGroup": 'user',
+        }
     },
     mutations: {
         initMetadata(state, key) {
@@ -51,6 +57,24 @@ export default createStore({
         },
         setBaseURL(state, url) {
             state.base_url = url
+        },
+        tokenCheck(state) {
+            axios.get(this.state.base_url + '/v1/account/token-check', { withCredentials: true })
+                .then(res => {
+                    console.log(res)
+                    if (res.data.code === 0) {
+                        this.state.account.uin = res.data.data.uin
+                        this.state.account.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
+                        this.state.account.userGroup = res.data.data.user_group
+                    }
+                })
+                .catch(err => {
+                    if (err.response.data.code === -1) {
+                        router.push('/auth?hint=请先登录嗷')
+                        return
+                    }
+                    console.error(err)
+                })
         }
     },
 })
