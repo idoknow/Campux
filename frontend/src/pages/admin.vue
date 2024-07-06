@@ -103,9 +103,6 @@ export default {
             },
             value: 2,
             displayInnerWindow: '',
-            avatarUrl: '',
-            uin: '',
-            userGroup: 'user',
             tab: null,
             accounts: [],
             filter: {
@@ -139,31 +136,10 @@ export default {
     },
 
     mounted() {
-        this.tokenLogin()
     },
 
     methods: {
 
-        tokenLogin() {
-            this.$axios.get('/v1/account/token-check')
-                .then(res => {
-                    if (res.data.code === 0) {
-                        this.uin = res.data.data.uin
-                        this.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
-                        this.userGroup = res.data.data.user_group
-                    } else {
-                        this.toast('登录失败：' + res.data.msg)
-                    }
-                })
-                .catch(err => {
-                    if (err.response.data.code === -1) {
-                        this.$router.push('/auth?hint=请先登录嗷')
-                        return
-                    }
-                    this.toast('登录失败：' + err.response.data.msg)
-                    console.error(err)
-                })
-        },
         randomColor() {
             let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#76FF03", "#9E9E9E", "#8D6E63"]
             return colors[Math.floor(Math.random() * 100) % colors.length]

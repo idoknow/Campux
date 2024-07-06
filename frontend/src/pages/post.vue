@@ -15,7 +15,7 @@
     <div style="display: flex; padding: 16px">
         <v-dialog max-width="500">
             <template v-slot:activator="{ props: activatorProps }">
-                <img v-bind="activatorProps" :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
+                <img v-bind="activatorProps" :src="$store.state.account.avatarUrl" width="50" height="50" style="border-radius: 50%;">
             </template>
 
             <template v-slot:default="{ isActive }">
@@ -94,7 +94,7 @@
         </v-dialog>
 
         <div style="display: flex; align-items: center;">
-            <button v-if="!isPending && uin !== ''" @click="letsPost" class="postbtn"
+            <button v-if="!isPending && $store.state.account.uin !== 0" @click="letsPost" class="postbtn"
                 style="margin: 8px; margin-top: 16px">
                 <span> 投稿
                 </span>
@@ -172,18 +172,14 @@ export default {
                     selected: false
                 }
             ],
-            avatarUrl: '',
-            uin: '',
             loading: false,
             showDeleteImageDialog: false,
             selectedIndex: -1,
             isPending: false,
-            userGroup: ''
         }
     },
 
     mounted() {
-        this.tokenLogin()
         this.getPosts()
         this.$store.commit('initMetadata', 'banner')
         this.$store.commit('initMetadata', 'brand')
@@ -306,26 +302,6 @@ export default {
         selectTag(index) {
             this.toast("标签功能暂时关闭", "warning")
             this.tags[index].selected = !this.tags[index].selected
-        },
-        tokenLogin() {
-            this.$axios.get('/v1/account/token-check')
-                .then(res => {
-                    if (res.data.code === 0) {
-                        this.uin = res.data.data.uin
-                        this.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
-                        this.userGroup = res.data.data.user_group
-                    } else {
-                        this.toast('登录失败：' + res.data.msg)
-                    }
-                })
-                .catch(err => {
-                    if (err.response.data.code === -1) {
-                        this.$router.push('/auth?hint=请先登录嗷')
-                        return
-                    }
-                    this.toast('登录失败：' + err.response.data.msg)
-                    console.error(err)
-                })
         },
         toast(text, color = 'error') {
             this.snackbar.text = text

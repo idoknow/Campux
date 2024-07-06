@@ -9,7 +9,7 @@
   <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
     <v-tab value="1">📰 你的稿件</v-tab>
     <v-tab value="2">🌏 动态</v-tab>
-    <v-tab v-if="userGroup === 'admin' || userGroup === 'member'" value="3">🤵 审核稿件</v-tab>
+    <v-tab v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'" value="3">🤵 审核稿件</v-tab>
   </v-tabs>
 
   <v-divider id="hdivider"></v-divider>
@@ -100,9 +100,6 @@ export default {
       posts: [],
       filterStatus: ['全部', '待审核', '已通过', '已拒绝', '已取消', '队列中', '已发布', '失败', '待撤回', '已撤回'],
       tab: null,
-      uin: "",
-      avatarUrl: "",
-      userGroup: "user",
       judgePosts: [],
       judgePages: 1,
       judgeCurrentPage: 1,
@@ -122,7 +119,6 @@ export default {
   },
 
   mounted() {
-    this.tokenLogin()
   },
 
   methods: {
@@ -229,26 +225,6 @@ export default {
           }
           this.toast('获取稿件失败')
           console.log(error)
-        })
-    },
-    tokenLogin() {
-      this.$axios.get('/v1/account/token-check')
-        .then(res => {
-          if (res.data.code === 0) {
-            this.uin = res.data.data.uin
-            this.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
-            this.userGroup = res.data.data.user_group
-          } else {
-            this.toast('登录失败：' + res.data.msg)
-          }
-        })
-        .catch(err => {
-          if (err.response.data.code === -1) {
-            this.$router.push('/auth?hint=请先登录嗷')
-            return
-          }
-          this.toast('登录失败：' + err.response.data.msg)
-          console.error(err)
         })
     },
     getPosts() {
