@@ -8,25 +8,29 @@
         style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
         <div>
           <RouterLink to="/">
-            <div class="pctab-btn">
+            <div class="pctab-btn" 
+              :style="{fontWeight: $route.path === '/' ? '800' : '400'}">
               <span>📝 投稿</span>
             </div>
           </RouterLink>
 
           <RouterLink to="/world">
-            <div class="pctab-btn">
+            <div class="pctab-btn"
+              :style="{fontWeight: $route.path === '/world' ? '800' : '400'}">
               <span>🌏 稿件</span>
             </div>
           </RouterLink>
 
           <RouterLink to="/service">
-            <div class="pctab-btn">
+            <div class="pctab-btn"
+              :style="{fontWeight: $route.path === '/service' ? '800' : '400'}">
               <span>🛠 服务</span>
             </div>
           </RouterLink>
           
           <RouterLink v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'"  to="/admin">
-            <div class="pctab-btn">
+            <div class="pctab-btn"
+              :style="{fontWeight: $route.path === '/admin' ? '800' : '400'}">
               <span>🔐 管理</span>
             </div>
           </RouterLink>
@@ -52,7 +56,7 @@
     </div>
   </div>
 
-  <BottomNavBar id="bnb" v-model="value" />
+  <BottomNavBar id="bnb" v-model="value" v-if="$store.state.account.uin != 0"/>
 
 
 </template>
@@ -169,6 +173,10 @@ button {
 
   #vdivider {
     display: none;
+  }
+
+  #container {
+    height: 100%;
   }
 
 }

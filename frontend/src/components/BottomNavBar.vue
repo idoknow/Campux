@@ -18,7 +18,7 @@
             服务
         </v-btn>
 
-        <v-btn @click="go('/admin')">
+        <v-btn @click="go('/admin')" v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'">
             <!-- <v-icon>mdi-apple-safari</v-icon> -->
             <span style="display: block">🔐</span>
             管理
