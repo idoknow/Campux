@@ -28,6 +28,9 @@ export default createStore({
             "uin": 0,
             "avatarUrl": '',
             "userGroup": 'user',
+            "access": {
+                "is_banned": false
+            }
         }
     },
     mutations: {
@@ -66,6 +69,14 @@ export default createStore({
                         this.state.account.uin = res.data.data.uin
                         this.state.account.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
                         this.state.account.userGroup = res.data.data.user_group
+                        this.state.account.access = res.data.data.access
+
+                        console.log(this.state.account.access)
+                        // 如果 access.end_time 存在
+                        if (this.state.account.access.end_time) {
+                            let date = new Date(this.state.account.access.end_time)
+                            this.state.account.access.end_time = date.toLocaleString()
+                        }
                     }
                 })
                 .catch(err => {

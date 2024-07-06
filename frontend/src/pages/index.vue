@@ -1,4 +1,19 @@
 <template>
+  <div id="banning-toast" v-if="$store.state.account.access.is_banned">
+      <div id="banning-card">
+        <div style="display: flex;flex-direction: row;margin-block: 8px;">
+          <div style="font-size: 80px;">🚫</div>
+          <div id="banning-details">
+              <h3>账号已被封禁</h3>
+              <p><strong>UIN：</strong>{{ $store.state.account.uin }}</p>
+              <p style="word-wrap: break-word;"><strong>封禁原因：</strong>{{ $store.state.account.access.comment }}</p>
+              <p><strong>结束时间：</strong>{{ $store.state.account.access.end_time }}</p>
+          </div>
+        </div>
+        <div>
+          <v-btn color="primary" text @click="logout" style="margin-top: 0px;width: 100%;">退出登录</v-btn></div>
+      </div>
+  </div>
 
   <!-- 左侧导航栏 -->
   <div id="container-wrap" style="height: calc(100vh - 64px)">
@@ -63,6 +78,7 @@
 
 <script>
 import BottomNavBar from '@/components/BottomNavBar.vue'
+import Cookies from "js-cookie";
 
 export default {
   components: {
@@ -88,6 +104,12 @@ export default {
   },
 
   methods: {
+
+    logout() {
+            Cookies.remove("access-token");
+            // reload
+            window.location.reload()
+        },
   }
 }
 </script>
@@ -104,6 +126,38 @@ button {
   padding: 0;
 }
 
+#banning-toast {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: rgb(238, 238, 238);
+    z-index: 10001;
+}
+
+#banning-card {
+    background-color: #fff;
+    padding: 16px;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(71, 71, 71, 0.174);
+    text-align: center;
+    max-width: 25rem;
+    min-width: 20rem;
+    display: flex;
+    flex-direction: column;
+}
+
+#banning-details {
+    margin-left: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: flex-start;
+}
 
 /* 适配pc端 */
 @media (min-width: 600px) {
