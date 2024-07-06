@@ -2,7 +2,7 @@
 
   <!-- 左侧导航栏 -->
   <div id="container-wrap" style="height: calc(100vh - 64px)">
-    <div id="pctabs">
+    <div id="pctabs" v-if="$store.state.account.uin != 0">
       <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
       <div
         style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
@@ -25,7 +25,7 @@
             </div>
           </RouterLink>
           
-          <RouterLink v-if="userGroup === 'admin' || userGroup === 'member'"  to="/admin">
+          <RouterLink v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'"  to="/admin">
             <div class="pctab-btn">
               <span>🔐 管理</span>
             </div>
@@ -33,10 +33,10 @@
         </div>
 
         <div style="display: flex;">
-          <img :src="avatarUrl" width="50" height="50" style="border-radius: 50%;">
+          <img :src="$store.state.account.avatarUrl" width="50" height="50" style="border-radius: 50%;">
           <div>
-            <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ uin }}</p>
-            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{ userGroup }}</p>
+            <p style="margin-left: 16px; font-size: 16px; font-weight: bold;">{{ $store.state.account.uin }}</p>
+            <p style="margin-left: 16px; font-size: 12px; color: #666;">{{ $store.state.account.userGroup }}</p>
           </div>
         </div>
       </div>
@@ -44,7 +44,7 @@
     </div>
 
     <!-- 纵向分割线 -->
-    <div id="vdivider" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
+    <div id="vdivider" v-if="$store.state.account.uin != 0" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
     </div>
 
     <div id="container">
@@ -68,18 +68,18 @@ export default {
     return {
       value: 0,
       loading: false,
-      userGroup: ''
     }
   },
 
   mounted() {
-    this.tokenLogin()
+    this.$store.commit('tokenCheck')
     this.$store.commit('initMetadata', 'banner')
     this.$store.commit('initMetadata', 'brand')
     this.$store.commit('initMetadata', 'popup_announcement')
     this.$store.commit('initMetadata', 'post_rules')
     this.$store.commit('initMetadata', 'beianhao')
     console.log(this.$store.state.metadata)
+    console.log(this.$store.state.account)
 
   },
 
