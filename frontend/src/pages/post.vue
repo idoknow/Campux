@@ -15,7 +15,8 @@
     <div style="display: flex; padding: 16px">
         <v-dialog max-width="500">
             <template v-slot:activator="{ props: activatorProps }">
-                <img v-bind="activatorProps" :src="$store.state.account.avatarUrl" width="50" height="50" style="border-radius: 50%;">
+                <img v-bind="activatorProps" :src="$store.state.account.avatarUrl" width="50" height="50"
+                    style="border-radius: 50%;">
             </template>
 
             <template v-slot:default="{ isActive }">
@@ -370,6 +371,7 @@ button {
     backdrop-filter: blur(10px);
     color: #ffffff;
 }
+
 
 /* 适配pc端 */
 @media (min-width: 600px) {
