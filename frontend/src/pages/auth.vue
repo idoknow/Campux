@@ -1,5 +1,5 @@
 <template style="">
-    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background-color: #fff;">
+    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background-color: #fff;flex-direction: column">
         <div class="auth-card">
             <h2 style="margin-bottom: 32px;">{{ authTitle }}</h2>
             <v-form v-if="!authMode">
@@ -144,6 +144,7 @@ export default {
 <style>
 .auth-card {
     width: 95%;
+    top: 40%;
     max-width: 400px;
     padding: 20px;
     border-radius: 9px;
