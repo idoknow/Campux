@@ -129,20 +129,12 @@
         {{ snackbar.text }}
     </v-snackbar>
 
-
-    <BottomNavBar id="bnb" v-model="value" />
-
-
 </template>
 
 <script>
-import BottomNavBar from '@/components/BottomNavBar.vue'
 import Cookies from "js-cookie";
 
 export default {
-    components: {
-        BottomNavBar
-    },
     data() {
         return {
             showPopupAN: false,

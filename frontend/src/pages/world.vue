@@ -1,7 +1,5 @@
 <template>
 
-  <BottomNavBar id="bnb" v-model="value" />
-
   <div>
     <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
     <span>{{ $store.state.metadata.brand }}</span>
@@ -70,12 +68,8 @@
 </template>
 
 <script>
-import BottomNavBar from '@/components/BottomNavBar.vue'
 import PostCard from '@/components/PostCard.vue'
 export default {
-  components: {
-    BottomNavBar
-  },
   data() {
     return {
       snackbar: {

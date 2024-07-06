@@ -1,7 +1,5 @@
 <template>
 
-    <BottomNavBar id="bnb" v-model="value" @input="go" />
-
     <div>
         <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
         <span>{{ $store.state.metadata.brand }}</span>
@@ -82,14 +80,10 @@
 </template>
 
 <script>
-import BottomNavBar from '@/components/BottomNavBar.vue';
 import AccountCard from '@/components/AccountCard.vue';
 import BanRecordCard from '@/components/BanRecordCard.vue';
 
 export default {
-    components: {
-        BottomNavBar
-    },
     data() {
         return {
             showServiceHint: false,
