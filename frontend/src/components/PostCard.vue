@@ -1,5 +1,5 @@
 <template>
-  <v-card class="mx-auto postcard" :color="backgrouldColor" max-width="400" style="border-radius: 10px; color: #fff">
+  <v-card class="mx-auto postcard" :color="post.status in colorMap ? colorMap[post.status] : '#9e9e9e'" max-width="400" style="border-radius: 10px; color: #fff">
     <div style="width: 100%; padding: 8px 8px 0px 8px">
       <div style="display: flex; align-items: center; justify-content: space-between;">
         <div style="display: flex; align-items: center;">
@@ -104,34 +104,23 @@ export default {
       reason: "",
 
       filterStatus: ['通过', '拒绝', '无理由拒绝'],
-      backgrouldColor: "",
       avatarBaseUrl: "http://q1.qlogo.cn/g?b=qq&nk=",
       logDialog: false,
-      log: []
+      log: [],
+      colorMap: {
+        '待审核': '#8D6E63',
+        '已通过': '#9CCC85',
+        '已拒绝': '#ee4242',
+        '已取消': '#ffC147',
+        '队列中': '#9Cbb85',
+        '已发布': '#42A5F5',
+        '失败': '#aa8888',
+      }
     }
   },
   mounted() {
-    this.backgrouldColor = this.randomColor()
   },
   methods: {
-    randomColor() {
-      let colors = ["#FFC107", "#42A5F5", "#9CCC65", "#F06292", "#9E9E9E", "#8D6E63"]
-      switch (this.post.status) {
-        case '待审核':
-          return colors[5]
-        case '已通过':
-          return colors[2]
-        case '已拒绝':
-          return colors[3]
-        case '已取消':
-          return colors[0]
-        case '已发布':
-          return colors[1]
-        default:
-          return colors[4]
-      }
-      // return colors[Math.floor(Math.random() * 100) % colors.length]
-    },
     recall() {
       this.$emit('recall', this.post.id)
     },
