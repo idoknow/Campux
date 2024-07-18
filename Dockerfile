@@ -1,4 +1,4 @@
-FROM golang:1.22.1
+FROM debian:12-slim
 
 WORKDIR /app
 
