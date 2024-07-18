@@ -9,6 +9,7 @@ on:
       - 'frontend/**'
       - '.github/workflows/build-latest-backend.yaml'
       - 'main.go'
+      - 'Dockerfile'
   workflow_dispatch:
 
 env:
