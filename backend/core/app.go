@@ -3,6 +3,8 @@ package core
 import (
 	"time"
 
+	viper "github.com/spf13/viper"
+
 	"github.com/RockChinQ/Campux/backend/controller"
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/mq"
@@ -80,5 +82,8 @@ func ScheduleRoutines(
 }
 
 func (a *Application) Run() {
-	a.API.R.Run()
+
+	a.API.R.Run(
+		viper.GetString("backend.host") + ":" + viper.GetString("backend.port"),
+	)
 }
