@@ -10,7 +10,7 @@ import (
 
 func ConfirmPosted(db database.MongoDBManager, msq mq.RedisStreamMQ) {
 	// 取出状态为“队列中”的稿件
-	// 检查消息队列中HGETALL publish_post_status:post_id 的所有值是否都是1
+	// 检查消息队列中HGETALL {{ viper.GetString("mq.redis.hash.post_publish_status") }}post_id 的所有值是否都是1
 	// 如果是, 则更新稿件状态为“已发布”
 	inQueuePosts, _, err := db.GetPosts(-1, database.POST_STATUS_IN_QUEUE, 1, 1, 100)
 	if err != nil {
