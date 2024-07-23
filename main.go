@@ -23,7 +23,7 @@ func main() {
 	}
 
 	if created {
-		panic("请修改配置文件")
+		panic("请修改配置文件后重启")
 	}
 
 	// 启动服务

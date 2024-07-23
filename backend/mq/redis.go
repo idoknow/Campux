@@ -47,7 +47,7 @@ func (r *RedisStreamMQ) PublishPost(postID int) error {
 		return err
 	}
 
-	// 创建散列表跟踪发布状态 HSET publish_post_status:post_id campuxbot_1234567 0 campuxbot_1234568 0
+	// 创建散列表跟踪发布状态 HSET {{ viper.GetString("mq.redis.hash.post_publish_status") }}post_id campuxbot_1234567 0 campuxbot_1234568 0
 	var bots []int64
 
 	err = viper.UnmarshalKey("service.bots", &bots)
@@ -57,7 +57,7 @@ func (r *RedisStreamMQ) PublishPost(postID int) error {
 	}
 
 	for _, bot := range bots {
-		err = r.Client.HSet(context.Background(), "publish_post_status:"+strconv.Itoa(postID), "campuxbot_"+strconv.FormatInt(bot, 10), 0).Err()
+		err = r.Client.HSet(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID), "campuxbot_"+strconv.FormatInt(bot, 10), 0).Err()
 
 		if err != nil {
 			return err
@@ -88,8 +88,8 @@ func (r *RedisStreamMQ) PostCancel(postID int) error {
 }
 
 func (r *RedisStreamMQ) CheckPostPublishStatus(postID int) (bool, error) {
-	// HGETALL publish_post_status:77
-	status, err := r.Client.HGetAll(context.Background(), "publish_post_status:"+strconv.Itoa(postID)).Result()
+	// HGETALL {{ viper.GetString("mq.redis.hash.post_publish_status") }}77
+	status, err := r.Client.HGetAll(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID)).Result()
 
 	if err != nil {
 		return false, err
@@ -106,6 +106,6 @@ func (r *RedisStreamMQ) CheckPostPublishStatus(postID int) (bool, error) {
 
 // 删除稿件发布跟踪hash表
 func (r *RedisStreamMQ) DeletePostPublishStatus(postID int) error {
-	_, err := r.Client.Del(context.Background(), "publish_post_status:"+strconv.Itoa(postID)).Result()
+	_, err := r.Client.Del(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID)).Result()
 	return err
 }
