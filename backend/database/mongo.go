@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	ACCOUNT_COLLECTION  = "account"
-	POST_COLLECTION     = "post"
-	POST_LOG_COLLECTION = "post_log"
-	METADATA_COLLECTION = "metadata"
-	BAN_LIST_COLLECTION = "ban_list"
+	ACCOUNT_COLLECTION      = "account"
+	POST_COLLECTION         = "post"
+	POST_LOG_COLLECTION     = "post_log"
+	POST_VERBOSE_COLLECTION = "post_verbose"
+	METADATA_COLLECTION     = "metadata"
+	BAN_LIST_COLLECTION     = "ban_list"
 )
 
 type Metadata struct {
@@ -540,6 +541,12 @@ func (m *MongoDBManager) UpdatePostStatus(id int, status PostStatus) error {
 		bson.M{"id": id},
 		bson.M{"$set": bson.M{"status": status}},
 	)
+	return err
+}
+
+func (m *MongoDBManager) SavePostVerbose(pv *PostVerbose) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(POST_VERBOSE_COLLECTION).InsertOne(context.TODO(), pv)
+
 	return err
 }
 
