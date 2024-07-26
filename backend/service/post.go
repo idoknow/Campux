@@ -229,3 +229,8 @@ func (ps *PostService) GetPostLogs(uin int64, postID int) ([]database.PostLogPO,
 
 	return logs, nil
 }
+
+// 提交稿件详细信息
+func (ps *PostService) SubmitPostVerbose(pv *database.PostVerbose) error {
+	return ps.DB.SavePostVerbose(pv)
+}

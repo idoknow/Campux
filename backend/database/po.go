@@ -71,6 +71,13 @@ type PostLogPO struct {
 	CreatedAt time.Time  `json:"created_at" bson:"created_at"` // CST时间
 }
 
+type PostVerbose struct {
+	PostID    int                    `json:"post_id" bson:"post_id"`       // 稿件ID
+	Key       string                 `json:"key" bson:"key"`               // 多Bot场景下识别的Key
+	Values    map[string]interface{} `json:"values" bson:"values"`         // 值
+	CreatedAt time.Time              `json:"created_at" bson:"created_at"` // CST时间
+}
+
 type ReviewOption string
 
 const (

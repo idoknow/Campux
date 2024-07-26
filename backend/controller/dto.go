@@ -129,6 +129,12 @@ type PostLogBody struct {
 	Comment string              `json:"comment" bson:"comment"`   // 备注
 }
 
+type PostVerboseBody struct {
+	PostID int                    `json:"post_id" binding:"required"`
+	Key    string                 `json:"key" binding:"required"`
+	Values map[string]interface{} `json:"values" binding:"required"`
+}
+
 type GetBanListBody struct {
 	// uin
 	Uin int64 `json:"uin" binding:"required"`

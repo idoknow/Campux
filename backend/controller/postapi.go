@@ -36,6 +36,7 @@ func NewPostRouter(rg *gin.RouterGroup, ps service.PostService, as service.Accou
 	group.POST("/review-post", pr.ReviewPost)
 	group.POST("/post-log", pr.PostPostLog)
 	group.GET("/post-log/:id", pr.GetPostLog)
+	group.POST("/submit-verbose", pr.SubmitPostVerbose)
 
 	return pr
 }
@@ -393,4 +394,38 @@ func (pr *PostRouter) GetPostLog(c *gin.Context) {
 	pr.Success(c, gin.H{
 		"list": logs,
 	})
+}
+
+// 提交稿件发布详细信息
+func (pr *PostRouter) SubmitPostVerbose(c *gin.Context) {
+	_, err := pr.Auth(c, ServiceOnly)
+
+	if err != nil {
+		return
+	}
+
+	// 取body的json里的id, op, old_stat, new_stat, comment
+	var body PostVerboseBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	var postVerbose database.PostVerbose
+
+	postVerbose.PostID = body.PostID
+	postVerbose.Key = body.Key
+	postVerbose.Values = body.Values
+	postVerbose.CreatedAt = util.GetCSTTime()
+
+	// 提交稿件发布详细信息
+	err = pr.PostService.SubmitPostVerbose(&postVerbose)
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
+	pr.Success(c, gin.H{})
 }
