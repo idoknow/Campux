@@ -7,6 +7,7 @@
     <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
         <v-tab value="1">🪪 账号</v-tab>
         <v-tab value="2">🚫 封禁记录</v-tab>
+        <v-tab value="3" v-if="$store.state.account.userGroup === 'admin'">🔑 OAuth 2 应用</v-tab>
     </v-tabs>
 
     <v-divider id="hdivider"></v-divider>
@@ -23,7 +24,7 @@
                         <v-select v-model="filter.user_group" label="按用户组筛选" style="margin-inline: 10px;width: 30px"
                             :items="['any', 'user', 'member', 'admin']" variant="solo"></v-select>
 
-                        <v-btn @click="getAccounts" color="primary" style="margin-top: 8px; " size="large">查找</v-btn>
+                        <v-btn @click="getAccounts" color="primary" style="margin-top: 8px; " size="large" :loading="accountRefreshing">查找</v-btn>
                     </div>
                 </div>
                 <v-pagination :length="accountPages" v-model="filter.page" style="margin-top: -10px"
@@ -48,7 +49,7 @@
 
                         <v-checkbox v-model="banListFilter.only_valid" label="仅生效中的" style="margin-inline: 10px;"
                             @change="getBanList"></v-checkbox>
-                        <v-btn @click="getBanList" color="primary" style="margin-top: 8px; " size="large">查找</v-btn>
+                        <v-btn @click="getBanList" color="primary" style="margin-top: 8px; " size="large" :loading="banlistRefreshing">查找</v-btn>
                     </div>
                 </div>
 
@@ -58,6 +59,22 @@
                     style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 10px">
                     <BanRecordCard v-for="b in banRecords" :key="b.id" :banRecord="b" style="margin-top: 16px"
                         @unban="unban" @toast="toast" />
+                </div>
+            </div>
+        </v-window-item>
+        <v-window-item value="3">
+            <div style="padding: 16px;">
+                <!--操作按钮-->
+                <div id="oauthOps">
+                    <v-btn color="primary" @click="showOAuthAppCreateDialog = true">新建 OAuth2 应用</v-btn>
+                    <v-btn color="primary" style="margin-inline: 0.8rem;" @click="getOAuthApps" :loading="oauthRefreshing">刷新</v-btn>
+                </div>
+
+                <div
+                    style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 2rem">
+                    <OAuthAppCard v-for="o in oauthApps" :key="o.name" :oauthApp="o" style="margin-top: 16px"
+                        @toast="toast" @deleteApp="deleteOAuthApp" />
+
                 </div>
             </div>
         </v-window-item>
@@ -77,13 +94,40 @@
         </v-card>
     </v-dialog>
 
+    <v-dialog v-model="showOAuthAppCreateDialog" width="auto">
+        <v-card>
+            <v-card-title>新建 OAuth2 应用</v-card-title>
+            <v-card-text>
+                <v-text-field v-model="newOAuthApp.name" label="应用名称" variant="solo"></v-text-field>
+                <div id="emoji-picking">
+                    <p id="oauth-emoji">{{ newOAuthApp.emoji }}</p>
+                    <EmojiPicker id="oauth-emoji-picker" :native="true" @select="onEmojiSelect" />
+                </div>
+            </v-card-text>
+            <v-card-actions>
+                <v-btn text @click="showOAuthAppCreateDialog = false">取消</v-btn>
+                <v-btn color="primary" @click="createOAuthApp">确定</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
 </template>
 
 <script>
 import AccountCard from '@/components/AccountCard.vue';
 import BanRecordCard from '@/components/BanRecordCard.vue';
+import OAuthAppCard from '@/components/OAuthAppCard.vue';
+
+import EmojiPicker from 'vue3-emoji-picker'
+import 'vue3-emoji-picker/css'
 
 export default {
+    components: {
+        AccountCard,
+        BanRecordCard,
+        OAuthAppCard,
+        EmojiPicker
+    },
     data() {
         return {
             showServiceHint: false,
@@ -99,6 +143,7 @@ export default {
             displayInnerWindow: '',
             tab: null,
             accounts: [],
+            accountRefreshing: false,
             filter: {
                 uin: '',
                 user_group: 'any',
@@ -114,8 +159,16 @@ export default {
                 page_size: 10,
                 time_order: -1
             },
+            banlistRefreshing: false,
             banRecords: [],
-            banPages: 1
+            banPages: 1,
+            oauthApps: [],
+            oauthRefreshing: false,
+            showOAuthAppCreateDialog: false,
+            newOAuthApp: {
+                name: '',
+                emoji: '🥰',
+            }
         }
     },
 
@@ -125,6 +178,8 @@ export default {
                 this.getAccounts()
             } else if (this.tab === '2') {
                 this.getBanList()
+            } else if (this.tab === '3') {
+                this.getOAuthApps()
             }
         }
     },
@@ -176,6 +231,9 @@ export default {
             } else {
                 this.filter.uin = parseInt(this.filter.uin)
             }
+
+            this.accountRefreshing = true
+
             this.$axios.post('/v1/account/get-accounts', this.filter)
                 .then(res => {
                     if (res.data.code === 0) {
@@ -194,6 +252,9 @@ export default {
                 .catch(err => {
                     this.toast('获取账号失败：' + err)
                     console.error(err)
+                })
+                .finally(() => {
+                    this.accountRefreshing = false
                 })
         },
 
@@ -244,6 +305,7 @@ export default {
             } else {
                 this.banListFilter.uin = parseInt(this.banListFilter.uin)
             }
+            this.banlistRefreshing = true
             this.$axios.post('/v1/account/get-ban-list', this.banListFilter)
                 .then(res => {
                     if (res.data.code === 0) {
@@ -269,6 +331,9 @@ export default {
                     this.toast('获取封禁列表失败：' + err)
                     console.error(err)
                 })
+                .finally(() => {
+                    this.banlistRefreshing = false
+                })
         },
 
         unban(uin) {
@@ -285,6 +350,69 @@ export default {
                 })
                 .catch(err => {
                     this.toast('解封失败：' + err)
+                    console.error(err)
+                })
+        },
+
+        getOAuthApps() {
+            this.oauthRefreshing = true
+
+            this.$axios.get('/v1/admin/get-oauth2-apps')
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.oauthApps = res.data.data.list
+                        console.log(this.oauthApps)
+                    } else {
+                        this.toast('获取OAuth应用失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('获取OAuth应用失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.oauthRefreshing = false
+                })
+        },
+        onEmojiSelect(emoji) {
+            this.newOAuthApp.emoji = emoji.i
+        },
+        createOAuthApp() {
+
+            if (this.newOAuthApp.name === '') {
+                this.toast('应用名称不能为空')
+                return
+            }
+
+            this.$axios.post('/v1/admin/add-oauth2-app', this.newOAuthApp)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('创建成功', 'success')
+                        this.getOAuthApps()
+                        this.showOAuthAppCreateDialog = false
+                        this.newOAuthApp.name = ''
+                        this.newOAuthApp.emoji = '🥰'
+                    } else {
+                        this.toast('创建失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('创建失败：' + err)
+                    console.error(err)
+                })
+        },
+        deleteOAuthApp(appID) {
+            this.$axios.delete('/v1/admin/del-oauth2-app/'+appID)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('删除成功', 'success')
+                        this.getOAuthApps()
+                    } else {
+                        this.toast('删除失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('删除失败：' + err)
                     console.error(err)
                 })
         }
@@ -316,6 +444,22 @@ export default {
 
 #container-wrap {
     min-height: 74vh;
+}
+
+#emoji-picking {
+    display: flex;
+    flex-direction: row;
+}
+
+#oauth-emoji {
+    font-size: 48px;
+    text-align: center;
+    margin-right: 1rem;
+}
+
+#oauth-emoji-picker {
+    width: 15rem;
+    height: 17rem;
 }
 
 

@@ -21,6 +21,7 @@ func NewApiController(
 	as service.AccountService,
 	ps service.PostService,
 	ms service.MiscService,
+	ads service.AdminService,
 ) *APIController {
 	r := gin.Default()
 
@@ -63,6 +64,7 @@ func NewApiController(
 	NewAccountRouter(rg, as)
 	NewPostRouter(rg, ps, as)
 	NewMiscRouter(rg, ms)
+	NewAdminRouter(rg, ads)
 
 	return &APIController{
 		R: r,
