@@ -19,3 +19,6 @@ var ErrOAuth2AppAlreadyExist = errors.New("OAuth2应用名称已存在")
 
 // OAuth2认证 Secret 不匹配
 var ErrOAuth2SecretNotMatch = errors.New("OAuth2 认证 Secret 不匹配")
+
+// 无效的 OAuth2 Access Token
+var ErrInvalidOAuth2AccessToken = errors.New("无效的 OAuth2 Access Token")

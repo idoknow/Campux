@@ -21,6 +21,7 @@ func NewOAuth2Router(rg *gin.RouterGroup, oas service.OAuth2Service) *OAuth2Rout
 	group.GET("/get-app-info", oar.GetOAuth2AppInfo)
 	group.GET("/authorize", oar.Authorize)
 	group.POST("/get-access-token", oar.GetAccessToken)
+	group.GET("/get-user-info", oar.GetUserInfo)
 
 	return oar
 }
@@ -106,5 +107,32 @@ func (oar *OAuth2Router) GetAccessToken(c *gin.Context) {
 
 	oar.Success(c, gin.H{
 		"access_token": ak,
+	})
+}
+
+func (oar *OAuth2Router) GetUserInfo(c *gin.Context) {
+	ak, err := oar.GetBearerToken(c)
+
+	if err != nil {
+		oar.StatusCode(c, 401, err.Error())
+		return
+	}
+
+	account, err := oar.OAuth2Service.GetUserInfo(ak)
+
+	if err != nil {
+		if err == service.ErrInvalidOAuth2AccessToken {
+			oar.StatusCode(c, 401, err.Error())
+			return
+		} else {
+			oar.Fail(c, 1, err.Error())
+			return
+		}
+	}
+
+	oar.Success(c, gin.H{
+		"uin":        account.Uin,
+		"user_group": account.UserGroup,
+		"created_at": account.CreatedAt,
 	})
 }
