@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
@@ -108,4 +109,14 @@ func (r *RedisStreamMQ) CheckPostPublishStatus(postID int) (bool, error) {
 func (r *RedisStreamMQ) DeletePostPublishStatus(postID int) error {
 	_, err := r.Client.Del(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID)).Result()
 	return err
+}
+
+// 存储oauth2_code和uin对应关系 十分钟过期
+func (r *RedisStreamMQ) SetOauth2Code(code string, uin int64) error {
+	return r.Client.Set(context.Background(), viper.GetString("mq.redis.prefix.oauth2_code")+code, uin, 60*10*time.Second).Err()
+}
+
+// 获取oauth2_code对应的uin
+func (r *RedisStreamMQ) GetOauth2Uin(code string) (int64, error) {
+	return r.Client.Get(context.Background(), viper.GetString("mq.redis.prefix.oauth2_code")+code).Int64()
 }

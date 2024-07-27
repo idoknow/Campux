@@ -159,3 +159,19 @@ type OAuth2AppCreateBody struct {
 	// emoji
 	Emoji string `json:"emoji" binding:"required"`
 }
+
+type OAuth2AuthorizeBody struct {
+	// 应用id
+	ClientID string `json:"client_id" binding:"required"`
+}
+
+type OAuth2GetAccessTokenBody struct {
+	// 应用id
+	ClientID string `json:"client_id" binding:"required"`
+
+	// 应用密钥
+	ClientSecret string `json:"client_secret" binding:"required"`
+
+	// 授权码
+	Code string `json:"code" binding:"required"`
+}
