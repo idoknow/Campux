@@ -1,8 +1,9 @@
 <template style="">
-    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background-color: #fff;flex-direction: column">
+    <div
+        style="display: flex; align-items: center; justify-content: center; height: 100%; background-color: #fff;flex-direction: column">
         <div class="auth-card">
-            <h2 style="margin-bottom: 32px;">{{ authTitle }}</h2>
-            <v-form v-if="!authMode">
+            <h2 style="margin-bottom: 18px;">{{ authTitle }}</h2>
+            <v-form style="margin-top: 30px;" v-if="!showOAuth2">
                 <v-text-field label="QQ 号" v-model="credientials.uin" variant="outlined"></v-text-field>
                 <v-text-field label="密码" v-model="credientials.passwd" variant="outlined"
                     type="password"></v-text-field>
@@ -62,6 +63,18 @@
                 </v-btn>
             </v-form>
 
+            <v-form v-else>
+                <p>允许此应用访问您 Campux 账号中的以下信息？</p>
+                <div id="oauth-scopes">
+                    <v-chip v-for="scope in currentSupportedScopes" :key="scope" color="primary" class="mr-2">
+                        {{ scope }}
+                    </v-chip>
+                </div>
+                <v-btn color="primary" text style="margin-top: 16px; width: 100%;" @click="doAuthorize">
+                    授权
+                </v-btn>
+            </v-form>
+
         </div>
 
         <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout">
@@ -86,15 +99,54 @@ export default {
                 show: false,
                 text: '',
                 color: ''
-            }
+            },
+            showOAuth2: false,
+            authorizingAppInfo: {
+                name: '',
+                emoji: '🥰',
+            },
+
+            currentSupportedScopes: [
+                '读取 UIN',
+                '读取 注册时间',
+                '读取 用户组',
+            ]
         }
     },
 
     mounted() {
+
         // get param
         if (this.$route.query.hint) {
             this.toast(this.$route.query.hint)
         }
+        this.$bus.on(
+            'tokenCheckSuccess',
+            () => {
+                console.log('token check success')
+                // oauth2 authorizing
+                if (this.$route.query.client_id && this.$route.query.redirect_uri) {
+                    this.$store.state.authMode = "oauth2"
+                    // 获取app信息
+                    this.$axios.get('/v1/oauth2/get-app-info?client_id=' + this.$route.query.client_id)
+                        .then(res => {
+                            if (res.data.code === 0) {
+                                console.log(res.data.data)
+                                this.authorizingAppInfo = res.data.data
+                                this.authTitle = '🔒 授权 ' + this.authorizingAppInfo.name
+                                this.showOAuth2 = true
+                            } else {
+                                this.toast('获取应用信息失败：' + res.data.msg)
+                            }
+                        })
+                        .catch(err => {
+                            this.toast('获取应用信息失败：' + err.response.data.msg)
+                        })
+                } else {
+                    this.$router.push('/')
+                }
+            }
+        )
     },
 
     methods: {
@@ -118,8 +170,7 @@ export default {
                 .then(res => {
                     if (res.data.code === 0) {
                         this.toast('登录成功', 'success')
-                        this.$store.commit('tokenCheck')
-                        this.$router.push('/')
+                        this.$store.commit('tokenCheck', this.$bus)
                     } else {
                         this.toast('登录失败：' + res.data.msg)
                     }
@@ -135,6 +186,35 @@ export default {
             this.snackbar.text = text
             this.snackbar.color = color
             this.snackbar.show = true
+        },
+        doAuthorize() {
+            this.$axios.get('/v1/oauth2/authorize', {
+                    params: {
+                        client_id: this.$route.query.client_id,
+                    }
+                })
+                .then(res => {
+                    if (res.data.code === 0) {
+                        
+                        let targetUri = this.$route.query.redirect_uri + '?code=' + res.data.data.code
+                        if (this.$route.query.state) {
+                            targetUri += '&state=' + this.$route.query.state
+                        }
+
+                        this.toast('授权成功，即将跳转到应用', 'success')
+                        
+                        //等待2秒
+                        setTimeout(() => {
+                            window.location.href = targetUri
+                        }, 2000)
+
+                    } else {
+                        this.toast('授权失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('授权失败：' + err.response.data.msg)
+                })
         }
     }
 }
@@ -161,5 +241,10 @@ export default {
     color: #3f51b5;
 }
 
-
+#oauth-scopes {
+    display: flex;
+    flex-wrap: wrap;
+    margin-top: 0.8rem;
+    margin-bottom: 0.8rem;
+}
 </style>

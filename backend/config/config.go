@@ -2,6 +2,8 @@ package config
 
 import (
 	"github.com/spf13/viper"
+
+	"github.com/google/uuid"
 )
 
 type Config struct {
@@ -12,8 +14,13 @@ func SetDefault() {
 	viper.SetDefault("backend.port", "8080")
 
 	// jwt
-	viper.SetDefault("auth.jwt.secret", "campux")
+	viper.SetDefault("auth.jwt.secret", uuid.New().String())
 	viper.SetDefault("auth.jwt.expire", 3600*6)
+
+	// oauth2
+	viper.SetDefault("oauth2.server.code_secret", uuid.New().String())
+	viper.SetDefault("oauth2.server.access_secret", uuid.New().String())
+	viper.SetDefault("oauth2.server.ak_expire", 3600*24*14)
 
 	// 服务token
 	viper.SetDefault("service.token", "campux")
@@ -38,6 +45,7 @@ func SetDefault() {
 	viper.SetDefault("mq.redis.stream.new_post", "campux_new_post")
 	viper.SetDefault("mq.redis.stream.post_cancel", "campux_post_cancel")
 	viper.SetDefault("mq.redis.hash.post_publish_status", "campux_post_publish_status")
+	viper.SetDefault("mq.redis.prefix.oauth2_code", "campux_oauth2_code")
 
 }
 
