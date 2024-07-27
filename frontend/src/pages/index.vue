@@ -5,7 +5,7 @@
           <div style="font-size: 80px;">🚫</div>
           <div id="banning-details">
               <h3>账号已被封禁</h3>
-              <p><strong>UIN：</strong>{{ $store.state.account.uin }}</p>
+              <p><strong>UIN：</strong>{{ $store.state.account.uin}}</p>
               <p style="word-wrap: break-word;"><strong>封禁原因：</strong>{{ $store.state.account.access.comment }}</p>
               <p><strong>结束时间：</strong>{{ $store.state.account.access.end_time }}</p>
           </div>
@@ -17,7 +17,7 @@
 
   <!-- 左侧导航栏 -->
   <div id="container-wrap" style="height: calc(100vh - 64px)">
-    <div id="pctabs" v-if="$store.state.account.uin != 0">
+    <div id="pctabs" v-if="$store.state.account.uin != 0  && $store.state.authMode === 'login'">
       <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
       <div
         style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
@@ -63,7 +63,7 @@
     </div>
 
     <!-- 纵向分割线 -->
-    <div id="vdivider" v-if="$store.state.account.uin != 0" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
+    <div id="vdivider" v-if="$store.state.account.uin != 0 && $store.state.authMode === 'login'" style="height: calc(100vh - 64px); width: 1px; background-color: #f5f5f5;">
     </div>
 
     <div id="container">
@@ -71,7 +71,7 @@
     </div>
   </div>
 
-  <BottomNavBar id="bnb" v-model="value" v-if="$store.state.account.uin != 0"/>
+  <BottomNavBar id="bnb" v-model="value" v-if="$store.state.account.uin != 0  && $store.state.authMode === 'login'"/>
 
 
 </template>
@@ -91,8 +91,8 @@ export default {
     }
   },
 
-  mounted() {
-    this.$store.commit('tokenCheck')
+  created() {
+    this.$store.commit('tokenCheck', this.$bus)
     this.$store.commit('initMetadata', 'banner')
     this.$store.commit('initMetadata', 'brand')
     this.$store.commit('initMetadata', 'popup_announcement')
@@ -100,7 +100,6 @@ export default {
     this.$store.commit('initMetadata', 'beianhao')
     console.log(this.$store.state.metadata)
     console.log(this.$store.state.account)
-
   },
 
   methods: {

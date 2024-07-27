@@ -67,7 +67,7 @@ func (as *AccountService) CheckAccount(uin int64, pwd string) (string, error) {
 		return "", ErrPasswordIncorrect
 	}
 
-	jwt, err := util.GenerateJWTToken(uin)
+	jwt, err := util.GenerateUserJWTToken(uin)
 
 	return jwt, err
 }

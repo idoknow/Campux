@@ -12,9 +12,11 @@
     "axios": "^1.6.8",
     "core-js": "^3.34.0",
     "js-cookie": "^3.0.5",
+    "mitt": "^3.0.1",
     "roboto-fontface": "*",
     "vue": "^3.4.0",
     "vue-cookies": "^1.8.4",
+    "vue3-emoji-picker": "^1.1.8",
     "vuetify": "^3.5.0",
     "vuex": "^4.1.0"
   },

@@ -31,7 +31,8 @@ export default createStore({
             "access": {
                 "is_banned": false
             }
-        }
+        },
+        authMode: "login",
     },
     mutations: {
         initMetadata(state, key) {
@@ -61,7 +62,7 @@ export default createStore({
         setBaseURL(state, url) {
             state.base_url = url
         },
-        tokenCheck(state) {
+        tokenCheck(state, bus) {
             axios.get(this.state.base_url + '/v1/account/token-check', { withCredentials: true })
                 .then(res => {
                     console.log(res)
@@ -77,6 +78,8 @@ export default createStore({
                             let date = new Date(this.state.account.access.end_time)
                             this.state.account.access.end_time = date.toLocaleString()
                         }
+
+                        bus.emit('tokenCheckSuccess')
                     }
                 })
                 .catch(err => {

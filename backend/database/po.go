@@ -84,3 +84,11 @@ const (
 	REVIEW_OPTION_APPROVE ReviewOption = "approve"
 	REVIEW_OPTION_REJECT  ReviewOption = "reject"
 )
+
+type OAuthAppPO struct {
+	Name         string    `json:"name" bson:"name"`                   // 应用名称
+	Emoji        string    `json:"emoji" bson:"emoji"`                 // Emoji
+	ClientID     string    `json:"client_id" bson:"client_id"`         // 客户端ID
+	ClientSecret string    `json:"client_secret" bson:"client_secret"` // 客户端密钥
+	CreatedAt    time.Time `json:"created_at" bson:"created_at"`       // CST时间
+}
