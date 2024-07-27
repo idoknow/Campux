@@ -27,6 +27,7 @@ func NewApplication() *Application {
 	as := service.NewAccountService(*db)
 	ps := service.NewPostService(*db, *fs, *msq)
 	ms := service.NewMiscService(*db)
+	ads := service.NewAdminService(*db)
 
 	err := ScheduleRoutines(*db, *msq)
 	if err != nil {
@@ -34,7 +35,7 @@ func NewApplication() *Application {
 	}
 
 	return &Application{
-		API: controller.NewApiController(*as, *ps, *ms),
+		API: controller.NewApiController(*as, *ps, *ms, *ads),
 	}
 }
 

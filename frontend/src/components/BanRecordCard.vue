@@ -30,7 +30,7 @@
 
 <script>
 export default {
-    name: 'AccountCard',
+    name: 'BanRecordCard',
     props: ['banRecord'],
     data() {
         return {

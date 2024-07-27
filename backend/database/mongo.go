@@ -18,6 +18,7 @@ const (
 	POST_VERBOSE_COLLECTION = "post_verbose"
 	METADATA_COLLECTION     = "metadata"
 	BAN_LIST_COLLECTION     = "ban_list"
+	OAUTH_APP_COLLECTION    = "oauth_app"
 )
 
 type Metadata struct {
@@ -562,4 +563,63 @@ func (m *MongoDBManager) GetMetadata(key string) (string, error) {
 		return "", err
 	}
 	return meta.Value, nil
+}
+
+func (m *MongoDBManager) AddOAuth2App(app *OAuthAppPO) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).InsertOne(context.TODO(), app)
+	return err
+}
+
+func (m *MongoDBManager) GetOAuth2App(clientID string) (*OAuthAppPO, error) {
+	var app OAuthAppPO
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).FindOne(
+		context.TODO(),
+		bson.M{"client_id": clientID},
+	).Decode(&app)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &app, nil
+}
+
+func (m *MongoDBManager) GetOAuth2AppByName(name string) (*OAuthAppPO, error) {
+	// 若不存在，返回 nil, nil
+	var app OAuthAppPO
+
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).FindOne(
+		context.TODO(),
+		bson.M{"name": name},
+	).Decode(&app)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &app, nil
+}
+
+// list
+func (m *MongoDBManager) GetOAuth2Apps() ([]OAuthAppPO, error) {
+	var apps []OAuthAppPO
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).Find(context.TODO(), bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &apps)
+	if err != nil {
+		return nil, err
+	}
+
+	return apps, nil
+}
+
+func (m *MongoDBManager) DeleteOAuth2App(clientID string) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).DeleteOne(context.TODO(), bson.M{"client_id": clientID})
+	return err
 }

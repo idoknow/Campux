@@ -151,3 +151,11 @@ type GetBanListBody struct {
 	// 时间排序
 	TimeOrder *int `json:"time_order" binding:"required"`
 }
+
+type OAuth2AppCreateBody struct {
+	// 名称
+	Name string `json:"name" binding:"required"`
+
+	// emoji
+	Emoji string `json:"emoji" binding:"required"`
+}
