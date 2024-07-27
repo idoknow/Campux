@@ -22,6 +22,7 @@ func NewApiController(
 	ps service.PostService,
 	ms service.MiscService,
 	ads service.AdminService,
+	oas service.OAuth2Service,
 ) *APIController {
 	r := gin.Default()
 
@@ -65,6 +66,7 @@ func NewApiController(
 	NewPostRouter(rg, ps, as)
 	NewMiscRouter(rg, ms)
 	NewAdminRouter(rg, ads)
+	NewOAuth2Router(rg, oas)
 
 	return &APIController{
 		R: r,
@@ -167,7 +169,7 @@ func (ar *APIRouter) GetUin(c *gin.Context) (int64, error) {
 		// 删除Bearer
 		jwtToken = jwtToken[7:]
 
-		uin, err := util.ParseJWTToken(jwtToken)
+		uin, err := util.ParseUserJWTToken(jwtToken)
 
 		return uin, err
 	} else {
@@ -178,7 +180,7 @@ func (ar *APIRouter) GetUin(c *gin.Context) (int64, error) {
 			return -1, err
 		}
 
-		uin, err := util.ParseJWTToken(jwtToken)
+		uin, err := util.ParseUserJWTToken(jwtToken)
 
 		return uin, err
 	}

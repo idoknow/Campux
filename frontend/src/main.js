@@ -23,6 +23,10 @@ const app = createApp(App)
 app.use(store)
 app.use(VueCookies)
 
+import mitt from 'mitt'
+
+const bus = mitt()
+
 // let config=require("../config.json");
 // fetch('/config.json').then(response => response.json()).then(config => {
 //     console.log(config)
@@ -40,6 +44,8 @@ const axiosInstance = axios.create({
     baseURL: store.state.base_url,
 })
 app.config.globalProperties.$axios = { ...axiosInstance }
+
+app.config.globalProperties.$bus = bus
 
 registerPlugins(app)
 
