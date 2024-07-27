@@ -86,6 +86,15 @@ const (
 
 var ErrAccountBanned = errors.New("账户已被封禁")
 
+func (ar *APIRouter) GetBearerToken(c *gin.Context) (string, error) {
+	bearer := c.GetHeader("Authorization")
+	if bearer == "" {
+		return "", errors.New("no bearer token")
+	}
+
+	return bearer[7:], nil
+}
+
 // 鉴权
 // 如果是服务鉴权，则拿Authorization头对比service.token
 // 其他的都是用户鉴权，直接尝试从GetUin取uin

@@ -65,3 +65,13 @@ func (oas *OAuth2Service) GetAccessToken(clientID, clientSecret, code string) (s
 
 	return accessToken, err
 }
+
+func (oas *OAuth2Service) GetUserInfo(accessToken string) (*database.AccountPO, error) {
+	uin, _, err := util.ParseOAuth2AccessTokenJWTToken(accessToken)
+
+	if err != nil {
+		return &database.AccountPO{}, ErrInvalidOAuth2AccessToken
+	}
+
+	return oas.DB.GetAccountByUIN(uin)
+}
