@@ -87,11 +87,11 @@ export default {
   data() {
     return {
       value: 0,
-      loading: false,
     }
   },
 
   created() {
+
     this.$store.commit('tokenCheck', this.$bus)
     this.$store.commit('initMetadata', 'banner')
     this.$store.commit('initMetadata', 'brand')

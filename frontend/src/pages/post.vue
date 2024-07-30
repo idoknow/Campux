@@ -1,134 +1,142 @@
 <template>
-
-    <div>
-        <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
-        <span>{{ $store.state.metadata.brand }}</span>
-    </div>
-    <v-banner v-if="$store.state.metadata.banner !== ''"
-        style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
-        :text="$store.state.metadata.banner" :stacked="false">
-    </v-banner>
-
-    <v-alert style="margin: 16px;" v-if="isPending" density="compact" text="你当前有一条待审核的投稿，请等待审核后再来投稿。" title="稿件待审核"
-        type="warning"></v-alert>
-
-    <div style="display: flex; padding: 16px">
-        <v-dialog max-width="500">
-            <template v-slot:activator="{ props: activatorProps }">
-                <img v-bind="activatorProps" :src="$store.state.account.avatarUrl" width="50" height="50"
-                    style="border-radius: 50%;">
-            </template>
-
-            <template v-slot:default="{ isActive }">
-                <v-card title="😉 提示">
-
-                    <v-card-text>
-                        真的要退出吗
-                    </v-card-text>
-
-                    <v-card-actions>
-                        <v-spacer></v-spacer>
-                        <v-btn text="取消" @click="isActive.value = false"></v-btn>
-                        <v-btn text="是的" @click="isActive.value = false; logout()"></v-btn>
-                    </v-card-actions>
-                </v-card>
-            </template>
-        </v-dialog>
-        <textarea :readonly="isPending" style="" name="textarea" v-model="post.text" placeholder="有什么新鲜事？！"
-            class="post"></textarea>
-    </div>
-
-    <div style="margin-left: 16px; display: flex; flex-wrap: wrap;">
-        <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70"
-            style="margin-right: 8px; margin-top:4px; border-radius: 10px;"
-            @click="selectedIndex = index; showDeleteImageDialog = true">
-        <svg style="margin-top: 8px" @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024"
-            version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1448" width="70" height="70">
-            <path
-                d="M85.312 85.312v853.376h853.376V85.312H85.312zM0 0h1024v1024H0V0z m554.624 213.312v256h256v85.376h-256v256H469.312v-256h-256V469.376h256v-256h85.312z"
-                fill="#262626" p-id="1449"></path>
-        </svg>
-    </div>
-
-    <div style="margin-left: 8px;">
-        <!-- 标签 -->
-        <div style="display: flex; align-items: center">
-            <v-chip class="ma-2" color="pink" size="small" label>
-                <v-icon icon="mdi-label" start></v-icon>
-                标签
-            </v-chip>
-            <v-chip @click="selectTag(index)" :ripple="true" style="margin-right: 4px;" v-for="(tag, index) in tags"
-                :key="index" size="x-small" :variant="tag.selected ? 'primary' : 'outlined'"
-                :color="tag.selected ? 'primary' : 'pink'" label>
-                {{ tag.name }}
-            </v-chip>
-        </div>
-        <small class="taghint">🤔 添加标签可更快过审，不要选择不完全符合内容的标签。</small>
-
-        <div class="rect" style="background-color: #8BC34A;">
-            <p style="display: inline-block;">🫥 匿名投稿</p>
-            <input type="checkbox" v-model="post.anon" style="margin-left: 16px; display: inline-block;">
-        </div>
-
-        <v-dialog max-width="500">
-            <template v-slot:activator="{ props: activatorProps }">
-                <div v-bind="activatorProps" class="rect" style="background-color: #FF8A65; font-size: 16px;">
-                    <p style="display: inline-block;">🪧 请务必遵守 <strong>投稿规则</strong></p>
-                </div>
-            </template>
-
-            <template v-slot:default="{ isActive }">
-                <v-card title="😉 投稿规则">
-
-                    <v-card-text>
-                        <p v-for="(rule, index) in $store.state.metadata.post_rules" :key="index">{{ index + 1 }}. {{
-                            rule }}</p>
-                    </v-card-text>
-
-                    <v-card-actions>
-                        <v-spacer></v-spacer>
-
-                        <v-btn text="好的👌" @click="isActive.value = false"></v-btn>
-                    </v-card-actions>
-                </v-card>
-            </template>
-        </v-dialog>
-
-        <div style="display: flex; align-items: center;">
-            <button v-if="!isPending && $store.state.account.uin !== 0" @click="letsPost" class="postbtn"
-                style="margin: 8px; margin-top: 16px">
-                <span> 投稿
-                </span>
-            </button>
-            <v-progress-circular v-if="loading" :size="25" color="primary" indeterminate></v-progress-circular>
-        </div>
-
+    <div v-if="$store.state.account.uin != 0 && $store.state.authMode === 'login'">
         <div>
-            <span style="font-size: 12px; color: #c3c3c3; margin-left: 8px">{{ $store.state.metadata.beianhao }}</span>
+            <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
+            <span>{{ $store.state.metadata.brand }}</span>
+        </div>
+        <v-banner v-if="$store.state.metadata.banner !== ''"
+            style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
+            :text="$store.state.metadata.banner" :stacked="false">
+        </v-banner>
+
+        <v-alert style="margin: 16px;" v-if="isPending" density="compact" text="你当前有一条待审核的投稿，请等待审核后再来投稿。" title="稿件待审核"
+            type="warning"></v-alert>
+
+        <div style="display: flex; padding: 16px">
+            <v-dialog max-width="500">
+                <template v-slot:activator="{ props: activatorProps }">
+                    <img v-bind="activatorProps" :src="$store.state.account.avatarUrl" width="50" height="50"
+                        style="border-radius: 50%;">
+                </template>
+
+                <template v-slot:default="{ isActive }">
+                    <v-card title="😉 提示">
+
+                        <v-card-text>
+                            真的要退出吗
+                        </v-card-text>
+
+                        <v-card-actions>
+                            <v-spacer></v-spacer>
+                            <v-btn text="取消" @click="isActive.value = false"></v-btn>
+                            <v-btn text="是的" @click="isActive.value = false; logout()"></v-btn>
+                        </v-card-actions>
+                    </v-card>
+                </template>
+            </v-dialog>
+            <textarea :readonly="isPending" style="" name="textarea" v-model="post.text" placeholder="有什么新鲜事？！"
+                class="post"></textarea>
         </div>
 
-        <v-dialog v-model="showDeleteImageDialog" width="auto">
-            <v-card text="要删除吗？" title="提示">
-                <template v-slot:actions>
-                    <v-btn class="ms-auto" text="不是" @click="showDeleteImageDialog = false"></v-btn>
-                    <v-btn class="ms-auto" text="是的"
-                        @click="showDeleteImageDialog = false; removeImage(selectedIndex)"></v-btn>
-                </template>
-            </v-card>
-        </v-dialog>
+        <div style="margin-left: 16px; display: flex; flex-wrap: wrap;">
+            <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70"
+                style="margin-right: 8px; margin-top:4px; border-radius: 10px;"
+                @click="selectedIndex = index; showDeleteImageDialog = true">
+            <svg style="margin-top: 8px" @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024"
+                version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1448" width="70" height="70">
+                <path
+                    d="M85.312 85.312v853.376h853.376V85.312H85.312zM0 0h1024v1024H0V0z m554.624 213.312v256h256v85.376h-256v256H469.312v-256h-256V469.376h256v-256h85.312z"
+                    fill="#262626" p-id="1449"></path>
+            </svg>
+        </div>
 
-        <v-dialog v-model="showPopupAN" width="auto">
-            <v-card :text="$store.state.metadata.popup_announcement" title="提示">
-                <template v-slot:actions>
-                    <v-btn class="ms-auto" text="1 天内不再提醒" @click="showPopupAN = false;"></v-btn>
-                </template>
-            </v-card>
-        </v-dialog>
+        <div style="margin-left: 8px;">
+            <!-- 标签 -->
+            <div style="display: flex; align-items: center">
+                <v-chip class="ma-2" color="pink" size="small" label>
+                    <v-icon icon="mdi-label" start></v-icon>
+                    标签
+                </v-chip>
+                <v-chip @click="selectTag(index)" :ripple="true" style="margin-right: 4px;" v-for="(tag, index) in tags"
+                    :key="index" size="x-small" :variant="tag.selected ? 'primary' : 'outlined'"
+                    :color="tag.selected ? 'primary' : 'pink'" label>
+                    {{ tag.name }}
+                </v-chip>
+            </div>
+            <small class="taghint">🤔 添加标签可更快过审，不要选择不完全符合内容的标签。</small>
 
+            <div class="rect" style="background-color: #8BC34A;">
+                <p style="display: inline-block;">🫥 匿名投稿</p>
+                <input type="checkbox" v-model="post.anon" style="margin-left: 16px; display: inline-block;">
+            </div>
+
+            <v-dialog max-width="500">
+                <template v-slot:activator="{ props: activatorProps }">
+                    <div v-bind="activatorProps" class="rect" style="background-color: #FF8A65; font-size: 16px;">
+                        <p style="display: inline-block;">🪧 请务必遵守 <strong>投稿规则</strong></p>
+                    </div>
+                </template>
+
+                <template v-slot:default="{ isActive }">
+                    <v-card title="😉 投稿规则">
+
+                        <v-card-text>
+                            <p v-for="(rule, index) in $store.state.metadata.post_rules" :key="index">{{ index + 1 }}.
+                                {{
+                                    rule }}</p>
+                        </v-card-text>
+
+                        <v-card-actions>
+                            <v-spacer></v-spacer>
+
+                            <v-btn text="好的👌" @click="isActive.value = false"></v-btn>
+                        </v-card-actions>
+                    </v-card>
+                </template>
+            </v-dialog>
+
+            <div style="display: flex; align-items: center;">
+                <button v-if="!isPending && $store.state.account.uin !== 0" @click="letsPost" class="postbtn"
+                    style="margin: 8px; margin-top: 16px">
+                    <span> 投稿
+                    </span>
+                </button>
+                <v-progress-circular v-if="loading" :size="25" color="primary" indeterminate></v-progress-circular>
+            </div>
+
+            <div>
+                <span style="font-size: 12px; color: #c3c3c3; margin-left: 8px">{{ $store.state.metadata.beianhao
+                    }}</span>
+            </div>
+
+            <v-dialog v-model="showDeleteImageDialog" width="auto">
+                <v-card text="要删除吗？" title="提示">
+                    <template v-slot:actions>
+                        <v-btn class="ms-auto" text="不是" @click="showDeleteImageDialog = false"></v-btn>
+                        <v-btn class="ms-auto" text="是的"
+                            @click="showDeleteImageDialog = false; removeImage(selectedIndex)"></v-btn>
+                    </template>
+                </v-card>
+            </v-dialog>
+
+            <v-dialog v-model="showPopupAN" width="auto">
+                <v-card :text="$store.state.metadata.popup_announcement" title="提示">
+                    <template v-slot:actions>
+                        <v-btn class="ms-auto" text="1 天内不再提醒" @click="showPopupAN = false;"></v-btn>
+                    </template>
+                </v-card>
+            </v-dialog>
+
+        </div>
+        <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout"
+            style="margin-bottom: 64px">
+            {{ snackbar.text }}
+        </v-snackbar>
     </div>
-    <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
-        {{ snackbar.text }}
-    </v-snackbar>
+
+    <div id="loading-tips" v-else>
+        Loading...
+    </div>
 
 </template>
 
@@ -370,6 +378,14 @@ button {
 .postbtn span:hover {
     backdrop-filter: blur(10px);
     color: #ffffff;
+}
+
+#loading-tips {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-size: 24px;
 }
 
 
