@@ -23,3 +23,4 @@ hero:
 #     details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
 ---
 
+<img src='/assets/web_demo.png' alt='Campux Logo' width='60%' height='60%'>
