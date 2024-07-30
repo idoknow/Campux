@@ -91,6 +91,10 @@ export default {
   },
 
   created() {
+    // 检查query是否包含access-token，如果有则存储到cookie
+    if (this.$route.query['token']) {
+      Cookies.set("access-token", this.$route.query['access-token']);
+    }
 
     this.$store.commit('tokenCheck', this.$bus)
     this.$store.commit('initMetadata', 'banner')
