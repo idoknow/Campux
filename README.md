@@ -9,7 +9,8 @@
 
 项目介绍和部署方式请查看：[Campux文档](https://campux.idoknow.top)
 
+## 预览图
 
-<image src="https://campux.idoknow.top/assets/web_demo.Byp50r1x.png" alt="demo" width="400"/>
+<image src="https://campux.idoknow.top/assets/web_demo.Byp50r1x.png" alt="demo" width="700"/>
 
 </div>
