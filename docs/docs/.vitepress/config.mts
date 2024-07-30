@@ -44,7 +44,8 @@ export default defineConfig({
       {
         text: '开发',
         items: [
-          { text: 'Campux 前后端', link: '/develop/campux' }
+          { text: 'Campux 前后端', link: '/develop/campux' },
+          { text: 'CampuxBot', link: '/develop/bot' }
         ]
       }
     ],
