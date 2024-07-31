@@ -68,7 +68,7 @@ var PresetMetadata = []Metadata{
 type MongoDBManager struct {
 	Client *mongo.Client
 
-	PostLock sync.Mutex
+	PostLock *sync.Mutex
 }
 
 func NewMongoDBManager() *MongoDBManager {
@@ -82,7 +82,7 @@ func NewMongoDBManager() *MongoDBManager {
 
 	m := &MongoDBManager{
 		Client:   client,
-		PostLock: sync.Mutex{},
+		PostLock: &sync.Mutex{},
 	}
 
 	// 检查连接
