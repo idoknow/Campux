@@ -21,21 +21,6 @@ func GenerateRandomPassword() string {
 	for i := range b {
 		b[i] = letterBytes[rand.Intn(len(letterBytes))]
 	}
-	return string(b)
-}
 
-// 随机生成一个包含小写字母和数字的字符串，长度为16
-// 用于生成salt
-func GenerateRandomSalt() string {
-	const letterBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 16)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
 	return string(b)
-}
-
-// 计算密码的md5值
-func EncryptPassword(password, salt string) string {
-	return MD5(password + salt)
 }
