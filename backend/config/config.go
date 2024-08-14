@@ -47,7 +47,6 @@ func SetDefault() {
 	viper.SetDefault("mq.redis.hash.post_publish_status", "campux_post_publish_status")
 	viper.SetDefault("mq.redis.prefix.oauth2_code", "campux_oauth2_code")
 
-	viper.SetDefault("experimental.password.hash.argon", true)
 }
 
 // 创建配置文件对象

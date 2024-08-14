@@ -168,7 +168,7 @@ func (m *MongoDBManager) GetAccountByUIN(uin int64) (*AccountPO, error) {
 	return &acc, nil
 }
 
-func (m *MongoDBManager) UpdatePassword(uin int64, pwd, salt string) error {
+func (m *MongoDBManager) UpdatePassword(uin int64, pwd string) error {
 
 	// 更新
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(ACCOUNT_COLLECTION).UpdateOne(
@@ -178,8 +178,7 @@ func (m *MongoDBManager) UpdatePassword(uin int64, pwd, salt string) error {
 		},
 		bson.M{
 			"$set": bson.M{
-				"pwd":  pwd,
-				"salt": salt,
+				"pwd": pwd,
 			},
 		},
 	)
