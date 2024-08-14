@@ -6,7 +6,7 @@
 
 ### beianhao
 
-域名备案号，这个很重要，会显示在投稿按钮下方。
+域名备案号，这个很重要（[为什么？](https://help.aliyun.com/zh/icp-filing/support/website-to-add-the-record-number-faq)），会显示在投稿按钮下方。
 
 ### popup_announcement
 
