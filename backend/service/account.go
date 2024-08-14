@@ -68,7 +68,7 @@ func (as *AccountService) CheckAccount(uin int64, pwd string) (string, error) {
 	valid, err = util.ComparePasswordAndHash(pwd, acc.Pwd)
 	if err != nil {
 		if err == util.ErrInvalidHash {
-			return "", errors.New("hash 算法已更改，请重置密码")
+			return "", errors.New("算法已更改 请点击忘记密码以重置")
 		}
 
 		return "", err
