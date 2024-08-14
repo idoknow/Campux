@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"github.com/spf13/viper"
 	"time"
 
 	"github.com/RockChinQ/Campux/backend/database"
@@ -35,22 +34,16 @@ func (as *AccountService) CreateAccount(uin int64) (string, error) {
 		return "", ErrAccountAlreadyExist
 	} else {
 		initPwd := util.GenerateRandomPassword()
-		salt := util.GenerateRandomSalt()
 
 		var pwdHash string
-		if viper.GetBool(`experimental.password.hash.argon`) {
-			pwdHash, err = util.CreateHash(initPwd, util.DefaultParams)
-			if err != nil {
-				return "", err
-			}
-		} else {
-			pwdHash = util.EncryptPassword(initPwd, salt)
+		pwdHash, err = util.CreateHash(initPwd, util.DefaultParams)
+		if err != nil {
+			return "", err
 		}
 		acc := &database.AccountPO{
 			Uin:       uin,
 			Pwd:       pwdHash,
 			UserGroup: database.USER_GROUP_USER,
-			Salt:      salt,
 			CreatedAt: util.GetCSTTime(),
 		}
 
@@ -72,13 +65,13 @@ func (as *AccountService) CheckAccount(uin int64, pwd string) (string, error) {
 	}
 
 	var valid bool
-	if viper.GetBool(`experimental.password.hash.argon`) {
-		valid, err = util.ComparePasswordAndHash(pwd, acc.Pwd)
-		if err != nil {
-			return "", err
+	valid, err = util.ComparePasswordAndHash(pwd, acc.Pwd)
+	if err != nil {
+		if err == util.ErrInvalidHash {
+			return "", errors.New("hash 算法已更改，请重置密码")
 		}
-	} else {
-		valid = acc.Pwd == util.EncryptPassword(pwd, acc.Salt)
+
+		return "", err
 	}
 
 	if !valid {
@@ -104,21 +97,16 @@ func (as *AccountService) ResetPassword(uin int64) (string, error) {
 
 	// 生成新密码
 	newPwd := util.GenerateRandomPassword()
-	salt := util.GenerateRandomSalt()
 
 	var encryptedPwd string
 
-	if viper.GetBool(`experimental.password.hash.argon`) {
-		encryptedPwd, err = util.CreateHash(newPwd, util.DefaultParams)
-		if err != nil {
-			return "", err
-		}
-	} else {
-		encryptedPwd = util.EncryptPassword(newPwd, salt)
+	encryptedPwd, err = util.CreateHash(newPwd, util.DefaultParams)
+	if err != nil {
+		return "", err
 	}
 
 	// 更新密码
-	err = as.DB.UpdatePassword(uin, encryptedPwd, salt)
+	err = as.DB.UpdatePassword(uin, encryptedPwd)
 
 	return newPwd, err
 }
@@ -135,20 +123,14 @@ func (as *AccountService) ChangePassword(uin int64, newPwd string) error {
 		return ErrAccountNotFound
 	}
 
-	salt := util.GenerateRandomSalt()
-
 	var encryptedPwd string
-	if viper.GetBool(`experimental.password.hash.argon`) {
-		encryptedPwd, err = util.CreateHash(newPwd, util.DefaultParams)
-		if err != nil {
-			return err
-		}
-	} else {
-		encryptedPwd = util.EncryptPassword(newPwd, salt)
+	encryptedPwd, err = util.CreateHash(newPwd, util.DefaultParams)
+	if err != nil {
+		return err
 	}
 
 	// 更新密码
-	err = as.DB.UpdatePassword(uin, encryptedPwd, salt)
+	err = as.DB.UpdatePassword(uin, encryptedPwd)
 
 	return err
 }
