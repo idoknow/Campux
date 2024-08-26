@@ -9,7 +9,9 @@ import (
 type Config struct {
 }
 
-func SetDefault() {
+// 设置初始值
+// 仅在配置文件不存在时调用
+func SetInitValue() {
 	viper.SetDefault("backend.host", "0.0.0.0")
 	viper.SetDefault("backend.port", "8080")
 
@@ -59,11 +61,10 @@ func NewConfig() (*Config, bool, error) {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./data/")
 
-	// 设置默认配置
-	SetDefault()
-
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// 设置默认配置
+			SetInitValue()
 			// Config file not found; write default config
 			if err := viper.WriteConfigAs("./data/campux.yaml"); err != nil {
 				return nil, false, err
