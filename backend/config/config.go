@@ -32,6 +32,11 @@ func SetInitValue() {
 	viper.SetDefault("database.mongo.uri", "mongodb://localhost:27017")
 	viper.SetDefault("database.mongo.db", "campux")
 
+	viper.SetDefault("oss.use", "local")
+
+	// local
+	viper.SetDefault("oss.local.dir", "./data/objects")
+
 	// minio
 	viper.SetDefault("oss.minio.endpoint", "localhost:9000")
 	viper.SetDefault("oss.minio.access_key", "minio")
@@ -51,6 +56,10 @@ func SetInitValue() {
 
 }
 
+func WriteConfig() error {
+	return viper.WriteConfigAs("./data/campux.yaml")
+}
+
 // 创建配置文件对象
 // 返回值1：配置文件对象
 // 返回值2：是否新建配置文件
@@ -66,7 +75,7 @@ func NewConfig() (*Config, bool, error) {
 			// 设置默认配置
 			SetInitValue()
 			// Config file not found; write default config
-			if err := viper.WriteConfigAs("./data/campux.yaml"); err != nil {
+			if err := WriteConfig(); err != nil {
 				return nil, false, err
 			}
 			return nil, true, nil

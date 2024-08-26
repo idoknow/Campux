@@ -1,28 +1,36 @@
 package migrate
 
-import "fmt"
+import (
+	"fmt"
 
-var migrations = new(map[string]Migration)
+	ms "github.com/RockChinQ/Campux/backend/migrate/migrations"
+)
+
+var migrations = []Migration{
+	&ms.LocalStorageConfig{},
+}
 
 // Migration interface
 type Migration interface {
+	Name() string
+
 	Check() bool
 
 	Up() error
 }
 
-// Register migration
-
 // Do migration
-func DoMigration() {
-	for name, migration := range *migrations {
+func DoMigration() error {
+	for _, migration := range migrations {
 		if migration.Check() {
 			err := migration.Up()
 			if err != nil {
-				fmt.Println("Migration", name, "failed:", err)
+				fmt.Println("Migration", migration.Name(), "failed")
+				return err
 			} else {
-				fmt.Println("Migration", name, "done")
+				fmt.Println("Migration", migration.Name(), "done")
 			}
 		}
 	}
+	return nil
 }
