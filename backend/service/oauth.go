@@ -13,7 +13,7 @@ type OAuth2Service struct {
 	MQ mq.RedisStreamMQ
 }
 
-func NewOAuth2Service(db database.MongoDBManager, mq mq.RedisStreamMQ) *OAuth2Service {
+func NewOAuth2Service(db database.BaseDBManager, mq mq.RedisStreamMQ) *OAuth2Service {
 	return &OAuth2Service{
 		CommonService: CommonService{
 			DB: db,

@@ -29,6 +29,10 @@ func SetInitValue() {
 	viper.SetDefault("service.bots", []int64{123456789})
 
 	// 数据库
+	viper.SetDefault("database.use", "sqlite")
+
+	viper.SetDefault("database.sqlite.path", "./data/campux.db")
+
 	viper.SetDefault("database.mongo.uri", "mongodb://localhost:27017")
 	viper.SetDefault("database.mongo.db", "campux")
 
