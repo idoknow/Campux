@@ -9,7 +9,9 @@ import (
 type Config struct {
 }
 
-func SetDefault() {
+// 设置初始值
+// 仅在配置文件不存在时调用
+func SetInitValue() {
 	viper.SetDefault("backend.host", "0.0.0.0")
 	viper.SetDefault("backend.port", "8080")
 
@@ -30,6 +32,11 @@ func SetDefault() {
 	viper.SetDefault("database.mongo.uri", "mongodb://localhost:27017")
 	viper.SetDefault("database.mongo.db", "campux")
 
+	viper.SetDefault("oss.use", "local")
+
+	// local
+	viper.SetDefault("oss.local.dir", "./data/objects")
+
 	// minio
 	viper.SetDefault("oss.minio.endpoint", "localhost:9000")
 	viper.SetDefault("oss.minio.access_key", "minio")
@@ -49,6 +56,10 @@ func SetDefault() {
 
 }
 
+func WriteConfig() error {
+	return viper.WriteConfigAs("./data/campux.yaml")
+}
+
 // 创建配置文件对象
 // 返回值1：配置文件对象
 // 返回值2：是否新建配置文件
@@ -59,13 +70,12 @@ func NewConfig() (*Config, bool, error) {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./data/")
 
-	// 设置默认配置
-	SetDefault()
-
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// 设置默认配置
+			SetInitValue()
 			// Config file not found; write default config
-			if err := viper.WriteConfigAs("./data/campux.yaml"); err != nil {
+			if err := WriteConfig(); err != nil {
 				return nil, false, err
 			}
 			return nil, true, nil

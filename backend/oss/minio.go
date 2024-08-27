@@ -12,8 +12,8 @@ import (
 
 // MinioClient minio client
 type MinioClient struct {
-	Client *minio.Client
-	Bucket string
+	client *minio.Client
+	bucket string
 }
 
 // NewMinioClient new minio client
@@ -32,31 +32,31 @@ func NewMinioClient() *MinioClient {
 		panic(err)
 	}
 	return &MinioClient{
-		Client: client,
-		Bucket: viper.GetString("oss.minio.bucket"),
+		client: client,
+		bucket: viper.GetString("oss.minio.bucket"),
 	}
 }
 
-func GenerateObjectName() string {
+func generateObjectName() string {
 	return uuid.New().String()
 }
 
 // 从io.Reader上传文件
 func (m *MinioClient) UploadFromIO(ioReader io.Reader, suffix string) (string, error) {
 
-	objectName := GenerateObjectName()
+	objectName := generateObjectName()
 
 	if suffix != "" {
 		objectName += "." + suffix
 	}
 
-	_, err := m.Client.PutObject(context.Background(), m.Bucket, objectName, ioReader, -1, minio.PutObjectOptions{})
+	_, err := m.client.PutObject(context.Background(), m.bucket, objectName, ioReader, -1, minio.PutObjectOptions{})
 	return objectName, err
 }
 
 // 下载文件到io.Writer
 func (m *MinioClient) DownloadToIO(objectName string, ioWriter io.Writer) error {
-	obj, err := m.Client.GetObject(context.Background(), m.Bucket, objectName, minio.GetObjectOptions{})
+	obj, err := m.client.GetObject(context.Background(), m.bucket, objectName, minio.GetObjectOptions{})
 
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func (m *MinioClient) DownloadToIO(objectName string, ioWriter io.Writer) error 
 
 // 检查文件是否存在
 func (m *MinioClient) CheckObjectExist(objectName string) (bool, error) {
-	_, err := m.Client.StatObject(context.Background(), m.Bucket, objectName, minio.StatObjectOptions{})
+	_, err := m.client.StatObject(context.Background(), m.bucket, objectName, minio.StatObjectOptions{})
 	if err != nil {
 		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
 			return false, nil
