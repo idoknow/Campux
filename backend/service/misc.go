@@ -3,12 +3,14 @@ package service
 import "github.com/RockChinQ/Campux/backend/database"
 
 type MiscService struct {
-	DB database.MongoDBManager
+	CommonService
 }
 
-func NewMiscService(db database.MongoDBManager) *MiscService {
+func NewMiscService(db database.BaseDBManager) *MiscService {
 	return &MiscService{
-		DB: db,
+		CommonService: CommonService{
+			DB: db,
+		},
 	}
 }
 

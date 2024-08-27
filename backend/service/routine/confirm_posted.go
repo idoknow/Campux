@@ -8,7 +8,7 @@ import (
 	"github.com/RockChinQ/Campux/backend/util"
 )
 
-func ConfirmPosted(db database.MongoDBManager, msq mq.RedisStreamMQ) {
+func ConfirmPosted(db database.BaseDBManager, msq mq.RedisStreamMQ) {
 	// 取出状态为“队列中”的稿件
 	// 检查消息队列中HGETALL {{ viper.GetString("mq.redis.hash.post_publish_status") }}post_id 的所有值是否都是1
 	// 如果是, 则更新稿件状态为“已发布”
