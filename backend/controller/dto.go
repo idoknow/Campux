@@ -175,3 +175,11 @@ type OAuth2GetAccessTokenBody struct {
 	// 授权码
 	Code string `json:"code" binding:"required"`
 }
+
+type SetMetadataBody struct {
+	// 键
+	Key string `json:"key" binding:"required"`
+
+	// 值
+	Value string `json:"value" binding:"required"`
+}

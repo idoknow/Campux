@@ -335,7 +335,6 @@ func (m *SQLiteDBManager) SavePostVerbose(pv *PostVerbose) error {
 }
 
 func (m *SQLiteDBManager) GetMetadata(key string) (string, error) {
-	// 改成gorm
 	var meta Metadata
 	err := m.Client.Where("key = ?", key).First(&meta).Error
 	if err != nil {
@@ -345,6 +344,10 @@ func (m *SQLiteDBManager) GetMetadata(key string) (string, error) {
 		return "", err
 	}
 	return meta.Value, nil
+}
+
+func (m *SQLiteDBManager) SetMetadata(key, value string) error {
+	return m.Client.Model(&Metadata{}).Where("key = ?", key).Update("value", value).Error
 }
 
 func (m *SQLiteDBManager) AddOAuth2App(app *OAuthAppPO) error {
