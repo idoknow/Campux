@@ -10,7 +10,7 @@ type AdminService struct {
 	CommonService
 }
 
-func NewAdminService(db database.MongoDBManager) *AdminService {
+func NewAdminService(db database.BaseDBManager) *AdminService {
 	return &AdminService{
 		CommonService: CommonService{
 			DB: db,

@@ -21,50 +21,6 @@ const (
 	OAUTH_APP_COLLECTION    = "oauth_app"
 )
 
-type Metadata struct {
-	Key string `bson:"key"`
-
-	Value string `bson:"value"`
-}
-
-var PresetMetadata = []Metadata{
-	{
-		Key:   "banner",
-		Value: "投稿前请阅读投稿规则！",
-	},
-	{
-		Key:   "popup_announcement",
-		Value: "欢迎使用 Campux！",
-	},
-	{
-		Key: "post_rules",
-		Value: `[
-			"投稿规则是数组",
-			"每个元素是一个字符串"
-		]`,
-	},
-	{
-		Key: "services",
-		Value: `[
-			{
-				"name": "服务名称",
-				"description": "服务也是数组形式，会显示在服务tab",
-				"link": "https://url.to.service",
-				"toast": "点击时的提示",
-				"emoji": "🗺️"
-			}
-		]`,
-	},
-	{
-		Key:   "brand",
-		Value: "Campux 这个是你的墙的名称",
-	},
-	{
-		Key:   "beianhao",
-		Value: "桂ICP备1145141919号-1",
-	},
-}
-
 type MongoDBManager struct {
 	Client *mongo.Client
 

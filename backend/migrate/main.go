@@ -8,6 +8,7 @@ import (
 
 var migrations = []Migration{
 	&ms.LocalStorageConfig{},
+	&ms.SQLiteConfig{},
 }
 
 // Migration interface

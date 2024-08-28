@@ -3,7 +3,7 @@ package service
 import "github.com/RockChinQ/Campux/backend/database"
 
 type CommonService struct {
-	DB database.MongoDBManager
+	DB database.BaseDBManager
 }
 
 func (cs *CommonService) CheckUserGroup(uin int64, groups []database.UserGroup) bool {
