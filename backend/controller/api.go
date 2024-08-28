@@ -67,7 +67,7 @@ func NewApiController(
 	NewAccountRouter(rg, as)
 	NewPostRouter(rg, ps, as)
 	NewMiscRouter(rg, ms)
-	NewAdminRouter(rg, ads)
+	NewAdminRouter(rg, ads, as)
 	NewOAuth2Router(rg, oas)
 
 	return &APIController{

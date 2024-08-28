@@ -8,12 +8,14 @@ import (
 
 type AdminRouter struct {
 	APIRouter
-	AdminService service.AdminService
+	AdminService   service.AdminService
+	AccountService service.AccountService
 }
 
-func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService) *AdminRouter {
+func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.AccountService) *AdminRouter {
 	ar := &AdminRouter{
-		AdminService: as,
+		AdminService:   as,
+		AccountService: acs,
 	}
 
 	group := rg.Group("/admin")
@@ -22,6 +24,8 @@ func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService) *AdminRouter {
 	group.POST("/add-oauth2-app", ar.AddOAuth2App)
 	group.GET("/get-oauth2-apps", ar.GetOAuth2AppList)
 	group.DELETE("/del-oauth2-app/:id", ar.DeleteOAuth2App)
+	group.GET("/init", ar.IsInit)
+	group.POST("/init", ar.Init)
 
 	return ar
 }
@@ -112,6 +116,59 @@ func (ar *AdminRouter) DeleteOAuth2App(c *gin.Context) {
 
 	if err != nil {
 		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	ar.Success(c, nil)
+}
+
+// 检查是否初始化
+func (ar *AdminRouter) IsInit(c *gin.Context) {
+	// 检查是否初始化
+	init, err := ar.AdminService.IsInit()
+
+	if err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	ar.Success(c, gin.H{
+		"initialized": init,
+	})
+}
+
+// 初始化
+func (ar *AdminRouter) Init(c *gin.Context) {
+	// 检查是否初始化
+	init, err := ar.AdminService.IsInit()
+
+	if err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	if init {
+		ar.Fail(c, 2, "系统已有管理员账户")
+		return
+	}
+
+	// 取body的json里的appname
+	var body InitBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		ar.Fail(c, 3, err.Error())
+		return
+	}
+
+	// 创建管理员账户
+	err = ar.AccountService.AddAccount(
+		body.AdminUin,
+		body.AdminPasswd,
+		database.USER_GROUP_ADMIN,
+	)
+
+	if err != nil {
+		ar.Fail(c, 4, err.Error())
 		return
 	}
 

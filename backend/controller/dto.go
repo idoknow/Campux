@@ -183,3 +183,11 @@ type SetMetadataBody struct {
 	// 值
 	Value string `json:"value" binding:"required"`
 }
+
+type InitBody struct {
+	// 管理员uin
+	AdminUin int64 `json:"admin_uin" binding:"required"`
+
+	// 管理员密码
+	AdminPasswd string `json:"admin_passwd" binding:"required"`
+}
