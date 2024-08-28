@@ -4,7 +4,7 @@ import axios from 'axios'
 
 export default createStore({
     state: {
-        base_url: "http://127.0.0.1:8081",
+        base_url: "",
         metadata: {
             "banner": "",
             "popup_announcement": "",
@@ -63,32 +63,46 @@ export default createStore({
             state.base_url = url
         },
         tokenCheck(state, bus) {
-            axios.get(this.state.base_url + '/v1/account/token-check', { withCredentials: true })
+            // 先检查系统是否已经初始化，没有则跳/init
+            axios.get(
+                this.state.base_url + '/v1/admin/init',
+            )
                 .then(res => {
-                    console.log(res)
                     if (res.data.code === 0) {
-                        this.state.account.uin = res.data.data.uin
-                        this.state.account.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
-                        this.state.account.userGroup = res.data.data.user_group
-                        this.state.account.access = res.data.data.access
+                        if (res.data.data.initialized === false) {
+                            router.push('/init')
+                        } else {
 
-                        console.log(this.state.account.access)
-                        // 如果 access.end_time 存在
-                        if (this.state.account.access.end_time) {
-                            let date = new Date(this.state.account.access.end_time)
-                            this.state.account.access.end_time = date.toLocaleString()
+                            axios.get(this.state.base_url + '/v1/account/token-check', { withCredentials: true })
+                                .then(res => {
+                                    console.log(res)
+                                    if (res.data.code === 0) {
+                                        this.state.account.uin = res.data.data.uin
+                                        this.state.account.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
+                                        this.state.account.userGroup = res.data.data.user_group
+                                        this.state.account.access = res.data.data.access
+
+                                        console.log(this.state.account.access)
+                                        // 如果 access.end_time 存在
+                                        if (this.state.account.access.end_time) {
+                                            let date = new Date(this.state.account.access.end_time)
+                                            this.state.account.access.end_time = date.toLocaleString()
+                                        }
+
+                                        bus.emit('tokenCheckSuccess')
+                                    }
+                                })
+                                .catch(err => {
+                                    if (err.response.data.code === -1) {
+                                        router.push('/auth?hint=请先登录嗷')
+                                        return
+                                    }
+                                    console.error(err)
+                                })
                         }
+                    }
+                })
 
-                        bus.emit('tokenCheckSuccess')
-                    }
-                })
-                .catch(err => {
-                    if (err.response.data.code === -1) {
-                        router.push('/auth?hint=请先登录嗷')
-                        return
-                    }
-                    console.error(err)
-                })
         }
     },
 })
