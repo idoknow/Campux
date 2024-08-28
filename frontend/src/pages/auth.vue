@@ -182,7 +182,7 @@ export default {
                 })
         },
 
-        toast(text, color = 'error') {
+        toast(text, color = 'info') {
             this.snackbar.text = text
             this.snackbar.color = color
             this.snackbar.show = true
