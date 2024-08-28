@@ -34,16 +34,11 @@ export default {
                 admin_uin: '',
                 admin_passwd: ''
             },
-            authTitle: '👋 初始化管理员账户',
+            authTitle: '😎 初始化管理员账户',
             snackbar: {
                 show: false,
                 text: '',
                 color: ''
-            },
-            showOAuth2: false,
-            authorizingAppInfo: {
-                name: '',
-                emoji: '🥰',
             },
         }
     },
