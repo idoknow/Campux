@@ -17,3 +17,7 @@ func NewMiscService(db database.BaseDBManager) *MiscService {
 func (ms *MiscService) GetMetadata(key string) (string, error) {
 	return ms.DB.GetMetadata(key)
 }
+
+func (ms *MiscService) SetMetadata(key, value string) error {
+	return ms.DB.SetMetadata(key, value)
+}

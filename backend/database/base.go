@@ -36,6 +36,7 @@ type BaseDBManager interface {
 	UpdatePostStatus(id int, status PostStatus) error
 	SavePostVerbose(pv *PostVerbose) error
 	GetMetadata(key string) (string, error)
+	SetMetadata(key, value string) error
 	AddOAuth2App(app *OAuthAppPO) error
 	GetOAuth2App(clientID string) (*OAuthAppPO, error)
 	GetOAuth2AppByName(name string) (*OAuthAppPO, error)

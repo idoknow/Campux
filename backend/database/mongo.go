@@ -520,6 +520,15 @@ func (m *MongoDBManager) GetMetadata(key string) (string, error) {
 	return meta.Value, nil
 }
 
+func (m *MongoDBManager) SetMetadata(key, value string) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).UpdateOne(
+		context.TODO(),
+		bson.M{"key": key},
+		bson.M{"$set": bson.M{"value": value}},
+	)
+	return err
+}
+
 func (m *MongoDBManager) AddOAuth2App(app *OAuthAppPO) error {
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).InsertOne(context.TODO(), app)
 	return err
