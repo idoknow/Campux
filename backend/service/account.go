@@ -10,10 +10,10 @@ import (
 
 type AccountService struct {
 	CommonService
-	DB database.MongoDBManager
+	DB database.BaseDBManager
 }
 
-func NewAccountService(db database.MongoDBManager) *AccountService {
+func NewAccountService(db database.BaseDBManager) *AccountService {
 	return &AccountService{
 		CommonService: CommonService{
 			DB: db,

@@ -32,7 +32,9 @@ func NewApiController(
 				cors.Config{
 					AllowOrigins: []string{
 						"http://localhost:3000",
+						"http://localhost:3001",
 						"http://127.0.0.1:3000",
+						"http://127.0.0.1:3001",
 					},
 					AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"},
 					AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Cookie"},

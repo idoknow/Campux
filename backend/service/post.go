@@ -16,7 +16,7 @@ type PostService struct {
 	MQ  mq.RedisStreamMQ
 }
 
-func NewPostService(db database.MongoDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ) *PostService {
+func NewPostService(db database.BaseDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ) *PostService {
 	return &PostService{
 		CommonService: CommonService{
 			DB: db,

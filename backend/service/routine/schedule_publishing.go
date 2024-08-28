@@ -8,7 +8,7 @@ import (
 	"github.com/RockChinQ/Campux/backend/util"
 )
 
-func SchedulePublishing(db database.MongoDBManager, msq mq.RedisStreamMQ) {
+func SchedulePublishing(db database.BaseDBManager, msq mq.RedisStreamMQ) {
 	// 从数据库中查询出所有待发布的稿件
 	// 遍历稿件, 发布到消息队列
 	// 更新稿件状态
