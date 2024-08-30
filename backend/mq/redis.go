@@ -14,6 +14,9 @@ type RedisStreamMQ struct {
 	PublishPostStream string
 	NewPostStream     string
 	PostCancelStream  string
+
+	PublishStatusHash string
+	Oauth2CodeHash    string
 }
 
 func NewRedisStreamMQ() *RedisStreamMQ {
@@ -23,17 +26,21 @@ func NewRedisStreamMQ() *RedisStreamMQ {
 		DB:       viper.GetInt("mq.redis.db"),
 	})
 
-	// 检查流是否存在
-	client.XGroupCreateMkStream(context.Background(), viper.GetString("mq.redis.stream.publish_post"), "campux", "0")
-	client.XGroupCreateMkStream(context.Background(), viper.GetString("mq.redis.stream.new_post"), "campux", "0")
-	client.XGroupCreateMkStream(context.Background(), viper.GetString("mq.redis.stream.post_cancel"), "campux", "0")
-
-	return &RedisStreamMQ{
+	redis := &RedisStreamMQ{
 		Client:            client,
-		PublishPostStream: viper.GetString("mq.redis.stream.publish_post"),
-		NewPostStream:     viper.GetString("mq.redis.stream.new_post"),
-		PostCancelStream:  viper.GetString("mq.redis.stream.post_cancel"),
+		PublishPostStream: viper.GetString("service.domain") + ".publish_post",
+		NewPostStream:     viper.GetString("service.domain") + ".new_post",
+		PostCancelStream:  viper.GetString("service.domain") + ".post_cancel",
+		PublishStatusHash: viper.GetString("service.domain") + ".post_publish_status",
+		Oauth2CodeHash:    viper.GetString("service.domain") + ".oauth2_code",
 	}
+
+	// 检查流是否存在
+	client.XGroupCreateMkStream(context.Background(), redis.PublishPostStream, "campux", "0")
+	client.XGroupCreateMkStream(context.Background(), redis.NewPostStream, "campux", "0")
+	client.XGroupCreateMkStream(context.Background(), redis.PostCancelStream, "campux", "0")
+
+	return redis
 }
 
 func (r *RedisStreamMQ) PublishPost(postID int) error {
@@ -58,7 +65,7 @@ func (r *RedisStreamMQ) PublishPost(postID int) error {
 	}
 
 	for _, bot := range bots {
-		err = r.Client.HSet(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID), "campuxbot_"+strconv.FormatInt(bot, 10), 0).Err()
+		err = r.Client.HSet(context.Background(), r.PublishStatusHash+":"+strconv.Itoa(postID), "campuxbot_"+strconv.FormatInt(bot, 10), 0).Err()
 
 		if err != nil {
 			return err
@@ -90,7 +97,7 @@ func (r *RedisStreamMQ) PostCancel(postID int) error {
 
 func (r *RedisStreamMQ) CheckPostPublishStatus(postID int) (bool, error) {
 	// HGETALL {{ viper.GetString("mq.redis.hash.post_publish_status") }}77
-	status, err := r.Client.HGetAll(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID)).Result()
+	status, err := r.Client.HGetAll(context.Background(), r.PublishStatusHash+":"+strconv.Itoa(postID)).Result()
 
 	if err != nil {
 		return false, err
@@ -107,16 +114,16 @@ func (r *RedisStreamMQ) CheckPostPublishStatus(postID int) (bool, error) {
 
 // 删除稿件发布跟踪hash表
 func (r *RedisStreamMQ) DeletePostPublishStatus(postID int) error {
-	_, err := r.Client.Del(context.Background(), viper.GetString("mq.redis.hash.post_publish_status")+strconv.Itoa(postID)).Result()
+	_, err := r.Client.Del(context.Background(), r.PublishStatusHash+":"+strconv.Itoa(postID)).Result()
 	return err
 }
 
 // 存储oauth2_code和uin对应关系 十分钟过期
 func (r *RedisStreamMQ) SetOauth2Code(code string, uin int64) error {
-	return r.Client.Set(context.Background(), viper.GetString("mq.redis.prefix.oauth2_code")+code, uin, 60*10*time.Second).Err()
+	return r.Client.Set(context.Background(), r.Oauth2CodeHash+code, uin, 60*10*time.Second).Err()
 }
 
 // 获取oauth2_code对应的uin
 func (r *RedisStreamMQ) GetOauth2Uin(code string) (int64, error) {
-	return r.Client.Get(context.Background(), viper.GetString("mq.redis.prefix.oauth2_code")+code).Int64()
+	return r.Client.Get(context.Background(), r.Oauth2CodeHash+code).Int64()
 }
