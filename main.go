@@ -17,15 +17,15 @@ func main() {
 	}
 
 	// 配置文件
-	_, created, err := config.NewConfig()
+	_, _, err = config.NewConfig()
 
 	if err != nil {
 		panic(err)
 	}
 
-	if created {
-		panic("请修改配置文件后重启")
-	}
+	// if created {
+	// 	panic("请修改配置文件后重启")
+	// }
 
 	err = migrate.DoMigration()
 
