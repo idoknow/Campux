@@ -21,3 +21,18 @@ func (ms *MiscService) GetMetadata(key string) (string, error) {
 func (ms *MiscService) SetMetadata(key, value string) error {
 	return ms.DB.SetMetadata(key, value)
 }
+
+func (ms *MiscService) GetMetadataList() ([]database.Metadata, error) {
+
+	return ms.DB.GetMetadataList()
+}
+
+func (ms *MiscService) SaveMetadata(metadataList []database.Metadata) error {
+	for _, metadata := range metadataList {
+		err := ms.SetMetadata(metadata.Key, metadata.Value)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
