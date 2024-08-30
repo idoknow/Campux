@@ -13,7 +13,7 @@ type Config struct {
 // 仅在配置文件不存在时调用
 func SetInitValue() {
 	viper.SetDefault("backend.host", "0.0.0.0")
-	viper.SetDefault("backend.port", "8080")
+	viper.SetDefault("backend.port", "8081")
 
 	// jwt
 	viper.SetDefault("auth.jwt.secret", uuid.New().String())
@@ -50,7 +50,7 @@ func SetInitValue() {
 	viper.SetDefault("oss.minio.use_ssl", false)
 
 	// redis
-	viper.SetDefault("mq.redis.addr", "localhost:6379")
+	viper.SetDefault("mq.redis.addr", "campux-redis:6379")
 	viper.SetDefault("mq.redis.password", "campux123456")
 	viper.SetDefault("mq.redis.db", 0)
 

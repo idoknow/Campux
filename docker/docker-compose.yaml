@@ -1,0 +1,53 @@
+version: "3"
+services:
+  redis:
+    image: redis:6-alpine
+    restart: always
+    container_name: campux-redis
+    volumes:
+      # Mount the redis data directory to the container.
+      - ./volumes/redis/data:/data
+    # Set the redis password when startup redis server.
+    command: redis-server --requirepass campux123456
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+    networks:
+      - campux-network
+  
+  campux:
+    image: rockchin/campux:latest
+    container_name: campux
+    ports:
+      - 8081:8081
+    volumes:
+      - ./volumes/campux/data:/app/data
+    networks:
+      - campux-network
+    environment:
+      - GIN_MODE=release
+
+  campuxbot:
+    image: rockchin/campuxbot:latest
+    container_name: campux-bot
+    restart: always
+    ports:
+      - 8282:8282
+    volumes:
+      - ./volumes/campuxbot/data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - campux-network
+
+  campuxutility:
+    image: rockchin/campuxutility:latest
+    container_name: campux-utility
+    restart: always
+    volumes:
+      - ./volumes/campuxutility/data:/app/data
+    networks:
+      - campux-network
+  
+networks:
+  campux-network:
+    external: true
