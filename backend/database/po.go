@@ -7,9 +7,9 @@ import (
 )
 
 type Metadata struct {
-	Key string `bson:"key" gorm:"type:varchar(256)"`
+	Key string `bson:"key" gorm:"type:varchar(256)" json:"key"`
 
-	Value string `bson:"value" gorm:"type:varchar(2048)"`
+	Value string `bson:"value" gorm:"type:varchar(2048)" json:"value"`
 }
 
 var PresetMetadata = []Metadata{

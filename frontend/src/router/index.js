@@ -13,6 +13,7 @@ import post from '../pages/post.vue'
 import world from '../pages/world.vue'
 import service from '../pages/service.vue'
 import admin from '../pages/admin.vue'
+import init from '../pages/init.vue'
 
 const routes = [
   { path: '/', component: post },
@@ -20,6 +21,7 @@ const routes = [
   { path: '/world', component: world },
   { path: '/service', component: service },
   { path: '/admin', component: admin },
+  { path: '/init', component: init },
 ]
 
 const router = createRouter({

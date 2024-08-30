@@ -7,7 +7,8 @@
     <v-tabs id="tabs" v-model="tab" align-tabs="center" color="deep-purple-accent-4" show-arrows>
         <v-tab value="1">🪪 账号</v-tab>
         <v-tab value="2">🚫 封禁记录</v-tab>
-        <v-tab value="3" v-if="$store.state.account.userGroup === 'admin'">🔑 OAuth 2 应用</v-tab>
+        <v-tab value="3" v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'">🧩 元数据</v-tab>
+        <v-tab value="4" v-if="$store.state.account.userGroup === 'admin'">🔑 OAuth 2 应用</v-tab>
     </v-tabs>
 
     <v-divider id="hdivider"></v-divider>
@@ -63,6 +64,18 @@
             </div>
         </v-window-item>
         <v-window-item value="3">
+            <div style="padding: 16px;">
+                <v-btn color="primary" @click="getMetadataList" :loading="metadataListRefreshing">刷新</v-btn>
+                <v-btn color="primary" style="margin-inline: 0.8rem;" @click="saveMetadata" :loading="metadataListRefreshing">保存所有</v-btn>
+                <div
+                    style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 2rem;">
+                    <div v-for="m in metadataList" :key="m.key" style="margin-top: 0px; display: flex; align-items: center;margin-inline: 10px;">
+                        <v-text-field v-model="m.value" :label="m.key" variant="solo" style="flex-grow: 1;"></v-text-field>
+                    </div>
+                </div>
+            </div>
+        </v-window-item>
+        <v-window-item value="4">
             <div style="padding: 16px;">
                 <!--操作按钮-->
                 <div id="oauthOps">
@@ -168,7 +181,10 @@ export default {
             newOAuthApp: {
                 name: '',
                 emoji: '🥰',
-            }
+            },
+            metadataList: [],
+            metadataListRefreshing: false,
+            saveMetadataLoading: false,
         }
     },
 
@@ -178,8 +194,10 @@ export default {
                 this.getAccounts()
             } else if (this.tab === '2') {
                 this.getBanList()
-            } else if (this.tab === '3') {
+            } else if (this.tab === '4') {
                 this.getOAuthApps()
+            } else if (this.tab === '3') {
+                this.getMetadataList()
             }
         }
     },
@@ -415,8 +433,45 @@ export default {
                     this.toast('删除失败：' + err)
                     console.error(err)
                 })
+        },
+        getMetadataList() {
+            this.metadataListRefreshing = true
+            this.$axios.get('/v1/misc/get-metadata-list')
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.metadataList = res.data.data.list
+                    } else {
+                        this.toast('获取元数据失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('获取元数据失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.metadataListRefreshing = false
+                })
+        },
+        saveMetadata() {
+            this.saveMetadataLoading = true
+            this.$axios.put('/v1/misc/save-metadatas', {
+                list: this.metadataList
+            })
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('保存成功', 'success')
+                    } else {
+                        this.toast('保存失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('保存失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.saveMetadataLoading = false
+                })
         }
-
     }
 }
 
