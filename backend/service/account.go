@@ -23,33 +23,41 @@ func NewAccountService(db database.BaseDBManager) *AccountService {
 }
 
 func (as *AccountService) CreateAccount(uin int64) (string, error) {
+	// 生成随机密码
+	initPwd := util.GenerateRandomPassword()
+
+	err := as.AddAccount(uin, initPwd, database.USER_GROUP_USER)
+
+	return initPwd, err
+}
+
+// 添加账户
+func (as *AccountService) AddAccount(uin int64, pwd string, userGroup database.UserGroup) error {
 
 	// 检查是否存在相同的uin
 	acc, err := as.DB.GetAccountByUIN(uin)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	if acc != nil {
-		return "", ErrAccountAlreadyExist
+		return ErrAccountAlreadyExist
 	} else {
-		initPwd := util.GenerateRandomPassword()
-
 		var pwdHash string
-		pwdHash, err = util.CreateHash(initPwd, util.DefaultParams)
+		pwdHash, err = util.CreateHash(pwd, util.DefaultParams)
 		if err != nil {
-			return "", err
+			return err
 		}
 		acc := &database.AccountPO{
 			Uin:       uin,
 			Pwd:       pwdHash,
-			UserGroup: database.USER_GROUP_USER,
+			UserGroup: userGroup,
 			CreatedAt: util.GetCSTTime(),
 		}
 
 		err := as.DB.AddAccount(acc)
 
-		return initPwd, err
+		return err
 	}
 }
 
