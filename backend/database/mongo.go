@@ -529,6 +529,22 @@ func (m *MongoDBManager) SetMetadata(key, value string) error {
 	return err
 }
 
+func (m *MongoDBManager) GetMetadataList() ([]Metadata, error) {
+	var list []Metadata
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).Find(context.TODO(), bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &list)
+	if err != nil {
+		return nil, err
+	}
+
+	return list, nil
+}
+
 func (m *MongoDBManager) AddOAuth2App(app *OAuthAppPO) error {
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).InsertOne(context.TODO(), app)
 	return err

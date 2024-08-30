@@ -184,6 +184,11 @@ type SetMetadataBody struct {
 	Value string `json:"value" binding:"required"`
 }
 
+type SaveMetadataBody struct {
+	// 元数据列表
+	MetadataList []database.Metadata `json:"list" binding:"required"`
+}
+
 type InitBody struct {
 	// 管理员uin
 	AdminUin int64 `json:"admin_uin" binding:"required"`
