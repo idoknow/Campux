@@ -25,8 +25,9 @@ func SetInitValue() {
 	viper.SetDefault("oauth2.server.ak_expire", 3600*24*14)
 
 	// 服务token
-	viper.SetDefault("service.token", "campux")
+	viper.SetDefault("service.token", "campux123456")
 	viper.SetDefault("service.bots", []int64{123456789})
+	viper.SetDefault("service.domain", "campux")
 
 	// 数据库
 	viper.SetDefault("database.use", "sqlite")
@@ -50,13 +51,8 @@ func SetInitValue() {
 
 	// redis
 	viper.SetDefault("mq.redis.addr", "localhost:6379")
-	viper.SetDefault("mq.redis.password", "")
+	viper.SetDefault("mq.redis.password", "campux123456")
 	viper.SetDefault("mq.redis.db", 0)
-	viper.SetDefault("mq.redis.stream.publish_post", "campux_publish_post")
-	viper.SetDefault("mq.redis.stream.new_post", "campux_new_post")
-	viper.SetDefault("mq.redis.stream.post_cancel", "campux_post_cancel")
-	viper.SetDefault("mq.redis.hash.post_publish_status", "campux_post_publish_status")
-	viper.SetDefault("mq.redis.prefix.oauth2_code", "campux_oauth2_code")
 
 }
 
