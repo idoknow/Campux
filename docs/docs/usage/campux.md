@@ -53,29 +53,3 @@
   "value": "[\n  {\n    \"name\": \"桂林中学毕业生去向图\",\n    \"description\": \"xxxxx\",\n    \"link\": \"https://stumap.idoknow.top\",\n    \"toast\": \"访问去向图\",\n    \"emoji\": \"🗺️\"\n  }\n]"
 }
 ```
-
-## 添加管理员
-
-系统部署后，第一个管理员先去找 Bot 注册账号，然后在MongoDB数据库中`account`集合找到对应的用户，将 `user_group` 字段改为 `admin`。
-
-<img src="/assets/usage_campux_01.png" alt="添加管理员" width="50%">
-
-刷新之后，管理员可以在 `管理` 页面设置其他账户为管理员。
-
-<img src="/assets/usage_campux_02.png" alt="查找账户" width="50%">
-
-点击账号卡片上的`普通用户`标签，选择新的用户组，点击`保存`。
-
-<img src="/assets/usage_campux_03.png" alt="设置管理员" width="50%">
-
-> 系统内有三种身份组：`admin`、`member`、`user`。`admin`可以管理所有内容，`member`可以审核稿件，`user`只能投稿。
-
-## 封禁用户
-
-同样的按照上方的方法找到用户，点击账号卡片上的`封禁`按钮，输入封禁原因并选择封禁时间，点击`OK`。
-
-<img src="/assets/usage_campux_04.png" alt="封禁用户" width="50%">
-
-如需在封禁结束之前解封，可以切到`封禁记录`页，点击用户卡片上的`解封`按钮。
-
-<img src="/assets/usage_campux_05.png" alt="解封用户" width="50%">
