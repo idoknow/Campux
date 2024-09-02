@@ -20,7 +20,7 @@ services:
     ports:
       - 8081:8081
     volumes:
-      - ./volumes/campux/data:/app/data
+      - ./volumes/campux:/app/data
     networks:
       - campux-network
     environment:
@@ -33,7 +33,7 @@ services:
     ports:
       - 8282:8282
     volumes:
-      - ./volumes/campuxbot/data:/app/data
+      - ./volumes/campuxbot:/app/data
     environment:
       - TZ=Asia/Shanghai
     networks:

@@ -53,3 +53,4 @@ pnpm-debug.log*
 frontend/package-lock.json
 dist/
 /data/
+/docker/volumes/
