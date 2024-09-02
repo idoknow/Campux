@@ -12,6 +12,7 @@ export default createStore({
             "brand": "",
             "beianhao": "",
         },
+        version: "Campux",
         statusMap: {
             "pending_approval": "待审核",
             "approved": "已通过",
@@ -58,6 +59,14 @@ export default createStore({
                         console.error(err)
                     })
             }
+        },
+        getVersion(state) {
+            axios.get(this.state.base_url + '/v1/misc/get-version')
+                .then(res => {
+                    if (res.data.code === 0) {
+                        state.version = res.data.data.version
+                    }
+                })
         },
         setBaseURL(state, url) {
             state.base_url = url
