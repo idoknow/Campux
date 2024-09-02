@@ -202,8 +202,8 @@ export default {
             this.$axios.post('/v1/post/get-self-posts', filter)
                 .then((response) => {
                     if (response.data.code === 0) {
-                        let p = response.data.data.list
-                        if (p !== null) {
+                        let p = response.data.data.total
+                        if (p !== 0) {
                             this.isPending = true
                         }
                     } else {

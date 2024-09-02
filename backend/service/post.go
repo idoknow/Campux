@@ -12,11 +12,11 @@ import (
 
 type PostService struct {
 	CommonService
-	OSS oss.MinioClient
+	OSS oss.BaseOSSProvider
 	MQ  mq.RedisStreamMQ
 }
 
-func NewPostService(db database.MongoDBManager, oss oss.MinioClient, mq mq.RedisStreamMQ) *PostService {
+func NewPostService(db database.BaseDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ) *PostService {
 	return &PostService{
 		CommonService: CommonService{
 			DB: db,

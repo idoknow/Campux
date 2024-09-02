@@ -175,3 +175,24 @@ type OAuth2GetAccessTokenBody struct {
 	// 授权码
 	Code string `json:"code" binding:"required"`
 }
+
+type SetMetadataBody struct {
+	// 键
+	Key string `json:"key" binding:"required"`
+
+	// 值
+	Value string `json:"value" binding:"required"`
+}
+
+type SaveMetadataBody struct {
+	// 元数据列表
+	MetadataList []database.Metadata `json:"list" binding:"required"`
+}
+
+type InitBody struct {
+	// 管理员uin
+	AdminUin int64 `json:"admin_uin" binding:"required"`
+
+	// 管理员密码
+	AdminPasswd string `json:"admin_passwd" binding:"required"`
+}
