@@ -18,7 +18,7 @@
   <!-- 左侧导航栏 -->
   <div id="container-wrap" style="height: calc(100vh - 64px)">
     <div id="pctabs" v-if="$store.state.account.uin != 0  && $store.state.authMode === 'login'">
-      <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">Campux</h2>
+      <h2 style="text-align: center; background-color: #42A5F5; color: #fff; padding: 8px 0px">{{ $store.state.version }}</h2>
       <div
         style="display: flex; justify-content: space-between; flex-direction: column; align-items: center; height: 100%">
         <div>
@@ -91,6 +91,7 @@ export default {
   },
 
   created() {
+    this.$store.commit('getVersion')
 
     this.$store.commit('tokenCheck', this.$bus)
     this.$store.commit('initMetadata', 'banner')

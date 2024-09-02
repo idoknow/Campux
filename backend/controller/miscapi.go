@@ -3,6 +3,7 @@ package controller
 import (
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
+	"github.com/RockChinQ/Campux/backend/util"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,6 +24,7 @@ func NewMiscRouter(rg *gin.RouterGroup, ms service.MiscService) *MiscRouter {
 	group.PUT("/set-metadata", mr.SetMetadata)
 	group.GET("/get-metadata-list", mr.GetMetadataList)
 	group.PUT("/save-metadatas", mr.SaveMetadata)
+	group.GET("/get-version", mr.GetVersion)
 
 	return mr
 }
@@ -145,4 +147,11 @@ func (mr *MiscRouter) SaveMetadata(c *gin.Context) {
 	}
 
 	mr.Success(c, nil)
+}
+
+// 获取版本信息
+func (mr *MiscRouter) GetVersion(c *gin.Context) {
+	mr.Success(c, gin.H{
+		"version": util.SEMANTIC_VERSION,
+	})
 }
