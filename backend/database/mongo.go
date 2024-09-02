@@ -21,50 +21,6 @@ const (
 	OAUTH_APP_COLLECTION    = "oauth_app"
 )
 
-type Metadata struct {
-	Key string `bson:"key"`
-
-	Value string `bson:"value"`
-}
-
-var PresetMetadata = []Metadata{
-	{
-		Key:   "banner",
-		Value: "投稿前请阅读投稿规则！",
-	},
-	{
-		Key:   "popup_announcement",
-		Value: "欢迎使用 Campux！",
-	},
-	{
-		Key: "post_rules",
-		Value: `[
-			"投稿规则是数组",
-			"每个元素是一个字符串"
-		]`,
-	},
-	{
-		Key: "services",
-		Value: `[
-			{
-				"name": "服务名称",
-				"description": "服务也是数组形式，会显示在服务tab",
-				"link": "https://url.to.service",
-				"toast": "点击时的提示",
-				"emoji": "🗺️"
-			}
-		]`,
-	},
-	{
-		Key:   "brand",
-		Value: "Campux 这个是你的墙的名称",
-	},
-	{
-		Key:   "beianhao",
-		Value: "桂ICP备1145141919号-1",
-	},
-}
-
 type MongoDBManager struct {
 	Client *mongo.Client
 
@@ -562,6 +518,31 @@ func (m *MongoDBManager) GetMetadata(key string) (string, error) {
 		return "", err
 	}
 	return meta.Value, nil
+}
+
+func (m *MongoDBManager) SetMetadata(key, value string) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).UpdateOne(
+		context.TODO(),
+		bson.M{"key": key},
+		bson.M{"$set": bson.M{"value": value}},
+	)
+	return err
+}
+
+func (m *MongoDBManager) GetMetadataList() ([]Metadata, error) {
+	var list []Metadata
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(METADATA_COLLECTION).Find(context.TODO(), bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &list)
+	if err != nil {
+		return nil, err
+	}
+
+	return list, nil
 }
 
 func (m *MongoDBManager) AddOAuth2App(app *OAuthAppPO) error {

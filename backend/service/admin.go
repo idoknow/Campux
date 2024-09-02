@@ -10,7 +10,7 @@ type AdminService struct {
 	CommonService
 }
 
-func NewAdminService(db database.MongoDBManager) *AdminService {
+func NewAdminService(db database.BaseDBManager) *AdminService {
 	return &AdminService{
 		CommonService: CommonService{
 			DB: db,
@@ -49,4 +49,15 @@ func (as *AdminService) GetOAuth2Apps() ([]database.OAuthAppPO, error) {
 // delete
 func (as *AdminService) DeleteOAuth2App(appID string) error {
 	return as.DB.DeleteOAuth2App(appID)
+}
+
+func (as *AdminService) IsInit() (bool, error) {
+	// 获取所有账户，如果没有账户则认为是初始化状态
+	_, total, err := as.DB.GetAccounts(-1, database.USER_GROUP_ANY, 1, 1, 0)
+
+	if err != nil {
+		return true, err
+	}
+
+	return total != 0, nil
 }

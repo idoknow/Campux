@@ -18,19 +18,41 @@ type Application struct {
 	API *controller.APIController
 }
 
+func makeDBManager() database.BaseDBManager {
+	switch viper.GetString("database.use") {
+	case "mongo":
+		return database.NewMongoDBManager()
+	case "sqlite":
+		return database.NewSQLiteDBManager()
+	default:
+		return nil
+	}
+}
+
+func makeOSSProvider() oss.BaseOSSProvider {
+	switch viper.GetString("oss.use") {
+	case "local":
+		return oss.NewLocalStorage()
+	case "minio":
+		return oss.NewMinioClient()
+	default:
+		return nil
+	}
+}
+
 func NewApplication() *Application {
 
-	db := database.NewMongoDBManager()
-	fs := oss.NewMinioClient()
+	db := makeDBManager()
+	fs := makeOSSProvider()
 	msq := mq.NewRedisStreamMQ()
 
-	as := service.NewAccountService(*db)
-	ps := service.NewPostService(*db, *fs, *msq)
-	ms := service.NewMiscService(*db)
-	ads := service.NewAdminService(*db)
-	oas := service.NewOAuth2Service(*db, *msq)
+	as := service.NewAccountService(db)
+	ps := service.NewPostService(db, fs, *msq)
+	ms := service.NewMiscService(db)
+	ads := service.NewAdminService(db)
+	oas := service.NewOAuth2Service(db, *msq)
 
-	err := ScheduleRoutines(*db, *msq)
+	err := ScheduleRoutines(db, *msq)
 	if err != nil {
 		panic(err)
 	}
@@ -41,7 +63,7 @@ func NewApplication() *Application {
 }
 
 func ScheduleRoutines(
-	db database.MongoDBManager,
+	db database.BaseDBManager,
 	msq mq.RedisStreamMQ,
 ) error {
 	s, err := gocron.NewScheduler()
