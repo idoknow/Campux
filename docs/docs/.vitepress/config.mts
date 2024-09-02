@@ -23,16 +23,10 @@ export default defineConfig({
       {
         text: '私有化部署',
         items: [
-          { text: '环境 & 外部组件', link: '/deploy/env'},
-          { text: '系统组件', link: '/deploy/campux' },
-          { text: '对外提供服务', link: '/deploy/expose' }
-        ]
-      },
-      {
-        text: '行为和维护',
-        items: [
-          { text: 'Campux 前后端和系统配置', link: '/usage/campux' },
-          { text: 'CampuxBot', link: '/usage/bot' },
+          { text: '最简部署', link: '/deploy/minimal' },
+          { text: '初始化和维护', link: '/deploy/maintain' },
+          { text: '配置文件', link: '/deploy/config' },
+          { text: '生产级部署', link: '/deploy/production' },
         ]
       },
       {

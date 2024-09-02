@@ -10,10 +10,7 @@
 
 ## 外部组件
 
-- MongoDB - 数据库
 - Redis - 消息队列
-- MinIO - 对象存储
-
-## 可选组件
-
-- Nginx/Caddy - 反向代理
+- (可选) MongoDB - 数据库
+- (可选) MinIO - 对象存储
+- (可选) Nginx/Caddy - 反向代理

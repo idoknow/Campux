@@ -43,7 +43,7 @@
 
 Bot 端配置了群内审核后，管理员可以直接在群内审核。
 
-<img src="/assets/insight_scenario_06.jpg" alt="群内审核" width="40%" height="40%">
+<img src="/assets/deploy_maintain_02.png" alt="群内审核" width="40%" height="40%">
 
 ### 自动发表到空间说说
 

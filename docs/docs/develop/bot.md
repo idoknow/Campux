@@ -7,5 +7,5 @@ CampuxBot 的 QQ 机器人模块基于[NoneBot2](https://nonebot.dev/)构建。
 启动机器人：
 
 ```bash
-python main.go
+python main.py
 ```
