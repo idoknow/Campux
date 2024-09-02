@@ -1,6 +1,9 @@
 package config
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/spf13/viper"
 
 	"github.com/google/uuid"
@@ -70,19 +73,53 @@ func NewConfig() (*Config, bool, error) {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./data/")
 
+	// 应用环境变量
+	viper.AutomaticEnv()
+
+	replacer := strings.NewReplacer(".", "__")
+
+	viper.SetEnvKeyReplacer(replacer)
+
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			// 设置默认配置
 			SetInitValue()
-			// Config file not found; write default config
-			if err := WriteConfig(); err != nil {
-				return nil, false, err
-			}
-			return nil, true, nil
 		} else {
 			return nil, false, err
 		}
 	}
 
+	postOperation()
+
+	// Config file not found; write default config
+	if err := WriteConfig(); err != nil {
+		return nil, false, err
+	}
+
 	return &Config{}, false, nil
+}
+
+func postOperation() {
+	bots := viper.Get("service.bots")
+	switch bots := bots.(type) { // 修改此行
+	case []interface{}:
+		// 检查是否为[]int
+		for _, v := range bots { // 修改此行
+			if _, ok := v.(int); !ok {
+				return
+			}
+		}
+	case string:
+		botsStr := bots // 修改此行
+		botsArr := strings.Split(botsStr, ",")
+		var botsInt []int
+		for _, bot := range botsArr {
+			botInt, err := strconv.Atoi(strings.TrimSpace(bot))
+			if err != nil {
+				return
+			}
+			botsInt = append(botsInt, botInt)
+		}
+		viper.Set("service.bots", botsInt)
+	}
 }
