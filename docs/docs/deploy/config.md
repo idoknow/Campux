@@ -4,7 +4,7 @@
 
 ### Campux 
 
-Campux 的配置文件位于 `Campux/docker/volumes/campux/config.yaml`。修改后请重启容器：
+Campux 的配置文件位于 `Campux/docker/volumes/campux/campux.yaml`。修改后请重启容器：
 
 ```yaml
 auth:
