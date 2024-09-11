@@ -124,14 +124,12 @@ CampuxBot 的配置文件位于 `Campux/docker/campuxbot/config.json`。修改�
     "campux_help_message": "发送 #注册账号 以此QQ号注册一个新账号(前面需要加#号)\n发送 #重置密码 重置你的账号密码\n\n投稿地址 https://gz.idoknow.top （若打不开请更换浏览器尝试）",
     // 群内审核时消息不符合命令时的回复消息
     "campux_review_help_message": "审核命令：\n#通过 <稿件id>\n\n#拒绝 <理由> <稿件id>\n\n例如：\n#通过 10\n#拒绝 测试理由 10",
-    // 审核群群号
+    // 管理员群群号
     "campux_review_qq_group_id": 422250630,
     // 见 Campux 配置文件中的 domain 字段
     "campux_domain": "campux",
     // 墙号 QQ 号
-    "campux_qq_bot_uin": 1099044697,
-    // 管理员 QQ 号
-    "campux_qq_admin_uin": 1010553892
+    "campux_qq_bot_uin": 1099044697
 }
 ```
 

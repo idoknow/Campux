@@ -39,7 +39,6 @@ services:
       - TZ=Asia/Shanghai
       - campux_review_qq_group_id=<修改为你的稿件审核群>
       - campux_qq_bot_uin=<修改为你的墙号QQ号>
-      - campux_qq_admin_uin=<修改为你的系统管理员QQ号>
     networks:
       - campux-network
 
