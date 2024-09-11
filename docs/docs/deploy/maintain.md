@@ -36,7 +36,9 @@
 
 Bot 发表说说都是逆向工程，模拟 Web QQ 空间的请求。需要定期（约48小时）扫码登录。
 
-Bot 管理员，向 Bot 发送命令 `#更新cookies` ，Bot 会返回一个二维码，管理员手机上登录 **墙号 QQ**，扫码授权即可自动登录。
+Bot 管理员在管理员群内，向 Bot 发送命令 `#登录` ，Bot 会返回一个二维码，管理员手机上登录 **墙号 QQ**，扫码授权即可自动登录。
+
+<img src="/assets/insight_scenario_11.jpg" alt="扫码登录" width="40%">
 
 <img src="/assets/insight_scenario_08.jpg" alt="扫码登录" width="40%">
 

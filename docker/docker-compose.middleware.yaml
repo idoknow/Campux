@@ -1,0 +1,15 @@
+version: "3"
+services:
+  redis:
+    image: redis:6-alpine
+    restart: always
+    container_name: campux-redis
+    volumes:
+      # Mount the redis data directory to the container.
+      - ./volumes/redis/data:/data
+    # Set the redis password when startup redis server.
+    command: redis-server --requirepass campux123456
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+    ports:
+      - 6379:6379
