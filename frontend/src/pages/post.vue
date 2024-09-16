@@ -39,7 +39,7 @@
         </div>
 
         <div style="margin-left: 16px; display: flex; flex-wrap: wrap;">
-            <img v-for="(image, index) in post.images" :src="image" :key="index" width="70" height="70"
+            <img v-for="(image, index) in postImageBlobs" :src="image" :key="index" width="70" height="70"
                 style="margin-right: 8px; margin-top:4px; border-radius: 10px;"
                 @click="selectedIndex = index; showDeleteImageDialog = true">
             <svg style="margin-top: 8px" @click="selectImage" t="1712897639010" class="icon" viewBox="0 0 1024 1024"
@@ -159,6 +159,7 @@ export default {
                 anon: false,
                 images: [],
             },
+            postImageBlobs: [],
             tags: [
                 {
                     name: '寻物/招领',
@@ -220,6 +221,7 @@ export default {
                 return
             }
             this.post.images.splice(index, 1)
+            this.postImageBlobs.splice(index, 1)
         },
         generateUUID4() {
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -248,6 +250,7 @@ export default {
                         this.toast('🥰 投稿成功', 'success')
                         this.post.text = ''
                         this.post.images = []
+                        this.postImageBlobs = []
                         this.tags.forEach(tag => {
                             tag.selected = false
                         })
@@ -286,6 +289,7 @@ export default {
                             let url = this.$store.state.base_url + '/v1/post/download-image/' + res.data.data.key
                             console.log(url)
                             this.post.images.push(url)
+                            this.fetchLatestImageToImageBlobs(url)
                             this.loading = false
                         } else {
                             this.toast('上传失败：' + res.data.msg)
@@ -299,6 +303,17 @@ export default {
                     })
             }
             input.click()
+        },
+        fetchLatestImageToImageBlobs(url) {
+            this.$axios.get(url, {
+                responseType: 'blob'
+            })
+                .then(res => {
+                    this.postImageBlobs.push(URL.createObjectURL(res.data))
+                })
+                .catch(err => {
+                    console.error(err)
+                })
         },
         selectTag(index) {
             this.toast("标签功能暂时关闭", "warning")
