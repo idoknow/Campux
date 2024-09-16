@@ -39,11 +39,7 @@ const bus = mitt()
 //     app.config.globalProperties.$axios = { ...axiosInstance }
 // })
 
-const axiosInstance = axios.create({
-    withCredentials: true,
-    baseURL: store.state.base_url,
-})
-app.config.globalProperties.$axios = { ...axiosInstance }
+app.config.globalProperties.$axios = axios
 
 app.config.globalProperties.$bus = bus
 
