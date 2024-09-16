@@ -1,5 +1,6 @@
 <template>
-  <v-card class="mx-auto postcard" :color="post.status in colorMap ? colorMap[post.status] : '#9e9e9e'" max-width="400" style="border-radius: 10px; color: #fff">
+  <v-card class="mx-auto postcard" :color="post.status in colorMap ? colorMap[post.status] : '#9e9e9e'" max-width="400"
+    style="border-radius: 10px; color: #fff">
     <div style="width: 100%; padding: 8px 8px 0px 8px">
       <div style="display: flex; align-items: center; justify-content: space-between;">
         <div style="display: flex; align-items: center;">
@@ -19,7 +20,7 @@
 
     <div
       style="display: flex; margin-left: 16px; margin-right: 16px; margin-top: 8px; overflow-x: auto; white-space: nowrap;">
-      <img v-for="img in post.images" :key="img" :src="img"
+      <img v-for="img in postImageBlobs" :key="img" :src="img"
         style="border-radius: 10px; margin-right: 8px; width: 100px; height: 100px; object-fit: cover" />
     </div>
 
@@ -31,8 +32,8 @@
         </template>
 
         <v-list-item-title v-if="!post.anon">{{ post.uin }}</v-list-item-title>
-        <v-list-item-title v-if="post.anon && typ==='self'">匿名</v-list-item-title>
-        <v-list-item-title v-if="post.anon && typ!=='self'">匿名({{ post.uin }})</v-list-item-title>
+        <v-list-item-title v-if="post.anon && typ === 'self'">匿名</v-list-item-title>
+        <v-list-item-title v-if="post.anon && typ !== 'self'">匿名({{ post.uin }})</v-list-item-title>
 
         <v-list-item-subtitle>{{ post.created_at }}</v-list-item-subtitle>
 
@@ -55,7 +56,9 @@
                 </v-list-item>
               </v-list>
             </v-menu>
-            <span @click="showLogs" v-else class="subheading" style="font-weight: bold; text-decoration: underline">{{ post.status }}</span>
+            <span @click="showLogs" v-else class="subheading" style="font-weight: bold; text-decoration: underline">{{
+              post.status
+              }}</span>
 
           </div>
         </template>
@@ -64,8 +67,7 @@
   </v-card>
 
   <v-dialog v-model="dialog" variant="outlined" persistent>
-    <v-card
-      title="拒绝原因">
+    <v-card title="拒绝原因">
       <v-card-text>
         <v-text-field v-model="reason" label="拒绝原因" outlined></v-text-field>
       </v-card-text>
@@ -77,10 +79,9 @@
   </v-dialog>
 
   <v-dialog v-model="logDialog" variant="outlined" persistent>
-    <v-card
-      title="日志">
+    <v-card title="日志">
       <v-card-text>
-        <div class="logCard" v-for="(l,index) in log" :key="index">
+        <div class="logCard" v-for="(l, index) in log" :key="index">
           <h3>{{ l.comment }}</h3>
           <p><strong>时间: </strong>{{ l.created_at }}</p>
           <p v-if="l.op !== -1 && typ != 'self'"><strong>操作者: </strong>{{ l.op }}</p>
@@ -102,7 +103,7 @@ export default {
     return {
       dialog: false,
       reason: "",
-
+      postImageBlobs: [],
       filterStatus: ['通过', '拒绝', '无理由拒绝'],
       avatarBaseUrl: "http://q1.qlogo.cn/g?b=qq&nk=",
       logDialog: false,
@@ -115,10 +116,12 @@ export default {
         '队列中': '#9Cbb85',
         '已发布': '#42A5F5',
         '失败': '#aa8888',
-      }
+      },
+      
     }
   },
   mounted() {
+    this.fetchImages()
   },
   methods: {
     recall() {
@@ -137,6 +140,22 @@ export default {
     emitJudgePost() {
       this.post.reason = this.reason
       this.$emit('updateJudgePost', this.post)
+    },
+    fetchImages() {
+      for (let i = 0; i < this.post.images.length; i++) {
+        this.fetchImageBlob(this.post.images[i])
+      }
+    },
+    fetchImageBlob(url) {
+      this.$axios.get(url, {
+        responseType: 'blob'
+      })
+        .then(res => {
+          this.postImageBlobs.push(URL.createObjectURL(res.data))
+        })
+        .catch(err => {
+          console.error(err)
+        })
     },
     showLogs() {
       this.$axios.get('/v1/post/post-log/' + this.post.id)
