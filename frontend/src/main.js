@@ -13,7 +13,7 @@ import App from './App.vue'
 // Composables
 import { createApp } from 'vue'
 
-import axios from 'axios'
+import axios from './utils/axios-wrapper.js'
 import store from './store/index.js'
 import VueCookies from 'vue-cookies'
 
