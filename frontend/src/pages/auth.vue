@@ -171,6 +171,8 @@ export default {
                     if (res.data.code === 0) {
                         this.toast('登录成功', 'success')
                         this.$store.commit('tokenCheck', this.$bus)
+                        // save token to local storage
+                        localStorage.setItem('access-token', res.data.data.token)
                     } else {
                         this.toast('登录失败：' + res.data.msg)
                     }
