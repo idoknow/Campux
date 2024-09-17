@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/mq"
@@ -38,6 +40,48 @@ func (ps *PostService) UploadImage(ioReader io.Reader, suffix string) (string, e
 
 func (ps *PostService) DownloadImage(key string, ioWriter io.Writer) error {
 	return ps.OSS.DownloadToIO(key, ioWriter)
+}
+
+func (ps *PostService) PreviewImage(key string, ioWriter io.Writer) error {
+	thumbnailKey := strings.Split(key, ".")[0] + "_thumbnail"
+	thumbnailKeySuffix := thumbnailKey + ".jpg"
+
+	exist, err := ps.OSS.CheckObjectExist(thumbnailKeySuffix)
+
+	if err != nil {
+		return err
+	}
+
+	if exist {
+		// download the thumbnail directly
+		return ps.OSS.DownloadToIO(thumbnailKeySuffix, ioWriter)
+	}
+
+	// compress the image and then upload.
+
+	buf := new(bytes.Buffer)
+	err = ps.OSS.DownloadToIO(key, buf)
+
+	if err != nil {
+		return err
+	}
+
+	// compress the image
+	reader, err := util.CompressImage(buf.Bytes(), 10)
+
+	if err != nil {
+		ioWriter.Write(buf.Bytes())
+		return nil
+	}
+
+	// CompressImage() should return a JPEG format image
+	_, err = ps.OSS.UploadFromIOWithKey(reader, thumbnailKey, "jpg")
+
+	if err != nil {
+		return err
+	}
+
+	return ps.OSS.DownloadToIO(thumbnailKeySuffix, ioWriter)
 }
 
 func (ps *PostService) PostNew(uuid string, uin int64, text string, images []string, anon bool) (int, error) {
