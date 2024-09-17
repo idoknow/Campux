@@ -43,15 +43,25 @@ func generateObjectName() string {
 
 // 从io.Reader上传文件
 func (m *MinioClient) UploadFromIO(ioReader io.Reader, suffix string) (string, error) {
-
 	objectName := generateObjectName()
 
+	key, err := m.UploadFromIOWithKey(ioReader, objectName, suffix)
+
+	return key, err
+}
+
+func (m *MinioClient) UploadFromIOWithKey(ioReader io.Reader, key string, suffix string) (string, error) {
 	if suffix != "" {
-		objectName += "." + suffix
+		key += "." + suffix
 	}
 
-	_, err := m.client.PutObject(context.Background(), m.bucket, objectName, ioReader, -1, minio.PutObjectOptions{})
-	return objectName, err
+	_, err := m.client.PutObject(context.Background(), m.bucket, key, ioReader, -1, minio.PutObjectOptions{})
+
+	if err != nil {
+		return "", err
+	}
+
+	return key, nil
 }
 
 // 下载文件到io.Writer

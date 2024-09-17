@@ -118,10 +118,15 @@ func (pr *PostRouter) DownloadImage(c *gin.Context) {
 	}
 
 	key := c.Param("key")
+	_, isPreview := c.GetQuery("preview")
 
 	buf := bytes.NewBuffer(nil)
 
-	err = pr.PostService.DownloadImage(key, buf)
+	if isPreview {
+		err = pr.PostService.PreviewImage(key, buf)
+	} else {
+		err = pr.PostService.DownloadImage(key, buf)
+	}
 
 	if err != nil {
 		pr.Fail(c, 1, err.Error())
