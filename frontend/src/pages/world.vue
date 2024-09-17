@@ -197,7 +197,7 @@ export default {
               p[i].created_at = date.toLocaleString()
               p[i].status = this.$store.state.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
-                p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
+                p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j] + "?preview=1"
               }
             }
             console.log(p)
@@ -250,7 +250,7 @@ export default {
               p[i].created_at = date.toLocaleString()
               p[i].status = this.$store.state.statusMap[p[i].status]
               for (let j = 0; j < p[i].images.length; j++) {
-                p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j]
+                p[i].images[j] = this.$store.state.base_url + "/v1/post/download-image/" + p[i].images[j] + "?preview=1"
               }
             }
             console.log(p)

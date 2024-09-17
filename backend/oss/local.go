@@ -29,18 +29,24 @@ func NewLocalStorage() *LocalStorage {
 func (l *LocalStorage) UploadFromIO(ioReader io.Reader, suffix string) (string, error) {
 	objectName := generateObjectName()
 
+	key, err := l.UploadFromIOWithKey(ioReader, objectName, suffix)
+
+	return key, err
+}
+
+func (l *LocalStorage) UploadFromIOWithKey(ioReader io.Reader, key string, suffix string) (string, error) {
 	if suffix != "" {
-		objectName += "." + suffix
+		key += "." + suffix
 	}
 
-	file, err := os.Create(filepath.Join(l.dir, objectName))
+	file, err := os.Create(filepath.Join(l.dir, key))
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
 	_, err = io.Copy(file, ioReader)
-	return objectName, err
+	return key, err
 }
 
 func (l *LocalStorage) DownloadToIO(objectName string, ioWriter io.Writer) error {
