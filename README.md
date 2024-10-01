@@ -12,6 +12,9 @@
   <a href="https://qm.qq.com/q/deaw9KGCC4">
 <img alt="Static Badge" src="https://img.shields.io/badge/%E7%A4%BE%E5%8C%BA%E7%BE%A4-226427026-blue">
 </a>
+<a href="https://t.me/+uSANsIhvIEY2ZGI1">
+<img alt="Static Badge" src="https://img.shields.io/badge/Telegram-Campux&QZone-blue">
+</a>
   <img src="https://wakapi.rockchin.top/api/badge/RockChinQ/interval:any/project:Campux" alt="Wakapi Count">
 
 校园墙自动化和校内服务统一认证解决方案。
