@@ -129,7 +129,10 @@ CampuxBot 的配置文件位于 `Campux/docker/campuxbot/config.json`。修改�
     // 见 Campux 配置文件中的 domain 字段
     "campux_domain": "campux",
     // 墙号 QQ 号
-    "campux_qq_bot_uin": 1099044697
+    "campux_qq_bot_uin": 1099044697,
+    // 墙号 QQ 号的 Cookies 刷新策略，支持 qrcode 和 ob11_auto
+    // qrcode 表示扫码登录，ob11_auto 表示自动获取（详细请查看`初始化和维护`页的 登录 QQ 空间 章节）
+    "campux_qzone_cookies_refresh_strategy": "qrcode"
 }
 ```
 
