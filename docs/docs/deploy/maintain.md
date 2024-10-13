@@ -44,6 +44,12 @@ Bot 管理员在管理员群内，向 Bot 发送命令 `#登录` ，Bot 会返�
 
 没有 有效Cookies 时，Bot 会一直等待登录后再发表说说。
 
+::: info
+如果你使用的消息平台（Bot协议端）支持`自动获取Cookies`，那么就不需要手动登录。你可以在 CampuxBot 的配置文件中设置`campux_qzone_cookies_refresh_strategy`为`ob11_auto`，之后即可使用`#登录`命令自动登录。
+
+目前支持`自动获取Cookies`的平台有：`NapCat`、`LiteLoader-OneBot`。
+:::
+
 ## 群内审核
 
 Bot 端配置了群内审核后，新稿件到来时会推送到管理员群，管理员可以直接在群内审核。
