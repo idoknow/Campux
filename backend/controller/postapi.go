@@ -2,12 +2,14 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/RockChinQ/Campux/backend/util"
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 type PostRouter struct {
@@ -51,16 +53,28 @@ func (pr *PostRouter) UploadImage(c *gin.Context) {
 	}
 
 	// 取body的json里的图片数据
-	file, _, err := c.Request.FormFile("image")
+	file, err := c.FormFile("image")
 	if err != nil {
 		pr.Fail(c, 1, err.Error())
+		return
+	}
+	// 检查图片大小
+	if file.Size > int64(viper.GetInt("feature.image_max_size")) {
+		pr.Fail(c, 1, fmt.Sprintf("图片文件过大 (%.2f MB > %.2f MB)", float64(file.Size)/1024/1024, float64(viper.GetInt("feature.image_max_size"))/1024/1024))
 		return
 	}
 
 	suffix := c.Request.FormValue("suffix")
 
+	fileReader, err := file.Open()
+
+	if err != nil {
+		pr.Fail(c, 1, err.Error())
+		return
+	}
+
 	// 上传图片
-	key, err := pr.PostService.UploadImage(file, suffix)
+	key, err := pr.PostService.UploadImage(fileReader, suffix)
 
 	if err != nil {
 		pr.Fail(c, 1, err.Error())

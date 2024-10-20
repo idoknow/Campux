@@ -9,6 +9,7 @@ import (
 var migrations = []Migration{
 	&ms.LocalStorageConfig{},
 	&ms.SQLiteConfig{},
+	&ms.ImageMaxSize{},
 }
 
 // Migration interface
