@@ -18,6 +18,8 @@ func SetInitValue() {
 	viper.SetDefault("backend.host", "0.0.0.0")
 	viper.SetDefault("backend.port", "8081")
 
+	viper.SetDefault("feature.image_max_size", 1024*1024*2)
+
 	// jwt
 	viper.SetDefault("auth.jwt.secret", uuid.New().String())
 	viper.SetDefault("auth.jwt.expire", 3600*6)
