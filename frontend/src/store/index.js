@@ -34,6 +34,11 @@ export default createStore({
             }
         },
         authMode: "login",
+        publicObject: {
+            "announcement": {
+                "admin": []
+            }
+        }
     },
     mutations: {
         initMetadata(state, key) {
@@ -59,6 +64,17 @@ export default createStore({
                         console.error(err)
                     })
             }
+        },
+        fetchPublicObject(state) {
+            axios.get(
+                "https://campux.idoknow.top/object.json",
+                {withCredentials: false}
+            ).then(res => {
+                if (res.status == 200) {
+                    state.publicObject = res.data
+                    console.log(state.publicObject)
+                }
+            })
         },
         getVersion(state) {
             axios.get(this.state.base_url + '/v1/misc/get-version')
