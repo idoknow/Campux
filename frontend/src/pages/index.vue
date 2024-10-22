@@ -99,6 +99,7 @@ export default {
     this.$store.commit('initMetadata', 'popup_announcement')
     this.$store.commit('initMetadata', 'post_rules')
     this.$store.commit('initMetadata', 'beianhao')
+    this.$store.commit('fetchPublicObject')
     console.log(this.$store.state.metadata)
     console.log(this.$store.state.account)
   },

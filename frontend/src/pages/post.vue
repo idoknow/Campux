@@ -4,6 +4,15 @@
             <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
             <span>{{ $store.state.metadata.brand }}</span>
         </div>
+        <v-banner v-if="($store.state.account.userGroup === 'admin') && $store.state.publicObject != {} && $store.state.publicObject.announcement.admin.length > 0 && ($store.state.publicObject.announcement.admin[0].versions.includes($store.state.version))"
+            :style="{ background: $store.state.publicObject.announcement.admin[0].color.background, color: $store.state.publicObject.announcement.admin[0].color.text, fontSize: '14px', textAlign: 'center' }"
+            lines="one">
+            <h3 style="margin-right: 8px;">{{ $store.state.publicObject.announcement.admin[0].title }}</h3>
+            <div style="margin-right: 3px;">{{ $store.state.publicObject.announcement.admin[0].content }}</div>
+            <a v-if="$store.state.publicObject.announcement.admin[0].link.url !== ''" :href="$store.state.publicObject.announcement.admin[0].link.url"
+                style="color: blue; font-weight: bold;"
+                target="_blank">{{ $store.state.publicObject.announcement.admin[0].link.text }}</a>
+        </v-banner>
         <v-banner v-if="$store.state.metadata.banner !== ''"
             style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
             :text="$store.state.metadata.banner" :stacked="false">
@@ -242,7 +251,7 @@ export default {
             // 将images中的baseurl去掉
             this.post.images = this.post.images.map(image => {
                 return image.replace(this.$store.state.base_url + "/v1/post/download-image/", '')
-                            .replace("?preview=1", "")
+                    .replace("?preview=1", "")
 
             })
 
