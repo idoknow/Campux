@@ -7,11 +7,11 @@
                 "content": "我们正在收集反馈以了解应该如何改进 Campux。请访问 ",
                 "link": {
                     "url": "https://www.wjx.cn/vm/tUPMYXG.aspx#",
-                    "text": "问卷"
+                    "text": "此问卷"
                 },
                 "created_at_ts": 1729610647,
                 "versions": [
-                    "1.0.0"
+                    "v1.0.0"
                 ],
                 "color": {
                     "text": "#fff",
