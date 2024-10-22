@@ -2,12 +2,17 @@
     "announcement": {
         "admin": [
             {
+                "id": 0,
                 "title": "重要公告",
-                "content": "我们正在收集用户反馈，并决定我们应该如何改进 Campux。请访问问卷：",
-                "created_at": "",
+                "content": "我们正在收集用户反馈，了解我们应该如何改进 Campux。请访问问卷：https://www.wjx.cn/vm/tUPMYXG.aspx# ",
+                "created_at_ts": 1729610647,
                 "versions": [
                     "1.0.0"
-                ]
+                ],
+                "color": {
+                    "text": "#fff",
+                    "background": "#d77"
+                }
             }
         ]
     }
