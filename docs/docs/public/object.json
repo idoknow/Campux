@@ -4,7 +4,11 @@
             {
                 "id": 0,
                 "title": "重要公告",
-                "content": "我们正在收集用户反馈，了解我们应该如何改进 Campux。请访问问卷：https://www.wjx.cn/vm/tUPMYXG.aspx# ",
+                "content": "我们正在收集反馈以了解应该如何改进 Campux。请访问 ",
+                "link": {
+                    "url": "https://www.wjx.cn/vm/tUPMYXG.aspx#",
+                    "text": "问卷"
+                },
                 "created_at_ts": 1729610647,
                 "versions": [
                     "1.0.0"
