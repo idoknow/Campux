@@ -1,0 +1,14 @@
+{
+    "announcement": {
+        "admin": [
+            {
+                "title": "重要公告",
+                "content": "我们正在收集用户反馈，并决定我们应该如何改进 Campux。请访问问卷：",
+                "created_at": "",
+                "versions": [
+                    "1.0.0"
+                ]
+            }
+        ]
+    }
+}
