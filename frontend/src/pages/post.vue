@@ -4,15 +4,20 @@
             <h2 id="mt" style="padding: 8px 16px; font-family: Lilita One; display: inline-block">Campux</h2>
             <span>{{ $store.state.metadata.brand }}</span>
         </div>
-        <v-banner v-if="($store.state.account.userGroup === 'admin') && $store.state.publicObject != {} && $store.state.publicObject.announcement.admin.length > 0 && ($store.state.publicObject.announcement.admin[0].versions.includes($store.state.version))"
-            :style="{ background: $store.state.publicObject.announcement.admin[0].color.background, color: $store.state.publicObject.announcement.admin[0].color.text, fontSize: '14px', textAlign: 'center' }"
+        <div id="admin-announcement" v-if="adminAnnouncement.show"
+            :style="{ background: adminAnnouncement.color.background, color: adminAnnouncement.color.text, fontSize: '14px', textAlign: 'center' }"
             lines="one">
-            <h3 style="margin-right: 8px;">{{ $store.state.publicObject.announcement.admin[0].title }}</h3>
-            <div style="margin-right: 3px;">{{ $store.state.publicObject.announcement.admin[0].content }}</div>
-            <a v-if="$store.state.publicObject.announcement.admin[0].link.url !== ''" :href="$store.state.publicObject.announcement.admin[0].link.url"
+            <div id="announcement-content">
+                <div style="margin-right: 5px;">{{ adminAnnouncement.content }}</div>
+                <!-- <a v-if="adminAnnouncement.link.url !== ''" :href="adminAnnouncement.link.url"
                 style="color: blue; font-weight: bold;"
-                target="_blank">{{ $store.state.publicObject.announcement.admin[0].link.text }}</a>
-        </v-banner>
+                    target="_blank">{{ adminAnnouncement.link.text }}</a> -->
+                <v-btn v-if="adminAnnouncement.link.url !== ''" :href="adminAnnouncement.link.url"
+                    style="padding-inline: 8px;font-size: 0.8rem;" color="primary" variant="flat"
+                    density="compact" target="_blank">{{ adminAnnouncement.link.text }}</v-btn>
+            </div>
+            <v-btn id="clear-announcement" text="清除" @click="dismissAdminAnnouncement" prepend-icon="mdi-check" variant="text"></v-btn>
+        </div>
         <v-banner v-if="$store.state.metadata.banner !== ''"
             style="background: #f8b94c; color: #fff; font-size: 14px; text-align: center;" color="warning" lines="one"
             :text="$store.state.metadata.banner" :stacked="false">
@@ -128,10 +133,10 @@
                 </v-card>
             </v-dialog>
 
-            <v-dialog v-model="showPopupAN" width="auto">
-                <v-card :text="$store.state.metadata.popup_announcement" title="提示">
+            <v-dialog v-model="popupAnnouncement.show" width="auto">
+                <v-card :text="popupAnnouncement.content" title="提示">
                     <template v-slot:actions>
-                        <v-btn class="ms-auto" text="1 天内不再提醒" @click="showPopupAN = false;"></v-btn>
+                        <v-btn class="ms-auto" text="1 天内不再提醒" @click="closePopupAnnouncement"></v-btn>
                     </template>
                 </v-card>
             </v-dialog>
@@ -155,7 +160,6 @@ import Cookies from "js-cookie";
 export default {
     data() {
         return {
-            showPopupAN: false,
             snackbar: {
                 show: false,
                 text: '',
@@ -187,18 +191,47 @@ export default {
             showDeleteImageDialog: false,
             selectedIndex: -1,
             isPending: false,
+            popupAnnouncement: {
+                show: false,
+                content: '',
+            },
+            adminAnnouncement: {
+                show: false,
+                content: '',
+                link: {
+                    url: '',
+                    text: ''
+                },
+                color: {
+                    text: '',
+                    background: ''
+                }
+            },
+            dismissedAdminAnnouncements: []
         }
     },
 
     mounted() {
         this.getPosts()
-        this.$store.commit('initMetadata', 'banner')
-        this.$store.commit('initMetadata', 'brand')
-        this.$store.commit('initMetadata', 'popup_announcement')
-        this.$store.commit('initMetadata', 'post_rules')
-        this.$store.commit('initMetadata', 'beianhao')
-        console.log(this.$store.state.metadata)
 
+        if (this.$store.state.publicObject.announcement.admin.length > 0) {
+            this.showAdminAnnouncement()
+        } else {
+            this.$bus.on('publicObjectFetched', () => {
+                this.showAdminAnnouncement()
+            })
+        }
+
+        if (this.$store.state.metadata.popup_announcement !== '') {
+            console.log("show popup_announcement")
+            this.showPopupAnnouncement()
+        } else {
+            console.log("waiting for popupAnnouncementFetched")
+            this.$bus.on('popupAnnouncementFetched', () => {
+                console.log("popupAnnouncementFetched")
+                this.showPopupAnnouncement()
+            })
+        }
     },
 
     methods: {
@@ -330,6 +363,54 @@ export default {
             this.toast("标签功能暂时关闭", "warning")
             this.tags[index].selected = !this.tags[index].selected
         },
+        showPopupAnnouncement() {
+            console.log("show popup_announcement" + this.$store.state.metadata.popup_announcement)
+            if (this.$store.state.metadata.popup_announcement === '') {
+                return
+            }
+            let dont_show_announcement_before = localStorage.getItem("dont_show_announcement_before")
+            if (dont_show_announcement_before == null || new Date().getTime() > dont_show_announcement_before) {
+                this.popupAnnouncement.show = true
+                console.log(this.$store.state.metadata.popup_announcement)
+                this.popupAnnouncement.content = this.$store.state.metadata.popup_announcement
+            }
+        },
+        closePopupAnnouncement() {
+            this.popupAnnouncement.show = false
+            localStorage.setItem("dont_show_announcement_before", new Date().getTime() + 86400000)
+        },
+        showAdminAnnouncement() {
+            if (this.$store.state.account.userGroup !== 'admin') {
+                return
+            }
+
+            if (this.$store.state.publicObject == {}) {
+                return
+            }
+
+            if (this.$store.state.publicObject.announcement.admin.length === 0) {
+                return
+            }
+
+            // 进入这个页面或dismiss了一个公告时，选择一个公告显示
+            this.dismissedAdminAnnouncements = JSON.parse(localStorage.getItem("dismissed_admin_announcements") || "[]")
+
+            this.adminAnnouncement.show = false
+
+            for (let i = 0; i < this.$store.state.publicObject.announcement.admin.length; i++) {
+                if (!this.dismissedAdminAnnouncements.includes(this.$store.state.publicObject.announcement.admin[i].id) && this.$store.state.publicObject.announcement.admin[i].versions.includes(this.$store.state.version)) {
+                    this.adminAnnouncement = this.$store.state.publicObject.announcement.admin[i]
+                    this.adminAnnouncement.show = true
+                    break
+                }
+            }
+        },
+        dismissAdminAnnouncement() {
+            this.dismissedAdminAnnouncements.push(this.adminAnnouncement.id)
+            localStorage.setItem("dismissed_admin_announcements", JSON.stringify(this.dismissedAdminAnnouncements))
+            this.adminAnnouncement.show = false
+            this.showAdminAnnouncement()
+        },
         toast(text, color = 'error') {
             this.snackbar.text = text
             this.snackbar.color = color
@@ -357,6 +438,26 @@ export default {
 
 .post:focus {
     outline: none;
+}
+
+
+#admin-announcement {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    height: 2.6rem;
+    /* padding-top: 4px; */
+    padding-inline: 16px;
+}
+
+#announcement-content {
+    display: flex;
+    align-items: center;
+}
+
+#clear-announcement {
+    justify-self: flex-end;
 }
 
 .taghint {
