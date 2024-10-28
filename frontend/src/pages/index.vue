@@ -101,16 +101,16 @@ export default {
     this.$store.commit('initMetadata', 'post_rules')
     this.$store.commit('initMetadata', 'beianhao')
     this.$store.commit('fetchPublicObject', this.$bus)
+    this.$store.commit('uploadMetrics')
   },
 
   methods: {
-
     logout() {
             Cookies.remove("access-token");
             // reload
             window.location.reload()
         },
-  }
+  },
 }
 </script>
 
