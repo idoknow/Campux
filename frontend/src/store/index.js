@@ -76,6 +76,24 @@ export default createStore({
                 }
             })
         },
+        uploadMetrics() {
+            // this method is used to upload metrics to our server to analyze the product usage,
+            // so that we can improve the product in the future.
+            fetch("https://tickstats.idoknow.top/api/metric/c91cd32d", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  metrics_data: {
+                    "os_name": window.navigator.platform,
+                    "browser": window.navigator.userAgent,
+                    "host": window.location.host,
+                    "tick": 1,
+                  }
+                }),
+            });
+        },
         getVersion(state) {
             axios.get(this.state.base_url + '/v1/misc/get-version')
                 .then(res => {
