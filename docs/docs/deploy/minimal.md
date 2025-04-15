@@ -79,7 +79,7 @@ CampuxBot 负责墙号的QQ消息处理和QQ空间操作。
 ### 配置 QQ 逆向框架
 
 目前可以选用的逆向框架有很多。当前（2024-09-02）推荐使用 [Lagrange](https://github.com/LagrangeDev/Lagrange.Core)。  
-关于各个框架的选用，和配置方式，可以参考我们另外一个项目（QChatGPT）的文档：[部署消息平台](https://qchatgpt.rockchin.top/deploy/platforms/aiocqhttp/lagrange.html)。  
+关于各个框架的选用，和配置方式，可以参考我们另外一个项目（QChatGPT）的文档：[部署消息平台](https://docs.langbot.app/deploy/platforms/qq/aiocqhttp/lagrange.html)。  
 需要注意的是，CampuxBot 仅支持 OneBot 协议，且只支持反向 WS 连接。上述文档中，只可以选用 `aiocqhttp` 目录下的框架。
 
 ### 连接 CampuxBot
