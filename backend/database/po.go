@@ -48,6 +48,10 @@ var PresetMetadata = []Metadata{
 		Key:   "beianhao",
 		Value: "桂ICP备1145141919号-1",
 	},
+	{
+		Key:   "webhook_urls",
+		Value: "[]",
+	},
 }
 
 type UserGroup string

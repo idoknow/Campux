@@ -10,12 +10,14 @@ type AdminRouter struct {
 	APIRouter
 	AdminService   service.AdminService
 	AccountService service.AccountService
+	WebhookService service.WebhookService
 }
 
-func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.AccountService) *AdminRouter {
+func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.AccountService, ws service.WebhookService) *AdminRouter {
 	ar := &AdminRouter{
 		AdminService:   as,
 		AccountService: acs,
+		WebhookService: ws,
 	}
 
 	group := rg.Group("/admin")
@@ -26,6 +28,8 @@ func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.Ac
 	group.DELETE("/del-oauth2-app/:id", ar.DeleteOAuth2App)
 	group.GET("/init", ar.IsInit)
 	group.POST("/init", ar.Init)
+	group.GET("/get-webhook-config", ar.GetWebhookConfig)
+	group.POST("/set-webhook-config", ar.SetWebhookConfig)
 
 	return ar
 }
@@ -169,6 +173,61 @@ func (ar *AdminRouter) Init(c *gin.Context) {
 
 	if err != nil {
 		ar.Fail(c, 4, err.Error())
+		return
+	}
+
+	ar.Success(c, nil)
+}
+
+func (ar *AdminRouter) GetWebhookConfig(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	webhookURLs, err := ar.WebhookService.GetWebhookURLs()
+	if err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	ar.Success(c, gin.H{
+		"webhook_urls": webhookURLs,
+	})
+}
+
+func (ar *AdminRouter) SetWebhookConfig(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	var body struct {
+		WebhookURLs []string `json:"webhook_urls"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	err = ar.WebhookService.SetWebhookURLs(body.WebhookURLs)
+	if err != nil {
+		ar.Fail(c, 2, err.Error())
 		return
 	}
 

@@ -9,6 +9,7 @@
         <v-tab value="2">🚫 封禁记录</v-tab>
         <v-tab value="3" v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'">🧩 元数据</v-tab>
         <v-tab value="4" v-if="$store.state.account.userGroup === 'admin'">🔑 OAuth 2 应用</v-tab>
+        <v-tab value="5" v-if="$store.state.account.userGroup === 'admin'">🔗 Webhook</v-tab>
     </v-tabs>
 
     <v-divider id="hdivider"></v-divider>
@@ -124,6 +125,93 @@
         </v-card>
     </v-dialog>
 
+    <v-window v-model="tab" disabled>
+        <v-window-item value="5">
+            <div style="padding: 16px;">
+                <v-btn color="primary" @click="getWebhookConfig" :loading="webhookRefreshing">刷新</v-btn>
+                <v-btn color="primary" style="margin-inline: 0.8rem;" @click="saveWebhookConfig" :loading="webhookSaving">保存</v-btn>
+                
+                <div style="margin-top: 2rem;">
+                    <v-row>
+                        <v-col cols="10">
+                            <v-text-field 
+                                v-model="newWebhookUrl" 
+                                label="添加新的 Webhook URL" 
+                                variant="solo"
+                                placeholder="https://your-webhook-endpoint.com/webhook"
+                                hint="当新稿件创建时，系统将向此 URL 发送 POST 请求"
+                                persistent-hint
+                                @keyup.enter="addWebhookUrl"
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="2">
+                            <v-btn 
+                                color="primary" 
+                                @click="addWebhookUrl" 
+                                :disabled="!newWebhookUrl.trim()"
+                                style="height: 56px;"
+                            >
+                                添加
+                            </v-btn>
+                        </v-col>
+                    </v-row>
+                    
+                    <v-list v-if="webhookConfig.urls.length > 0" style="margin-top: 1rem;">
+                        <v-list-item 
+                            v-for="(url, index) in webhookConfig.urls" 
+                            :key="index"
+                            style="border: 1px solid #e0e0e0; margin-bottom: 8px; border-radius: 4px;"
+                        >
+                            <v-list-item-content>
+                                <v-list-item-title>{{ url }}</v-list-item-title>
+                            </v-list-item-content>
+                            <v-list-item-action>
+                                <v-btn 
+                                    color="error" 
+                                    variant="text" 
+                                    size="small"
+                                    @click="removeWebhookUrl(index)"
+                                >
+                                    删除
+                                </v-btn>
+                            </v-list-item-action>
+                        </v-list-item>
+                    </v-list>
+                    
+                    <v-alert 
+                        v-if="webhookConfig.urls.length === 0" 
+                        type="info" 
+                        variant="outlined"
+                        style="margin-top: 1rem;"
+                    >
+                        暂无配置的 Webhook URL
+                    </v-alert>
+                    
+                    <v-card style="margin-top: 1rem;" variant="outlined">
+                        <v-card-title>Webhook 事件格式</v-card-title>
+                        <v-card-text>
+                            <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto;">{{
+                                JSON.stringify({
+                                    event: "post.created",
+                                    timestamp: 1640995200,
+                                    data: {
+                                        post_id: 123,
+                                        uuid: "550e8400-e29b-41d4-a716-446655440000",
+                                        uin: 123456789,
+                                        text: "稿件内容",
+                                        images: ["image1.jpg", "image2.jpg"],
+                                        anon: false,
+                                        created_at: 1640995200
+                                    }
+                                }, null, 2)
+                            }}</pre>
+                        </v-card-text>
+                    </v-card>
+                </div>
+            </div>
+        </v-window-item>
+    </v-window>
+
 </template>
 
 <script>
@@ -185,6 +273,12 @@ export default {
             metadataList: [],
             metadataListRefreshing: false,
             saveMetadataLoading: false,
+            webhookConfig: {
+                urls: []
+            },
+            newWebhookUrl: '',
+            webhookRefreshing: false,
+            webhookSaving: false,
         }
     },
 
@@ -198,6 +292,8 @@ export default {
                 this.getOAuthApps()
             } else if (this.tab === '3') {
                 this.getMetadataList()
+            } else if (this.tab === '5') {
+                this.getWebhookConfig()
             }
         }
     },
@@ -471,6 +567,65 @@ export default {
                 .finally(() => {
                     this.saveMetadataLoading = false
                 })
+        },
+
+        getWebhookConfig() {
+            this.webhookRefreshing = true
+            this.$axios.get('/v1/admin/get-webhook-config')
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.webhookConfig.urls = res.data.data.webhook_urls || []
+                    } else {
+                        this.toast('获取 Webhook 配置失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('获取 Webhook 配置失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.webhookRefreshing = false
+                })
+        },
+        
+        saveWebhookConfig() {
+            this.webhookSaving = true
+            this.$axios.post('/v1/admin/set-webhook-config', {
+                webhook_urls: this.webhookConfig.urls
+            })
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('保存 Webhook 配置成功', 'success')
+                    } else {
+                        this.toast('保存 Webhook 配置失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('保存 Webhook 配置失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.webhookSaving = false
+                })
+        },
+        
+        addWebhookUrl() {
+            const url = this.newWebhookUrl.trim()
+            if (!url) return
+            
+            if (this.webhookConfig.urls.includes(url)) {
+                this.toast('该 Webhook URL 已存在')
+                return
+            }
+            
+            this.webhookConfig.urls.push(url)
+            this.newWebhookUrl = ''
+            this.toast('Webhook URL 已添加，请点击保存按钮保存配置', 'info')
+        },
+        
+        removeWebhookUrl(index) {
+            this.webhookConfig.urls.splice(index, 1)
+            this.toast('Webhook URL 已移除，请点击保存按钮保存配置', 'info')
         }
     }
 }

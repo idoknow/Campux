@@ -23,6 +23,7 @@ func NewApiController(
 	ms service.MiscService,
 	ads service.AdminService,
 	oas service.OAuth2Service,
+	ws service.WebhookService,
 ) *APIController {
 	r := gin.Default()
 
@@ -67,7 +68,7 @@ func NewApiController(
 	NewAccountRouter(rg, as)
 	NewPostRouter(rg, ps, as)
 	NewMiscRouter(rg, ms)
-	NewAdminRouter(rg, ads, as)
+	NewAdminRouter(rg, ads, as, ws)
 	NewOAuth2Router(rg, oas)
 
 	return &APIController{

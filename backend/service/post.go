@@ -14,17 +14,19 @@ import (
 
 type PostService struct {
 	CommonService
-	OSS oss.BaseOSSProvider
-	MQ  mq.RedisStreamMQ
+	OSS            oss.BaseOSSProvider
+	MQ             mq.RedisStreamMQ
+	WebhookService *WebhookService
 }
 
-func NewPostService(db database.BaseDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ) *PostService {
+func NewPostService(db database.BaseDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ, ws *WebhookService) *PostService {
 	return &PostService{
 		CommonService: CommonService{
 			DB: db,
 		},
-		OSS: oss,
-		MQ:  mq,
+		OSS:            oss,
+		MQ:             mq,
+		WebhookService: ws,
 	}
 }
 
@@ -132,6 +134,13 @@ func (ps *PostService) PostNew(uuid string, uin int64, text string, images []str
 	if err != nil {
 		return -1, err
 	}
+
+	go func() {
+		if ps.WebhookService != nil {
+			post.ID = id
+			ps.WebhookService.TriggerPostCreated(post)
+		}
+	}()
 
 	return id, nil
 }

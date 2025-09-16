@@ -47,7 +47,8 @@ func NewApplication() *Application {
 	msq := mq.NewRedisStreamMQ()
 
 	as := service.NewAccountService(db)
-	ps := service.NewPostService(db, fs, *msq)
+	ws := service.NewWebhookService(db)
+	ps := service.NewPostService(db, fs, *msq, ws)
 	ms := service.NewMiscService(db)
 	ads := service.NewAdminService(db)
 	oas := service.NewOAuth2Service(db, *msq)
@@ -58,7 +59,7 @@ func NewApplication() *Application {
 	}
 
 	return &Application{
-		API: controller.NewApiController(*as, *ps, *ms, *ads, *oas),
+		API: controller.NewApiController(*as, *ps, *ms, *ads, *oas, *ws),
 	}
 }
 
