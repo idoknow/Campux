@@ -43,4 +43,9 @@ type BaseDBManager interface {
 	GetOAuth2AppByName(name string) (*OAuthAppPO, error)
 	GetOAuth2Apps() ([]OAuthAppPO, error)
 	DeleteOAuth2App(clientID string) error
+	AddWebhook(webhook *WebhookPO) error
+	GetWebhook(id int) (*WebhookPO, error)
+	GetWebhooks() ([]WebhookPO, error)
+	UpdateWebhook(webhook *WebhookPO) error
+	DeleteWebhook(id int) error
 }

@@ -38,69 +38,33 @@ func NewWebhookService(db database.BaseDBManager) *WebhookService {
 	}
 }
 
-func (ws *WebhookService) GetWebhookURLs() ([]string, error) {
-	urlsStr, err := ws.DB.GetMetadata("webhook_urls")
-	if err != nil {
-		return nil, err
-	}
-
-	var urls []string
-	if urlsStr == "" || urlsStr == "[]" {
-		return urls, nil
-	}
-
-	err = json.Unmarshal([]byte(urlsStr), &urls)
-	if err != nil {
-		return nil, err
-	}
-
-	return urls, nil
+func (ws *WebhookService) GetWebhooks() ([]database.WebhookPO, error) {
+	return ws.DB.GetWebhooks()
 }
 
-func (ws *WebhookService) SetWebhookURLs(urls []string) error {
-	urlsBytes, err := json.Marshal(urls)
-	if err != nil {
-		return err
+func (ws *WebhookService) AddWebhook(name, url string) (*database.WebhookPO, error) {
+	webhook := &database.WebhookPO{
+		Name:      name,
+		URL:       url,
+		Enabled:   true,
+		CreatedAt: time.Now(),
 	}
 
-	return ws.DB.SetMetadata("webhook_urls", string(urlsBytes))
+	err := ws.DB.AddWebhook(webhook)
+	return webhook, err
 }
 
-func (ws *WebhookService) AddWebhookURL(url string) error {
-	urls, err := ws.GetWebhookURLs()
-	if err != nil {
-		return err
-	}
-
-	for _, existingURL := range urls {
-		if existingURL == url {
-			return fmt.Errorf("webhook URL already exists")
-		}
-	}
-
-	urls = append(urls, url)
-	return ws.SetWebhookURLs(urls)
+func (ws *WebhookService) UpdateWebhook(webhook *database.WebhookPO) error {
+	return ws.DB.UpdateWebhook(webhook)
 }
 
-func (ws *WebhookService) RemoveWebhookURL(url string) error {
-	urls, err := ws.GetWebhookURLs()
-	if err != nil {
-		return err
-	}
-
-	var newURLs []string
-	for _, existingURL := range urls {
-		if existingURL != url {
-			newURLs = append(newURLs, existingURL)
-		}
-	}
-
-	return ws.SetWebhookURLs(newURLs)
+func (ws *WebhookService) DeleteWebhook(id int) error {
+	return ws.DB.DeleteWebhook(id)
 }
 
 func (ws *WebhookService) TriggerPostCreated(post *database.PostPO) error {
-	webhookURLs, err := ws.GetWebhookURLs()
-	if err != nil || len(webhookURLs) == 0 {
+	webhooks, err := ws.GetWebhooks()
+	if err != nil || len(webhooks) == 0 {
 		return nil
 	}
 
@@ -118,10 +82,12 @@ func (ws *WebhookService) TriggerPostCreated(post *database.PostPO) error {
 		},
 	}
 
-	for _, webhookURL := range webhookURLs {
-		go func(url string) {
-			ws.sendWebhook(url, event)
-		}(webhookURL)
+	for _, webhook := range webhooks {
+		if webhook.Enabled {
+			go func(url string) {
+				ws.sendWebhook(url, event)
+			}(webhook.URL)
+		}
 	}
 
 	return nil

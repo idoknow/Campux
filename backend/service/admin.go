@@ -61,3 +61,23 @@ func (as *AdminService) IsInit() (bool, error) {
 
 	return total != 0, nil
 }
+
+func (as *AdminService) AddWebhook(name, url string) (*database.WebhookPO, error) {
+	webhook := &database.WebhookPO{
+		Name:      name,
+		URL:       url,
+		Enabled:   true,
+		CreatedAt: util.GetCSTTime(),
+	}
+
+	err := as.DB.AddWebhook(webhook)
+	return webhook, err
+}
+
+func (as *AdminService) GetWebhooks() ([]database.WebhookPO, error) {
+	return as.DB.GetWebhooks()
+}
+
+func (as *AdminService) DeleteWebhook(id int) error {
+	return as.DB.DeleteWebhook(id)
+}

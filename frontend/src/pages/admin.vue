@@ -129,26 +129,34 @@
         <v-window-item value="5">
             <div style="padding: 16px;">
                 <v-btn color="primary" @click="getWebhookConfig" :loading="webhookRefreshing">刷新</v-btn>
-                <v-btn color="primary" style="margin-inline: 0.8rem;" @click="saveWebhookConfig" :loading="webhookSaving">保存</v-btn>
                 
                 <div style="margin-top: 2rem;">
                     <v-row>
-                        <v-col cols="10">
+                        <v-col cols="4">
+                            <v-text-field 
+                                v-model="newWebhookName" 
+                                label="Webhook 名称" 
+                                variant="solo"
+                                placeholder="例如：通知服务"
+                                @keyup.enter="addWebhook"
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="6">
                             <v-text-field 
                                 v-model="newWebhookUrl" 
-                                label="添加新的 Webhook URL" 
+                                label="Webhook URL" 
                                 variant="solo"
                                 placeholder="https://your-webhook-endpoint.com/webhook"
                                 hint="当新稿件创建时，系统将向此 URL 发送 POST 请求"
                                 persistent-hint
-                                @keyup.enter="addWebhookUrl"
+                                @keyup.enter="addWebhook"
                             ></v-text-field>
                         </v-col>
                         <v-col cols="2">
                             <v-btn 
                                 color="primary" 
-                                @click="addWebhookUrl" 
-                                :disabled="!newWebhookUrl.trim()"
+                                @click="addWebhook" 
+                                :disabled="!newWebhookUrl.trim() || !newWebhookName.trim()"
                                 style="height: 56px;"
                             >
                                 添加
@@ -156,21 +164,29 @@
                         </v-col>
                     </v-row>
                     
-                    <v-list v-if="webhookConfig.urls.length > 0" style="margin-top: 1rem;">
+                    <v-list v-if="webhookConfig.webhooks.length > 0" style="margin-top: 1rem;">
                         <v-list-item 
-                            v-for="(url, index) in webhookConfig.urls" 
-                            :key="index"
+                            v-for="webhook in webhookConfig.webhooks" 
+                            :key="webhook.id"
                             style="border: 1px solid #e0e0e0; margin-bottom: 8px; border-radius: 4px;"
                         >
                             <v-list-item-content>
-                                <v-list-item-title>{{ url }}</v-list-item-title>
+                                <v-list-item-title>{{ webhook.name }}</v-list-item-title>
+                                <v-list-item-subtitle>{{ webhook.url }}</v-list-item-subtitle>
                             </v-list-item-content>
                             <v-list-item-action>
+                                <v-chip 
+                                    :color="webhook.enabled ? 'success' : 'error'" 
+                                    size="small" 
+                                    style="margin-right: 8px;"
+                                >
+                                    {{ webhook.enabled ? '启用' : '禁用' }}
+                                </v-chip>
                                 <v-btn 
                                     color="error" 
                                     variant="text" 
                                     size="small"
-                                    @click="removeWebhookUrl(index)"
+                                    @click="deleteWebhook(webhook.id)"
                                 >
                                     删除
                                 </v-btn>
@@ -179,12 +195,12 @@
                     </v-list>
                     
                     <v-alert 
-                        v-if="webhookConfig.urls.length === 0" 
+                        v-if="webhookConfig.webhooks.length === 0" 
                         type="info" 
                         variant="outlined"
                         style="margin-top: 1rem;"
                     >
-                        暂无配置的 Webhook URL
+                        暂无配置的 Webhook
                     </v-alert>
                     
                     <v-card style="margin-top: 1rem;" variant="outlined">
@@ -274,8 +290,9 @@ export default {
             metadataListRefreshing: false,
             saveMetadataLoading: false,
             webhookConfig: {
-                urls: []
+                webhooks: []
             },
+            newWebhookName: '',
             newWebhookUrl: '',
             webhookRefreshing: false,
             webhookSaving: false,
@@ -574,7 +591,7 @@ export default {
             this.$axios.get('/v1/admin/get-webhook-config')
                 .then(res => {
                     if (res.data.code === 0) {
-                        this.webhookConfig.urls = res.data.data.webhook_urls || []
+                        this.webhookConfig.webhooks = res.data.data.webhooks || []
                     } else {
                         this.toast('获取 Webhook 配置失败：' + res.data.msg)
                     }
@@ -588,20 +605,28 @@ export default {
                 })
         },
         
-        saveWebhookConfig() {
+        addWebhook() {
+            const name = this.newWebhookName.trim()
+            const url = this.newWebhookUrl.trim()
+            if (!name || !url) return
+            
             this.webhookSaving = true
-            this.$axios.post('/v1/admin/set-webhook-config', {
-                webhook_urls: this.webhookConfig.urls
+            this.$axios.post('/v1/admin/add-webhook', {
+                name: name,
+                url: url
             })
                 .then(res => {
                     if (res.data.code === 0) {
-                        this.toast('保存 Webhook 配置成功', 'success')
+                        this.toast('添加 Webhook 成功', 'success')
+                        this.newWebhookName = ''
+                        this.newWebhookUrl = ''
+                        this.getWebhookConfig()
                     } else {
-                        this.toast('保存 Webhook 配置失败：' + res.data.msg)
+                        this.toast('添加 Webhook 失败：' + res.data.msg)
                     }
                 })
                 .catch(err => {
-                    this.toast('保存 Webhook 配置失败：' + err)
+                    this.toast('添加 Webhook 失败：' + err)
                     console.error(err)
                 })
                 .finally(() => {
@@ -609,23 +634,24 @@ export default {
                 })
         },
         
-        addWebhookUrl() {
-            const url = this.newWebhookUrl.trim()
-            if (!url) return
-            
-            if (this.webhookConfig.urls.includes(url)) {
-                this.toast('该 Webhook URL 已存在')
-                return
-            }
-            
-            this.webhookConfig.urls.push(url)
-            this.newWebhookUrl = ''
-            this.toast('Webhook URL 已添加，请点击保存按钮保存配置', 'info')
-        },
-        
-        removeWebhookUrl(index) {
-            this.webhookConfig.urls.splice(index, 1)
-            this.toast('Webhook URL 已移除，请点击保存按钮保存配置', 'info')
+        deleteWebhook(id) {
+            this.webhookSaving = true
+            this.$axios.delete(`/v1/admin/delete-webhook/${id}`)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('删除 Webhook 成功', 'success')
+                        this.getWebhookConfig()
+                    } else {
+                        this.toast('删除 Webhook 失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('删除 Webhook 失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.webhookSaving = false
+                })
         }
     }
 }

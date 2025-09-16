@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strconv"
+
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
@@ -29,7 +31,8 @@ func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.Ac
 	group.GET("/init", ar.IsInit)
 	group.POST("/init", ar.Init)
 	group.GET("/get-webhook-config", ar.GetWebhookConfig)
-	group.POST("/set-webhook-config", ar.SetWebhookConfig)
+	group.POST("/add-webhook", ar.AddWebhook)
+	group.DELETE("/delete-webhook/:id", ar.DeleteWebhook)
 
 	return ar
 }
@@ -192,18 +195,18 @@ func (ar *AdminRouter) GetWebhookConfig(c *gin.Context) {
 		return
 	}
 
-	webhookURLs, err := ar.WebhookService.GetWebhookURLs()
+	webhooks, err := ar.AdminService.GetWebhooks()
 	if err != nil {
 		ar.Fail(c, 1, err.Error())
 		return
 	}
 
 	ar.Success(c, gin.H{
-		"webhook_urls": webhookURLs,
+		"webhooks": webhooks,
 	})
 }
 
-func (ar *AdminRouter) SetWebhookConfig(c *gin.Context) {
+func (ar *AdminRouter) AddWebhook(c *gin.Context) {
 	uin, err := ar.Auth(c, UserOnly)
 	if err != nil {
 		return
@@ -217,7 +220,8 @@ func (ar *AdminRouter) SetWebhookConfig(c *gin.Context) {
 	}
 
 	var body struct {
-		WebhookURLs []string `json:"webhook_urls"`
+		Name string `json:"name"`
+		URL  string `json:"url"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -225,7 +229,36 @@ func (ar *AdminRouter) SetWebhookConfig(c *gin.Context) {
 		return
 	}
 
-	err = ar.WebhookService.SetWebhookURLs(body.WebhookURLs)
+	webhook, err := ar.AdminService.AddWebhook(body.Name, body.URL)
+	if err != nil {
+		ar.Fail(c, 2, err.Error())
+		return
+	}
+
+	ar.Success(c, webhook)
+}
+
+func (ar *AdminRouter) DeleteWebhook(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		ar.Fail(c, 1, "Invalid webhook ID")
+		return
+	}
+
+	err = ar.AdminService.DeleteWebhook(id)
 	if err != nil {
 		ar.Fail(c, 2, err.Error())
 		return

@@ -48,10 +48,6 @@ var PresetMetadata = []Metadata{
 		Key:   "beianhao",
 		Value: "桂ICP备1145141919号-1",
 	},
-	{
-		Key:   "webhook_urls",
-		Value: "[]",
-	},
 }
 
 type UserGroup string
@@ -140,4 +136,12 @@ type OAuthAppPO struct {
 	ClientID     string    `json:"client_id" bson:"client_id" gorm:"type:varchar(256)"`         // 客户端ID
 	ClientSecret string    `json:"client_secret" bson:"client_secret" gorm:"type:varchar(256)"` // 客户端密钥
 	CreatedAt    time.Time `json:"created_at" bson:"created_at" gorm:"autoCreateTime"`          // CST时间
+}
+
+type WebhookPO struct {
+	ID        int       `json:"id" bson:"id" gorm:"primary_key;auto_increment"`     // Webhook ID
+	Name      string    `json:"name" bson:"name" gorm:"type:varchar(256)"`          // Webhook名称
+	URL       string    `json:"url" bson:"url" gorm:"type:varchar(512)"`            // Webhook URL
+	Enabled   bool      `json:"enabled" bson:"enabled" gorm:"default:true"`         // 是否启用
+	CreatedAt time.Time `json:"created_at" bson:"created_at" gorm:"autoCreateTime"` // CST时间
 }
