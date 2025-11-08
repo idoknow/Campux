@@ -14,17 +14,19 @@ import (
 
 type PostService struct {
 	CommonService
-	OSS oss.BaseOSSProvider
-	MQ  mq.RedisStreamMQ
+	OSS            oss.BaseOSSProvider
+	MQ             mq.RedisStreamMQ
+	WebhookService *WebhookService
 }
 
-func NewPostService(db database.BaseDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ) *PostService {
+func NewPostService(db database.BaseDBManager, oss oss.BaseOSSProvider, mq mq.RedisStreamMQ, ws *WebhookService) *PostService {
 	return &PostService{
 		CommonService: CommonService{
 			DB: db,
 		},
-		OSS: oss,
-		MQ:  mq,
+		OSS:            oss,
+		MQ:             mq,
+		WebhookService: ws,
 	}
 }
 
@@ -169,6 +171,12 @@ func (ps *PostService) UserCancelPost(uin int64, id int) error {
 		return err
 	}
 
+	// Notify webhooks
+	post, _ = ps.DB.GetPost(id)
+	if post != nil && ps.WebhookService != nil {
+		go ps.WebhookService.NotifyWebhooks("post_cancelled", post)
+	}
+
 	// 记录日志
 	err = ps.DB.AddPostLog(
 		&database.PostLogPO{
@@ -237,7 +245,23 @@ func (ps *PostService) PostReview(uin int64, id int, option database.ReviewOptio
 		return err
 	}
 
-	return ps.DB.UpdatePostStatus(id, newStat)
+	err = ps.DB.UpdatePostStatus(id, newStat)
+
+	if err != nil {
+		return err
+	}
+
+	// Notify webhooks
+	updatedPost, _ := ps.DB.GetPost(id)
+	if updatedPost != nil && ps.WebhookService != nil {
+		eventName := "post_approved"
+		if newStat == database.POST_STATUS_REJECTED {
+			eventName = "post_rejected"
+		}
+		go ps.WebhookService.NotifyWebhooks(eventName, updatedPost)
+	}
+
+	return nil
 }
 
 // 获取稿件日志

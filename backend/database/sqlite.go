@@ -29,6 +29,7 @@ func NewSQLiteDBManager() *SQLiteDBManager {
 	db.AutoMigrate(&Metadata{})
 	db.AutoMigrate(&BanInfo{})
 	db.AutoMigrate(&OAuthAppPO{})
+	db.AutoMigrate(&WebhookPO{})
 
 	m := &SQLiteDBManager{
 		Client:   db,
@@ -402,4 +403,21 @@ func (m *SQLiteDBManager) GetOAuth2Apps() ([]OAuthAppPO, error) {
 
 func (m *SQLiteDBManager) DeleteOAuth2App(clientID string) error {
 	return m.Client.Where("client_id = ?", clientID).Delete(&OAuthAppPO{}).Error
+}
+
+func (m *SQLiteDBManager) AddWebhook(webhook *WebhookPO) error {
+	return m.Client.Create(webhook).Error
+}
+
+func (m *SQLiteDBManager) GetWebhooks() ([]WebhookPO, error) {
+	var webhooks []WebhookPO
+	err := m.Client.Find(&webhooks).Error
+	if err != nil {
+		return nil, err
+	}
+	return webhooks, nil
+}
+
+func (m *SQLiteDBManager) DeleteWebhook(id int) error {
+	return m.Client.Where("id = ?", id).Delete(&WebhookPO{}).Error
 }

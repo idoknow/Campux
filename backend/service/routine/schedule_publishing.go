@@ -5,10 +5,11 @@ import (
 
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/mq"
+	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/RockChinQ/Campux/backend/util"
 )
 
-func SchedulePublishing(db database.BaseDBManager, msq mq.RedisStreamMQ) {
+func SchedulePublishing(db database.BaseDBManager, msq mq.RedisStreamMQ, ws *service.WebhookService) {
 	// 从数据库中查询出所有待发布的稿件
 	// 遍历稿件, 发布到消息队列
 	// 更新稿件状态
@@ -42,6 +43,11 @@ func SchedulePublishing(db database.BaseDBManager, msq mq.RedisStreamMQ) {
 		if err != nil {
 			fmt.Println(err)
 			continue
+		}
+
+		// Notify webhooks
+		if ws != nil {
+			go ws.NotifyWebhooks("post_in_queue", &post)
 		}
 	}
 }

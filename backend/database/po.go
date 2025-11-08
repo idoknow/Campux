@@ -137,3 +137,9 @@ type OAuthAppPO struct {
 	ClientSecret string    `json:"client_secret" bson:"client_secret" gorm:"type:varchar(256)"` // 客户端密钥
 	CreatedAt    time.Time `json:"created_at" bson:"created_at" gorm:"autoCreateTime"`          // CST时间
 }
+
+type WebhookPO struct {
+	ID        int       `json:"id" bson:"id" gorm:"primary_key;auto_increment"`         // Webhook ID
+	URL       string    `json:"url" bson:"url" gorm:"type:varchar(512);unique"`         // Webhook URL
+	CreatedAt time.Time `json:"created_at" bson:"created_at" gorm:"autoCreateTime"`     // CST时间
+}
