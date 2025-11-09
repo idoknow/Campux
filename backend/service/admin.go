@@ -70,7 +70,8 @@ func (as *AdminService) AddWebhook(name, url string) (*database.WebhookPO, error
 		CreatedAt: util.GetCSTTime(),
 	}
 
-	err := as.DB.AddWebhook(webhook)
+	id, err := as.DB.AddWebhook(webhook)
+	webhook.ID = id
 	return webhook, err
 }
 

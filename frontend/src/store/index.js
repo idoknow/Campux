@@ -4,7 +4,7 @@ import axios from 'axios'
 
 export default createStore({
     state: {
-        base_url: "http://localhost:8081",
+        base_url: "http://localhost:8082",
         metadata: {
             "banner": "",
             "popup_announcement": "",

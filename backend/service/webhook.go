@@ -42,26 +42,6 @@ func (ws *WebhookService) GetWebhooks() ([]database.WebhookPO, error) {
 	return ws.DB.GetWebhooks()
 }
 
-func (ws *WebhookService) AddWebhook(name, url string) (*database.WebhookPO, error) {
-	webhook := &database.WebhookPO{
-		Name:      name,
-		URL:       url,
-		Enabled:   true,
-		CreatedAt: time.Now(),
-	}
-
-	err := ws.DB.AddWebhook(webhook)
-	return webhook, err
-}
-
-func (ws *WebhookService) UpdateWebhook(webhook *database.WebhookPO) error {
-	return ws.DB.UpdateWebhook(webhook)
-}
-
-func (ws *WebhookService) DeleteWebhook(id int) error {
-	return ws.DB.DeleteWebhook(id)
-}
-
 func (ws *WebhookService) TriggerPostCreated(post *database.PostPO) error {
 	webhooks, err := ws.GetWebhooks()
 	if err != nil || len(webhooks) == 0 {
@@ -100,7 +80,7 @@ func (ws *WebhookService) sendWebhook(url string, event WebhookEvent) error {
 	}
 
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 120 * time.Second,
 	}
 
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(payload))

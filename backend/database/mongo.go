@@ -25,7 +25,8 @@ const (
 type MongoDBManager struct {
 	Client *mongo.Client
 
-	PostLock *sync.Mutex
+	PostLock    *sync.Mutex
+	WebhookLock *sync.Mutex
 }
 
 func NewMongoDBManager() *MongoDBManager {
@@ -38,8 +39,9 @@ func NewMongoDBManager() *MongoDBManager {
 	}
 
 	m := &MongoDBManager{
-		Client:   client,
-		PostLock: &sync.Mutex{},
+		Client:      client,
+		PostLock:    &sync.Mutex{},
+		WebhookLock: &sync.Mutex{},
 	}
 
 	// 检查连接
@@ -605,9 +607,40 @@ func (m *MongoDBManager) DeleteOAuth2App(clientID string) error {
 	return err
 }
 
-func (m *MongoDBManager) AddWebhook(webhook *WebhookPO) error {
-	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(WEBHOOK_COLLECTION).InsertOne(context.TODO(), webhook)
-	return err
+func (m *MongoDBManager) GetMaxWebhookID() (int, error) {
+	var webhook struct {
+		ID int `bson:"id"`
+	}
+	err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(WEBHOOK_COLLECTION).FindOne(context.TODO(), bson.M{}, options.FindOne().SetSort(bson.M{"id": -1})).Decode(&webhook)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return webhook.ID, nil
+}
+
+func (m *MongoDBManager) AddWebhook(webhook *WebhookPO) (int, error) {
+	m.WebhookLock.Lock()
+
+	id, err := m.GetMaxWebhookID()
+	if err != nil {
+		m.WebhookLock.Unlock()
+		return 0, err
+	}
+	id += 1
+	webhook.ID = id
+
+	_, err = m.Client.Database(viper.GetString("database.mongo.db")).Collection(WEBHOOK_COLLECTION).InsertOne(context.TODO(), webhook)
+	if err != nil {
+		m.WebhookLock.Unlock()
+		return 0, err
+	}
+
+	m.WebhookLock.Unlock()
+
+	return id, nil
 }
 
 func (m *MongoDBManager) GetWebhook(id int) (*WebhookPO, error) {

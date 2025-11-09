@@ -219,20 +219,20 @@ func (m *SQLiteDBManager) CountPost() (int, error) {
 	return int(count), err
 }
 
-// 获取当前最大的post id
-func (m *SQLiteDBManager) GetMaxPostID() (int, error) {
-	// 改成gorm
-	var post PostPO
-	err := m.Client.Model(&PostPO{}).Order("id desc").First(&post).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return 0, nil
-		}
-		return 0, err
-	}
+// // 获取当前最大的post id
+// func (m *SQLiteDBManager) GetMaxPostID() (int, error) {
+// 	// 改成gorm
+// 	var post PostPO
+// 	err := m.Client.Model(&PostPO{}).Order("id desc").First(&post).Error
+// 	if err != nil {
+// 		if err == gorm.ErrRecordNotFound {
+// 			return 0, nil
+// 		}
+// 		return 0, err
+// 	}
 
-	return post.ID, nil
-}
+// 	return post.ID, nil
+// }
 
 func (m *SQLiteDBManager) AddPost(post *PostPO) (int, error) {
 	// 改成gorm
@@ -405,8 +405,14 @@ func (m *SQLiteDBManager) DeleteOAuth2App(clientID string) error {
 	return m.Client.Where("client_id = ?", clientID).Delete(&OAuthAppPO{}).Error
 }
 
-func (m *SQLiteDBManager) AddWebhook(webhook *WebhookPO) error {
-	return m.Client.Create(webhook).Error
+func (m *SQLiteDBManager) AddWebhook(webhook *WebhookPO) (int, error) {
+
+	err := m.Client.Create(webhook).Error
+	if err != nil {
+		return 0, err
+	}
+
+	return webhook.ID, nil
 }
 
 func (m *SQLiteDBManager) GetWebhook(id int) (*WebhookPO, error) {

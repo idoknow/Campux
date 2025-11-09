@@ -22,7 +22,7 @@ type BaseDBManager interface {
 	UpdateUserGroup(uin int64, userGroup UserGroup) error
 	GetCurrentBanInfo(uin int64) (*BanInfo, error)
 	CountPost() (int, error)
-	GetMaxPostID() (int, error)
+	// GetMaxPostID() (int, error)
 	AddPost(post *PostPO) (int, error)
 	AddPostLog(log *PostLogPO) error
 	GetPostLogs(postID int) ([]PostLogPO, error)
@@ -43,7 +43,7 @@ type BaseDBManager interface {
 	GetOAuth2AppByName(name string) (*OAuthAppPO, error)
 	GetOAuth2Apps() ([]OAuthAppPO, error)
 	DeleteOAuth2App(clientID string) error
-	AddWebhook(webhook *WebhookPO) error
+	AddWebhook(webhook *WebhookPO) (int, error)
 	GetWebhook(id int) (*WebhookPO, error)
 	GetWebhooks() ([]WebhookPO, error)
 	UpdateWebhook(webhook *WebhookPO) error
