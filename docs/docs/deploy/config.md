@@ -86,7 +86,7 @@ service:
 
 #### 配置文件
 
-CampuxBot 的配置文件位于 `Campux/docker/campuxbot/config.json`。修改后请重启容器：  
+CampuxBot 的配置文件位于 `Campux/docker/volumes/campuxbot/config.json`。修改后请重启容器：  
 注意，json不支持注释，请勿直接复制下方示例。
 
 ```json
