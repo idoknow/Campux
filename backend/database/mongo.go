@@ -19,6 +19,7 @@ const (
 	METADATA_COLLECTION     = "metadata"
 	BAN_LIST_COLLECTION     = "ban_list"
 	OAUTH_APP_COLLECTION    = "oauth_app"
+	WEBHOOK_COLLECTION      = "webhook"
 )
 
 type MongoDBManager struct {
@@ -601,5 +602,31 @@ func (m *MongoDBManager) GetOAuth2Apps() ([]OAuthAppPO, error) {
 
 func (m *MongoDBManager) DeleteOAuth2App(clientID string) error {
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).DeleteOne(context.TODO(), bson.M{"client_id": clientID})
+	return err
+}
+
+func (m *MongoDBManager) AddWebhook(webhook *WebhookPO) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(WEBHOOK_COLLECTION).InsertOne(context.TODO(), webhook)
+	return err
+}
+
+func (m *MongoDBManager) GetWebhooks() ([]WebhookPO, error) {
+	var webhooks []WebhookPO
+	cursor, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(WEBHOOK_COLLECTION).Find(context.TODO(), bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &webhooks)
+	if err != nil {
+		return nil, err
+	}
+
+	return webhooks, nil
+}
+
+func (m *MongoDBManager) DeleteWebhook(id int) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(WEBHOOK_COLLECTION).DeleteOne(context.TODO(), bson.M{"id": id})
 	return err
 }

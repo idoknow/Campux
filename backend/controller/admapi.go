@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
@@ -10,12 +12,14 @@ type AdminRouter struct {
 	APIRouter
 	AdminService   service.AdminService
 	AccountService service.AccountService
+	WebhookService service.WebhookService
 }
 
-func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.AccountService) *AdminRouter {
+func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.AccountService, ws service.WebhookService) *AdminRouter {
 	ar := &AdminRouter{
 		AdminService:   as,
 		AccountService: acs,
+		WebhookService: ws,
 	}
 
 	group := rg.Group("/admin")
@@ -24,6 +28,9 @@ func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.Ac
 	group.POST("/add-oauth2-app", ar.AddOAuth2App)
 	group.GET("/get-oauth2-apps", ar.GetOAuth2AppList)
 	group.DELETE("/del-oauth2-app/:id", ar.DeleteOAuth2App)
+	group.POST("/add-webhook", ar.AddWebhook)
+	group.GET("/get-webhooks", ar.GetWebhookList)
+	group.DELETE("/del-webhook/:id", ar.DeleteWebhook)
 	group.GET("/init", ar.IsInit)
 	group.POST("/init", ar.Init)
 
@@ -169,6 +176,108 @@ func (ar *AdminRouter) Init(c *gin.Context) {
 
 	if err != nil {
 		ar.Fail(c, 4, err.Error())
+		return
+	}
+
+	ar.Success(c, nil)
+}
+
+// AddWebhook adds a new webhook URL
+func (ar *AdminRouter) AddWebhook(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	var body struct {
+		URL string `json:"url"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	if body.URL == "" {
+		ar.Fail(c, 2, "URL 不能为空")
+		return
+	}
+
+	err = ar.WebhookService.AddWebhook(body.URL)
+
+	if err != nil {
+		ar.Fail(c, 3, err.Error())
+		return
+	}
+
+	ar.Success(c, nil)
+}
+
+// GetWebhookList retrieves all webhooks
+func (ar *AdminRouter) GetWebhookList(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	webhooks, err := ar.WebhookService.GetWebhooks()
+
+	if err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	ar.Success(c, gin.H{
+		"list": webhooks,
+	})
+}
+
+// DeleteWebhook deletes a webhook by ID
+func (ar *AdminRouter) DeleteWebhook(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	webhookID := c.Param("id")
+
+	// Convert to int
+	var id int
+	_, err = fmt.Sscanf(webhookID, "%d", &id)
+
+	if err != nil {
+		ar.Fail(c, 1, "无效的 Webhook ID")
+		return
+	}
+
+	err = ar.WebhookService.DeleteWebhook(id)
+
+	if err != nil {
+		ar.Fail(c, 2, err.Error())
 		return
 	}
 

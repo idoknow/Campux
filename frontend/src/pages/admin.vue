@@ -9,6 +9,7 @@
         <v-tab value="2">🚫 封禁记录</v-tab>
         <v-tab value="3" v-if="$store.state.account.userGroup === 'admin' || $store.state.account.userGroup === 'member'">🧩 元数据</v-tab>
         <v-tab value="4" v-if="$store.state.account.userGroup === 'admin'">🔑 OAuth 2 应用</v-tab>
+        <v-tab value="5" v-if="$store.state.account.userGroup === 'admin'">🪝 Webhook</v-tab>
     </v-tabs>
 
     <v-divider id="hdivider"></v-divider>
@@ -91,6 +92,22 @@
                 </div>
             </div>
         </v-window-item>
+        <v-window-item value="5">
+            <div style="padding: 16px;">
+                <!--操作按钮-->
+                <div id="webhookOps">
+                    <v-btn color="primary" @click="showWebhookCreateDialog = true">添加 Webhook</v-btn>
+                    <v-btn color="primary" style="margin-inline: 0.8rem;" @click="getWebhooks" :loading="webhookRefreshing">刷新</v-btn>
+                </div>
+
+                <div
+                    style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 2rem">
+                    <WebhookCard v-for="w in webhooks" :key="w.id" :webhook="w" style="margin-top: 16px"
+                        @toast="toast" @deleteWebhook="deleteWebhook" />
+
+                </div>
+            </div>
+        </v-window-item>
     </v-window>
 
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="snackbar.timeout" style="margin-bottom: 64px">
@@ -124,12 +141,26 @@
         </v-card>
     </v-dialog>
 
+    <v-dialog v-model="showWebhookCreateDialog" width="auto">
+        <v-card>
+            <v-card-title>添加 Webhook</v-card-title>
+            <v-card-text>
+                <v-text-field v-model="newWebhook.url" label="Webhook URL" variant="solo" placeholder="https://example.com/webhook"></v-text-field>
+            </v-card-text>
+            <v-card-actions>
+                <v-btn text @click="showWebhookCreateDialog = false">取消</v-btn>
+                <v-btn color="primary" @click="createWebhook">确定</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
 </template>
 
 <script>
 import AccountCard from '@/components/AccountCard.vue';
 import BanRecordCard from '@/components/BanRecordCard.vue';
 import OAuthAppCard from '@/components/OAuthAppCard.vue';
+import WebhookCard from '@/components/WebhookCard.vue';
 
 import EmojiPicker from 'vue3-emoji-picker'
 import 'vue3-emoji-picker/css'
@@ -139,6 +170,7 @@ export default {
         AccountCard,
         BanRecordCard,
         OAuthAppCard,
+        WebhookCard,
         EmojiPicker
     },
     data() {
@@ -182,6 +214,12 @@ export default {
                 name: '',
                 emoji: '🥰',
             },
+            webhooks: [],
+            webhookRefreshing: false,
+            showWebhookCreateDialog: false,
+            newWebhook: {
+                url: '',
+            },
             metadataList: [],
             metadataListRefreshing: false,
             saveMetadataLoading: false,
@@ -194,10 +232,12 @@ export default {
                 this.getAccounts()
             } else if (this.tab === '2') {
                 this.getBanList()
-            } else if (this.tab === '4') {
-                this.getOAuthApps()
             } else if (this.tab === '3') {
                 this.getMetadataList()
+            } else if (this.tab === '4') {
+                this.getOAuthApps()
+            } else if (this.tab === '5') {
+                this.getWebhooks()
             }
         }
     },
@@ -470,6 +510,63 @@ export default {
                 })
                 .finally(() => {
                     this.saveMetadataLoading = false
+                })
+        },
+        getWebhooks() {
+            this.webhookRefreshing = true
+
+            this.$axios.get('/v1/admin/get-webhooks')
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.webhooks = res.data.data.list
+                        console.log(this.webhooks)
+                    } else {
+                        this.toast('获取 Webhook 失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('获取 Webhook 失败：' + err)
+                    console.error(err)
+                })
+                .finally(() => {
+                    this.webhookRefreshing = false
+                })
+        },
+        createWebhook() {
+            if (this.newWebhook.url === '') {
+                this.toast('URL 不能为空')
+                return
+            }
+
+            this.$axios.post('/v1/admin/add-webhook', this.newWebhook)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('创建成功', 'success')
+                        this.getWebhooks()
+                        this.showWebhookCreateDialog = false
+                        this.newWebhook.url = ''
+                    } else {
+                        this.toast('创建失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('创建失败：' + err)
+                    console.error(err)
+                })
+        },
+        deleteWebhook(webhookID) {
+            this.$axios.delete('/v1/admin/del-webhook/' + webhookID)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('删除成功', 'success')
+                        this.getWebhooks()
+                    } else {
+                        this.toast('删除失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('删除失败：' + err)
+                    console.error(err)
                 })
         }
     }

@@ -47,24 +47,26 @@ func NewApplication() *Application {
 	msq := mq.NewRedisStreamMQ()
 
 	as := service.NewAccountService(db)
-	ps := service.NewPostService(db, fs, *msq)
+	ws := service.NewWebhookService(db)
+	ps := service.NewPostService(db, fs, *msq, ws)
 	ms := service.NewMiscService(db)
 	ads := service.NewAdminService(db)
 	oas := service.NewOAuth2Service(db, *msq)
 
-	err := ScheduleRoutines(db, *msq)
+	err := ScheduleRoutines(db, *msq, ws)
 	if err != nil {
 		panic(err)
 	}
 
 	return &Application{
-		API: controller.NewApiController(*as, *ps, *ms, *ads, *oas),
+		API: controller.NewApiController(*as, *ps, *ms, *ads, *oas, *ws),
 	}
 }
 
 func ScheduleRoutines(
 	db database.BaseDBManager,
 	msq mq.RedisStreamMQ,
+	ws *service.WebhookService,
 ) error {
 	s, err := gocron.NewScheduler()
 	if err != nil {
@@ -79,11 +81,11 @@ func ScheduleRoutines(
 	jobs := []Job{
 		{
 			Duration: 20 * time.Second,
-			Task:     gocron.NewTask(routine.SchedulePublishing, db, msq),
+			Task:     gocron.NewTask(routine.SchedulePublishing, db, msq, ws),
 		},
 		{
 			Duration: 20 * time.Second,
-			Task:     gocron.NewTask(routine.ConfirmPosted, db, msq),
+			Task:     gocron.NewTask(routine.ConfirmPosted, db, msq, ws),
 		},
 	}
 
