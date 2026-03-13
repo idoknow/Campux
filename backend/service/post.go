@@ -237,7 +237,13 @@ func (ps *PostService) PostReview(uin int64, id int, option database.ReviewOptio
 		return err
 	}
 
-	return ps.DB.UpdatePostStatus(id, newStat)
+	err = ps.DB.UpdatePostStatus(id, newStat)
+	if err != nil {
+		return err
+	}
+
+	ps.MQ.PostReview(id)
+	return nil
 }
 
 // 获取稿件日志
