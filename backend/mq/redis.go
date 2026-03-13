@@ -14,6 +14,7 @@ type RedisStreamMQ struct {
 	PublishPostStream string
 	NewPostStream     string
 	PostCancelStream  string
+	PostReviewStream  string
 
 	PublishStatusHash string
 	Oauth2CodeHash    string
@@ -31,6 +32,7 @@ func NewRedisStreamMQ() *RedisStreamMQ {
 		PublishPostStream: viper.GetString("service.domain") + ".publish_post",
 		NewPostStream:     viper.GetString("service.domain") + ".new_post",
 		PostCancelStream:  viper.GetString("service.domain") + ".post_cancel",
+		PostReviewStream:  viper.GetString("service.domain") + ".post_review",
 		PublishStatusHash: viper.GetString("service.domain") + ".post_publish_status",
 		Oauth2CodeHash:    viper.GetString("service.domain") + ".oauth2_code",
 	}
@@ -39,6 +41,7 @@ func NewRedisStreamMQ() *RedisStreamMQ {
 	client.XGroupCreateMkStream(context.Background(), redis.PublishPostStream, "campux", "0")
 	client.XGroupCreateMkStream(context.Background(), redis.NewPostStream, "campux", "0")
 	client.XGroupCreateMkStream(context.Background(), redis.PostCancelStream, "campux", "0")
+	client.XGroupCreateMkStream(context.Background(), redis.PostReviewStream, "campux", "0")
 
 	return redis
 }
@@ -88,6 +91,16 @@ func (r *RedisStreamMQ) NewPost(postID int) error {
 func (r *RedisStreamMQ) PostCancel(postID int) error {
 	_, err := r.Client.XAdd(context.Background(), &redis.XAddArgs{
 		Stream: r.PostCancelStream,
+		Values: map[string]interface{}{
+			"post_id": postID,
+		},
+	}).Result()
+	return err
+}
+
+func (r *RedisStreamMQ) PostReview(postID int) error {
+	_, err := r.Client.XAdd(context.Background(), &redis.XAddArgs{
+		Stream: r.PostReviewStream,
 		Values: map[string]interface{}{
 			"post_id": postID,
 		},
