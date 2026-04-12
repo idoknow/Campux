@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"net/http"
+
 	"github.com/RockChinQ/Campux/backend/service"
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 type OAuth2Router struct {
@@ -21,6 +24,7 @@ func NewOAuth2Router(rg *gin.RouterGroup, oas service.OAuth2Service) *OAuth2Rout
 	group.GET("/get-app-info", oar.GetOAuth2AppInfo)
 	group.GET("/authorize", oar.Authorize)
 	group.POST("/get-access-token", oar.GetAccessToken)
+	group.POST("/token", oar.GetAccessTokenByOAuth2Spec)
 	group.GET("/get-user-info", oar.GetUserInfo)
 
 	return oar
@@ -107,6 +111,50 @@ func (oar *OAuth2Router) GetAccessToken(c *gin.Context) {
 
 	oar.Success(c, gin.H{
 		"access_token": ak,
+	})
+}
+
+func (oar *OAuth2Router) GetAccessTokenByOAuth2Spec(c *gin.Context) {
+	var body OAuth2TokenBody
+
+	if err := c.ShouldBind(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	if body.GrantType != "authorization_code" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "unsupported_grant_type",
+			"error_description": "grant_type must be authorization_code",
+		})
+		return
+	}
+
+	ak, err := oar.OAuth2Service.GetAccessToken(body.ClientID, body.ClientSecret, body.Code)
+
+	if err != nil {
+		if err == service.ErrOAuth2SecretNotMatch {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":             "invalid_client",
+				"error_description": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "invalid_grant",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token": ak,
+		"token_type":   "Bearer",
+		"expires_in":   viper.GetInt("oauth2.server.ak_expire"),
 	})
 }
 
