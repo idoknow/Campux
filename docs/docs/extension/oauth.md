@@ -53,6 +53,32 @@ https://demoapp.com/oauth2/callback?code=eyJhbGciOiJIUzI1NiIsInR5cCI6I
 
 DemoApp 的回调页面收到授权码后，向 Campux 请求访问令牌（建议使用后端请求）：
 
+#### 方式 A：标准 OAuth2 风格（推荐，兼容通用客户端）
+
+支持两种客户端认证方式：
+
+- 表单字段 `client_id` + `client_secret`
+- HTTP Basic 认证头 `Authorization: Basic base64(client_id:client_secret)`
+
+```
+POST https://campux.com/v1/oauth2/token
+Content-Type: application/x-www-form-urlencoded
+
+client_id=7RYtLq8VA45Fiprc&client_secret=851de2eb-3fbb-40cc-8354-92a9bdf97fed&code=eyJhbGciOiJIUzI1NiIsInR5cCI6I&grant_type=authorization_code&redirect_uri=https://demoapp.com/oauth2/callback
+```
+
+返回：
+
+```json
+{
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+    "token_type": "Bearer",
+    "expires_in": 2592000
+}
+```
+
+#### 方式 B：Campux 旧版接口（向后兼容）
+
 ```
 POST https://campux.com/v1/oauth2/get-access-token
 Content-Type: application/json

@@ -176,6 +176,23 @@ type OAuth2GetAccessTokenBody struct {
 	Code string `json:"code" binding:"required"`
 }
 
+type OAuth2TokenBody struct {
+	// 应用id
+	ClientID string `form:"client_id"`
+
+	// 应用密钥
+	ClientSecret string `form:"client_secret"`
+
+	// 授权码
+	Code string `form:"code" binding:"required"`
+
+	// 授权类型
+	GrantType string `form:"grant_type" binding:"required"`
+
+	// 回调地址
+	RedirectURI string `form:"redirect_uri" binding:"required"`
+}
+
 type SetMetadataBody struct {
 	// 键
 	Key string `json:"key" binding:"required"`
