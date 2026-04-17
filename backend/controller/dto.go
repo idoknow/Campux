@@ -178,10 +178,10 @@ type OAuth2GetAccessTokenBody struct {
 
 type OAuth2TokenBody struct {
 	// 应用id
-	ClientID string `form:"client_id" binding:"required"`
+	ClientID string `form:"client_id"`
 
 	// 应用密钥
-	ClientSecret string `form:"client_secret" binding:"required"`
+	ClientSecret string `form:"client_secret"`
 
 	// 授权码
 	Code string `form:"code" binding:"required"`
