@@ -4,7 +4,7 @@ import axios from 'axios'
 
 export default createStore({
     state: {
-        base_url: "",
+        base_url: "http://localhost:8081",
         metadata: {
             "banner": "",
             "popup_announcement": "",
@@ -121,7 +121,7 @@ export default createStore({
                                     console.log(res)
                                     if (res.data.code === 0) {
                                         this.state.account.uin = res.data.data.uin
-                                        this.state.account.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=100"
+                                        this.state.account.avatarUrl = "http://q1.qlogo.cn/g?b=qq&nk=" + res.data.data.uin + "&s=320"
                                         this.state.account.userGroup = res.data.data.user_group
                                         this.state.account.access = res.data.data.access
 
