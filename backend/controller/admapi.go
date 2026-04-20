@@ -22,6 +22,7 @@ func NewAdminRouter(rg *gin.RouterGroup, as service.AdminService, acs service.Ac
 
 	// bind routes
 	group.POST("/add-oauth2-app", ar.AddOAuth2App)
+	group.PUT("/update-oauth2-app", ar.UpdateOAuth2App)
 	group.GET("/get-oauth2-apps", ar.GetOAuth2AppList)
 	group.DELETE("/del-oauth2-app/:id", ar.DeleteOAuth2App)
 	group.GET("/init", ar.IsInit)
@@ -54,8 +55,8 @@ func (ar *AdminRouter) AddOAuth2App(c *gin.Context) {
 		return
 	}
 
-	// 创建OAuth2应用
-	app, err := ar.AdminService.AddOAuth2App(body.Name, body.Emoji)
+	// 创建OAuth2应用（包含回调地址）
+	app, err := ar.AdminService.AddOAuth2App(body.Name, body.Emoji, body.RedirectURIs)
 
 	if err != nil {
 		ar.Fail(c, 2, err.Error())
@@ -63,6 +64,36 @@ func (ar *AdminRouter) AddOAuth2App(c *gin.Context) {
 	}
 
 	ar.Success(c, app)
+}
+
+// 更新 OAuth2 应用（回调地址）
+func (ar *AdminRouter) UpdateOAuth2App(c *gin.Context) {
+	uin, err := ar.Auth(c, UserOnly)
+
+	if err != nil {
+		return
+	}
+
+	if !ar.AdminService.CheckUserGroup(uin, []database.UserGroup{
+		database.USER_GROUP_ADMIN,
+	}) {
+		ar.StatusCode(c, 401, "权限不足")
+		return
+	}
+
+	var body OAuth2AppUpdateBody
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		ar.Fail(c, 1, err.Error())
+		return
+	}
+
+	if err := ar.AdminService.UpdateOAuth2App(body.ClientID, body.RedirectURIs); err != nil {
+		ar.Fail(c, 2, err.Error())
+		return
+	}
+
+	ar.Success(c, nil)
 }
 
 // 获取 OAuth2 应用列表

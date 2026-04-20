@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/RockChinQ/Campux/backend/service"
@@ -58,43 +59,75 @@ func (oar *OAuth2Router) GetOAuth2AppInfo(c *gin.Context) {
 
 func (oar *OAuth2Router) Authorize(c *gin.Context) {
 
-	uin, err := oar.Auth(c, UserOnly)
-
-	if err != nil {
-		return
-	}
-
+	// 获取参数
 	clientID := c.Query("client_id")
+	redirectURI := c.Query("redirect_uri")
 
 	if clientID == "" {
 		oar.Fail(c, 1, "未提供 client_id")
 		return
 	}
 
+	if redirectURI == "" {
+		oar.Fail(c, 1, "未提供 redirect_uri")
+		return
+	}
+
 	// 检查是否存在这个应用
 	app, err := oar.OAuth2Service.GetOAuth2AppByClientID(clientID)
-
 	if err != nil {
 		oar.Fail(c, 2, err.Error())
 		return
 	}
-
 	if app == nil {
 		oar.Fail(c, 3, "此应用未注册")
 		return
 	}
 
-	// 计算code
-	code, err := oar.OAuth2Service.GenerateCode(app.ClientID, uin)
+	// 检查登录
+	uin, err := oar.Auth(c, UserOnly)
+	if err != nil {
+		// 未登录，重定向到 Campux 登录页，登录后回跳本 authorize
+		loginURL := "/login?redirect=" + url.QueryEscape(c.Request.RequestURI)
+		c.Redirect(http.StatusFound, loginURL)
+		return
+	}
 
+	// 生成授权码
+	code, err := oar.OAuth2Service.GenerateCode(app.ClientID, uin)
 	if err != nil {
 		oar.Fail(c, 4, err.Error())
 		return
 	}
 
-	oar.Success(c, gin.H{
-		"code": code,
-	})
+	// 基本校验 redirect_uri（应在未来改为与注册回调地址精准匹配）
+	parsed, perr := url.Parse(redirectURI)
+	if perr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		oar.Fail(c, 5, "invalid redirect_uri")
+		return
+	}
+
+	// 严格匹配已注册回调地址，防止 open redirect
+	matched := false
+	for _, ru := range app.RedirectURIs {
+		if ru == redirectURI {
+			matched = true
+			break
+		}
+	}
+
+	if !matched {
+		oar.Fail(c, 6, "redirect_uri not registered for this client")
+		return
+	}
+
+	// 拼接回调地址并重定向（对参数进行编码）
+	sep := "?"
+	if strings.Contains(redirectURI, "?") {
+		sep = "&"
+	}
+	redirectWithCode := redirectURI + sep + "code=" + url.QueryEscape(code) + "&client_id=" + url.QueryEscape(clientID)
+	c.Redirect(http.StatusFound, redirectWithCode)
 }
 
 func (oar *OAuth2Router) GetAccessToken(c *gin.Context) {

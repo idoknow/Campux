@@ -18,7 +18,7 @@ func NewAdminService(db database.BaseDBManager) *AdminService {
 	}
 }
 
-func (as *AdminService) AddOAuth2App(name, emoji string) (*database.OAuthAppPO, error) {
+func (as *AdminService) AddOAuth2App(name, emoji string, redirectURIs []string) (*database.OAuthAppPO, error) {
 	check, err := as.DB.GetOAuth2AppByName(name)
 
 	if err != nil {
@@ -34,6 +34,7 @@ func (as *AdminService) AddOAuth2App(name, emoji string) (*database.OAuthAppPO, 
 		Emoji:        emoji,
 		ClientID:     util.RandomString(16),
 		ClientSecret: uuid.New().String(),
+		RedirectURIs: util.StrArray(redirectURIs),
 		CreatedAt:    util.GetCSTTime(),
 	}
 
@@ -49,6 +50,10 @@ func (as *AdminService) GetOAuth2Apps() ([]database.OAuthAppPO, error) {
 // delete
 func (as *AdminService) DeleteOAuth2App(appID string) error {
 	return as.DB.DeleteOAuth2App(appID)
+}
+
+func (as *AdminService) UpdateOAuth2App(clientID string, redirectURIs []string) error {
+	return as.DB.UpdateOAuth2App(clientID, redirectURIs)
 }
 
 func (as *AdminService) IsInit() (bool, error) {

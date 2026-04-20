@@ -43,4 +43,5 @@ type BaseDBManager interface {
 	GetOAuth2AppByName(name string) (*OAuthAppPO, error)
 	GetOAuth2Apps() ([]OAuthAppPO, error)
 	DeleteOAuth2App(clientID string) error
+	UpdateOAuth2App(clientID string, redirectURIs []string) error
 }

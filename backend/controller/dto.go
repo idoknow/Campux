@@ -158,6 +158,14 @@ type OAuth2AppCreateBody struct {
 
 	// emoji
 	Emoji string `json:"emoji" binding:"required"`
+
+	// 回调地址列表
+	RedirectURIs []string `json:"redirect_uris"`
+}
+
+type OAuth2AppUpdateBody struct {
+	ClientID     string   `json:"client_id" binding:"required"`
+	RedirectURIs []string `json:"redirect_uris" binding:"required"`
 }
 
 type OAuth2AuthorizeBody struct {
