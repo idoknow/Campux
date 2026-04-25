@@ -10,6 +10,12 @@
                 <p><strong>Client ID: </strong>{{ oauthApp.client_id }}</p>
                 <p><strong>Client Secret: </strong>{{ oauthApp.client_secret }}</p>
             </div>
+            <div id="app-redirects" style="margin-top:8px">
+                <p><strong>Redirect URIs:</strong></p>
+                <ul>
+                    <li v-for="(r, idx) in oauthApp.redirect_uris" :key="idx" style="font-size:0.8rem">{{ r }}</li>
+                </ul>
+            </div>
 
         </div>
 
@@ -17,6 +23,7 @@
 
 
         <v-btn color="red" text @click="deletingDialog = true">删除</v-btn>
+        <v-btn color="primary" text @click="openEdit">编辑回调</v-btn>
         </div>
         
     </v-card>
@@ -33,6 +40,19 @@
             </v-card-actions>
         </v-card>
     </v-dialog>
+
+    <v-dialog v-model="editingDialog" max-width="600">
+        <v-card>
+            <v-card-title>编辑回调地址</v-card-title>
+            <v-card-text>
+                <v-textarea v-model="editRedirectsText" label="回调地址（每行一个）" rows="6"></v-textarea>
+            </v-card-text>
+            <v-card-actions>
+                <v-btn text @click="editingDialog = false">取消</v-btn>
+                <v-btn color="primary" text @click="saveEdit">保存</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
 </template>
 
 <script>
@@ -42,6 +62,8 @@ export default {
     data() {
         return {
             deletingDialog: false,
+            editingDialog: false,
+            editRedirectsText: '',
         }
     },
     mounted() {
@@ -54,6 +76,30 @@ export default {
         deleteApp() {
             this.$emit('deleteApp', this.oauthApp.client_id)
         },
+        openEdit() {
+            this.editRedirectsText = (this.oauthApp.redirect_uris || []).join('\n')
+            this.editingDialog = true
+        },
+        saveEdit() {
+            const payload = {
+                client_id: this.oauthApp.client_id,
+                redirect_uris: this.editRedirectsText.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+            }
+
+            this.$axios.put('/v1/admin/update-oauth2-app', payload)
+                .then(res => {
+                    if (res.data.code === 0) {
+                        this.toast('更新成功', 'success')
+                        this.$emit('refresh')
+                        this.editingDialog = false
+                    } else {
+                        this.toast('更新失败：' + res.data.msg)
+                    }
+                })
+                .catch(err => {
+                    this.toast('更新失败：' + err)
+                })
+        }
     }
 }
 </script>

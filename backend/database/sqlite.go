@@ -403,3 +403,7 @@ func (m *SQLiteDBManager) GetOAuth2Apps() ([]OAuthAppPO, error) {
 func (m *SQLiteDBManager) DeleteOAuth2App(clientID string) error {
 	return m.Client.Where("client_id = ?", clientID).Delete(&OAuthAppPO{}).Error
 }
+
+func (m *SQLiteDBManager) UpdateOAuth2App(clientID string, redirectURIs []string) error {
+	return m.Client.Model(&OAuthAppPO{}).Where("client_id = ?", clientID).Update("redirect_uris", util.StrArray(redirectURIs)).Error
+}

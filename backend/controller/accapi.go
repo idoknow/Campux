@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/RockChinQ/Campux/backend/database"
 	"github.com/RockChinQ/Campux/backend/service"
@@ -86,37 +87,31 @@ func (ar *AccountRouter) LoginAccount(c *gin.Context) {
 		return
 	}
 
-	domain := c.Request.Header.Get("Origin")
+	// 使用配置控制 cookie 的安全策略
+	secure := viper.GetBool("auth.cookie.secure")
+	sameSiteStr := viper.GetString("auth.cookie.samesite")
+	httpOnly := viper.GetBool("auth.cookie.httponly")
 
-	// set-cookie
-	// 要求：
-	// 1. 调试模式时允许跨域
-	// 2. 设置的域为请求的域
-	// 3. 允许js修改
-	if gin.Mode() == gin.DebugMode {
-		http.SetCookie(c.Writer, &http.Cookie{
-			Name:     "access-token",
-			Value:    token,
-			Path:     "/",
-			Domain:   domain,
-			Secure:   true,
-			SameSite: http.SameSiteNoneMode,
-			HttpOnly: false,
-			MaxAge:   viper.GetInt("auth.jwt.expire"),
-		})
-	} else {
-		// 正式环境用strict模式
-		http.SetCookie(c.Writer, &http.Cookie{
-			Name:     "access-token",
-			Value:    token,
-			Path:     "/",
-			Domain:   domain,
-			Secure:   false,
-			SameSite: http.SameSiteStrictMode,
-			HttpOnly: false,
-			MaxAge:   viper.GetInt("auth.jwt.expire"),
-		})
+	var sameSiteMode http.SameSite
+	switch strings.ToLower(sameSiteStr) {
+	case "none":
+		sameSiteMode = http.SameSiteNoneMode
+	case "strict":
+		sameSiteMode = http.SameSiteStrictMode
+	default:
+		sameSiteMode = http.SameSiteLaxMode
 	}
+
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:  "access-token",
+		Value: token,
+		Path:  "/",
+		// Domain:   "campux.com", // 可在配置中启用
+		Secure:   secure,
+		SameSite: sameSiteMode,
+		HttpOnly: httpOnly,
+		MaxAge:   viper.GetInt("auth.jwt.expire"),
+	})
 
 	ar.Success(c, gin.H{
 		"token": token,

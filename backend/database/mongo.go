@@ -603,3 +603,12 @@ func (m *MongoDBManager) DeleteOAuth2App(clientID string) error {
 	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).DeleteOne(context.TODO(), bson.M{"client_id": clientID})
 	return err
 }
+
+func (m *MongoDBManager) UpdateOAuth2App(clientID string, redirectURIs []string) error {
+	_, err := m.Client.Database(viper.GetString("database.mongo.db")).Collection(OAUTH_APP_COLLECTION).UpdateOne(
+		context.TODO(),
+		bson.M{"client_id": clientID},
+		bson.M{"$set": bson.M{"redirect_uris": redirectURIs}},
+	)
+	return err
+}

@@ -131,9 +131,10 @@ const (
 )
 
 type OAuthAppPO struct {
-	Name         string    `json:"name" bson:"name" gorm:"type:varchar(256)"`                   // 应用名称
-	Emoji        string    `json:"emoji" bson:"emoji" gorm:"type:varchar(16)"`                  // Emoji
-	ClientID     string    `json:"client_id" bson:"client_id" gorm:"type:varchar(256)"`         // 客户端ID
-	ClientSecret string    `json:"client_secret" bson:"client_secret" gorm:"type:varchar(256)"` // 客户端密钥
-	CreatedAt    time.Time `json:"created_at" bson:"created_at" gorm:"autoCreateTime"`          // CST时间
+	Name         string        `json:"name" bson:"name" gorm:"type:varchar(256)"`                   // 应用名称
+	Emoji        string        `json:"emoji" bson:"emoji" gorm:"type:varchar(16)"`                  // Emoji
+	ClientID     string        `json:"client_id" bson:"client_id" gorm:"type:varchar(256)"`         // 客户端ID
+	ClientSecret string        `json:"client_secret" bson:"client_secret" gorm:"type:varchar(256)"` // 客户端密钥
+	RedirectURIs util.StrArray `json:"redirect_uris" bson:"redirect_uris" gorm:"type:text"`         // 回调地址列表
+	CreatedAt    time.Time     `json:"created_at" bson:"created_at" gorm:"autoCreateTime"`          // CST时间
 }

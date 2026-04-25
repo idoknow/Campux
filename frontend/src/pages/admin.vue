@@ -86,7 +86,7 @@
                 <div
                     style="overflow-y: scroll; max-height: calc(100vh - 260px); min-height: calc(100vh - 360px);margin-top: 2rem">
                     <OAuthAppCard v-for="o in oauthApps" :key="o.name" :oauthApp="o" style="margin-top: 16px"
-                        @toast="toast" @deleteApp="deleteOAuthApp" />
+                        @toast="toast" @deleteApp="deleteOAuthApp" @refresh="getOAuthApps" />
 
                 </div>
             </div>
@@ -116,6 +116,7 @@
                     <p id="oauth-emoji">{{ newOAuthApp.emoji }}</p>
                     <EmojiPicker id="oauth-emoji-picker" :native="true" @select="onEmojiSelect" />
                 </div>
+                <v-textarea v-model="newOAuthApp.redirect_uris_text" label="回调地址（每行一个）" variant="solo" rows="3"></v-textarea>
             </v-card-text>
             <v-card-actions>
                 <v-btn text @click="showOAuthAppCreateDialog = false">取消</v-btn>
@@ -181,6 +182,7 @@ export default {
             newOAuthApp: {
                 name: '',
                 emoji: '🥰',
+                redirect_uris_text: '',
             },
             metadataList: [],
             metadataListRefreshing: false,
@@ -402,7 +404,15 @@ export default {
                 return
             }
 
-            this.$axios.post('/v1/admin/add-oauth2-app', this.newOAuthApp)
+            // prepare redirect_uris array from textarea
+            let payload = Object.assign({}, this.newOAuthApp)
+            if (payload.redirect_uris_text) {
+                payload.redirect_uris = payload.redirect_uris_text.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+            } else {
+                payload.redirect_uris = []
+            }
+
+            this.$axios.post('/v1/admin/add-oauth2-app', payload)
                 .then(res => {
                     if (res.data.code === 0) {
                         this.toast('创建成功', 'success')
