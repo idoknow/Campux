@@ -29,6 +29,12 @@ func SetInitValue() {
 	viper.SetDefault("oauth2.server.access_secret", uuid.New().String())
 	viper.SetDefault("oauth2.server.ak_expire", 3600*24*14)
 
+	// cookie / auth
+	// 开发时默认允许非 Secure，以便本地调试；生产请通过配置或环境覆盖为安全值
+	viper.SetDefault("auth.cookie.secure", false)
+	viper.SetDefault("auth.cookie.samesite", "Lax")
+	viper.SetDefault("auth.cookie.httponly", true)
+
 	// 服务token
 	viper.SetDefault("service.token", "campux123456")
 	viper.SetDefault("service.bots", []int64{123456789})
