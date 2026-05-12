@@ -8,6 +8,7 @@ import {
   HomeIcon,
   ImagePlusIcon,
   KeyRoundIcon,
+  LogOutIcon,
   MegaphoneIcon,
   RefreshCwIcon,
   SendIcon,
@@ -30,6 +31,14 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -67,8 +76,30 @@ const adminItems = [
   { title: "发布目标", description: "3 个 QQ 墙号", icon: ShieldCheckIcon },
 ];
 
+const loggedOutStorageKey = "campux:logged-out";
+
+function clearBrowserSession() {
+  const cookieNames = new Set(
+    document.cookie
+      .split(";")
+      .map((cookie) => cookie.split("=")[0]?.trim())
+      .filter(Boolean),
+  );
+
+  ["access-token", "refresh-token", "campux-token", "campux-session"].forEach((name) => cookieNames.add(name));
+
+  for (const name of cookieNames) {
+    document.cookie = `${name}=; Max-Age=0; path=/`;
+    document.cookie = `${name}=; Max-Age=0; path=/; SameSite=Lax`;
+  }
+
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+}
+
 export function App() {
   const [activeTab, setActiveTab] = useState<MainTab>("post");
+  const [loggedIn, setLoggedIn] = useState(() => window.localStorage.getItem(loggedOutStorageKey) !== "1");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
@@ -79,6 +110,18 @@ export function App() {
   const selectedTenant = useMemo(() => {
     return tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0];
   }, [selectedTenantId, tenants]);
+
+  function logout() {
+    clearBrowserSession();
+    window.localStorage.setItem(loggedOutStorageKey, "1");
+    setLoggedIn(false);
+    setActiveTab("post");
+  }
+
+  function login() {
+    window.localStorage.removeItem(loggedOutStorageKey);
+    setLoggedIn(true);
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -115,14 +158,19 @@ export function App() {
     };
   }, []);
 
+  if (!loggedIn) {
+    return <LoggedOutScreen selectedTenant={selectedTenant} onLogin={login} />;
+  }
+
   return (
     <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as MainTab)} className="min-h-dvh">
       <div className="min-h-dvh bg-background md:flex">
-        <DesktopSidebar selectedTenant={selectedTenant} activeTab={activeTab} />
+        <DesktopSidebar selectedTenant={selectedTenant} activeTab={activeTab} onLogout={logout} />
 
         <div className="min-h-dvh w-full bg-background pb-24 md:max-w-[760px] md:border-r md:border-slate-100 md:pb-8">
           <Header
             selectedTenant={selectedTenant}
+            onLogout={logout}
           />
 
           <main>
@@ -172,12 +220,44 @@ export function App() {
   );
 }
 
+function LoggedOutScreen({
+  selectedTenant,
+  onLogin,
+}: {
+  selectedTenant: TenantSummary | undefined;
+  onLogin: () => void;
+}) {
+  return (
+    <main className="flex min-h-dvh bg-white md:items-stretch">
+      <aside className="hidden w-[178px] shrink-0 border-r border-slate-100 bg-white md:block">
+        <div className="bg-[#42a5f5] py-2 text-center text-2xl font-black text-white">Campux</div>
+      </aside>
+      <section className="flex min-h-dvh w-full max-w-[520px] flex-col px-4 pt-3 md:justify-center md:px-10 md:pt-0">
+        <div>
+          <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
+          <span className="align-baseline text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
+        </div>
+
+        <div className="mt-16 rounded-md bg-sky-50 px-4 py-5 md:mt-0">
+          <p className="text-xl font-bold text-slate-950">已退出登录</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">你当前没有登录账户。登录后会进入你被授权访问的校园墙。</p>
+          <Button className="mt-5 rounded-full bg-[#42a5f5] px-8 font-bold hover:bg-[#42a5f5]" onClick={onLogin}>
+            登录
+          </Button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function DesktopSidebar({
   selectedTenant,
   activeTab,
+  onLogout,
 }: {
   selectedTenant: TenantSummary | undefined;
   activeTab: MainTab;
+  onLogout: () => void;
 }) {
   return (
     <aside className="hidden h-dvh w-[178px] shrink-0 border-r border-slate-100 bg-white md:flex md:flex-col">
@@ -197,16 +277,12 @@ function DesktopSidebar({
           ))}
         </TabsList>
 
-        <div className="flex items-center gap-3 px-1 pb-2">
-          <Avatar className="h-[50px] w-[50px]">
-            <AvatarImage src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="用户头像" />
-            <AvatarFallback>QQ</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <p className="truncate text-base font-bold">10000</p>
-            <p className="truncate text-xs text-slate-500">{activeTab === "admin" ? "管理员" : "投稿者"}</p>
-          </div>
-        </div>
+        <AccountMenu
+          selectedTenant={selectedTenant}
+          roleLabel={activeTab === "admin" ? "管理员" : "投稿者"}
+          onLogout={onLogout}
+          variant="desktop"
+        />
       </div>
     </aside>
   );
@@ -214,18 +290,72 @@ function DesktopSidebar({
 
 function Header({
   selectedTenant,
+  onLogout,
 }: {
   selectedTenant: TenantSummary | undefined;
+  onLogout: () => void;
 }) {
   return (
     <header className="bg-background pb-2">
-      <div className="flex items-baseline gap-2 px-4 pt-3">
+      <div className="flex items-center justify-between gap-3 px-4 pt-3">
         <div className="min-w-0">
           <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
           <span className="align-baseline text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
         </div>
+        <AccountMenu selectedTenant={selectedTenant} roleLabel="投稿者" onLogout={onLogout} variant="mobile" />
       </div>
     </header>
+  );
+}
+
+function AccountMenu({
+  selectedTenant,
+  roleLabel,
+  onLogout,
+  variant,
+}: {
+  selectedTenant: TenantSummary | undefined;
+  roleLabel: string;
+  onLogout: () => void;
+  variant: "mobile" | "desktop";
+}) {
+  const isDesktop = variant === "desktop";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className={
+            isDesktop
+              ? "flex w-full items-center gap-3 rounded-md px-1 py-2 text-left hover:bg-slate-50"
+              : "flex h-[42px] w-[42px] items-center justify-center rounded-full"
+          }
+          aria-label="账户菜单"
+        >
+          <Avatar className={isDesktop ? "h-[50px] w-[50px]" : "h-[38px] w-[38px]"}>
+            <AvatarImage src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="用户头像" />
+            <AvatarFallback>QQ</AvatarFallback>
+          </Avatar>
+          {isDesktop ? (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-base font-bold">10000</p>
+              <p className="truncate text-xs text-slate-500">{roleLabel}</p>
+            </div>
+          ) : null}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={isDesktop ? "start" : "end"} className="w-52">
+        <DropdownMenuLabel>
+          <span className="block text-sm font-semibold text-slate-900">10000</span>
+          <span className="mt-0.5 block truncate text-xs text-slate-500">{selectedTenant?.name ?? "当前校园墙"} · {roleLabel}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={onLogout}>
+          <LogOutIcon data-icon="inline-start" />
+          退出登录
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
