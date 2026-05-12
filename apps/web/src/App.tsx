@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   BookOpenIcon,
   CameraIcon,
@@ -39,169 +40,373 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 type MainTab = "post" | "posts" | "services" | "admin";
+type TenantRole = "submitter" | "reviewer" | "admin";
+
+type Membership = {
+  id: string;
+  role: TenantRole;
+  tenant: TenantSummary;
+};
+
+type CurrentMembership = {
+  id: string;
+  role: TenantRole;
+};
+
+type MeResponse =
+  | { authenticated: false }
+  | {
+      authenticated: true;
+      user: {
+        id: string;
+        qqUin: string;
+        displayName: string | null;
+        systemRole: "system_operator" | null;
+      };
+      memberships: Membership[];
+      currentTenant: TenantSummary | null;
+      currentMembership: CurrentMembership | null;
+      needsTenantSelection: boolean;
+    };
+
+type TenantMetadata = {
+  brand: string;
+  banner: string;
+  postRules: string[];
+  services: Array<{
+    title: string;
+    description?: string;
+    url?: string;
+  }>;
+};
+
+type UploadedImage = {
+  key: string;
+  url: string;
+  fileName: string;
+  previewUrl: string;
+};
+
+type PostItem = {
+  id: string;
+  displayId: number;
+  title: string;
+  text: string;
+  images: unknown;
+  anonymous: boolean;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const defaultMetadata: TenantMetadata = {
+  brand: "校园墙",
+  banner: "",
+  postRules: [
+    "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
+    "寻物招领请写清地点、时间和联系方式。",
+    "图片最多 9 张，审核通过后会同步到本校启用的 QQ 墙号。",
+  ],
+  services: [
+    { title: "修改密码", description: "账号服务" },
+    { title: "投稿规则", description: "查看本墙规范" },
+    { title: "校园服务", description: "推荐入口" },
+  ],
+};
 
 const navItems = [
-  { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon },
-  { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon },
-  { value: "services", label: "服务", emoji: "🛠", icon: SparklesIcon },
-  { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon },
-] satisfies Array<{ value: MainTab; label: string; emoji: string; icon: typeof HomeIcon }>;
+  { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },
+  { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon, minRole: "submitter" },
+  { value: "services", label: "服务", emoji: "🛠", icon: SparklesIcon, minRole: "submitter" },
+  { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "admin" },
+] satisfies Array<{ value: MainTab; label: string; emoji: string; icon: typeof HomeIcon; minRole: TenantRole }>;
+type NavItem = (typeof navItems)[number];
 
-const rules = [
-  "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
-  "寻物招领请写清地点、时间和联系方式。",
-  "图片最多 9 张，审核通过后会同步到本校启用的 QQ 墙号。",
-];
+const roleRank: Record<TenantRole, number> = {
+  submitter: 1,
+  reviewer: 2,
+  admin: 3,
+};
 
-const posts = [
-  { id: "#4289", title: "南门夜宵摊位营业时间", status: "发布中", variant: "default" },
-  { id: "#4288", title: "图书馆闭馆音乐投票", status: "待审核", variant: "destructive" },
-  { id: "#4281", title: "校运会失物招领合集", status: "已发布", variant: "secondary" },
-] as const;
+const roleLabels: Record<TenantRole, string> = {
+  submitter: "投稿者",
+  reviewer: "审核员",
+  admin: "管理员",
+};
 
-const services = [
-  { title: "修改密码", description: "账号服务", icon: KeyRoundIcon },
-  { title: "投稿规则", description: "查看本墙规范", icon: BookOpenIcon },
-  { title: "校园服务", description: "推荐入口", icon: SparklesIcon },
-];
+const statusLabels: Record<string, string> = {
+  pending_approval: "待审核",
+  approved: "已通过",
+  rejected: "已拒绝",
+  cancelled: "已取消",
+  publishing: "发布中",
+  partially_failed: "部分失败",
+  failed: "发布失败",
+  published: "已发布",
+  pending_recall: "待撤回",
+  recalled: "已撤回",
+};
 
-const adminItems = [
-  { title: "审核稿件", description: "18 条待审核", icon: ClipboardListIcon },
-  { title: "校园墙设置", description: "品牌、公告、规则", icon: MegaphoneIcon },
-  { title: "发布目标", description: "3 个 QQ 墙号", icon: ShieldCheckIcon },
-];
-
-const loggedOutStorageKey = "campux:logged-out";
-
-function clearBrowserSession() {
-  const cookieNames = new Set(
-    document.cookie
-      .split(";")
-      .map((cookie) => cookie.split("=")[0]?.trim())
-      .filter(Boolean),
-  );
-
-  ["access-token", "refresh-token", "campux-token", "campux-session"].forEach((name) => cookieNames.add(name));
-
-  for (const name of cookieNames) {
-    document.cookie = `${name}=; Max-Age=0; path=/`;
-    document.cookie = `${name}=; Max-Age=0; path=/; SameSite=Lax`;
+async function api<T>(path: string, options: RequestInit = {}) {
+  const response = await fetch(path, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+  const data = (await response.json().catch(() => ({}))) as T & { message?: string };
+  if (!response.ok) {
+    throw new Error(data.message || `请求失败：${response.status}`);
   }
+  return data as T;
+}
 
-  window.localStorage.clear();
-  window.sessionStorage.clear();
+function canAccess(role: TenantRole, minRole: TenantRole) {
+  return roleRank[role] >= roleRank[minRole];
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<MainTab>("post");
-  const [loggedIn, setLoggedIn] = useState(() => window.localStorage.getItem(loggedOutStorageKey) !== "1");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [activeTab, setActiveTab] = useState<MainTab>("post");
+  const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
+  const [posts, setPosts] = useState<PostItem[]>([]);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const selectedTenant = useMemo(() => {
-    return tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0];
-  }, [selectedTenantId, tenants]);
+  const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
+  const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
+  const availableNavItems = useMemo(() => {
+    if (!currentRole) {
+      return navItems.filter((item) => item.value !== "admin");
+    }
+    return navItems.filter((item) => canAccess(currentRole, item.minRole));
+  }, [currentRole]);
 
-  function logout() {
-    clearBrowserSession();
-    window.localStorage.setItem(loggedOutStorageKey, "1");
-    setLoggedIn(false);
-    setActiveTab("post");
+  async function refreshMe() {
+    const data = await api<MeResponse>("/api/me");
+    setMe(data);
   }
 
-  function login() {
-    window.localStorage.removeItem(loggedOutStorageKey);
-    setLoggedIn(true);
+  async function refreshTenantData() {
+    if (!me?.authenticated || !me.currentTenant) {
+      return;
+    }
+
+    const [metadataData, postsData] = await Promise.all([
+      api<TenantMetadata>("/api/tenant/metadata"),
+      api<{ posts: PostItem[] }>("/api/posts/mine"),
+    ]);
+    setMetadata(metadataData);
+    setPosts(postsData.posts);
   }
 
   useEffect(() => {
     let ignore = false;
-
-    async function fetchTenants() {
-      setLoading(true);
-      setError("");
-
+    async function boot() {
       try {
-        const response = await fetch("/api/tenants");
-        if (!response.ok) {
-          throw new Error(`请求失败：${response.status}`);
-        }
-
-        const data = (await response.json()) as { tenants: TenantSummary[] };
+        const [meData, tenantData] = await Promise.all([
+          api<MeResponse>("/api/me"),
+          api<{ tenants: TenantSummary[] }>("/api/tenants"),
+        ]);
         if (!ignore) {
-          setTenants(data.tenants);
-          setSelectedTenantId(data.tenants[0]?.id ?? "");
+          setMe(meData);
+          setTenants(tenantData.tenants);
         }
       } catch (caught) {
         if (!ignore) {
           setError(caught instanceof Error ? caught.message : "无法连接到 Campux API");
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
+          setMe({ authenticated: false });
         }
       }
     }
 
-    void fetchTenants();
+    void boot();
     return () => {
       ignore = true;
     };
   }, []);
 
-  if (!loggedIn) {
-    return <LoggedOutScreen selectedTenant={selectedTenant} onLogin={login} />;
+  useEffect(() => {
+    void refreshTenantData().catch((caught) => {
+      setError(caught instanceof Error ? caught.message : "无法读取校园墙数据");
+    });
+  }, [me]);
+
+  useEffect(() => {
+    if (!availableNavItems.some((item) => item.value === activeTab)) {
+      setActiveTab(availableNavItems[0]?.value ?? "post");
+    }
+  }, [activeTab, availableNavItems]);
+
+  async function login(qqUin: string, password: string) {
+    setError("");
+    const data = await api<MeResponse>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ qqUin, password }),
+    });
+    setMe(data);
+  }
+
+  async function logout() {
+    await api<{ ok: true }>("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    setMe({ authenticated: false });
+    setPostText("");
+    setUploadedImages([]);
+    setPosts([]);
+    setActiveTab("post");
+  }
+
+  async function selectTenant(tenantId: string) {
+    await api("/api/session/tenant", {
+      method: "POST",
+      body: JSON.stringify({ tenantId }),
+    });
+    await refreshMe();
+  }
+
+  async function uploadFiles(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    try {
+      const nextImages: UploadedImage[] = [];
+      for (const file of Array.from(files).slice(0, 9 - uploadedImages.length)) {
+        const previewUrl = await fileToBase64(file);
+        const uploaded = await api<Omit<UploadedImage, "previewUrl">>("/api/uploads/post-images", {
+          method: "POST",
+          body: JSON.stringify({
+            fileName: file.name,
+            contentType: file.type || "application/octet-stream",
+            base64: previewUrl,
+          }),
+        });
+        nextImages.push({ ...uploaded, previewUrl });
+      }
+      setUploadedImages((current) => [...current, ...nextImages]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "图片上传失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPost() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/api/posts", {
+        method: "POST",
+        body: JSON.stringify({
+          text: postText,
+          anonymous,
+          images: uploadedImages.map(({ key, url, fileName }) => ({ key, url, fileName })),
+        }),
+      });
+      setPostText("");
+      setUploadedImages([]);
+      setAnonymous(false);
+      setNotice("投稿已提交，等待审核。");
+      const data = await api<{ posts: PostItem[] }>("/api/posts/mine");
+      setPosts(data.posts);
+      setActiveTab("posts");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "投稿失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!me) {
+    return <LoadingScreen />;
+  }
+
+  if (!me.authenticated) {
+    return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} onLogin={login} />;
+  }
+
+  if (me.needsTenantSelection || !me.currentTenant || !me.currentMembership) {
+    return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onLogout={logout} />;
   }
 
   return (
     <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as MainTab)} className="min-h-dvh">
       <div className="min-h-dvh bg-background md:flex">
-        <DesktopSidebar selectedTenant={selectedTenant} activeTab={activeTab} onLogout={logout} />
+        <DesktopSidebar
+          activeTab={activeTab}
+          me={me}
+          navItems={availableNavItems}
+          selectedTenant={me.currentTenant}
+          onLogout={logout}
+        />
 
         <div className="min-h-dvh w-full bg-background pb-24 md:max-w-[760px] md:border-r md:border-slate-100 md:pb-8">
-          <Header
-            selectedTenant={selectedTenant}
-            onLogout={logout}
-          />
+          <Header me={me} selectedTenant={me.currentTenant} onLogout={logout} />
 
           <main>
             <TabsContent value="post" className="m-0">
               <PostPage
+                busy={busy}
                 error={error}
+                metadata={metadata}
+                notice={notice}
                 postText={postText}
                 anonymous={anonymous}
-                selectedTenant={selectedTenant}
-                onPostTextChange={setPostText}
+                selectedTenant={me.currentTenant}
+                uploadedImages={uploadedImages}
                 onAnonymousChange={setAnonymous}
+                onFilesSelected={uploadFiles}
+                onPostTextChange={setPostText}
+                onSubmit={submitPost}
+                onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
               />
             </TabsContent>
 
             <TabsContent value="posts" className="m-0">
-              <PostsPage />
+              <PostsPage posts={posts} currentRole={me.currentMembership.role} onRefresh={refreshTenantData} />
             </TabsContent>
 
             <TabsContent value="services" className="m-0">
-              <ServicesPage />
+              <ServicesPage services={metadata.services} />
             </TabsContent>
 
             <TabsContent value="admin" className="m-0">
-            <AdminPage selectedTenant={selectedTenant} />
-          </TabsContent>
+              <AdminPage selectedTenant={me.currentTenant} />
+            </TabsContent>
           </main>
         </div>
       </div>
 
-      <TabsList className="fixed inset-x-0 bottom-0 z-40 mx-auto grid h-[64px] max-w-[480px] grid-cols-4 rounded-none border-x-0 border-b-0 bg-white px-2 pb-1 pt-1 shadow-[0_-2px_10px_rgba(0,0,0,0.08)] md:hidden">
-        {navItems.map((item) => {
+      <TabsList
+        className="fixed inset-x-0 bottom-0 z-40 mx-auto grid h-[64px] max-w-[480px] rounded-none border-x-0 border-b-0 bg-white px-2 pb-1 pt-1 shadow-[0_-2px_10px_rgba(0,0,0,0.08)] md:hidden"
+        style={{ gridTemplateColumns: `repeat(${availableNavItems.length}, minmax(0, 1fr))` }}
+      >
+        {availableNavItems.map((item) => {
           const Icon = item.icon;
 
           return (
@@ -220,13 +425,37 @@ export function App() {
   );
 }
 
-function LoggedOutScreen({
+function LoadingScreen() {
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-white">
+      <p className="text-lg font-bold text-slate-500">Loading...</p>
+    </main>
+  );
+}
+
+function LoginScreen({
   selectedTenant,
+  error,
   onLogin,
 }: {
   selectedTenant: TenantSummary | undefined;
-  onLogin: () => void;
+  error: string;
+  onLogin: (qqUin: string, password: string) => Promise<void>;
 }) {
+  const [qqUin, setQqUin] = useState("10000");
+  const [password, setPassword] = useState("campux123");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await onLogin(qqUin, password);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="flex min-h-dvh bg-white md:items-stretch">
       <aside className="hidden w-[178px] shrink-0 border-r border-slate-100 bg-white md:block">
@@ -238,13 +467,98 @@ function LoggedOutScreen({
           <span className="align-baseline text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
         </div>
 
-        <div className="mt-16 rounded-md bg-sky-50 px-4 py-5 md:mt-0">
-          <p className="text-xl font-bold text-slate-950">已退出登录</p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">你当前没有登录账户。登录后会进入你被授权访问的校园墙。</p>
-          <Button className="mt-5 rounded-full bg-[#42a5f5] px-8 font-bold hover:bg-[#42a5f5]" onClick={onLogin}>
-            登录
+        <form className="mt-12 rounded-md bg-sky-50 px-4 py-5 md:mt-0" onSubmit={handleSubmit}>
+          <p className="text-xl font-bold text-slate-950">登录到 Campux</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">输入通过校园墙机器人注册的账号和密码。</p>
+          <div className="mt-5 grid gap-3">
+            <Input value={qqUin} inputMode="numeric" placeholder="QQ 号 / UIN" onChange={(event) => setQqUin(event.target.value)} />
+            <Input value={password} type="password" placeholder="密码" onChange={(event) => setPassword(event.target.value)} />
+          </div>
+          {error ? <p className="mt-3 text-sm font-medium text-red-600">{error}</p> : null}
+          <Button className="mt-5 rounded-full bg-[#42a5f5] px-8 font-bold hover:bg-[#42a5f5]" disabled={busy} type="submit">
+            {busy ? "登录中" : "登录"}
+          </Button>
+          <div className="mt-4 text-xs leading-5 text-slate-500">
+            <p>测试账号密码均为 `campux123`：</p>
+            <p>10000 投稿者，20000 审核员，30000 多墙管理员，40000 系统运维。</p>
+          </div>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function TenantSelectionScreen({
+  me,
+  onSelectTenant,
+  onLogout,
+}: {
+  me: Extract<MeResponse, { authenticated: true }>;
+  onSelectTenant: (tenantId: string) => Promise<void>;
+  onLogout: () => Promise<void>;
+}) {
+  const [busyTenantId, setBusyTenantId] = useState("");
+
+  async function select(tenantId: string) {
+    setBusyTenantId(tenantId);
+    try {
+      await onSelectTenant(tenantId);
+    } finally {
+      setBusyTenantId("");
+    }
+  }
+
+  return (
+    <main className="min-h-dvh bg-white md:flex">
+      <aside className="hidden w-[178px] shrink-0 border-r border-slate-100 bg-white md:block">
+        <div className="bg-[#42a5f5] py-2 text-center text-2xl font-black text-white">Campux</div>
+      </aside>
+      <section className="w-full max-w-[560px] px-4 pt-3 md:px-10 md:pt-12">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
+            <span className="align-baseline text-sm text-slate-600">选择校园墙</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={onLogout}>
+            <LogOutIcon data-icon="inline-start" />
+            退出
           </Button>
         </div>
+
+        <div className="mt-8">
+          <p className="text-xl font-bold text-slate-950">{me.user.displayName ?? me.user.qqUin}</p>
+          <p className="mt-2 text-sm text-slate-500">你的账号可以进入多个校园墙，请选择本次要使用的校园墙。</p>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          {me.memberships.length === 0 ? (
+            <Card className="bg-orange-50">
+              <CardContent className="p-4 text-sm font-medium text-orange-900">暂无可访问的校园墙，请先通过对应校园墙机器人注册。</CardContent>
+            </Card>
+          ) : null}
+          {me.memberships.map((membership) => (
+            <Button
+              key={membership.id}
+              variant="outline"
+              className="h-auto justify-between rounded-md p-4 text-left"
+              disabled={busyTenantId === membership.tenant.id}
+              onClick={() => void select(membership.tenant.id)}
+            >
+              <span>
+                <span className="block font-bold">{membership.tenant.name}</span>
+                <span className="text-xs text-slate-500">{roleLabels[membership.role]}</span>
+              </span>
+              <ChevronRightIcon data-icon="inline-end" />
+            </Button>
+          ))}
+        </div>
+
+        {me.user.systemRole === "system_operator" ? (
+          <div className="mt-5 rounded-md bg-slate-100 p-4">
+            <p className="font-bold">系统运维面板</p>
+            <p className="mt-1 text-sm text-slate-500">运维入口将在系统后台 Phase 中接入。</p>
+          </div>
+        ) : null}
       </section>
     </main>
   );
@@ -253,12 +567,18 @@ function LoggedOutScreen({
 function DesktopSidebar({
   selectedTenant,
   activeTab,
+  me,
+  navItems,
   onLogout,
 }: {
-  selectedTenant: TenantSummary | undefined;
+  selectedTenant: TenantSummary;
   activeTab: MainTab;
+  me: Extract<MeResponse, { authenticated: true }>;
+  navItems: NavItem[];
   onLogout: () => void;
 }) {
+  const role = me.currentMembership?.role ?? "submitter";
+
   return (
     <aside className="hidden h-dvh w-[178px] shrink-0 border-r border-slate-100 bg-white md:flex md:flex-col">
       <div className="bg-[#42a5f5] py-2 text-center text-2xl font-black text-white">Campux</div>
@@ -277,12 +597,7 @@ function DesktopSidebar({
           ))}
         </TabsList>
 
-        <AccountMenu
-          selectedTenant={selectedTenant}
-          roleLabel={activeTab === "admin" ? "管理员" : "投稿者"}
-          onLogout={onLogout}
-          variant="desktop"
-        />
+        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} variant="desktop" />
       </div>
     </aside>
   );
@@ -290,19 +605,22 @@ function DesktopSidebar({
 
 function Header({
   selectedTenant,
+  me,
   onLogout,
 }: {
-  selectedTenant: TenantSummary | undefined;
+  selectedTenant: TenantSummary;
+  me: Extract<MeResponse, { authenticated: true }>;
   onLogout: () => void;
 }) {
+  const role = me.currentMembership?.role ?? "submitter";
   return (
     <header className="bg-background pb-2">
       <div className="flex items-center justify-between gap-3 px-4 pt-3">
         <div className="min-w-0">
           <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
-          <span className="align-baseline text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
+          <span className="align-baseline text-sm text-slate-600">{selectedTenant.name}</span>
         </div>
-        <AccountMenu selectedTenant={selectedTenant} roleLabel="投稿者" onLogout={onLogout} variant="mobile" />
+        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} variant="mobile" />
       </div>
     </header>
   );
@@ -310,16 +628,19 @@ function Header({
 
 function AccountMenu({
   selectedTenant,
+  me,
   roleLabel,
   onLogout,
   variant,
 }: {
-  selectedTenant: TenantSummary | undefined;
+  selectedTenant: TenantSummary;
+  me: Extract<MeResponse, { authenticated: true }>;
   roleLabel: string;
   onLogout: () => void;
   variant: "mobile" | "desktop";
 }) {
   const isDesktop = variant === "desktop";
+  const displayName = me.user.displayName ?? me.user.qqUin;
 
   return (
     <DropdownMenu>
@@ -338,7 +659,7 @@ function AccountMenu({
           </Avatar>
           {isDesktop ? (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-bold">10000</p>
+              <p className="truncate text-base font-bold">{displayName}</p>
               <p className="truncate text-xs text-slate-500">{roleLabel}</p>
             </div>
           ) : null}
@@ -346,8 +667,8 @@ function AccountMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align={isDesktop ? "start" : "end"} className="w-52">
         <DropdownMenuLabel>
-          <span className="block text-sm font-semibold text-slate-900">10000</span>
-          <span className="mt-0.5 block truncate text-xs text-slate-500">{selectedTenant?.name ?? "当前校园墙"} · {roleLabel}</span>
+          <span className="block text-sm font-semibold text-slate-900">{displayName}</span>
+          <span className="mt-0.5 block truncate text-xs text-slate-500">{selectedTenant.name} · {roleLabel}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={onLogout}>
@@ -360,33 +681,60 @@ function AccountMenu({
 }
 
 function PostPage({
+  busy,
   error,
+  metadata,
+  notice,
   postText,
   anonymous,
   selectedTenant,
+  uploadedImages,
   onPostTextChange,
   onAnonymousChange,
+  onFilesSelected,
+  onRemoveImage,
+  onSubmit,
 }: {
+  busy: boolean;
   error: string;
+  metadata: TenantMetadata;
+  notice: string;
   postText: string;
   anonymous: boolean;
-  selectedTenant: TenantSummary | undefined;
+  selectedTenant: TenantSummary;
+  uploadedImages: UploadedImage[];
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
+  onFilesSelected: (files: FileList | null) => void;
+  onRemoveImage: (key: string) => void;
+  onSubmit: () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
+
   return (
     <div className="flex flex-col">
-      {error ? (
-        <Alert variant="destructive" className="mx-4 my-2">
-          <AlertTitle>连接失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : (
+      {metadata.banner ? (
         <div className="flex min-h-10 items-center gap-2 bg-[#f8b94c] px-4 py-2 text-sm text-white">
           <MegaphoneIcon className="size-4 shrink-0" strokeWidth={2.3} />
-          <p className="min-w-0 truncate">今晚 22:30 后投稿会顺延到明早审核，请勿重复提交同一内容。</p>
+          <p className="min-w-0 truncate">{metadata.banner}</p>
         </div>
-      )}
+      ) : null}
+
+      {error ? (
+        <Alert variant="destructive" className="mx-4 my-2">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {notice ? (
+        <Alert className="mx-4 my-2 border-green-200 bg-green-50">
+          <CheckIcon />
+          <AlertTitle>提交成功</AlertTitle>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
 
       <section className="px-4 pt-4">
         <div className="flex gap-3">
@@ -404,15 +752,23 @@ function PostPage({
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <ImageButton label="校运会.jpg" icon={CameraIcon} />
-          <ImageButton label="公告截图.png" icon={MegaphoneIcon} />
-          <Button
-            variant="outline"
-            className="h-[70px] w-[70px] rounded-none border-0 bg-white p-0 text-black shadow-none hover:bg-white"
-            aria-label="添加图片"
-          >
-            <ImagePlusIcon className="!size-[70px] stroke-[1.35]" />
-          </Button>
+          {uploadedImages.map((image) => (
+            <button key={image.key} className="h-[70px] w-[70px] overflow-hidden rounded-[10px] bg-slate-100" onClick={() => onRemoveImage(image.key)}>
+              <img src={image.previewUrl} alt={image.fileName} className="h-full w-full object-cover" />
+            </button>
+          ))}
+          {uploadedImages.length < 9 ? (
+            <Button
+              variant="outline"
+              className="h-[70px] w-[70px] rounded-none border-0 bg-white p-0 text-black shadow-none hover:bg-white"
+              disabled={busy}
+              aria-label="添加图片"
+              onClick={() => inputRef.current?.click()}
+            >
+              <ImagePlusIcon className="!size-[70px] stroke-[1.35]" />
+            </Button>
+          ) : null}
+          <input ref={inputRef} hidden multiple accept="image/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
 
         <div className="mt-3 w-fit rounded-[5px] bg-[#8bc34a] px-2 py-1 text-lg text-white shadow-sm">
@@ -453,10 +809,10 @@ function PostPage({
         </Drawer>
 
         <div className="mt-4 flex items-center gap-3">
-          <button className="campux-postbtn">
+          <button className="campux-postbtn" disabled={busy || postText.trim().length === 0} onClick={onSubmit}>
             <span>
               <SendIcon className="mr-1 inline size-4" />
-              投稿
+              {busy ? "提交中" : "投稿"}
             </span>
           </button>
           <span className="text-xs text-slate-400">{postText.length}/1000</span>
@@ -468,7 +824,7 @@ function PostPage({
           <div>
             <p className="font-semibold text-slate-900">稿件状态</p>
             <p className="mt-1 text-sm text-slate-500">
-              审核通过后会同步到 {selectedTenant?.botAccountCount ?? 0} 个墙号。
+              审核通过后会同步到 {selectedTenant.botAccountCount} 个墙号。
             </p>
           </div>
           <Badge variant="secondary" className="rounded-md shadow-none">无阻塞</Badge>
@@ -478,60 +834,63 @@ function PostPage({
   );
 }
 
-function ImageButton({ label, icon: Icon }: { label: string; icon: typeof CameraIcon }) {
-  return (
-    <Button variant="secondary" className="h-[70px] w-[70px] flex-col rounded-[10px] bg-slate-100 p-1 text-slate-800 shadow-none hover:bg-slate-100">
-      <Icon data-icon="inline-start" />
-      <span className="max-w-[62px] truncate text-[11px]">{label}</span>
-    </Button>
-  );
-}
-
-function PostsPage() {
+function PostsPage({
+  posts,
+  currentRole,
+  onRefresh,
+}: {
+  posts: PostItem[];
+  currentRole: TenantRole;
+  onRefresh: () => Promise<void>;
+}) {
+  const canReview = canAccess(currentRole, "reviewer");
   return (
     <div className="px-4">
-      <SectionHeader title="稿件" subtitle="你的稿件、动态和审核流" action="刷新" icon={RefreshCwIcon} />
+      <SectionHeader title="稿件" subtitle="你的稿件、动态和审核流" action="刷新" icon={RefreshCwIcon} onAction={onRefresh} />
       <Tabs defaultValue="mine" className="mt-3">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className={`grid w-full ${canReview ? "grid-cols-3" : "grid-cols-2"}`}>
           <TabsTrigger value="mine">你的稿件</TabsTrigger>
           <TabsTrigger value="feed">动态</TabsTrigger>
-          <TabsTrigger value="review">审核</TabsTrigger>
+          {canReview ? <TabsTrigger value="review">审核</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="mine" className="mt-3">
-          <PostList />
+          <PostList posts={posts} />
         </TabsContent>
         <TabsContent value="feed" className="mt-3">
           <EmptyCard title="前面的区域，以后再来探索吧" />
         </TabsContent>
-        <TabsContent value="review" className="mt-3">
-          <PostList review />
-        </TabsContent>
+        {canReview ? (
+          <TabsContent value="review" className="mt-3">
+            <EmptyCard title="审核工作流会在 Phase 4 接入" />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );
 }
 
-function ServicesPage() {
+function ServicesPage({ services }: { services: TenantMetadata["services"] }) {
+  const entries = services.length > 0 ? services : defaultMetadata.services;
   return (
     <div className="px-4">
       <SectionHeader title="服务" subtitle="账号服务与推荐网站" />
       <div className="mt-3 flex flex-col gap-2">
-        {services.map((service) => (
-          <ListButton key={service.title} title={service.title} description={service.description} icon={service.icon} />
+        {entries.map((service) => (
+          <ListButton key={service.title} title={service.title} description={service.description ?? "校园服务"} icon={service.title.includes("密码") ? KeyRoundIcon : SparklesIcon} />
         ))}
       </div>
     </div>
   );
 }
 
-function AdminPage({ selectedTenant }: { selectedTenant: TenantSummary | undefined }) {
+function AdminPage({ selectedTenant }: { selectedTenant: TenantSummary }) {
   return (
     <div className="px-4">
-      <SectionHeader title="管理" subtitle={`${selectedTenant?.name ?? "校园墙"} 的审核和配置`} />
+      <SectionHeader title="管理" subtitle={`${selectedTenant.name} 的审核和配置`} />
       <div className="mt-3 flex flex-col gap-2">
-        {adminItems.map((item) => (
-          <ListButton key={item.title} title={item.title} description={item.description} icon={item.icon} />
-        ))}
+        <ListButton title="审核稿件" description={`${selectedTenant.pendingPostCount} 条待审核`} icon={ClipboardListIcon} />
+        <ListButton title="校园墙设置" description="品牌、公告、规则" icon={MegaphoneIcon} />
+        <ListButton title="发布目标" description={`${selectedTenant.botAccountCount} 个 QQ 墙号`} icon={ShieldCheckIcon} />
       </div>
     </div>
   );
@@ -542,11 +901,13 @@ function SectionHeader({
   subtitle,
   action,
   icon: Icon,
+  onAction,
 }: {
   title: string;
   subtitle: string;
   action?: string;
   icon?: typeof RefreshCwIcon;
+  onAction?: () => void | Promise<void>;
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -555,7 +916,7 @@ function SectionHeader({
         <p className="text-sm text-muted-foreground">{subtitle}</p>
       </div>
       {action && Icon ? (
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" onClick={() => void onAction?.()}>
           <Icon data-icon="inline-start" />
           {action}
         </Button>
@@ -564,19 +925,20 @@ function SectionHeader({
   );
 }
 
-function PostList({ review = false }: { review?: boolean }) {
+function PostList({ posts }: { posts: PostItem[] }) {
+  if (posts.length === 0) {
+    return <EmptyCard title="还没有稿件" />;
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {posts.map((post) => (
         <Button key={post.id} variant="secondary" className="h-auto justify-between rounded-xl p-3">
           <span className="min-w-0 text-left">
             <span className="block truncate font-medium">{post.title}</span>
-            <span className="text-xs text-muted-foreground">
-              {post.id}
-              {review ? " · 等待审核员处理" : ""}
-            </span>
+            <span className="text-xs text-muted-foreground">#{post.displayId}</span>
           </span>
-          <Badge variant={post.variant}>{post.status}</Badge>
+          <Badge variant={post.status === "pending_approval" ? "destructive" : "secondary"}>{statusLabels[post.status] ?? post.status}</Badge>
         </Button>
       ))}
     </div>

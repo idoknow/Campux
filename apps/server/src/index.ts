@@ -2,7 +2,11 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
+import { prisma } from "./lib/prisma";
+import { registerAuthRoutes } from "./routes/auth";
 import { registerHealthRoutes } from "./routes/health";
+import { registerMetadataRoutes } from "./routes/metadata";
+import { registerPostRoutes } from "./routes/posts";
 import { registerTenantRoutes } from "./routes/tenants";
 
 const config = loadConfig();
@@ -22,10 +26,14 @@ const queue = createRuntimeQueue({
 });
 
 registerHealthRoutes(app, queue);
+registerAuthRoutes(app);
 registerTenantRoutes(app);
+registerMetadataRoutes(app);
+registerPostRoutes(app, config);
 
 app.addHook("onClose", async () => {
   await queue.stop();
+  await prisma.$disconnect();
 });
 
 await queue.start();

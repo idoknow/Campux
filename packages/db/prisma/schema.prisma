@@ -53,6 +53,7 @@ model Tenant {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   memberships    TenantMembership[]
+  sessions       AccountSession[]
   metadata       TenantMetadata[]
   posts          Post[]
   botAccounts    BotAccount[]
@@ -63,10 +64,27 @@ model User {
   id          String             @id @default(uuid())
   qqUin       BigInt             @unique
   displayName String?
+  passwordHash String
   systemRole  SystemRole?
   createdAt   DateTime           @default(now())
   memberships TenantMembership[]
   posts       Post[]
+  sessions    AccountSession[]
+}
+
+model AccountSession {
+  id               String   @id @default(uuid())
+  userId           String
+  tokenHash        String   @unique
+  selectedTenantId String?
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  selectedTenant   Tenant?  @relation(fields: [selectedTenantId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model TenantMembership {
