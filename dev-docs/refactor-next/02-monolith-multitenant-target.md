@@ -16,7 +16,7 @@ CampuxNext 应该是 TypeScript 全栈单体应用，同时内建多租户能力
 ```text
 CampuxNext/
   apps/
-    web/              # Vite 前端 UI
+    web/              # Vite + React 前端 UI
     server/           # API、后台任务、Bot runtime
   packages/
     domain/           # 领域类型、状态机、权限策略
@@ -28,7 +28,8 @@ CampuxNext/
 
 技术栈决策：
 
-- 前端构建：Vite。
+- 前端构建：Vite + React。
+- UI 组件：shadcn/ui，按移动端优先的校园墙体验组合组件，不照搬桌面后台 Sidebar 模式。
 - 包管理器与脚本运行：Bun。
 - 数据库：PostgreSQL。
 - 后端：TypeScript server 入口，建议 Fastify 或 NestJS；Bot 常驻连接、发布队列和 Playwright 渲染更像后端服务，不建议用纯 Next.js 承担全部运行时。
@@ -44,14 +45,16 @@ CampuxNext/
 
 ## UI 设计方向
 
-CampuxNext 面向校园墙运营和学生投稿，不应该做成过于灰冷的通用后台。界面可以更生动一些，多一些色彩和校园感，但仍要保持管理工作台的扫描效率。
+CampuxNext 面向校园墙运营和学生投稿，不应该做成过于灰冷的通用后台。用户侧应以移动端优先设计，界面可以更生动一些，多一些色彩和校园感；管理能力应作为用户侧任务流的一部分进入，而不是默认呈现成桌面后台。
 
 建议方向：
 
-- 前台投稿页可以更轻快，使用鲜明品牌色、插画感空状态、柔和但不单调的色块。
-- 管理后台可以在导航、状态标签、租户切换、发布目标状态上使用更丰富的颜色编码。
+- 前台投稿页是默认首屏，使用鲜明品牌色、轻快状态表达、柔和但不单调的色块。
+- 用户侧移动端主导航采用底部 Tab：投稿、稿件、服务、管理；桌面宽屏可以参考旧版增加简易左侧 Sidebar，但保持朴素入口，不做通用后台壳。
+- shadcn/ui 用于 Card、Tabs、Select、Textarea、Badge、Switch、Alert、Avatar、Drawer、Dropdown Menu 等基础组件，保持一致的交互和可访问性。
+- 管理页面可以在导航、状态标签、当前校园墙配置、发布目标状态上使用更丰富的颜色编码。
 - 多租户场景下，每个学校可以拥有独立主题色、logo、墙名称和投稿规则展示。
-- 不做纯营销式落地页，首屏仍以投稿、审核、管理这些真实任务为核心。
+- 不做纯营销式落地页，首屏仍以投稿、稿件状态、服务入口这些真实任务为核心。
 - 状态表达要有温度：待审核、发布中、部分墙号失败、已同步发布等状态应一眼可分辨。
 
 ## 多租户模型
@@ -84,8 +87,8 @@ erDiagram
 | 表 | 说明 |
 | --- | --- |
 | `tenants` | 学校/校园墙，含 slug、名称、状态、默认域名或访问路径 |
-| `users` | 全局用户，以 QQ uin 或其他登录身份为主体 |
-| `tenant_memberships` | 用户在某租户下的角色，替代当前全局 `user_group` |
+| `users` | 全局用户，以 QQ uin 或其他登录身份为主体；系统运维权限挂在用户账户上 |
+| `tenant_memberships` | 用户被授权进入某租户的关系，以及在该租户下的角色，替代当前全局 `user_group` |
 | `tenant_metadata` | 租户级站点配置，替代全局 `metadata` |
 | `posts` | 投稿，增加 `tenant_id` |
 | `post_logs` | 投稿日志，增加 `tenant_id` |
@@ -107,19 +110,34 @@ erDiagram
 - 所有租户级表都带 `tenant_id`。
 - 查询 repository 默认要求传入 `tenantId`，不要允许业务层裸查全表。
 - 唯一索引必须考虑租户维度，例如 `(tenant_id, post_id)`、`(tenant_id, key)`、`(tenant_id, client_id)`。
-- `uin` 不应再直接等于账号主键。一个 QQ 用户可以在多个学校有不同角色和封禁状态。
-- 管理后台需要区分“实例管理员”和“租户管理员”。
+- `uin` 不应再直接等于账号主键。一个 QQ 用户只有一个全局账户，但可以被授权进入多个学校，并在不同学校有不同角色和封禁状态。
+- 不能默认允许一个账户进入所有租户。用户只有在 Bot 注册或后台授权后，才拥有对应校园墙的 `TenantMembership`。
+- 权限模型分成两层：全局账户角色和租户内成员角色。
 
-推荐角色：
+全局账户角色：
 
 | 角色 | 作用域 | 权限 |
 | --- | --- | --- |
-| `instance_owner` | 全局 | 创建租户、全局配置、跨租户查看 |
-| `tenant_admin` | 单租户 | 租户配置、成员、OAuth app、Bot 配置 |
-| `tenant_moderator` | 单租户 | 审核、封禁、查看投稿 |
-| `tenant_user` | 单租户 | 投稿、查看自己的稿件 |
+| `system_operator` | 全局账户 | 进入运维面板，创建、停用和修改所有校园墙，管理所有用户、墙号、发布目标、系统配置和运维状态 |
 
-现有 `admin/member/user` 可以映射为 `tenant_admin/tenant_moderator/tenant_user`。
+租户内成员角色：
+
+| 角色 | 作用域 | 权限 |
+| --- | --- | --- |
+| `submitter` | 单校园墙 | 投稿、查看和撤回自己的稿件、维护自己的账号信息 |
+| `reviewer` | 单校园墙 | 查看待审核稿件、通过、拒绝、填写审核备注 |
+| `admin` | 单校园墙 | 拥有审核能力，并可修改自己校园墙允许开放的配置，例如公告、投稿规则、服务入口、运营成员、发布目标展示名 |
+
+现有 `user` 可以映射为 `submitter`，现有 `member` 可以映射为 `reviewer`，现有 `admin` 在单墙部署里可以先映射为租户内 `admin`。只有负责整个实例运维的人才应有账户级 `system_operator`。
+
+租户内 `admin` 不是跨租户管理员。它只能读写自己所属校园墙下的数据。`system_operator` 才能跨校园墙查看和修改所有租户信息。
+
+登录后租户选择规则：
+
+1. 如果账户没有任何 `TenantMembership`，显示“暂无可访问的校园墙”，不允许进入普通用户页面。
+2. 如果账户只有一个 `TenantMembership`，直接进入该校园墙。
+3. 如果账户有多个 `TenantMembership`，先让用户选择要进入的校园墙。
+4. 如果账户有 `system_operator` 权限，额外展示“系统运维面板”入口。这个入口和普通校园墙入口分开，不要混成普通租户切换器。
 
 ## 租户识别
 
@@ -127,7 +145,7 @@ Web 访问需要先定位租户。建议同时支持三种方式：
 
 1. 域名：`gz.example.com` 解析到某租户。
 2. 路径：`/t/:tenantSlug`。
-3. 管理后台显式选择租户。
+3. 系统运维后台显式选择校园墙。
 
 API 层建议使用以下上下文：
 
@@ -136,11 +154,12 @@ type RequestContext = {
   tenantId?: string
   userId?: string
   membership?: TenantMembership
-  isInstanceOwner: boolean
+  tenantRole?: "submitter" | "reviewer" | "admin"
+  systemRole?: "system_operator"
 }
 ```
 
-前台投稿页必须有 `tenantId`；全局管理页可以没有默认租户，但进入租户管理后必须绑定。
+前台投稿页必须有 `tenantId`，但不要把租户概念暴露给普通用户；它应表现为“当前校园墙”。系统运维后台可以没有默认校园墙，进入某个校园墙管理后必须绑定。
 
 ## 投稿与发布任务
 
@@ -296,4 +315,4 @@ Utility 可以变成内部渲染模块：
 - OAuth2 app 必须按租户隔离，redirect URI 校验继续保留严格匹配。
 - Service token 在单体内应消失。若还存在外部 Bot 兼容模式，也要变成租户级 token，并支持轮换。
 - 投稿图片对象 key 应包含租户前缀，例如 `tenants/{tenantId}/posts/{postId}/...`。
-- 所有后台任务执行前重新加载租户配置，避免配置变更后旧任务误发。
+- 所有后台任务执行前重新加载校园墙配置，避免配置变更后旧任务误发。

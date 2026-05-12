@@ -4,7 +4,7 @@ const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().default("postgresql://campux:campux@localhost:5432/campux_next"),
   CAMPUX_SERVER_HOST: z.string().default("0.0.0.0"),
-  CAMPUX_SERVER_PORT: z.coerce.number().int().positive().default(8787),
+  CAMPUX_SERVER_PORT: z.coerce.number().int().positive().default(8989),
   CAMPUX_WEB_ORIGIN: z.string().default("http://localhost:5180"),
   S3_ENDPOINT: z.string().default("http://localhost:9000"),
   S3_REGION: z.string().default("auto"),

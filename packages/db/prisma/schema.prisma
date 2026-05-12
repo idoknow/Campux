@@ -14,10 +14,13 @@ enum TenantStatus {
 }
 
 enum TenantRole {
-  instance_owner
-  tenant_admin
-  tenant_moderator
-  tenant_user
+  submitter
+  reviewer
+  admin
+}
+
+enum SystemRole {
+  system_operator
 }
 
 enum PostStatus {
@@ -60,6 +63,7 @@ model User {
   id          String             @id @default(uuid())
   qqUin       BigInt             @unique
   displayName String?
+  systemRole  SystemRole?
   createdAt   DateTime           @default(now())
   memberships TenantMembership[]
   posts       Post[]
@@ -69,7 +73,7 @@ model TenantMembership {
   id        String     @id @default(uuid())
   tenantId  String
   userId    String
-  role      TenantRole @default(tenant_user)
+  role      TenantRole @default(submitter)
   createdAt DateTime   @default(now())
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -3,12 +3,10 @@ import { z } from "zod";
 export const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
 export type TenantStatus = z.infer<typeof tenantStatusSchema>;
 
-export const tenantRoleSchema = z.enum([
-  "instance_owner",
-  "tenant_admin",
-  "tenant_moderator",
-  "tenant_user",
-]);
+export const systemRoleSchema = z.enum(["system_operator"]);
+export type SystemRole = z.infer<typeof systemRoleSchema>;
+
+export const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
 export type TenantRole = z.infer<typeof tenantRoleSchema>;
 
 export const postStatusSchema = z.enum([
