@@ -16,7 +16,7 @@ CampuxNext 应该是 TypeScript 全栈单体应用，同时内建多租户能力
 ```text
 CampuxNext/
   apps/
-    web/              # 前端 UI
+    web/              # Vite 前端 UI
     server/           # API、后台任务、Bot runtime
   packages/
     domain/           # 领域类型、状态机、权限策略
@@ -26,19 +26,33 @@ CampuxNext/
     config/           # 配置加载、租户设置 schema
 ```
 
-具体框架可以二选一：
+技术栈决策：
 
-1. Next.js 全栈：适合前后端一体、页面和 API 共部署，后台 worker 需要单独入口。
-2. Fastify/NestJS + Vite/React 或 Vue：适合更清晰的后端模块和长期后台任务。
-
-如果重构目标是“稳定管理多个学校”，我倾向于 `Fastify + Vite + Prisma + PostgreSQL`。Next.js 也能做，但 Bot 常驻连接、发布队列和 Playwright 渲染更像后端服务，独立 server 入口会更舒服。
+- 前端构建：Vite。
+- 包管理器与脚本运行：Bun。
+- 数据库：PostgreSQL。
+- 后端：TypeScript server 入口，建议 Fastify 或 NestJS；Bot 常驻连接、发布队列和 Playwright 渲染更像后端服务，不建议用纯 Next.js 承担全部运行时。
+- ORM：Prisma 或 Drizzle。若更看重 schema 可读性和迁移体验，用 Prisma；若更看重 SQL 控制和轻量，用 Drizzle。
 
 数据库建议：
 
 - 主库：PostgreSQL。
-- ORM：Prisma 或 Drizzle。若更看重 schema 可读性和迁移体验，用 Prisma；若更看重 SQL 控制和轻量，用 Drizzle。
-- 队列：单体内仍建议保留持久任务表，而不是只用内存队列。可以先用数据库任务表，未来再接 BullMQ/Redis。
-- 对象存储：本地磁盘和 S3 兼容接口二选一，抽象保留。
+- 队列：当前阶段不引入 Redis，使用进程内内存队列调度后台任务。
+- 对象存储：使用 S3 兼容接口。开发和自部署可以用 MinIO，但应用层只面向 S3 API。
+
+内存队列只负责“现在要执行什么”，不要作为唯一事实来源。发布目标、发布尝试、失败原因、投稿聚合状态仍然写入 PostgreSQL。进程重启后，worker 应从 PostgreSQL 扫描 `publishing`、`failed but retryable`、`pending notification` 等状态并重新入队。
+
+## UI 设计方向
+
+CampuxNext 面向校园墙运营和学生投稿，不应该做成过于灰冷的通用后台。界面可以更生动一些，多一些色彩和校园感，但仍要保持管理工作台的扫描效率。
+
+建议方向：
+
+- 前台投稿页可以更轻快，使用鲜明品牌色、插画感空状态、柔和但不单调的色块。
+- 管理后台可以在导航、状态标签、租户切换、发布目标状态上使用更丰富的颜色编码。
+- 多租户场景下，每个学校可以拥有独立主题色、logo、墙名称和投稿规则展示。
+- 不做纯营销式落地页，首屏仍以投稿、审核、管理这些真实任务为核心。
+- 状态表达要有温度：待审核、发布中、部分墙号失败、已同步发布等状态应一眼可分辨。
 
 ## 多租户模型
 
@@ -82,7 +96,7 @@ erDiagram
 | `bot_sessions` | QZone cookies、登录状态、过期信息，加密存储 |
 | `publish_targets` | 发布目标；同一租户可绑定多个 QZone 墙号并同步发布相同内容 |
 | `publish_attempts` | 单篇投稿在单个发布目标上的发布记录、重试次数和结果 |
-| `jobs` | 持久后台任务，替代 Redis Streams 的业务角色 |
+| `runtime_jobs` | 进程内任务类型，不一定落表；由 PostgreSQL 中的业务状态恢复 |
 
 ### 租户隔离策略
 
@@ -130,7 +144,7 @@ type RequestContext = {
 
 ## 投稿与发布任务
 
-现有 Redis Stream 语义可以映射为持久任务：
+现有 Redis Stream 语义可以映射为内存队列任务：
 
 | 现有事件 | 新任务类型 | 触发 |
 | --- | --- | --- |
@@ -138,6 +152,8 @@ type RequestContext = {
 | `post_cancel` | `notifyPostCancelled` | 用户取消 |
 | `post_review` | `notifyReviewResult` | 审核通过/拒绝 |
 | `publish_post` | `publishPost` | 审核通过后创建，或定时扫描创建 |
+
+新系统第一阶段不引入 Redis。内存队列的可靠性通过 PostgreSQL 状态兜底：任务执行前写入或更新 `publish_attempts`，任务失败写入失败原因和下次重试时间，worker 周期性扫描需要补偿的记录并重新入队。
 
 建议将发布流程改为显式任务状态：
 
@@ -220,7 +236,7 @@ Utility 可以变成内部渲染模块：
 
 - 模板存储在数据库或代码模板目录。
 - 模板变量来自 `tenant_metadata`、`post`、`user`、`bot_account`。
-- Playwright 浏览器实例复用，渲染结果写入对象存储或临时目录。
+- Playwright 浏览器实例复用，渲染结果写入 S3 对象存储；本地临时目录只用于渲染过程中的短生命周期中间文件。
 - 对模板执行白名单或使用安全模板引擎，避免当前 Bot 中 `eval(post_publish_text)` 这类动态执行。
 
 当前 `post_publish_text` 支持表达式拼接，这很灵活但风险高。建议改为模板字符串，例如：
@@ -268,7 +284,7 @@ Utility 可以变成内部渲染模块：
 仍适合作为实例级环境变量的配置：
 
 - 数据库连接。
-- 对象存储根配置。
+- S3 endpoint、bucket、region、access key、secret key、public base URL。
 - 加密密钥。
 - Web 监听端口。
 - OneBot 连接默认参数。

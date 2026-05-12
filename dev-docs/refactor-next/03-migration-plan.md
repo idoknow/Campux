@@ -15,8 +15,8 @@
 
 产出：
 
-- `apps/server`：HTTP API、任务 worker、Bot runtime 入口。
-- `apps/web`：前端应用。
+- `apps/server`：HTTP API、内存队列 worker、Bot runtime 入口。
+- `apps/web`：Vite 前端应用。
 - `packages/domain`：类型、枚举、权限、状态机。
 - `packages/db`：数据库 schema 和迁移。
 - `packages/render`：内部文本转图。
@@ -35,7 +35,7 @@
 - BotAccount
 - PublishTarget
 - PublishAttempt
-- Job
+- RuntimeJob
 
 本阶段暂时可以只创建一个默认租户，但所有表和 service 方法都按 `tenantId` 设计。
 
@@ -47,7 +47,7 @@
 2. 租户 metadata：迁移 `brand`、`banner`、`post_rules`、`services` 等。
 3. 投稿：图片上传、投稿创建、个人稿件列表。
 4. 审核：后台列表、通过/拒绝、日志。
-5. 发布任务：先用数据库 jobs 实现 `notifyNewPost`、`publishPost`、`notifyReviewResult`，并为同一租户的多个发布目标生成 fan-out 任务。
+5. 发布任务：先用内存队列实现 `notifyNewPost`、`publishPost`、`notifyReviewResult`，并为同一租户的多个发布目标生成 fan-out 任务；任务状态通过 PostgreSQL 中的 `publish_attempts` 和投稿状态恢复。
 6. QZone 发布：把 `CampuxBot/campux/social/qzone` 迁成 TS integration。
 7. 文本转图：把 `CampuxUtility` 迁成内部 `renderPostCard()`。
 8. OAuth2：迁移 app 管理、授权码、token、用户信息。
@@ -64,8 +64,9 @@
 - 租户级管理员与审核员管理。
 - 租户级 Bot 配置：多个墙号、审核群、帮助文本、发布延迟、QZone 登录。
 - 租户级发布目标配置：同一篇投稿可同步发布到多个 QQ 墙号，并能单独启停、重试和查看失败原因。
-- 租户级对象存储前缀和数据统计。
+- 租户级 S3 对象前缀和数据统计。
 - 每个租户独立初始化，而不是全局 `/init` 只创建一个管理员。
+- 租户级 UI 主题：品牌色、logo、前台展示文案和状态色。
 
 关键改动：
 
@@ -107,7 +108,7 @@ MongoDB 迁移逻辑相似，但要注意旧 post ID 是代码手动递增，迁
 | 全局 metadata | `Metadata.key` 全局唯一 | 改为 `(tenant_id, key)` |
 | 全局 post_id | Go/SQLite 自增，Mongo 手动递增 | 改为租户内 `display_id` |
 | 全局 service token | Bot 调 API 只靠 `service.token` | 单体内移除，外部兼容 token 租户化 |
-| Redis stream 全局 domain | `service.domain`/`campux_domain` 决定 stream 名称 | 用 jobs 表和 `tenant_id` 替代 |
+| Redis stream 全局 domain | `service.domain`/`campux_domain` 决定 stream 名称 | 新系统暂不使用 Redis；用内存队列调度，并用 PostgreSQL 里的 `tenant_id`、投稿状态和 `publish_attempts` 恢复 |
 | Bot cookie 明文缓存 | `qzone_cookies` 存在 Bot data cache | 加密存储到 `bot_sessions` |
 | 动态 eval | Bot 的 `post_publish_text` 使用 `eval` | 改安全模板 |
 | 发布确认依赖 Hash | 所有 `service.bots` 都置 1 才 published，且配置是全局的 | 改按租户级 `publish_targets` 和 `publish_attempts` 聚合，支持单学校多个 QQ 墙号同步发布 |
@@ -121,6 +122,7 @@ MongoDB 迁移逻辑相似，但要注意旧 post ID 是代码手动递增，迁
 - 租户隔离：租户 A 不能读写租户 B 的投稿、metadata、OAuth app、封禁记录。
 - 权限：实例管理员、租户管理员、审核员、普通用户的边界。
 - 投稿状态机：重复审核、取消已审核稿件、发布失败重试。
+- 内存队列恢复：进程重启后能从 PostgreSQL 找回发布中、待通知、可重试的任务。
 - 多墙号同步发布：同一租户多个发布目标 fan-out、部分失败、单目标重试、聚合状态更新。
 - Bot 命令路由：不同审核群映射到不同租户。
 - QZone 发布：渲染、上传、发布、记录 verbose、失败日志。
@@ -130,30 +132,33 @@ MongoDB 迁移逻辑相似，但要注意旧 post ID 是代码手动递增，迁
 
 在正式编码前，建议先定下这些选择：
 
-1. 后端框架：Fastify/NestJS/Next.js 选一个。
-2. 前端框架：继续 Vue/Vuetify，还是换 React 系。
-3. 数据库：PostgreSQL 是否作为唯一主库。
-4. 任务队列：数据库 jobs 起步，还是直接 BullMQ。
+1. 后端框架：Fastify 或 NestJS 选一个。
+2. 前端框架：Vite 下继续 Vue，还是换 React 系。
+3. ORM：Prisma 还是 Drizzle。
+4. 内存队列实现：自研轻量 worker loop，还是选用支持内存 backend 的队列库。
 5. 租户访问方式：域名优先、路径优先，还是都支持。
 6. Bot 运行方式：内置 OneBot 客户端常驻，还是保留外部 Bot 兼容入口。
 
 我的建议是：
 
+- 包管理器：Bun。
 - 后端：Fastify。
-- 前端：继续 Vue 3，降低重写成本；如果 CampuxNext 想整体换栈，再考虑 React。
+- 前端：Vite + Vue 3，降低重写成本；如果 CampuxNext 想整体换栈，再考虑 React。
 - 数据库：PostgreSQL + Prisma。
-- 队列：先数据库 jobs，后续有吞吐压力再接 Redis/BullMQ。
+- 队列：当前阶段使用内存队列，不引入 Redis；PostgreSQL 持久化发布状态，用扫描补偿处理重启恢复。
+- 对象存储：S3 兼容接口，开发环境可用 MinIO。
 - 租户识别：域名和路径都支持。
 - Bot：新系统内置 Bot runtime，但保留一层外部 webhook/token 兼容空间。
+- UI：比当前后台更生动，允许更多色彩、状态色和校园品牌感，但保持审核和运维场景的扫描效率。
 
 ## 第一批可落地任务
 
-1. 建立 CampuxNext monorepo 和基础 lint/test/build。
+1. 使用 Bun 建立 CampuxNext monorepo 和基础 lint/test/build。
 2. 写出 Prisma schema 初版，包含租户和现有业务模型。
 3. 实现 tenant context middleware。
 4. 实现 metadata、account、post 的最小 API。
 5. 实现默认租户初始化流程。
-6. 实现 jobs 表和 worker loop。
+6. 实现内存队列 worker loop，并实现基于 PostgreSQL 状态的启动恢复扫描。
 7. 迁移文本转图为 TS 内部模块。
 8. 迁移 OneBot 审核群通知和命令。
 9. 写旧 SQLite 到新 PostgreSQL 的一次性迁移脚本。
