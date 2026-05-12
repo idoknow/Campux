@@ -13,7 +13,8 @@
     "build": "bun --cwd apps/web build && bun --cwd apps/server build",
     "typecheck": "bun --cwd apps/web typecheck && bun --cwd apps/server typecheck",
     "db:generate": "bun --cwd packages/db prisma generate",
-    "db:migrate": "bun --cwd packages/db prisma migrate dev"
+    "db:migrate": "bun --cwd packages/db prisma migrate dev",
+    "db:seed": "bun --cwd packages/db src/seed.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -16,7 +18,43 @@ const configSchema = z.object({
 
 export type CampuxConfig = ReturnType<typeof loadConfig>;
 
+function loadDotEnvFiles() {
+  const candidates = [
+    resolve(process.cwd(), ".env"),
+    resolve(process.cwd(), "../.env"),
+    resolve(process.cwd(), "../../.env"),
+  ];
+
+  for (const file of candidates) {
+    if (!existsSync(file)) {
+      continue;
+    }
+
+    const content = readFileSync(file, "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) {
+        continue;
+      }
+
+      const separatorIndex = trimmed.indexOf("=");
+      if (separatorIndex < 0) {
+        continue;
+      }
+
+      const key = trimmed.slice(0, separatorIndex).trim();
+      const rawValue = trimmed.slice(separatorIndex + 1).trim();
+      if (!key || process.env[key] !== undefined) {
+        continue;
+      }
+
+      process.env[key] = rawValue.replace(/^"|"$/g, "");
+    }
+  }
+}
+
 export function loadConfig() {
+  loadDotEnvFiles();
   const env = configSchema.parse(process.env);
 
   return {

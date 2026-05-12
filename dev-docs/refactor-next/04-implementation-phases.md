@@ -18,13 +18,21 @@
   - 通过 `TenantMembership` 授权进入一个或多个校园墙。
   - 租户内角色：`submitter`、`reviewer`、`admin`。
   - 全局系统角色：`system_operator`。
+- Phase 1-3 最小闭环已经接入：
+  - 真实账号密码登录、session cookie、退出登录。
+  - `GET /api/me` 当前用户和 membership。
+  - 单 membership 直进校园墙，多 membership 选择校园墙。
+  - 当前校园墙 metadata 读取。
+  - 图片上传到 S3/MinIO。
+  - 创建投稿、查看自己的稿件。
+  - seed 测试账号和默认校园墙。
 
 当前主要问题：
 
-- 登录页和认证 API 还没有实现；前端现在只是本地假登录态。
-- `/api/tenants` 仍然返回 demo tenants。
-- 投稿、审核、配置、服务页都还是 UI 骨架，没有真实后端数据。
-- 租户上下文、权限校验、Bot 注册授权、图片上传、发布队列都还没有接入。
+- 登录和投稿已经是最小真实链路，但还没有旧系统完整功能，例如改密、Bot 注册、封禁、OAuth。
+- 审核、配置、服务页仍然是 UI 骨架或只读入口，Phase 4 才会接入真实审核和租户内管理。
+- 发布队列、Bot 注册授权、QZone 发布和文本转图还没有接入。
+- 系统运维面板还只是权限模型和入口设计，没有真实后台页面。
 
 ## Phase 1：真实账户与登录闭环
 
