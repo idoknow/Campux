@@ -6,7 +6,7 @@ CampuxNext 应该是 TypeScript 全栈单体应用，同时内建多租户能力
 
 - Web UI、API、后台任务、Bot 适配器、发布器、渲染器共享同一套领域模型。
 - 同一实例可管理多个学校/校园墙。
-- 每个租户拥有自己的品牌、投稿规则、审核群、墙号、发布目标、OAuth 应用和运营配置。
+- 每个租户拥有自己的品牌、投稿规则、审核群、一个或多个 QQ 墙号、发布目标、OAuth 应用和运营配置。
 - 运维上减少多套 Docker Compose、多份 Redis、多份配置文件带来的重复劳动。
 
 ## 建议技术形态
@@ -59,6 +59,9 @@ erDiagram
   Tenant ||--o{ BanRecord : owns
   Post ||--o{ PostLog : has
   Post ||--o{ PostVerbose : has
+  Post ||--o{ PublishAttempt : fanouts
+  PublishTarget ||--o{ PublishAttempt : receives
+  BotAccount ||--o{ PublishTarget : backs
   BotAccount ||--o{ BotSession : has
 ```
 
@@ -75,9 +78,10 @@ erDiagram
 | `post_verbose` | 发布结果详情，增加 `tenant_id` |
 | `ban_records` | 租户级封禁，增加 `tenant_id` |
 | `oauth_apps` | 租户级 OAuth 应用，增加 `tenant_id` |
-| `bot_accounts` | 墙号、审核群、命令配置、发布策略 |
+| `bot_accounts` | QQ 墙号、登录会话、命令入口配置 |
 | `bot_sessions` | QZone cookies、登录状态、过期信息，加密存储 |
-| `publish_targets` | 发布目标，可先只支持 QZone，后续扩展公众号、Telegram 等 |
+| `publish_targets` | 发布目标；同一租户可绑定多个 QZone 墙号并同步发布相同内容 |
+| `publish_attempts` | 单篇投稿在单个发布目标上的发布记录、重试次数和结果 |
 | `jobs` | 持久后台任务，替代 Redis Streams 的业务角色 |
 
 ### 租户隔离策略
@@ -165,6 +169,32 @@ stateDiagram-v2
 
 这样一个租户可以配置多个墙号或多个发布目标，不再依赖全局 `service.bots`。
 
+### 单租户多 QQ 墙号同步发布
+
+必须显式支持“一个学校有多个 QQ 墙号，同一篇投稿同步发布到多个 QQ 空间”的场景。原因是 QQ 单号好友上限约束会让大型学校自然拆成多个墙号，但运营侧仍希望它们表现为同一个校园墙。
+
+推荐模型：
+
+- `bot_accounts` 表示可登录、可收发消息、可发布 QZone 的 QQ 账号。
+- `publish_targets` 表示某租户启用的发布目标，当前类型先支持 `qzone`，并绑定一个 `bot_account_id`。
+- `publish_attempts` 表示一篇投稿对某个 `publish_target` 的一次或多次发布尝试。
+- 投稿审核通过后，为该租户所有启用的发布目标生成 fan-out 任务。
+- 只有所有 required 发布目标都成功后，投稿聚合状态才进入 `published`。
+- 如果部分目标失败，投稿保持 `publishing` 或进入 `partially_failed`/`failed`，后台必须能看到每个墙号的独立失败原因并单独重试。
+
+建议增加发布目标策略：
+
+| 字段 | 说明 |
+| --- | --- |
+| `required` | 是否计入整篇投稿的发布成功判定；默认 true |
+| `enabled` | 是否启用该目标 |
+| `display_name` | 后台展示名称，例如“南校区墙号 1” |
+| `bot_account_id` | 绑定的 QQ 墙号 |
+| `publish_delay_seconds` | 该目标独立的发布延迟，可用于错峰 |
+| `failure_policy` | 失败时阻塞整篇投稿，还是仅标记目标失败 |
+
+这套模型比现有 Redis Hash 更清楚。当前 `service.bots` 已经隐含了“多个 Bot 都要发布完成才算 published”的思路，但它是全局配置，不能表达每个学校自己的多个墙号、每个墙号的启停、失败重试和可选目标。
+
 ## Bot 集成目标形态
 
 当前 Bot 的业务逻辑建议迁入 `integrations/onebot` 和 `integrations/qzone`：
@@ -173,7 +203,7 @@ stateDiagram-v2
 - 命令路由：根据群号、私聊用户、Bot 账号定位租户。
 - 审核群通知：租户级配置。
 - 私聊注册和重置密码：需要先判断用户要注册哪个租户。可以通过 Bot 账号所属租户或命令参数决定。
-- QZone 发布器：租户级 Bot 账号和 session。
+- QZone 发布器：租户级 Bot 账号和 session，同一租户可启动多个账号的发布 worker。
 
 命令路由要从“一个 Bot 只有一个租户”升级为：
 
@@ -182,7 +212,7 @@ message -> botAccountUin -> tenantBotBinding -> tenantId -> command handler
 groupId -> tenant review group binding -> tenantId
 ```
 
-如果一个 QQ Bot 账号服务多个学校，需要进一步支持命令参数或群绑定。但从当前运营模式看，更自然的是一个学校一个墙号或一个审核群绑定一个租户。
+如果一个 QQ Bot 账号服务多个学校，需要进一步支持命令参数或群绑定。但从当前运营模式看，更自然的是一个学校绑定一个审核群，并允许该学校配置多个墙号用于同步发布。
 
 ## 渲染服务目标形态
 
@@ -251,4 +281,3 @@ Utility 可以变成内部渲染模块：
 - Service token 在单体内应消失。若还存在外部 Bot 兼容模式，也要变成租户级 token，并支持轮换。
 - 投稿图片对象 key 应包含租户前缀，例如 `tenants/{tenantId}/posts/{postId}/...`。
 - 所有后台任务执行前重新加载租户配置，避免配置变更后旧任务误发。
-
