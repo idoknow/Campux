@@ -7,6 +7,7 @@ dist/
 build/
 .vite/
 coverage/
+*.tsbuildinfo
 
 # Runtime data
 data/

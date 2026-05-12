@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  active
+  paused
+  archived
+}
+
+enum TenantRole {
+  instance_owner
+  tenant_admin
+  tenant_moderator
+  tenant_user
+}
+
+enum PostStatus {
+  pending_approval
+  approved
+  rejected
+  cancelled
+  publishing
+  partially_failed
+  failed
+  published
+  pending_recall
+  recalled
+}
+
+enum PublishAttemptStatus {
+  queued
+  running
+  succeeded
+  failed
+  skipped
+}
+
+model Tenant {
+  id             String             @id @default(uuid())
+  slug           String             @unique
+  name           String
+  status         TenantStatus       @default(active)
+  themeColor     String             @default("#e0574f")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  memberships    TenantMembership[]
+  metadata       TenantMetadata[]
+  posts          Post[]
+  botAccounts    BotAccount[]
+  publishTargets PublishTarget[]
+}
+
+model User {
+  id          String             @id @default(uuid())
+  qqUin       BigInt             @unique
+  displayName String?
+  createdAt   DateTime           @default(now())
+  memberships TenantMembership[]
+  posts       Post[]
+}
+
+model TenantMembership {
+  id        String     @id @default(uuid())
+  tenantId  String
+  userId    String
+  role      TenantRole @default(tenant_user)
+  createdAt DateTime   @default(now())
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model TenantMetadata {
+  id        String   @id @default(uuid())
+  tenantId  String
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+}
+
+model Post {
+  id              String           @id @default(uuid())
+  tenantId        String
+  authorId        String
+  displayId       Int
+  text            String
+  images          Json             @default("[]")
+  anonymous       Boolean          @default(false)
+  status          PostStatus       @default(pending_approval)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author          User             @relation(fields: [authorId], references: [id])
+  logs            PostLog[]
+  publishAttempts PublishAttempt[]
+
+  @@unique([tenantId, displayId])
+  @@index([tenantId, status, createdAt])
+}
+
+model PostLog {
+  id        String     @id @default(uuid())
+  tenantId  String
+  postId    String
+  actorId   String?
+  oldStatus PostStatus?
+  newStatus PostStatus
+  comment   String
+  createdAt DateTime   @default(now())
+  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, postId, createdAt])
+}
+
+model BotAccount {
+  id             String          @id @default(uuid())
+  tenantId       String
+  qqUin          BigInt
+  displayName    String
+  enabled        Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  publishTargets PublishTarget[]
+
+  @@unique([tenantId, qqUin])
+}
+
+model PublishTarget {
+  id                  String           @id @default(uuid())
+  tenantId            String
+  botAccountId        String
+  type                String           @default("qzone")
+  displayName         String
+  enabled             Boolean          @default(true)
+  required            Boolean          @default(true)
+  publishDelaySeconds Int              @default(0)
+  failurePolicy       String           @default("block_post")
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botAccount          BotAccount       @relation(fields: [botAccountId], references: [id], onDelete: Cascade)
+  attempts            PublishAttempt[]
+
+  @@index([tenantId, enabled])
+}
+
+model PublishAttempt {
+  id              String               @id @default(uuid())
+  tenantId        String
+  postId          String
+  publishTargetId String
+  status          PublishAttemptStatus @default(queued)
+  attempt         Int                  @default(0)
+  lastError       String?
+  nextRunAt       DateTime?
+  externalId      String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  post            Post                 @relation(fields: [postId], references: [id], onDelete: Cascade)
+  publishTarget   PublishTarget        @relation(fields: [publishTargetId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, publishTargetId])
+  @@index([tenantId, status, nextRunAt])
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@campux/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "prisma": "prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2"
+  },
+  "devDependencies": {
+    "prisma": "^6.8.2"
+  }
+}
