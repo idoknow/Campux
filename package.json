@@ -1,0 +1,22 @@
+{
+  "name": "campux-next",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.2.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "bun --cwd apps/web dev",
+    "dev:server": "bun --cwd apps/server dev",
+    "build": "bun --cwd apps/web build && bun --cwd apps/server build",
+    "typecheck": "bun --cwd apps/web typecheck && bun --cwd apps/server typecheck",
+    "db:generate": "bun --cwd packages/db prisma generate",
+    "db:migrate": "bun --cwd packages/db prisma migrate dev"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.8.3"
+  }
+}

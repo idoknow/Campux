@@ -1,0 +1,21 @@
+{
+  "name": "@campux/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b --noEmit",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@campux/domain": "workspace:*",
+    "@vitejs/plugin-vue": "^5.2.3",
+    "vite": "^6.3.5",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vue-tsc": "^2.2.10"
+  }
+}

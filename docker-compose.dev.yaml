@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: campux-next-postgres
+    environment:
+      POSTGRES_USER: campux
+      POSTGRES_PASSWORD: campux
+      POSTGRES_DB: campux_next
+    ports:
+      - "5432:5432"
+    volumes:
+      - campux-next-postgres:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: campux-next-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: campux
+      MINIO_ROOT_PASSWORD: campux-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - campux-next-minio:/data
+
+volumes:
+  campux-next-postgres:
+  campux-next-minio:
