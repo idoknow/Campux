@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vue-tsc -b && vite build",
-    "typecheck": "vue-tsc -b --noEmit",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
