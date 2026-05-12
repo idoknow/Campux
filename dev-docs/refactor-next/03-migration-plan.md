@@ -34,6 +34,7 @@
 - OAuthApp
 - BotAccount
 - PublishTarget
+- PublishAttempt
 - Job
 
 本阶段暂时可以只创建一个默认租户，但所有表和 service 方法都按 `tenantId` 设计。
@@ -46,7 +47,7 @@
 2. 租户 metadata：迁移 `brand`、`banner`、`post_rules`、`services` 等。
 3. 投稿：图片上传、投稿创建、个人稿件列表。
 4. 审核：后台列表、通过/拒绝、日志。
-5. 发布任务：先用数据库 jobs 实现 `notifyNewPost`、`publishPost`、`notifyReviewResult`。
+5. 发布任务：先用数据库 jobs 实现 `notifyNewPost`、`publishPost`、`notifyReviewResult`，并为同一租户的多个发布目标生成 fan-out 任务。
 6. QZone 发布：把 `CampuxBot/campux/social/qzone` 迁成 TS integration。
 7. 文本转图：把 `CampuxUtility` 迁成内部 `renderPostCard()`。
 8. OAuth2：迁移 app 管理、授权码、token、用户信息。
@@ -61,7 +62,8 @@
 - 租户切换器：实例管理员可切换学校。
 - 租户域名/slug 映射。
 - 租户级管理员与审核员管理。
-- 租户级 Bot 配置：墙号、审核群、帮助文本、发布延迟、QZone 登录。
+- 租户级 Bot 配置：多个墙号、审核群、帮助文本、发布延迟、QZone 登录。
+- 租户级发布目标配置：同一篇投稿可同步发布到多个 QQ 墙号，并能单独启停、重试和查看失败原因。
 - 租户级对象存储前缀和数据统计。
 - 每个租户独立初始化，而不是全局 `/init` 只创建一个管理员。
 
@@ -108,7 +110,7 @@ MongoDB 迁移逻辑相似，但要注意旧 post ID 是代码手动递增，迁
 | Redis stream 全局 domain | `service.domain`/`campux_domain` 决定 stream 名称 | 用 jobs 表和 `tenant_id` 替代 |
 | Bot cookie 明文缓存 | `qzone_cookies` 存在 Bot data cache | 加密存储到 `bot_sessions` |
 | 动态 eval | Bot 的 `post_publish_text` 使用 `eval` | 改安全模板 |
-| 发布确认依赖 Hash | 所有 `service.bots` 都置 1 才 published | 改按 `publish_targets` 或 `publish_attempts` 聚合 |
+| 发布确认依赖 Hash | 所有 `service.bots` 都置 1 才 published，且配置是全局的 | 改按租户级 `publish_targets` 和 `publish_attempts` 聚合，支持单学校多个 QQ 墙号同步发布 |
 | Utility 临时文件 | 独立服务生成临时 jpeg | 迁到内部模块并统一清理 |
 | OAuth app 全局 | client_id 不带租户 | app 和授权上下文租户化 |
 
@@ -119,6 +121,7 @@ MongoDB 迁移逻辑相似，但要注意旧 post ID 是代码手动递增，迁
 - 租户隔离：租户 A 不能读写租户 B 的投稿、metadata、OAuth app、封禁记录。
 - 权限：实例管理员、租户管理员、审核员、普通用户的边界。
 - 投稿状态机：重复审核、取消已审核稿件、发布失败重试。
+- 多墙号同步发布：同一租户多个发布目标 fan-out、部分失败、单目标重试、聚合状态更新。
 - Bot 命令路由：不同审核群映射到不同租户。
 - QZone 发布：渲染、上传、发布、记录 verbose、失败日志。
 - OAuth2：redirect URI 严格匹配、授权码过期、client secret 校验。
@@ -154,4 +157,3 @@ MongoDB 迁移逻辑相似，但要注意旧 post ID 是代码手动递增，迁
 7. 迁移文本转图为 TS 内部模块。
 8. 迁移 OneBot 审核群通知和命令。
 9. 写旧 SQLite 到新 PostgreSQL 的一次性迁移脚本。
-
