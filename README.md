@@ -1,26 +1,15 @@
-
-<div align="center">
-
-<image src="https://campux.idoknow.top/logo.png" alt="logo" width="140"/>
-
 # Campux
 
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/idoknow/Campux)](https://github.com/idoknow/Campux/releases/latest)
-<a href="https://hub.docker.com/repository/docker/rockchin/campux">
-    <img src="https://img.shields.io/docker/pulls/rockchin/campux?color=blue" alt="docker pull">
-  </a>
-  <a href="https://qm.qq.com/q/deaw9KGCC4">
-<img alt="Static Badge" src="https://img.shields.io/badge/%E7%A4%BE%E5%8C%BA%E7%BE%A4-226427026-blue">
-</a>
-<a href="https://t.me/+uSANsIhvIEY2ZGI1">
-<img alt="Static Badge" src="https://img.shields.io/badge/Telegram-Campux&QZone-blue">
-</a>
-  <img src="https://wakapi.rockchin.top/api/badge/RockChinQ/interval:any/project:Campux" alt="Wakapi Count">
+Campux is being rebuilt as a TypeScript full-stack monolith with first-class multi-tenant support.
 
-校园墙自动化和校内服务统一认证解决方案。
+The previous Go/Vue microservice-era application has been moved to [`legacy/`](./legacy/). New architecture notes live in [`dev-docs/refactor-next/`](./dev-docs/refactor-next/).
 
-[文档首页](https://campux.idoknow.top/)｜[功能介绍](https://campux.idoknow.top/insight/scenario.html)｜[部署教程](https://campux.idoknow.top/deploy/minimal.html)
+Planned stack:
 
-<image src="https://campux.idoknow.top/assets/web_demo.Byp50r1x.png" alt="demo" width="500"/>
+- Bun for package management and scripts
+- Vite for the web app
+- TypeScript across frontend and backend
+- PostgreSQL for data
+- S3-compatible object storage
+- In-memory workers with PostgreSQL-backed recovery state
 
-</div>
