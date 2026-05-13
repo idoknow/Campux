@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIcon, ArchiveIcon, BotIcon, Building2Icon, ClipboardListIcon, PauseCircleIcon, PlayCircleIcon, RefreshCwIcon, UsersRoundIcon } from "lucide-react";
+import { ActivityIcon, ArchiveIcon, BotIcon, Building2Icon, ClipboardListIcon, PauseCircleIcon, PlayCircleIcon, PlusIcon, RefreshCwIcon, UsersRoundIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import type { AuditLogItem, SystemBot, SystemQueueSnapshot, SystemTenant, SystemUser, TenantStatus } from "@/types/app";
 import { SectionHeader } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 const statusLabels: Record<TenantStatus, string> = {
   active: "运行中",
@@ -33,6 +34,13 @@ export function OpsPanel() {
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
+  const [creatingTenant, setCreatingTenant] = useState(false);
+  const [tenantForm, setTenantForm] = useState({
+    name: "",
+    slug: "",
+    themeColor: "#42a5f5",
+    botQqUin: "",
+  });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -95,6 +103,33 @@ export function OpsPanel() {
     }
   }
 
+  async function createTenant() {
+    setCreatingTenant(true);
+    setError("");
+    setNotice("");
+    try {
+      const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants", {
+        method: "POST",
+        body: JSON.stringify({
+          name: tenantForm.name.trim(),
+          slug: tenantForm.slug.trim(),
+          themeColor: tenantForm.themeColor,
+          ...(tenantForm.botQqUin.trim().length > 0 ? { botQqUin: tenantForm.botQqUin.trim() } : {}),
+        }),
+      });
+      setTenants(data.tenants);
+      const created = data.tenants.find((tenant) => tenant.slug === tenantForm.slug.trim());
+      setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
+      setTenantForm({ name: "", slug: "", themeColor: "#42a5f5", botQqUin: "" });
+      setNotice("新校园墙已创建。");
+      await refreshTenants(created?.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "创建租户失败");
+    } finally {
+      setCreatingTenant(false);
+    }
+  }
+
   return (
     <div className="px-4 pb-6">
       <SectionHeader title="系统运维" subtitle="只处理租户生命周期和全局运行状态" action="刷新" icon={RefreshCwIcon} onAction={refreshTenants} />
@@ -118,9 +153,30 @@ export function OpsPanel() {
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         <Card className="rounded-md">
           <CardContent className="p-3">
-            <div className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
-              <Building2Icon className="size-4" />
-              租户生命周期
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                <Building2Icon className="size-4" />
+                租户生命周期
+              </div>
+            </div>
+            <div className="mb-3 rounded-md bg-sky-50 p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-black text-sky-900">
+                <PlusIcon className="size-4" />
+                添加租户
+              </div>
+              <div className="grid gap-2">
+                <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
+                <Input placeholder="slug，例如 canton-wall" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
+                <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
+                  <span className="h-9 rounded-md border border-white shadow-sm" style={{ backgroundColor: tenantForm.themeColor }} />
+                  <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
+                </div>
+                <Input placeholder="Bot QQ，可选" value={tenantForm.botQqUin} onChange={(event) => setTenantForm({ ...tenantForm, botQqUin: event.target.value })} />
+                <Button className="rounded-full bg-[#42a5f5] font-bold hover:bg-[#42a5f5]" disabled={creatingTenant || tenantForm.name.trim().length === 0 || tenantForm.slug.trim().length === 0} onClick={() => void createTenant()}>
+                  <PlusIcon data-icon="inline-start" />
+                  创建
+                </Button>
+              </div>
             </div>
             <div className="flex flex-col gap-2">
               {tenants.map((tenant) => (

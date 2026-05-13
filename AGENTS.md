@@ -74,7 +74,7 @@ Tenant membership role:
 
 | Role | Chinese name | Scope | Meaning |
 | --- | --- | --- | --- |
-| `submitter` | 投稿者 | One campus wall | Can submit posts and view or withdraw their own posts. |
+| `submitter` | 用户 | One campus wall | Can submit posts and view or withdraw their own posts. |
 | `reviewer` | 审核员 | One campus wall | Can review posts for that campus wall. |
 | `admin` | 管理员 | One campus wall | Can review posts and manage allowed settings for that campus wall. |
 

@@ -15,13 +15,43 @@ const reviewBodySchema = z.object({
   comment: z.string().max(500).optional(),
 });
 
+const reviewQuerySchema = z.object({
+  status: z.enum(["all", "pending_approval", "approved", "rejected", "publishing", "partially_failed", "failed", "published"]).default("pending_approval"),
+  q: z.string().max(80).optional(),
+});
+
 export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue) {
   app.get("/api/review/posts", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
+    const query = reviewQuerySchema.parse(request.query);
+    const displayId = query.q && !Number.isNaN(Number(query.q)) ? Number(query.q) : null;
+    const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
     const posts = await prisma.post.findMany({
       where: {
         tenantId: context.selectedTenant.id,
-        status: "pending_approval",
+        ...(query.status === "all" ? {} : { status: query.status }),
+        ...(query.q
+          ? {
+              OR: [
+                {
+                  text: {
+                    contains: query.q,
+                    mode: "insensitive",
+                  },
+                },
+                ...(displayId === null ? [] : [{ displayId }]),
+                ...(qqUin === null ? [] : [{ author: { qqUin } }]),
+                {
+                  author: {
+                    displayName: {
+                      contains: query.q,
+                      mode: "insensitive",
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
       },
       include: {
         author: true,
@@ -35,13 +65,11 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     return {
       posts: posts.map((post) => ({
         ...toPostListItem(post),
-        author: post.anonymous
-          ? null
-          : {
-              id: post.author.id,
-              qqUin: post.author.qqUin.toString(),
-              displayName: post.author.displayName,
-            },
+        author: {
+          id: post.author.id,
+          qqUin: post.author.qqUin.toString(),
+          displayName: post.author.displayName,
+        },
       })),
     };
   });

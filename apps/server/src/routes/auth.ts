@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { z } from "zod";
-import { clearSessionCookie, createSession, getCookie, getSessionContext, hashToken, sessionCookieName, setSessionCookie } from "../lib/auth";
+import { clearSessionCookie, createSession, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 
@@ -12,6 +12,11 @@ const loginSchema = z.object({
 
 const selectTenantSchema = z.object({
   tenantId: z.string().min(1),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(6).max(128),
 });
 
 export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
@@ -83,6 +88,31 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     clearSessionCookie(reply);
+    return { ok: true };
+  });
+
+  app.post("/api/auth/password", async (request, reply) => {
+    const context = await requireSession(request, reply);
+    const body = changePasswordSchema.parse(request.body);
+    const user = await prisma.user.findUniqueOrThrow({
+      where: {
+        id: context.user.id,
+      },
+    });
+
+    if (!(await Bun.password.verify(body.currentPassword, user.passwordHash))) {
+      return reply.code(401).send({ message: "当前密码不正确" });
+    }
+
+    await prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        passwordHash: await Bun.password.hash(body.newPassword),
+      },
+    });
+
     return { ok: true };
   });
 

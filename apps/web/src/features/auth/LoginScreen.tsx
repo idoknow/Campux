@@ -50,7 +50,7 @@ export function LoginScreen({
           {allowTestAccounts ? (
             <div className="mt-4 text-xs leading-5 text-slate-500">
               <p>开发环境测试账号密码均为 `campux123`：</p>
-              <p>10000 投稿者，20000 审核员，30000 多墙管理员，40000 系统运维。</p>
+              <p>10000 用户，20000 审核员，30000 多墙管理员，40000 系统运维。</p>
             </div>
           ) : null}
         </form>

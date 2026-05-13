@@ -116,6 +116,25 @@ export type PublishAttemptItem = {
   };
 };
 
+export type AdminBanRecord = {
+  id: string;
+  comment: string;
+  startsAt: string;
+  endsAt: string;
+  createdAt: string;
+  active: boolean;
+  user: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+  } | null;
+  operator: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+  } | null;
+};
+
 export type TenantStatus = "active" | "paused" | "archived";
 
 export type SystemTenant = {
