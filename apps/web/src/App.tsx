@@ -457,12 +457,9 @@ function LoginScreen({
   }
 
   return (
-    <main className="flex min-h-dvh bg-white md:items-stretch">
-      <aside className="hidden w-[178px] shrink-0 border-r border-slate-100 bg-white md:block">
-        <div className="bg-[#42a5f5] py-2 text-center text-2xl font-black text-white">Campux</div>
-      </aside>
-      <section className="flex min-h-dvh w-full max-w-[520px] flex-col px-4 pt-3 md:justify-center md:px-10 md:pt-0">
-        <div>
+    <main className="min-h-dvh bg-white">
+      <section className="mx-auto flex min-h-dvh w-full max-w-[520px] flex-col px-4 pt-3 md:justify-center md:px-8 md:pt-0">
+        <div className="md:mb-8">
           <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
           <span className="align-baseline text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
         </div>
@@ -509,11 +506,8 @@ function TenantSelectionScreen({
   }
 
   return (
-    <main className="min-h-dvh bg-white md:flex">
-      <aside className="hidden w-[178px] shrink-0 border-r border-slate-100 bg-white md:block">
-        <div className="bg-[#42a5f5] py-2 text-center text-2xl font-black text-white">Campux</div>
-      </aside>
-      <section className="w-full max-w-[560px] px-4 pt-3 md:px-10 md:pt-12">
+    <main className="min-h-dvh bg-white">
+      <section className="mx-auto w-full max-w-[560px] px-4 pt-3 md:px-8 md:pt-12">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
