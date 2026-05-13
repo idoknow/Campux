@@ -55,8 +55,8 @@ export function AppShell({
   onSubmitPost: () => void;
 }) {
   return (
-    <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as MainTab)} className="min-h-dvh">
-      <div className="min-h-dvh bg-background md:flex">
+    <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as MainTab)} className="min-h-dvh md:h-dvh">
+      <div className="min-h-dvh bg-background md:flex md:h-dvh md:overflow-hidden">
         <DesktopSidebar
           activeTab={activeTab}
           me={me}
@@ -66,13 +66,12 @@ export function AppShell({
           onOpenOps={onOpenOps}
         />
 
-        <div className="min-h-dvh w-full bg-background pb-28 md:max-w-[760px] md:border-r md:border-slate-100 md:pb-8">
+        <div className="min-h-dvh w-full bg-background pb-28 md:h-dvh md:max-w-[760px] md:overflow-y-auto md:border-r md:border-slate-100 md:pb-8">
           <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} />
 
           <main>
             <TabsContent value="post" className="m-0">
               <PostPage
-                avatarQqUin={me.user.qqUin}
                 busy={busy}
                 error={error}
                 metadata={metadata}
@@ -99,6 +98,7 @@ export function AppShell({
 
             <TabsContent value="admin" className="m-0">
               <AdminPage
+                currentRole={me.currentMembership.role}
                 selectedTenant={me.currentTenant}
                 metadata={metadata}
                 onSaved={async () => {

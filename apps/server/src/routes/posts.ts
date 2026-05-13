@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { CampuxConfig } from "@campux/config";
 import { createS3Client } from "@campux/integrations";
 import { requireTenantContext } from "../lib/auth";
+import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 
 const uploadSchema = z.object({
@@ -24,29 +25,6 @@ const createPostSchema = z.object({
     }),
   ).max(9).default([]),
 });
-
-function toPostListItem(post: {
-  id: string;
-  displayId: number;
-  text: string;
-  images: unknown;
-  anonymous: boolean;
-  status: string;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
-  return {
-    id: post.id,
-    displayId: post.displayId,
-    title: post.text.length > 28 ? `${post.text.slice(0, 28)}...` : post.text,
-    text: post.text,
-    images: post.images,
-    anonymous: post.anonymous,
-    status: post.status,
-    createdAt: post.createdAt.toISOString(),
-    updatedAt: post.updatedAt.toISOString(),
-  };
-}
 
 function decodeBase64(base64: string) {
   const commaIndex = base64.indexOf(",");

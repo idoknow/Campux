@@ -29,7 +29,7 @@ export const navItems = [
   { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },
   { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon, minRole: "submitter" },
   { value: "services", label: "服务", emoji: "🛠", icon: SparklesIcon, minRole: "submitter" },
-  { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "admin" },
+  { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "reviewer" },
 ] satisfies NavItem[];
 
 const roleRank: Record<TenantRole, number> = {

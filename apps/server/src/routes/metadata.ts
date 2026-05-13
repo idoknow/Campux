@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireTenantContext, requireTenantRole } from "../lib/auth";
+import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 
 const publicMetadataKeys = ["brand", "banner", "post_rules", "services"] as const;
@@ -126,6 +127,17 @@ export function registerMetadataRoutes(app: FastifyInstance) {
         }),
       ),
     );
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "tenant.metadata.update",
+      targetType: "tenant",
+      targetId: context.selectedTenant.id,
+      detail: {
+        fields: Object.keys(body),
+      },
+    });
 
     const entries = await prisma.tenantMetadata.findMany({
       where: {

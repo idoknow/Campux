@@ -85,12 +85,14 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
     update: {
       displayName: `${tenant.name} 1 号墙`,
       enabled: true,
+      reviewGroupId: tenant.id === "tenant-canton" ? "91000001" : "91000002",
     },
     create: {
       tenantId: tenant.id,
       qqUin: BigInt(tenant.id === "tenant-canton" ? "2854199010" : "2854199020"),
       displayName: `${tenant.name} 1 号墙`,
       enabled: true,
+      reviewGroupId: tenant.id === "tenant-canton" ? "91000001" : "91000002",
     },
   });
 

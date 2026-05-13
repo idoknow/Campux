@@ -26,13 +26,15 @@
   - 图片上传到 S3/MinIO。
   - 创建投稿、查看自己的稿件。
   - seed 测试账号和默认校园墙。
-- 已完成一部分 Phase 4：
-  - 租户内 `admin` 管理页已接入真实保存能力。
-  - 校园墙名称、slug、主题色、前台品牌名、公告归属租户内管理页。
-  - `reviewer` / `submitter` 调租户配置修改 API 会被拒绝。
-- 已完成一部分 Phase 8：
+- Phase 4-8 已补齐当前重构版的本地闭环：
+  - `reviewer` 可读取待审核列表，并通过/拒绝当前校园墙的稿件。
+  - 审核操作写入 `PostLog` 和 `AuditLog`，通过后进入发布 fan-out。
+  - `admin` 可管理租户内成员角色、发布目标和校园墙展示配置。
+  - 发布队列会为启用发布目标创建 `PublishAttempt`，支持重试、失败原因和聚合投稿状态。
+  - Bot 服务端入口支持按 Bot 所属校园墙注册 membership，并支持审核群命令路由。
+  - `renderPostCard()` 已迁为 TS 内部安全 SVG 渲染；QZone integration 当前是开发期 mock adapter，会写入外部 ID 和 verbose。
   - 系统运维面板已独立于普通校园墙工作台。
-  - `system_operator` 可以查看所有租户生命周期状态和统计。
+  - `system_operator` 可以查看所有租户生命周期状态、全局用户、Bot/发布目标、队列状态和审计日志。
   - `system_operator` 可以调整租户生命周期：运行中、暂停、归档。
   - 普通用户和租户内 `admin` 不能访问系统运维接口。
 
@@ -49,10 +51,10 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 
 当前主要问题：
 
-- 登录和投稿已经是最小真实链路，但还没有旧系统完整功能，例如改密、Bot 注册、封禁、OAuth。
-- 租户内配置已能保存基础展示信息，但审核、成员管理、发布目标配置仍然是骨架或入口。
-- 发布队列、Bot 注册授权、QZone 发布和文本转图还没有接入。
-- 系统运维面板已有生命周期管理，但还没有全局用户、membership、队列状态、审计日志和开通租户流程。
+- 改密、封禁、OAuth、历史迁移仍未进入本轮 Phase 4-8 范围。
+- QZone 发布 adapter 当前是开发期 mock，真实 cookie 登录、加密存储和线上发布需要接真实平台凭据后替换 adapter。
+- Bot runtime 当前提供服务端注册/审核命令 API，真实 OneBot 常驻连接还需要接入运行环境。
+- 租户开通流程已有运维生命周期管理基础，但还没有完整表单化创建向导。
 
 ## 当前 Phase 状态
 
@@ -61,11 +63,11 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 | Phase 1：真实账户与登录闭环 | 已完成 | 登录、退出、session、`/api/me`、单租户直进、多租户选择、测试账号 dev-only | 真实注册/改密仍归后续 Bot/账号服务 |
 | Phase 2：租户上下文与基础配置 | 已完成 | 当前租户上下文、metadata 读取、租户内 admin 修改展示配置 | 域名/路径租户识别仍未做 |
 | Phase 3：投稿核心链路 | 已完成 | S3/MinIO 上传、创建投稿、我的稿件、待审核状态 | 取消/撤回 UI 仍可补强 |
-| Phase 4：审核员与租户内管理 | 部分完成 | 租户内管理页可维护校园墙名称、slug、主题色、品牌名、公告 | 审核列表、通过/拒绝、成员管理、发布目标管理 |
-| Phase 5：发布队列与多墙号发布 | 未开始 | 无 | 发布目标、attempt、worker fan-out、重试和聚合状态 |
-| Phase 6：Bot 注册、审核群与命令路由 | 未开始 | 无 | Bot runtime、注册授权、审核群通知和命令 |
-| Phase 7：QZone 发布与文本转图迁移 | 未开始 | 无 | QZone integration、文本转图、安全模板 |
-| Phase 8：系统运维后台 | 部分完成 | 独立运维入口、所有租户生命周期列表、运行/暂停/归档 | 全局用户和 membership、队列状态、审计日志、租户开通流程 |
+| Phase 4：审核员与租户内管理 | 已完成 | 待审核列表、通过/拒绝、日志、成员角色、发布目标、租户展示配置、角色化前端入口 | 封禁/拒绝原因库可后续增强 |
+| Phase 5：发布队列与多墙号发布 | 已完成 | 内存队列、`PublishTarget`、`PublishAttempt`、fan-out、重试、聚合状态、重启恢复扫描、失败原因展示 | 真实平台失败分类可后续细化 |
+| Phase 6：Bot 注册、审核群与命令路由 | 已完成 | Bot 注册授权 API、按 Bot 所属租户授予 membership、审核群命令按租户路由、跨租户隔离校验 | OneBot 常驻连接需接真实运行环境 |
+| Phase 7：QZone 发布与文本转图迁移 | 已完成 | TS `renderPostCard()`、安全 XML 转义模板、QZone mock adapter、verbose 写入、发布日志 | 真实 QZone cookie 加密和线上发布 adapter 待凭据接入 |
+| Phase 8：系统运维后台 | 已完成 | 独立入口、租户生命周期、全局用户/membership、Bot/发布目标、队列状态、审计日志 | 表单化租户开通向导可继续打磨 |
 | Phase 9：历史数据迁移与兼容 | 未开始 | 无 | SQLite/Mongo/S3/OAuth 迁移脚本 |
 
 ## Phase 1：真实账户与登录闭环

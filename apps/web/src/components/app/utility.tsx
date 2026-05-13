@@ -47,8 +47,6 @@ export function ListButton({ title, description, icon: Icon }: { title: string; 
 
 export function EmptyCard({ title }: { title: string }) {
   return (
-    <Card className="bg-muted/70">
-      <CardContent className="flex min-h-40 items-center justify-center p-6 text-center font-semibold">{title}</CardContent>
-    </Card>
+    <div className="flex min-h-24 items-center justify-center px-4 py-6 text-center text-sm font-bold text-slate-500">{title}</div>
   );
 }

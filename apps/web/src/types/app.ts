@@ -62,6 +62,60 @@ export type PostItem = {
   updatedAt: string;
 };
 
+export type ReviewPostItem = PostItem & {
+  author: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+  } | null;
+};
+
+export type AdminMember = {
+  id: string;
+  role: TenantRole;
+  createdAt: string;
+  user: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+    systemRole: string | null;
+  };
+};
+
+export type PublishTargetItem = {
+  id: string;
+  type: string;
+  displayName: string;
+  enabled: boolean;
+  required: boolean;
+  publishDelaySeconds: number;
+  failurePolicy: string;
+  botAccount: {
+    id: string;
+    qqUin: string;
+    displayName: string;
+    enabled: boolean;
+  };
+};
+
+export type PublishAttemptItem = {
+  id: string;
+  status: string;
+  attempt: number;
+  lastError: string | null;
+  externalId: string | null;
+  updatedAt: string;
+  publishTarget: {
+    id: string;
+    displayName: string;
+    required: boolean;
+    botAccount: {
+      qqUin: string;
+      displayName: string;
+    };
+  };
+};
+
 export type TenantStatus = "active" | "paused" | "archived";
 
 export type SystemTenant = {
@@ -74,4 +128,79 @@ export type SystemTenant = {
   botAccountCount: number;
   postCount: number;
   memberCount: number;
+};
+
+export type SystemUser = {
+  id: string;
+  qqUin: string;
+  displayName: string | null;
+  systemRole: string | null;
+  isTestAccount: boolean;
+  createdAt: string;
+  memberships: Array<{
+    id: string;
+    role: TenantRole;
+    tenant: {
+      id: string;
+      name: string;
+      slug: string;
+      status: TenantStatus;
+    };
+  }>;
+};
+
+export type SystemBot = {
+  id: string;
+  qqUin: string;
+  displayName: string;
+  enabled: boolean;
+  reviewGroupId: string | null;
+  lastSeenAt: string | null;
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+    status: TenantStatus;
+  };
+  publishTargets: Array<{
+    id: string;
+    displayName: string;
+    enabled: boolean;
+    required: boolean;
+  }>;
+};
+
+export type SystemQueueSnapshot = {
+  runtime: {
+    running: boolean;
+    queued: number;
+    processing: number;
+    failed: number;
+    lastError: string | null;
+  };
+  publishAttempts: {
+    queued: number;
+    running: number;
+    failed: number;
+    succeeded: number;
+  };
+};
+
+export type AuditLogItem = {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  detail: unknown;
+  createdAt: string;
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+  } | null;
+  actor: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+  } | null;
 };
