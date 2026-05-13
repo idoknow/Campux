@@ -7,6 +7,7 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerHealthRoutes } from "./routes/health";
 import { registerMetadataRoutes } from "./routes/metadata";
 import { registerPostRoutes } from "./routes/posts";
+import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
 
 const config = loadConfig();
@@ -30,6 +31,7 @@ registerAuthRoutes(app, config);
 registerTenantRoutes(app);
 registerMetadataRoutes(app);
 registerPostRoutes(app, config);
+registerSystemRoutes(app);
 
 app.addHook("onClose", async () => {
   await queue.stop();

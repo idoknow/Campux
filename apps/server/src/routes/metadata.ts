@@ -6,6 +6,9 @@ import { prisma } from "../lib/prisma";
 const publicMetadataKeys = ["brand", "banner", "post_rules", "services"] as const;
 
 const patchMetadataSchema = z.object({
+  tenantName: z.string().min(1).max(80).optional(),
+  slug: z.string().min(2).max(64).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/).optional(),
+  themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   brand: z.string().min(1).optional(),
   banner: z.string().optional(),
   postRules: z.array(z.string().min(1)).optional(),
@@ -70,6 +73,24 @@ export function registerMetadataRoutes(app: FastifyInstance) {
   app.patch("/api/admin/tenant/metadata", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const body = patchMetadataSchema.parse(request.body);
+
+    if (body.tenantName !== undefined || body.slug !== undefined || body.themeColor !== undefined) {
+      const tenantUpdate: {
+        name?: string;
+        slug?: string;
+        themeColor?: string;
+      } = {};
+      if (body.tenantName !== undefined) tenantUpdate.name = body.tenantName;
+      if (body.slug !== undefined) tenantUpdate.slug = body.slug;
+      if (body.themeColor !== undefined) tenantUpdate.themeColor = body.themeColor;
+
+      await prisma.tenant.update({
+        where: {
+          id: context.selectedTenant.id,
+        },
+        data: tenantUpdate,
+      });
+    }
 
     const updates: Array<{ key: string; value: string | string[] | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
     if (body.brand !== undefined) {

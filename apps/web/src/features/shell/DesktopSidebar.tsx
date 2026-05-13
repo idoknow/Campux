@@ -10,12 +10,14 @@ export function DesktopSidebar({
   me,
   navItems,
   onLogout,
+  onOpenOps,
 }: {
   selectedTenant: TenantSummary;
   activeTab: MainTab;
   me: AuthenticatedMe;
   navItems: NavItem[];
   onLogout: () => void;
+  onOpenOps: (() => void) | undefined;
 }) {
   const role = me.currentMembership?.role ?? "submitter";
 
@@ -37,7 +39,7 @@ export function DesktopSidebar({
           ))}
         </TabsList>
 
-        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} variant="desktop" />
+        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} variant="desktop" />
       </div>
     </aside>
   );

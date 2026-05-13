@@ -8,10 +8,12 @@ import { Card, CardContent } from "@/components/ui/card";
 export function TenantSelectionScreen({
   me,
   onSelectTenant,
+  onOpenOps,
   onLogout,
 }: {
   me: AuthenticatedMe;
   onSelectTenant: (tenantId: string) => Promise<void>;
+  onOpenOps?: () => void;
   onLogout: () => Promise<void>;
 }) {
   const [busyTenantId, setBusyTenantId] = useState("");
@@ -67,10 +69,13 @@ export function TenantSelectionScreen({
           ))}
         </div>
 
-        {me.user.systemRole === "system_operator" ? (
+        {me.user.systemRole === "system_operator" && onOpenOps ? (
           <div className="mt-5 rounded-md bg-slate-100 p-4">
-            <p className="font-bold">系统运维面板</p>
-            <p className="mt-1 text-sm text-slate-500">运维入口将在系统后台 Phase 中接入。</p>
+            <p className="font-bold">系统运维</p>
+            <p className="mt-1 text-sm text-slate-500">不进入具体校园墙，直接管理所有租户信息。</p>
+            <Button className="mt-3 rounded-full bg-[#42a5f5] px-5 font-bold hover:bg-[#42a5f5]" onClick={onOpenOps}>
+              进入运维面板
+            </Button>
           </div>
         ) : null}
       </section>
