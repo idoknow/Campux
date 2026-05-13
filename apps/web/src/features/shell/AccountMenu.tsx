@@ -16,12 +16,14 @@ export function AccountMenu({
   me,
   roleLabel,
   onLogout,
+  onOpenOps,
   variant,
 }: {
   selectedTenant: TenantSummary;
   me: AuthenticatedMe;
   roleLabel: string;
   onLogout: () => void;
+  onOpenOps: (() => void) | undefined;
   variant: "mobile" | "desktop";
 }) {
   const isDesktop = variant === "desktop";
@@ -59,6 +61,12 @@ export function AccountMenu({
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {onOpenOps ? (
+          <>
+            <DropdownMenuItem onSelect={onOpenOps}>系统运维</DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <DropdownMenuItem variant="destructive" onSelect={onLogout}>
           <LogOutIcon data-icon="inline-start" />
           退出登录

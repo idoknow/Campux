@@ -25,8 +25,10 @@ export function AppShell({
   onAnonymousChange,
   onFilesSelected,
   onLogout,
+  onOpenOps,
   onPostTextChange,
   onRefreshTenantData,
+  onRefreshMe,
   onRemoveImage,
   onSubmitPost,
 }: {
@@ -45,8 +47,10 @@ export function AppShell({
   onAnonymousChange: (value: boolean) => void;
   onFilesSelected: (files: FileList | null) => void;
   onLogout: () => void;
+  onOpenOps: (() => void) | undefined;
   onPostTextChange: (value: string) => void;
   onRefreshTenantData: () => Promise<void>;
+  onRefreshMe: () => Promise<void>;
   onRemoveImage: (key: string) => void;
   onSubmitPost: () => void;
 }) {
@@ -59,10 +63,11 @@ export function AppShell({
           navItems={navItems}
           selectedTenant={me.currentTenant}
           onLogout={onLogout}
+          onOpenOps={onOpenOps}
         />
 
         <div className="min-h-dvh w-full bg-background pb-28 md:max-w-[760px] md:border-r md:border-slate-100 md:pb-8">
-          <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} />
+          <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} />
 
           <main>
             <TabsContent value="post" className="m-0">
@@ -93,7 +98,13 @@ export function AppShell({
             </TabsContent>
 
             <TabsContent value="admin" className="m-0">
-              <AdminPage selectedTenant={me.currentTenant} />
+              <AdminPage
+                selectedTenant={me.currentTenant}
+                metadata={metadata}
+                onSaved={async () => {
+                  await Promise.all([onRefreshMe(), onRefreshTenantData()]);
+                }}
+              />
             </TabsContent>
           </main>
         </div>

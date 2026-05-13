@@ -7,10 +7,12 @@ export function Header({
   selectedTenant,
   me,
   onLogout,
+  onOpenOps,
 }: {
   selectedTenant: TenantSummary;
   me: AuthenticatedMe;
   onLogout: () => void;
+  onOpenOps: (() => void) | undefined;
 }) {
   const role = me.currentMembership?.role ?? "submitter";
   return (
@@ -20,7 +22,7 @@ export function Header({
           <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
           <span className="align-baseline text-sm text-slate-600">{selectedTenant.name}</span>
         </div>
-        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} variant="mobile" />
+        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} variant="mobile" />
       </div>
     </header>
   );

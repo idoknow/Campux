@@ -61,3 +61,17 @@ export type PostItem = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type TenantStatus = "active" | "paused" | "archived";
+
+export type SystemTenant = {
+  id: string;
+  slug: string;
+  name: string;
+  status: TenantStatus;
+  createdAt: string;
+  updatedAt: string;
+  botAccountCount: number;
+  postCount: number;
+  memberCount: number;
+};

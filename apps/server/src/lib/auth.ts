@@ -150,3 +150,13 @@ export async function requireTenantRole(request: FastifyRequest, reply: FastifyR
 
   return context;
 }
+
+export async function requireSystemOperator(request: FastifyRequest, reply: FastifyReply) {
+  const context = await requireSession(request, reply);
+  if (context.user.systemRole !== "system_operator") {
+    reply.code(403);
+    throw new Error("没有系统运维权限");
+  }
+
+  return context;
+}

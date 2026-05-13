@@ -6,6 +6,7 @@ import type { AuthenticatedMe, MainTab, MeResponse, PostItem, TenantMetadata, Up
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
+import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { AppShell } from "@/features/shell/AppShell";
 
 export function App() {
@@ -20,6 +21,7 @@ export function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showOpsOnly, setShowOpsOnly] = useState(false);
 
   const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
@@ -102,6 +104,7 @@ export function App() {
     setUploadedImages([]);
     setPosts([]);
     setActiveTab("post");
+    setShowOpsOnly(false);
   }
 
   async function selectTenant(tenantId: string) {
@@ -176,8 +179,26 @@ export function App() {
     return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} onLogin={login} />;
   }
 
+  if (me.user.systemRole === "system_operator" && (showOpsOnly || me.memberships.length === 0)) {
+    if (me.memberships.length > 0) {
+      return <OpsStandaloneScreen me={me} onBackToTenants={() => setShowOpsOnly(false)} onLogout={logout} />;
+    }
+
+    return <OpsStandaloneScreen me={me} onLogout={logout} />;
+  }
+
   if (me.needsTenantSelection || !me.currentTenant || !me.currentMembership) {
-    return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onLogout={logout} />;
+    if (me.user.systemRole === "system_operator") {
+      return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onOpenOps={() => setShowOpsOnly(true)} onLogout={logout} />;
+    }
+
+    return (
+      <TenantSelectionScreen
+        me={me}
+        onSelectTenant={selectTenant}
+        onLogout={logout}
+      />
+    );
   }
 
   return (
@@ -197,7 +218,9 @@ export function App() {
       onAnonymousChange={setAnonymous}
       onFilesSelected={uploadFiles}
       onLogout={logout}
+      onOpenOps={me.user.systemRole === "system_operator" ? () => setShowOpsOnly(true) : undefined}
       onPostTextChange={setPostText}
+      onRefreshMe={refreshMe}
       onRefreshTenantData={refreshTenantData}
       onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
       onSubmitPost={submitPost}

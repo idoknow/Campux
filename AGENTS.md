@@ -60,6 +60,7 @@ Login flow:
 - If the account has exactly one campus wall membership, enter that wall directly.
 - If the account has multiple memberships, ask the user to choose which campus wall to enter.
 - If the account has system operation permission, also expose a separate system operations entry.
+- The system operations entry must be visually and structurally separate from the ordinary campus wall workspace. Do not add it as a normal tenant tab.
 
 There are two role layers.
 
@@ -67,7 +68,7 @@ Global account role:
 
 | Role | Chinese name | Scope | Meaning |
 | --- | --- | --- | --- |
-| `system_operator` | 系统运维 | Global account-level role | Can enter the operations panel and manage all campus walls and system-level settings. |
+| `system_operator` | 系统运维 | Global account-level role | Can enter the independent operations panel and manage system-level lifecycle, user, membership, queue, audit, and domain state. |
 
 Tenant membership role:
 
@@ -83,7 +84,9 @@ Important boundaries:
 - `submitter` should only see posting and their own post status.
 - `reviewer` should only see review-related surfaces, not wall settings.
 - `admin` can only administer the campus wall where they have the `admin` membership.
-- `system_operator` is the only role that can create, disable, or edit every campus wall and all cross-wall/system settings.
+- `system_operator` manages system-level operations such as tenant lifecycle, global users, membership, queue state, audit logs, and domain bindings.
+- Campus wall display settings belong to tenant admins, not the system operations panel. This includes wall name, slug, theme color, front-facing brand name, announcements, post rules, and service links.
+- If a system operator is also a member of a campus wall, the ordinary wall workspace should still look like the normal tenant workspace. Use the account menu or tenant selection screen to enter the separate operations panel.
 
 ## Component Style
 
