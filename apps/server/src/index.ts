@@ -26,7 +26,7 @@ const queue = createRuntimeQueue({
 });
 
 registerHealthRoutes(app, queue);
-registerAuthRoutes(app);
+registerAuthRoutes(app, config);
 registerTenantRoutes(app);
 registerMetadataRoutes(app);
 registerPostRoutes(app, config);

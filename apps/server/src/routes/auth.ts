@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import type { CampuxConfig } from "@campux/config";
 import { z } from "zod";
 import { clearSessionCookie, createSession, getCookie, getSessionContext, hashToken, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 
 const loginSchema = z.object({
-  qqUin: z.string().min(1),
+  qqUin: z.string().regex(/^\d+$/, "QQ 号格式不正确"),
   password: z.string().min(1),
 });
 
@@ -13,7 +14,7 @@ const selectTenantSchema = z.object({
   tenantId: z.string().min(1),
 });
 
-export function registerAuthRoutes(app: FastifyInstance) {
+export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
   app.post("/api/auth/login", async (request, reply) => {
     const body = loginSchema.parse(request.body);
     const qqUin = BigInt(body.qqUin);
@@ -47,6 +48,12 @@ export function registerAuthRoutes(app: FastifyInstance) {
     if (!user || !(await Bun.password.verify(body.password, user.passwordHash))) {
       return reply.code(401).send({
         message: "账号或密码错误",
+      });
+    }
+
+    if (user.isTestAccount && config.nodeEnv !== "development") {
+      return reply.code(403).send({
+        message: "测试账号只能在开发环境登录",
       });
     }
 

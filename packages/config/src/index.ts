@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const configSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("production"),
   DATABASE_URL: z.string().default("postgresql://campux:campux@localhost:5432/campux_next"),
   CAMPUX_SERVER_HOST: z.string().default("0.0.0.0"),
   CAMPUX_SERVER_PORT: z.coerce.number().int().positive().default(8989),
