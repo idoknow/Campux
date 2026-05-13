@@ -11,6 +11,26 @@ const tenantPatchSchema = z.object({
   status: tenantStatusSchema,
 });
 
+const tenantCreateSchema = z.object({
+  name: z.string().min(1).max(80),
+  slug: z.string().min(2).max(64).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
+  themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#42a5f5"),
+  banner: z.string().max(200).default(""),
+  botQqUin: z.string().regex(/^\d+$/).optional(),
+});
+
+const defaultPostRules = [
+  "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
+  "寻物招领请写清地点、时间和联系方式。",
+  "图片最多 9 张，审核通过后会同步到本校启用的 QQ 墙号。",
+];
+
+const defaultServices = [
+  { title: "修改密码", description: "账号服务" },
+  { title: "投稿规则", description: "查看本墙规范" },
+  { title: "校园服务", description: "推荐入口" },
+];
+
 function toSystemTenant(
   tenant: Awaited<ReturnType<typeof prisma.tenant.findMany>>[number] & {
     _count: {
@@ -53,6 +73,66 @@ async function listSystemTenants() {
 export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) {
   app.get("/api/system/tenants", async (request, reply) => {
     await requireSystemOperator(request, reply);
+
+    return {
+      tenants: await listSystemTenants(),
+    };
+  });
+
+  app.post("/api/system/tenants", async (request, reply) => {
+    const context = await requireSystemOperator(request, reply);
+    const body = tenantCreateSchema.parse(request.body);
+    const tenant = await prisma.$transaction(async (tx) => {
+      const created = await tx.tenant.create({
+        data: {
+          name: body.name,
+          slug: body.slug,
+          themeColor: body.themeColor,
+          status: "active",
+          metadata: {
+            create: [
+              { key: "brand", value: body.name },
+              { key: "banner", value: body.banner },
+              { key: "post_rules", value: defaultPostRules },
+              { key: "services", value: defaultServices },
+            ],
+          },
+        },
+      });
+
+      if (body.botQqUin) {
+        const bot = await tx.botAccount.create({
+          data: {
+            tenantId: created.id,
+            qqUin: BigInt(body.botQqUin),
+            displayName: `${body.name} 1 号墙`,
+            enabled: true,
+          },
+        });
+        await tx.publishTarget.create({
+          data: {
+            tenantId: created.id,
+            botAccountId: bot.id,
+            displayName: "主墙号",
+            enabled: true,
+            required: true,
+          },
+        });
+      }
+
+      return created;
+    });
+
+    await writeAuditLog({
+      tenantId: tenant.id,
+      actorId: context.user.id,
+      action: "tenant.create",
+      targetType: "tenant",
+      targetId: tenant.id,
+      detail: {
+        slug: tenant.slug,
+      },
+    });
 
     return {
       tenants: await listSystemTenants(),

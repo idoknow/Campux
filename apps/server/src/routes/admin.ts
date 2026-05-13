@@ -45,6 +45,24 @@ const postParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+const banQuerySchema = z.object({
+  onlyActive: z.coerce.boolean().default(true),
+  q: z.string().max(80).optional(),
+});
+
+const banCreateSchema = z.object({
+  userId: z.string().min(1).optional(),
+  qqUin: z.string().regex(/^\d+$/).optional(),
+  comment: z.string().min(1).max(500),
+  endsAt: z.string().datetime(),
+}).refine((body) => Boolean(body.userId || body.qqUin), {
+  message: "需要指定用户",
+});
+
+const banParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
 export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue) {
   app.get("/api/admin/members", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
@@ -106,6 +124,138 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue) {
 
     return {
       member: toMember(updated),
+    };
+  });
+
+  app.get("/api/admin/ban-records", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const query = banQuerySchema.parse(request.query);
+    const now = new Date();
+    const matchedUsers = query.q
+      ? await prisma.user.findMany({
+          where: {
+            OR: [
+              ...(Number.isNaN(Number(query.q)) ? [] : [{ qqUin: BigInt(query.q) }]),
+              {
+                displayName: {
+                  contains: query.q,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          },
+          select: {
+            id: true,
+          },
+          take: 50,
+        })
+      : [];
+    const bans = await prisma.banRecord.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+        ...(query.onlyActive ? { endsAt: { gt: now } } : {}),
+        ...(query.q ? { userId: { in: matchedUsers.map((user) => user.id) } } : {}),
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 100,
+    });
+
+    return {
+      bans: await toBanRecords(bans),
+    };
+  });
+
+  app.post("/api/admin/ban-records", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const body = banCreateSchema.parse(request.body);
+    const endsAt = new Date(body.endsAt);
+    if (endsAt.getTime() <= Date.now()) {
+      return reply.code(400).send({ message: "封禁结束时间必须晚于当前时间" });
+    }
+
+    const user = body.userId
+      ? await prisma.user.findUnique({ where: { id: body.userId } })
+      : await prisma.user.findUnique({ where: { qqUin: BigInt(body.qqUin ?? "0") } });
+    if (!user) {
+      return reply.code(404).send({ message: "用户不存在" });
+    }
+
+    const membership = await prisma.tenantMembership.findUnique({
+      where: {
+        tenantId_userId: {
+          tenantId: context.selectedTenant.id,
+          userId: user.id,
+        },
+      },
+    });
+    if (!membership) {
+      return reply.code(404).send({ message: "该用户不属于当前校园墙" });
+    }
+    if (membership.role === "admin") {
+      return reply.code(409).send({ message: "不能封禁管理员" });
+    }
+
+    const ban = await prisma.banRecord.create({
+      data: {
+        tenantId: context.selectedTenant.id,
+        userId: user.id,
+        operatorId: context.user.id,
+        comment: body.comment,
+        endsAt,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "ban.create",
+      targetType: "user",
+      targetId: user.id,
+      detail: {
+        comment: body.comment,
+        endsAt: endsAt.toISOString(),
+      },
+    });
+
+    return {
+      ban: (await toBanRecords([ban]))[0],
+    };
+  });
+
+  app.post("/api/admin/ban-records/:id/unban", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = banParamsSchema.parse(request.params);
+    const ban = await prisma.banRecord.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+    if (!ban) {
+      return reply.code(404).send({ message: "封禁记录不存在" });
+    }
+
+    const updated = await prisma.banRecord.update({
+      where: {
+        id: ban.id,
+      },
+      data: {
+        endsAt: new Date(),
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "ban.unban",
+      targetType: "user",
+      targetId: ban.userId,
+    });
+
+    return {
+      ban: (await toBanRecords([updated]))[0],
     };
   });
 
@@ -370,4 +520,55 @@ function toPublishAttempt(attempt: {
       },
     },
   };
+}
+
+async function toBanRecords(
+  bans: Array<{
+    id: string;
+    tenantId: string;
+    userId: string;
+    operatorId: string | null;
+    comment: string;
+    startsAt: Date;
+    endsAt: Date;
+    createdAt: Date;
+  }>,
+) {
+  const userIds = [...new Set(bans.flatMap((ban) => [ban.userId, ban.operatorId]).filter((id): id is string => Boolean(id)))];
+  const users = await prisma.user.findMany({
+    where: {
+      id: {
+        in: userIds,
+      },
+    },
+  });
+  const userById = new Map(users.map((user) => [user.id, user]));
+  const now = Date.now();
+
+  return bans.map((ban) => {
+    const user = userById.get(ban.userId);
+    const operator = ban.operatorId ? userById.get(ban.operatorId) : null;
+    return {
+      id: ban.id,
+      comment: ban.comment,
+      startsAt: ban.startsAt.toISOString(),
+      endsAt: ban.endsAt.toISOString(),
+      createdAt: ban.createdAt.toISOString(),
+      active: ban.endsAt.getTime() > now,
+      user: user
+        ? {
+            id: user.id,
+            qqUin: user.qqUin.toString(),
+            displayName: user.displayName,
+          }
+        : null,
+      operator: operator
+        ? {
+            id: operator.id,
+            qqUin: operator.qqUin.toString(),
+            displayName: operator.displayName,
+          }
+        : null,
+    };
+  });
 }

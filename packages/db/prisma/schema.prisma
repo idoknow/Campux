@@ -200,6 +200,20 @@ model PublishAttempt {
   @@index([tenantId, status, nextRunAt])
 }
 
+model BanRecord {
+  id         String   @id @default(uuid())
+  tenantId   String
+  userId     String
+  operatorId String?
+  comment    String
+  startsAt   DateTime @default(now())
+  endsAt     DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, userId, endsAt])
+  @@index([tenantId, endsAt])
+}
+
 model AuditLog {
   id         String   @id @default(uuid())
   tenantId   String?

@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CampuxConfig } from "@campux/config";
@@ -12,6 +12,10 @@ const uploadSchema = z.object({
   fileName: z.string().min(1),
   contentType: z.string().min(1),
   base64: z.string().min(1),
+});
+
+const fileQuerySchema = z.object({
+  key: z.string().min(1),
 });
 
 const createPostSchema = z.object({
@@ -44,6 +48,29 @@ async function ensureBucket(config: CampuxConfig) {
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig) {
+  app.get("/api/uploads/post-image", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const query = fileQuerySchema.parse(request.query);
+    const expectedPrefix = `tenants/${context.selectedTenant.id}/uploads/`;
+    if (!query.key.startsWith(expectedPrefix)) {
+      return reply.code(403).send({ message: "没有访问该图片的权限" });
+    }
+
+    const s3 = await ensureBucket(config);
+    const object = await s3.send(
+      new GetObjectCommand({
+        Bucket: config.s3.bucket,
+        Key: query.key,
+      }),
+    );
+
+    if (object.ContentType) {
+      reply.header("Content-Type", object.ContentType);
+    }
+    reply.header("Cache-Control", "private, max-age=3600");
+    return reply.send(object.Body);
+  });
+
   app.post("/api/uploads/post-images", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const body = uploadSchema.parse(request.body);
@@ -66,7 +93,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig) {
 
     return {
       key,
-      url: `${config.s3.publicBaseUrl}/${key}`,
+      url: `/api/uploads/post-image?key=${encodeURIComponent(key)}`,
       fileName: body.fileName,
     };
   });
@@ -74,6 +101,21 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig) {
   app.post("/api/posts", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const body = createPostSchema.parse(request.body);
+    const activeBan = await prisma.banRecord.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        userId: context.user.id,
+        endsAt: {
+          gt: new Date(),
+        },
+      },
+      orderBy: {
+        endsAt: "desc",
+      },
+    });
+    if (activeBan) {
+      return reply.code(403).send({ message: `账号已被封禁：${activeBan.comment}` });
+    }
 
     const post = await prisma.$transaction(async (tx) => {
       const aggregate = await tx.post.aggregate({
@@ -159,7 +201,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig) {
             actorId: context.user.id,
             oldStatus: post.status,
             newStatus: "cancelled",
-            comment: "投稿者取消",
+            comment: "用户取消",
           },
         },
       },

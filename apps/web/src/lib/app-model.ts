@@ -39,7 +39,7 @@ const roleRank: Record<TenantRole, number> = {
 };
 
 export const roleLabels: Record<TenantRole, string> = {
-  submitter: "投稿者",
+  submitter: "用户",
   reviewer: "审核员",
   admin: "管理员",
 };
