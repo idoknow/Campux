@@ -120,23 +120,27 @@ async function seedUser({
   displayName,
   systemRole,
   memberships,
+  isTestAccount = true,
 }: {
   qqUin: string;
   displayName: string;
   systemRole?: "system_operator";
   memberships: Array<{ tenantId: string; role: "submitter" | "reviewer" | "admin" }>;
+  isTestAccount?: boolean;
 }) {
   const user = await prisma.user.upsert({
     where: { qqUin: BigInt(qqUin) },
     update: {
       displayName,
       passwordHash,
+      isTestAccount,
       systemRole: systemRole ?? null,
     },
     create: {
       qqUin: BigInt(qqUin),
       displayName,
       passwordHash,
+      isTestAccount,
       systemRole: systemRole ?? null,
     },
   });

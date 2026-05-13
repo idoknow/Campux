@@ -371,6 +371,7 @@ export function App() {
           <main>
             <TabsContent value="post" className="m-0">
               <PostPage
+                avatarQqUin={me.user.qqUin}
                 busy={busy}
                 error={error}
                 metadata={metadata}
@@ -442,8 +443,9 @@ function LoginScreen({
   error: string;
   onLogin: (qqUin: string, password: string) => Promise<void>;
 }) {
-  const [qqUin, setQqUin] = useState("10000");
-  const [password, setPassword] = useState("campux123");
+  const allowTestAccounts = import.meta.env.DEV;
+  const [qqUin, setQqUin] = useState(allowTestAccounts ? "10000" : "");
+  const [password, setPassword] = useState(allowTestAccounts ? "campux123" : "");
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
@@ -475,10 +477,12 @@ function LoginScreen({
           <Button className="mt-5 rounded-full bg-[#42a5f5] px-8 font-bold hover:bg-[#42a5f5]" disabled={busy} type="submit">
             {busy ? "登录中" : "登录"}
           </Button>
-          <div className="mt-4 text-xs leading-5 text-slate-500">
-            <p>测试账号密码均为 `campux123`：</p>
-            <p>10000 投稿者，20000 审核员，30000 多墙管理员，40000 系统运维。</p>
-          </div>
+          {allowTestAccounts ? (
+            <div className="mt-4 text-xs leading-5 text-slate-500">
+              <p>开发环境测试账号密码均为 `campux123`：</p>
+              <p>10000 投稿者，20000 审核员，30000 多墙管理员，40000 系统运维。</p>
+            </div>
+          ) : null}
         </form>
       </section>
     </main>
@@ -635,6 +639,7 @@ function AccountMenu({
 }) {
   const isDesktop = variant === "desktop";
   const displayName = me.user.displayName ?? me.user.qqUin;
+  const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${me.user.qqUin}&s=100`;
 
   return (
     <DropdownMenu>
@@ -648,7 +653,7 @@ function AccountMenu({
           aria-label="账户菜单"
         >
           <Avatar className={isDesktop ? "h-[50px] w-[50px]" : "h-[38px] w-[38px]"}>
-            <AvatarImage src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="用户头像" />
+            <AvatarImage src={avatarUrl} alt="用户头像" />
             <AvatarFallback>QQ</AvatarFallback>
           </Avatar>
           {isDesktop ? (
@@ -675,6 +680,7 @@ function AccountMenu({
 }
 
 function PostPage({
+  avatarQqUin,
   busy,
   error,
   metadata,
@@ -689,6 +695,7 @@ function PostPage({
   onRemoveImage,
   onSubmit,
 }: {
+  avatarQqUin: string;
   busy: boolean;
   error: string;
   metadata: TenantMetadata;
@@ -733,7 +740,7 @@ function PostPage({
       <section className="px-4 pt-4">
         <div className="flex gap-3">
           <Avatar size="lg" className="h-[50px] w-[50px] shrink-0">
-            <AvatarImage src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="用户头像" />
+            <AvatarImage src={`https://q1.qlogo.cn/g?b=qq&nk=${avatarQqUin}&s=100`} alt="用户头像" />
             <AvatarFallback>QQ</AvatarFallback>
           </Avatar>
           <Textarea

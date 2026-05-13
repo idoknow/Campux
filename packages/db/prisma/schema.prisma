@@ -65,6 +65,7 @@ model User {
   qqUin       BigInt             @unique
   displayName String?
   passwordHash String
+  isTestAccount Boolean           @default(false)
   systemRole  SystemRole?
   createdAt   DateTime           @default(now())
   memberships TenantMembership[]
