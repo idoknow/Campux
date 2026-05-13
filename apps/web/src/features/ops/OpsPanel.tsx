@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIcon, ArchiveIcon, Building2Icon, PauseCircleIcon, PlayCircleIcon, RefreshCwIcon } from "lucide-react";
+import { ActivityIcon, ArchiveIcon, BotIcon, Building2Icon, ClipboardListIcon, PauseCircleIcon, PlayCircleIcon, RefreshCwIcon, UsersRoundIcon } from "lucide-react";
 import { api } from "@/lib/api";
-import type { SystemTenant, TenantStatus } from "@/types/app";
+import type { AuditLogItem, SystemBot, SystemQueueSnapshot, SystemTenant, SystemUser, TenantStatus } from "@/types/app";
 import { SectionHeader } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,10 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
 export function OpsPanel() {
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [users, setUsers] = useState<SystemUser[]>([]);
+  const [bots, setBots] = useState<SystemBot[]>([]);
+  const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -47,8 +51,18 @@ export function OpsPanel() {
   );
 
   async function refreshTenants(nextSelectedId?: string) {
-    const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants");
+    const [data, userData, botData, queueData, auditData] = await Promise.all([
+      api<{ tenants: SystemTenant[] }>("/api/system/tenants"),
+      api<{ users: SystemUser[] }>("/api/system/users"),
+      api<{ bots: SystemBot[] }>("/api/system/bots"),
+      api<SystemQueueSnapshot>("/api/system/queue"),
+      api<{ logs: AuditLogItem[] }>("/api/system/audit-logs"),
+    ]);
     setTenants(data.tenants);
+    setUsers(userData.users);
+    setBots(botData.bots);
+    setQueue(queueData);
+    setAuditLogs(auditData.logs);
     const nextTenant = data.tenants.find((tenant) => tenant.id === nextSelectedId) ?? data.tenants[0];
     setSelectedTenantId(nextTenant?.id ?? "");
   }
@@ -92,6 +106,13 @@ export function OpsPanel() {
         <StatusSummary title="运行中" value={summary.active} tone="green" />
         <StatusSummary title="暂停" value={summary.paused} tone="amber" />
         <StatusSummary title="归档" value={summary.archived} tone="slate" />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <MetricCard title="全局用户" value={users.length} icon={UsersRoundIcon} />
+        <MetricCard title="Bot 账号" value={bots.length} icon={BotIcon} />
+        <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} />
+        <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -171,6 +192,61 @@ export function OpsPanel() {
           </Card>
         )}
       </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <Card className="rounded-md">
+          <CardContent className="p-4">
+            <div className="mb-3 flex items-center gap-2 font-black">
+              <UsersRoundIcon className="size-4" />
+              全局用户
+            </div>
+            <div className="flex max-h-80 flex-col gap-2 overflow-auto">
+              {users.slice(0, 12).map((user) => (
+                <div key={user.id} className="rounded-md bg-slate-50 p-2">
+                  <p className="truncate text-sm font-black">{user.displayName ?? user.qqUin}</p>
+                  <p className="text-xs text-slate-500">
+                    {user.memberships.length} 个校园墙{user.systemRole ? " · 系统运维" : ""}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-md">
+          <CardContent className="p-4">
+            <div className="mb-3 flex items-center gap-2 font-black">
+              <BotIcon className="size-4" />
+              Bot 与发布目标
+            </div>
+            <div className="flex max-h-80 flex-col gap-2 overflow-auto">
+              {bots.slice(0, 12).map((bot) => (
+                <div key={bot.id} className="rounded-md bg-slate-50 p-2">
+                  <p className="truncate text-sm font-black">{bot.displayName}</p>
+                  <p className="text-xs text-slate-500">{bot.tenant.name} · {bot.publishTargets.length} 个发布目标</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-md">
+          <CardContent className="p-4">
+            <div className="mb-3 flex items-center gap-2 font-black">
+              <ActivityIcon className="size-4" />
+              审计日志
+            </div>
+            <div className="flex max-h-80 flex-col gap-2 overflow-auto">
+              {auditLogs.slice(0, 12).map((log) => (
+                <div key={log.id} className="rounded-md bg-slate-50 p-2">
+                  <p className="truncate text-sm font-black">{log.action}</p>
+                  <p className="text-xs text-slate-500">{log.tenant?.name ?? "全局"} · {log.actor?.displayName ?? log.actor?.qqUin ?? "系统"}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -195,6 +271,18 @@ function Metric({ label, value }: { label: string; value: number }) {
     <div className="rounded-md border border-slate-100 bg-white px-3 py-2">
       <p className="text-xs text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-black">{value}</p>
+    </div>
+  );
+}
+
+function MetricCard({ title, value, icon: Icon }: { title: string; value: number; icon: typeof ActivityIcon }) {
+  return (
+    <div className="rounded-md bg-sky-50 px-4 py-3 text-sky-900">
+      <div className="flex items-center gap-2 text-sm font-bold">
+        <Icon className="size-4" />
+        {title}
+      </div>
+      <p className="mt-1 text-2xl font-black">{value}</p>
     </div>
   );
 }

@@ -4,7 +4,6 @@ import { CheckIcon, ImagePlusIcon, MegaphoneIcon, SendIcon } from "lucide-react"
 import { defaultMetadata } from "@/lib/app-model";
 import type { TenantMetadata, UploadedImage } from "@/types/app";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -12,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 
 export function PostPage({
-  avatarQqUin,
   busy,
   error,
   metadata,
@@ -27,7 +25,6 @@ export function PostPage({
   onRemoveImage,
   onSubmit,
 }: {
-  avatarQqUin: string;
   busy: boolean;
   error: string;
   metadata: TenantMetadata;
@@ -70,21 +67,15 @@ export function PostPage({
       ) : null}
 
       <section className="px-4 pt-4">
-        <div className="flex gap-3">
-          <Avatar size="lg" className="h-[50px] w-[50px] shrink-0">
-            <AvatarImage src={`https://q1.qlogo.cn/g?b=qq&nk=${avatarQqUin}&s=100`} alt="用户头像" />
-            <AvatarFallback>QQ</AvatarFallback>
-          </Avatar>
-          <Textarea
-            value={postText}
-            maxLength={1000}
-            placeholder="有什么新鲜事？！"
-            className="min-h-40 flex-1 resize-none rounded-none border-0 bg-white p-4 text-base leading-7 shadow-none focus-visible:ring-0"
-            onChange={(event) => onPostTextChange(event.target.value)}
-          />
-        </div>
+        <Textarea
+          value={postText}
+          maxLength={1000}
+          placeholder="有什么新鲜事？！"
+          className="min-h-40 w-full resize-none rounded-none border-0 bg-white px-0 py-2 text-lg leading-8 text-slate-900 shadow-none placeholder:text-slate-500 focus-visible:ring-0"
+          onChange={(event) => onPostTextChange(event.target.value)}
+        />
 
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {uploadedImages.map((image) => (
             <button key={image.key} className="h-[70px] w-[70px] overflow-hidden rounded-[10px] bg-slate-100" onClick={() => onRemoveImage(image.key)}>
               <img src={image.previewUrl} alt={image.fileName} className="h-full w-full object-cover" />

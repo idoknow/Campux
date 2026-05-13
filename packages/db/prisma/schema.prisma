@@ -58,6 +58,7 @@ model Tenant {
   posts          Post[]
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
+  auditLogs      AuditLog[]
 }
 
 model User {
@@ -71,6 +72,7 @@ model User {
   memberships TenantMembership[]
   posts       Post[]
   sessions    AccountSession[]
+  auditLogs   AuditLog[]
 }
 
 model AccountSession {
@@ -152,6 +154,8 @@ model BotAccount {
   qqUin          BigInt
   displayName    String
   enabled        Boolean         @default(true)
+  reviewGroupId  String?
+  lastSeenAt     DateTime?
   createdAt      DateTime        @default(now())
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   publishTargets PublishTarget[]
@@ -184,6 +188,7 @@ model PublishAttempt {
   status          PublishAttemptStatus @default(queued)
   attempt         Int                  @default(0)
   lastError       String?
+  verbose         Json?
   nextRunAt       DateTime?
   externalId      String?
   createdAt       DateTime             @default(now())
@@ -193,4 +198,21 @@ model PublishAttempt {
 
   @@unique([postId, publishTargetId])
   @@index([tenantId, status, nextRunAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String?
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String?
+  detail     Json?
+  createdAt  DateTime @default(now())
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
 }
