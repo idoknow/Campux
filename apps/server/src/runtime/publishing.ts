@@ -1,7 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { Prisma } from "@campux/db";
 import { publishToQZone } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
+import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
+import { decryptJson } from "../lib/secret-json";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -154,7 +157,20 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
     include: {
       publishTarget: {
         include: {
-          botAccount: true,
+          botAccount: {
+            include: {
+              sessions: {
+                where: {
+                  type: "qzone",
+                  domain: qzoneCookieDomain,
+                },
+                orderBy: {
+                  refreshedAt: "desc",
+                },
+                take: 1,
+              },
+            },
+          },
         },
       },
       post: {
@@ -214,6 +230,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
       text: attempt.post.text,
       renderedCard,
       imageUrls: getImageUrls(attempt.post.images),
+      cookies: toCookieRecord(attempt.publishTarget.botAccount.sessions[0]?.cookies),
     });
 
     await prisma.publishAttempt.update({
@@ -344,4 +361,18 @@ function getImageUrls(images: unknown) {
     const candidate = image as ImagePayload;
     return typeof candidate.url === "string" ? [candidate.url] : [];
   });
+}
+
+function toCookieRecord(value: Prisma.JsonValue | undefined) {
+  if (!value) {
+    return null;
+  }
+  const decrypted = decryptJson(value);
+  if (!decrypted || typeof decrypted !== "object" || Array.isArray(decrypted)) {
+    return null;
+  }
+
+  return Object.fromEntries(
+    Object.entries(decrypted).flatMap(([name, cookieValue]) => (typeof cookieValue === "string" ? [[name, cookieValue]] : [])),
+  );
 }

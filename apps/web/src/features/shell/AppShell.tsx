@@ -1,4 +1,4 @@
-import type { AuthenticatedMe, MainTab, PostItem, TenantMetadata, UploadedImage } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
@@ -11,6 +11,7 @@ import { MobileTabBar } from "./MobileTabBar";
 
 export function AppShell({
   activeTab,
+  adminTab,
   me,
   navItems,
   metadata,
@@ -19,20 +20,24 @@ export function AppShell({
   error,
   notice,
   postText,
+  postsTab,
   anonymous,
   uploadedImages,
   onActiveTabChange,
+  onAdminTabChange,
   onAnonymousChange,
   onFilesSelected,
   onLogout,
   onOpenOps,
   onPostTextChange,
+  onPostsTabChange,
   onRefreshTenantData,
   onRefreshMe,
   onRemoveImage,
   onSubmitPost,
 }: {
   activeTab: MainTab;
+  adminTab: AdminTab;
   me: AuthenticatedMe & { currentTenant: NonNullable<AuthenticatedMe["currentTenant"]>; currentMembership: NonNullable<AuthenticatedMe["currentMembership"]> };
   navItems: NavItem[];
   metadata: TenantMetadata;
@@ -41,14 +46,17 @@ export function AppShell({
   error: string;
   notice: string;
   postText: string;
+  postsTab: PostsTab;
   anonymous: boolean;
   uploadedImages: UploadedImage[];
   onActiveTabChange: (tab: MainTab) => void;
+  onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
   onFilesSelected: (files: FileList | null) => void;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
   onPostTextChange: (value: string) => void;
+  onPostsTabChange: (tab: PostsTab) => void;
   onRefreshTenantData: () => Promise<void>;
   onRefreshMe: () => Promise<void>;
   onRemoveImage: (key: string) => void;
@@ -89,7 +97,7 @@ export function AppShell({
             </TabsContent>
 
             <TabsContent value="posts" className="m-0">
-              <PostsPage posts={posts} currentRole={me.currentMembership.role} onRefresh={onRefreshTenantData} />
+              <PostsPage posts={posts} currentRole={me.currentMembership.role} activeTab={postsTab} onTabChange={onPostsTabChange} onRefresh={onRefreshTenantData} />
             </TabsContent>
 
             <TabsContent value="services" className="m-0">
@@ -98,9 +106,11 @@ export function AppShell({
 
             <TabsContent value="admin" className="m-0">
               <AdminPage
+                activeTab={adminTab}
                 currentRole={me.currentMembership.role}
                 selectedTenant={me.currentTenant}
                 metadata={metadata}
+                onTabChange={onAdminTabChange}
                 onSaved={async () => {
                   await Promise.all([onRefreshMe(), onRefreshTenantData()]);
                 }}

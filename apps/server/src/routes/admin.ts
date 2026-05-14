@@ -5,6 +5,7 @@ import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
 import { enqueueAttempt } from "../runtime/publishing";
+import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
 
 const roleSchema = z.enum(["submitter", "reviewer", "admin"]);
@@ -37,6 +38,18 @@ const targetCreateSchema = z.object({
   publishDelaySeconds: z.number().int().min(0).max(86_400).default(0),
 });
 
+const botCreateSchema = z.object({
+  qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字"),
+  displayName: z.string().min(1).max(80),
+  reviewGroupId: z.string().trim().max(40).optional(),
+  enabled: z.boolean().default(true),
+  createPublishTarget: z.boolean().default(true),
+});
+
+const botParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
 const attemptParamsSchema = z.object({
   id: z.string().min(1),
 });
@@ -63,7 +76,7 @@ const banParamsSchema = z.object({
   id: z.string().min(1),
 });
 
-export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue) {
+export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/admin/members", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const members = await prisma.tenantMembership.findMany({
@@ -256,6 +269,161 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue) {
 
     return {
       ban: (await toBanRecords([updated]))[0],
+    };
+  });
+
+  app.get("/api/admin/bots", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+      },
+      include: {
+        sessions: {
+          orderBy: {
+            refreshedAt: "desc",
+          },
+          take: 3,
+        },
+        publishTargets: {
+          orderBy: {
+            displayName: "asc",
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
+    const auditLogs = await prisma.auditLog.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+        OR: [
+          {
+            action: {
+              startsWith: "bot.",
+            },
+          },
+          {
+            targetType: {
+              in: ["bot_account", "bot_session", "publish_target", "publish_attempt"],
+            },
+          },
+        ],
+      },
+      include: {
+        actor: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 30,
+    });
+
+    return {
+      bots: bots.map((bot) => toBotAccount(bot, oneBot?.getBotConnectionStatus(bot.qqUin.toString()))),
+      events: auditLogs.map(toTenantBotEvent),
+    };
+  });
+
+  app.post("/api/admin/bots", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const body = botCreateSchema.parse(request.body);
+    const existing = await prisma.botAccount.findUnique({
+      where: {
+        tenantId_qqUin: {
+          tenantId: context.selectedTenant.id,
+          qqUin: BigInt(body.qqUin),
+        },
+      },
+    });
+    if (existing) {
+      return reply.code(409).send({ message: "这个机器人已经绑定到当前校园墙" });
+    }
+
+    const bot = await prisma.botAccount.create({
+      data: {
+        tenantId: context.selectedTenant.id,
+        qqUin: BigInt(body.qqUin),
+        displayName: body.displayName,
+        reviewGroupId: body.reviewGroupId?.trim() || null,
+        enabled: body.enabled,
+        ...(body.createPublishTarget
+          ? {
+              publishTargets: {
+                create: {
+                  tenantId: context.selectedTenant.id,
+                  displayName: body.displayName,
+                  enabled: true,
+                  required: false,
+                },
+              },
+            }
+          : {}),
+      },
+      include: {
+        sessions: true,
+        publishTargets: true,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "bot_account.create",
+      targetType: "bot_account",
+      targetId: bot.id,
+      detail: {
+        qqUin: body.qqUin,
+        displayName: body.displayName,
+        reviewGroupId: body.reviewGroupId?.trim() || null,
+      },
+    });
+
+    return {
+      bot: toBotAccount(bot, oneBot?.getBotConnectionStatus(bot.qqUin.toString())),
+    };
+  });
+
+  app.delete("/api/admin/bots/:id", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsSchema.parse(request.params);
+    const bot = await prisma.botAccount.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+      include: {
+        publishTargets: true,
+      },
+    });
+
+    if (!bot) {
+      return reply.code(404).send({ message: "机器人不存在" });
+    }
+
+    await prisma.botAccount.delete({
+      where: {
+        id: bot.id,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "bot_account.delete",
+      targetType: "bot_account",
+      targetId: bot.id,
+      detail: {
+        qqUin: bot.qqUin.toString(),
+        displayName: bot.displayName,
+        publishTargetCount: bot.publishTargets.length,
+      },
+    });
+
+    return {
+      ok: true,
     };
   });
 
@@ -483,6 +651,91 @@ function toPublishTarget(target: {
       displayName: target.botAccount.displayName,
       enabled: target.botAccount.enabled,
     },
+  };
+}
+
+function toBotAccount(
+  bot: {
+    id: string;
+    qqUin: bigint;
+    displayName: string;
+    enabled: boolean;
+    reviewGroupId: string | null;
+    lastSeenAt: Date | null;
+    createdAt: Date;
+    sessions: Array<{
+      id: string;
+      type: string;
+      domain: string;
+      refreshedAt: Date;
+      expiresAt: Date | null;
+    }>;
+    publishTargets: Array<{
+      id: string;
+      displayName: string;
+      enabled: boolean;
+      required: boolean;
+      type: string;
+    }>;
+  },
+  connection: { online: boolean; connectionCount: number } | undefined,
+) {
+  return {
+    id: bot.id,
+    qqUin: bot.qqUin.toString(),
+    displayName: bot.displayName,
+    enabled: bot.enabled,
+    reviewGroupId: bot.reviewGroupId,
+    lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
+    createdAt: bot.createdAt.toISOString(),
+    connection: connection ?? {
+      online: false,
+      connectionCount: 0,
+    },
+    sessions: bot.sessions.map((session) => ({
+      id: session.id,
+      type: session.type,
+      domain: session.domain,
+      refreshedAt: session.refreshedAt.toISOString(),
+      expiresAt: session.expiresAt?.toISOString() ?? null,
+    })),
+    publishTargets: bot.publishTargets.map((target) => ({
+      id: target.id,
+      type: target.type,
+      displayName: target.displayName,
+      enabled: target.enabled,
+      required: target.required,
+    })),
+  };
+}
+
+function toTenantBotEvent(event: {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  detail: unknown;
+  createdAt: Date;
+  actor: {
+    id: string;
+    qqUin: bigint;
+    displayName: string | null;
+  } | null;
+}) {
+  return {
+    id: event.id,
+    action: event.action,
+    targetType: event.targetType,
+    targetId: event.targetId,
+    detail: event.detail,
+    createdAt: event.createdAt.toISOString(),
+    actor: event.actor
+      ? {
+          id: event.actor.id,
+          qqUin: event.actor.qqUin.toString(),
+          displayName: event.actor.displayName,
+        }
+      : null,
   };
 }
 

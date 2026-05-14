@@ -245,12 +245,14 @@ stateDiagram-v2
 
 ## Bot 集成目标形态
 
-当前 Bot 的业务逻辑建议迁入 `integrations/onebot` 和 `integrations/qzone`：
+当前 Bot 的业务逻辑已经迁入服务端 runtime 和 QZone integration：
 
-- OneBot 连接管理：接入一个或多个 QQ 机器人协议端。
-- 命令路由：根据群号、私聊用户、Bot 账号定位租户。
-- 审核群通知：租户级配置。
-- 私聊注册和重置密码：需要先判断用户要注册哪个租户。可以通过 Bot 账号所属租户或命令参数决定。
+- OneBot 连接管理：服务端开放 OneBot v11 反向 WebSocket `/onebot/v11/ws`，可接入一个或多个 QQ 机器人协议端。
+- 命令路由：根据 `self_id` / Bot 账号、群号、私聊用户定位租户。
+- 审核群通知：投稿创建后按租户 Bot 的 `reviewGroupId` 推送待审核消息。
+- 私聊注册和重置密码：通过 Bot 账号所属租户授予当前用户 membership。
+- 审核群命令：支持 `#通过 <稿件id>`、`#拒绝 <理由> <稿件id>`。
+- QZone cookies 刷新：审核群内 `#登录` 或 `#刷新qzone cookies` 会调用 OneBot `get_cookies(domain='user.qzone.qq.com')`，并将 Bot session 加密落库。
 - QZone 发布器：租户级 Bot 账号和 session，同一租户可启动多个账号的发布 worker。
 
 命令路由要从“一个 Bot 只有一个租户”升级为：
@@ -324,7 +326,7 @@ Utility 可以变成内部渲染模块：
 
 ## 安全要点
 
-- Bot cookies 必须加密落库，不能像现在一样以 JSON 明文缓存。
+- Bot cookies 必须加密落库，不能像旧版一样以 JSON 明文缓存。生产环境必须配置 `CAMPUX_BOT_SESSION_SECRET`；开发环境可使用本地 fallback，方便 matcha 端到端验证。
 - OAuth2 app 必须按租户隔离，redirect URI 校验继续保留严格匹配。
 - Service token 在单体内应消失。若还存在外部 Bot 兼容模式，也要变成租户级 token，并支持轮换。
 - 投稿图片对象 key 应包含租户前缀，例如 `tenants/{tenantId}/posts/{postId}/...`。

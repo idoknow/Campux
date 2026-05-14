@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { CheckIcon, ClipboardListIcon, MegaphoneIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, UserRoundIcon, XIcon } from "lucide-react";
+import { BotIcon, CheckIcon, ClipboardListIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, Trash2Icon, UserRoundIcon, WifiIcon, WifiOffIcon, XIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import type { AdminBanRecord, AdminMember, PublishAttemptItem, PublishTargetItem, ReviewPostItem, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, PublishAttemptItem, PublishTargetItem, ReviewPostItem, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, SectionHeader } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,24 +30,37 @@ type BanForm = {
   endsAt: string;
 };
 
+type BotForm = {
+  qqUin: string;
+  displayName: string;
+  reviewGroupId: string;
+  createPublishTarget: boolean;
+};
+
 const managementTabsListClassName = "grid !h-[60px] w-full items-stretch rounded-md bg-[#eef8ff] p-1.5 shadow-none";
 const managementTabsTriggerClassName = "!h-full rounded-[6px] p-0 text-base font-bold shadow-none after:hidden data-active:text-white data-active:shadow-none";
 
 export function AdminPage({
+  activeTab,
   currentRole,
   selectedTenant,
   metadata,
+  onTabChange,
   onSaved,
 }: {
+  activeTab: AdminTab;
   currentRole: TenantRole;
   selectedTenant: TenantSummary;
   metadata: TenantMetadata;
+  onTabChange: (tab: AdminTab) => void;
   onSaved: () => Promise<void>;
 }) {
   const isAdmin = currentRole === "admin";
   const [form, setForm] = useState<TenantSettingsForm>(() => toForm(selectedTenant, metadata));
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
   const [members, setMembers] = useState<AdminMember[]>([]);
+  const [bots, setBots] = useState<AdminBotAccount[]>([]);
+  const [botEvents, setBotEvents] = useState<AdminBotEvent[]>([]);
   const [targets, setTargets] = useState<PublishTargetItem[]>([]);
   const [attempts, setAttempts] = useState<PublishAttemptItem[]>([]);
   const [bans, setBans] = useState<AdminBanRecord[]>([]);
@@ -55,7 +68,7 @@ export function AdminPage({
   const [banKeyword, setBanKeyword] = useState("");
   const [onlyActiveBans, setOnlyActiveBans] = useState(true);
   const [banForm, setBanForm] = useState<BanForm>(() => defaultBanForm());
-  const [activeTab, setActiveTab] = useState("review");
+  const [botForm, setBotForm] = useState<BotForm>(() => defaultBotForm());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -82,22 +95,33 @@ export function AdminPage({
     });
   }, [selectedTenant.id, currentRole]);
 
+  useEffect(() => {
+    if (!isAdmin && activeTab !== "review") {
+      onTabChange("review");
+    }
+  }, [activeTab, isAdmin, onTabChange]);
+
   async function refreshAdminData() {
     const reviewData = await api<{ posts: ReviewPostItem[] }>("/api/review/posts");
     setReviewPosts(reviewData.posts);
     if (!isAdmin) {
       setMembers([]);
+      setBots([]);
+      setBotEvents([]);
       setTargets([]);
       setBans([]);
       return;
     }
 
-    const [memberData, targetData, banData] = await Promise.all([
+    const [memberData, botData, targetData, banData] = await Promise.all([
       api<{ members: AdminMember[] }>("/api/admin/members"),
+      api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
       api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
       fetchBanRecords(),
     ]);
     setMembers(memberData.members);
+    setBots(botData.bots);
+    setBotEvents(botData.events);
     setTargets(targetData.targets);
     setBans(banData.bans);
   }
@@ -202,6 +226,47 @@ export function AdminPage({
     await refreshBans();
   }
 
+  async function addBot() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/api/admin/bots", {
+        method: "POST",
+        body: JSON.stringify({
+          qqUin: botForm.qqUin.trim(),
+          displayName: botForm.displayName.trim(),
+          reviewGroupId: botForm.reviewGroupId.trim() || undefined,
+          createPublishTarget: botForm.createPublishTarget,
+        }),
+      });
+      setBotForm(defaultBotForm());
+      setNotice("机器人已添加。");
+      await refreshAdminData();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "添加机器人失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteBot(id: string) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api(`/api/admin/bots/${id}`, {
+        method: "DELETE",
+      });
+      setNotice("机器人已删除。");
+      await refreshAdminData();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "删除机器人失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleTarget(target: PublishTargetItem) {
     await api(`/api/admin/publish-targets/${target.id}`, {
       method: "PATCH",
@@ -224,8 +289,8 @@ export function AdminPage({
       {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p> : null}
       {notice ? <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm font-medium text-green-700">{notice}</p> : null}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-3">
-        <TabsList className={`${managementTabsListClassName} ${isAdmin ? "grid-cols-5" : "grid-cols-1"}`}>
+      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="mt-3">
+        <TabsList className={`${managementTabsListClassName} ${isAdmin ? "grid-cols-6" : "grid-cols-1"}`}>
           <TabsTrigger value="review" className={`${managementTabsTriggerClassName} data-active:bg-[#f8b94c]`}>
             审核
           </TabsTrigger>
@@ -239,6 +304,9 @@ export function AdminPage({
               </TabsTrigger>
               <TabsTrigger value="metadata" className={`${managementTabsTriggerClassName} data-active:bg-[#8bc34a]`}>
                 元数据
+              </TabsTrigger>
+              <TabsTrigger value="bots" className={`${managementTabsTriggerClassName} data-active:bg-[#7e57c2]`}>
+                机器人
               </TabsTrigger>
               <TabsTrigger value="publish" className={`${managementTabsTriggerClassName} data-active:bg-[#ff7d9a]`}>
                 发布
@@ -261,7 +329,7 @@ export function AdminPage({
                 onRoleChange={(id, role) => void updateMemberRole(id, role)}
                 onPrepareBan={(member) => {
                   setBanForm((current) => ({ ...current, userId: member.user.id }));
-                  setActiveTab("bans");
+                  onTabChange("bans");
                 }}
               />
             </TabsContent>
@@ -285,6 +353,19 @@ export function AdminPage({
 
             <TabsContent value="metadata" className="mt-4">
               <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} />
+            </TabsContent>
+
+            <TabsContent value="bots" className="mt-4">
+              <BotsPanel
+                bots={bots}
+                events={botEvents}
+                form={botForm}
+                busy={busy}
+                onFormChange={setBotForm}
+                onAdd={() => void addBot()}
+                onDelete={(id) => void deleteBot(id)}
+                onRefresh={() => void refreshAdminData()}
+              />
             </TabsContent>
 
             <TabsContent value="publish" className="mt-4">
@@ -525,6 +606,130 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
   );
 }
 
+function BotsPanel({
+  bots,
+  events,
+  form,
+  busy,
+  onFormChange,
+  onAdd,
+  onDelete,
+  onRefresh,
+}: {
+  bots: AdminBotAccount[];
+  events: AdminBotEvent[];
+  form: BotForm;
+  busy: boolean;
+  onFormChange: (form: BotForm) => void;
+  onAdd: () => void;
+  onDelete: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <Card className="rounded-md border-[#d8c8ff] bg-[#f7f2ff] shadow-none">
+      <CardContent className="p-4">
+        <PanelTitle
+          icon={BotIcon}
+          title="机器人"
+          description="管理当前校园墙的 Bot、连接状态和事件"
+          color="bg-[#7e57c2]"
+          action={<Button variant="outline" size="sm" onClick={onRefresh}>刷新</Button>}
+        />
+
+        <div className="mt-4 grid gap-2 rounded-md bg-white p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+          <Input placeholder="Bot QQ" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value })} />
+          <Input placeholder="显示名，例如 1 号墙" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+          <Input placeholder="审核群号，可选" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value })} />
+          <Button className="bg-[#7e57c2] font-bold hover:bg-[#7e57c2]" disabled={busy || !form.qqUin.trim() || !form.displayName.trim()} onClick={onAdd}>
+            <PlusIcon data-icon="inline-start" />
+            添加
+          </Button>
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 md:col-span-4">
+            <input type="checkbox" checked={form.createPublishTarget} onChange={(event) => onFormChange({ ...form, createPublishTarget: event.target.checked })} />
+            同时创建一个发布目标
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          {bots.length === 0 ? (
+            <p className="text-sm font-bold text-slate-500">还没有绑定机器人。</p>
+          ) : (
+            bots.map((bot) => (
+              <div key={bot.id} className="rounded-md bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-lg font-black text-slate-950">{bot.displayName}</p>
+                      <Badge className={`rounded-full shadow-none ${bot.connection.online ? "bg-[#8bc34a] text-white" : "bg-slate-100 text-slate-500"}`}>
+                        {bot.connection.online ? "在线" : "离线"}
+                      </Badge>
+                      {!bot.enabled ? <Badge className="rounded-full bg-[#ff7d68] text-white shadow-none">停用</Badge> : null}
+                    </div>
+                    <p className="mt-1 text-sm font-bold text-slate-500">QQ {bot.qqUin}</p>
+                    <p className="text-xs text-slate-500">审核群：{bot.reviewGroupId ?? "未设置"}</p>
+                  </div>
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => onDelete(bot.id)}>
+                    <Trash2Icon data-icon="inline-start" />
+                    删除
+                  </Button>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-sm md:grid-cols-3">
+                  <BotMetric icon={bot.connection.online ? WifiIcon : WifiOffIcon} label="连接" value={bot.connection.online ? `${bot.connection.connectionCount} 条` : "未连接"} />
+                  <BotMetric label="最近心跳" value={bot.lastSeenAt ? formatDateTime(bot.lastSeenAt) : "暂无"} />
+                  <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
+                </div>
+
+                <div className="mt-3 rounded-md bg-[#f7f2ff] p-2">
+                  <p className="text-xs font-black text-slate-500">QZone session</p>
+                  {bot.sessions.length === 0 ? (
+                    <p className="mt-1 text-sm font-bold text-slate-500">还没有刷新 cookies</p>
+                  ) : (
+                    bot.sessions.map((session) => (
+                      <p key={session.id} className="mt-1 text-sm font-bold text-slate-700">
+                        {session.domain} · {formatDateTime(session.refreshedAt)}
+                      </p>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="mt-4 rounded-md bg-white p-3">
+          <p className="font-black text-slate-950">最近事件</p>
+          <div className="mt-2 flex flex-col gap-2">
+            {events.length === 0 ? (
+              <p className="text-sm font-bold text-slate-500">暂无 Bot 事件。</p>
+            ) : (
+              events.slice(0, 12).map((event) => (
+                <div key={event.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-[#f8fbff] px-3 py-2 text-sm">
+                  <span className="font-black text-slate-700">{formatBotEventAction(event.action)}</span>
+                  <span className="text-slate-500">{event.actor?.displayName ?? event.actor?.qqUin ?? "系统"}</span>
+                  <span className="text-xs font-bold text-slate-400">{formatDateTime(event.createdAt)}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BotMetric({ label, value, icon: Icon }: { label: string; value: string; icon?: LucideIcon }) {
+  return (
+    <div className="rounded-md bg-[#f8fbff] p-2">
+      <p className="flex items-center gap-1 text-xs font-black text-slate-500">
+        {Icon ? <Icon className="size-3.5" /> : null}
+        {label}
+      </p>
+      <p className="mt-1 font-black text-slate-900">{value}</p>
+    </div>
+  );
+}
+
 function PublishPanel({
   targets,
   attempts,
@@ -617,6 +822,15 @@ function defaultBanForm(): BanForm {
   };
 }
 
+function defaultBotForm(): BotForm {
+  return {
+    qqUin: "",
+    displayName: "",
+    reviewGroupId: "",
+    createPublishTarget: true,
+  };
+}
+
 function toLocalDateTimeValue(date: Date) {
   const offset = date.getTimezoneOffset();
   const local = new Date(date.getTime() - offset * 60 * 1000);
@@ -634,4 +848,21 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatBotEventAction(action: string) {
+  const labels: Record<string, string> = {
+    "bot_account.create": "添加机器人",
+    "bot_account.delete": "删除机器人",
+    "bot.register": "Bot 注册账号",
+    "bot.membership.update": "Bot 更新授权",
+    "bot.password.reset": "Bot 重置密码",
+    "bot.review.approve": "群内通过",
+    "bot.review.reject": "群内拒绝",
+    "bot.qzone.cookies.refresh": "刷新 QZone cookies",
+    "publish_target.create": "创建发布目标",
+    "publish_target.update": "更新发布目标",
+    "publish_attempt.retry": "重试发布",
+  };
+  return labels[action] ?? action;
 }

@@ -2,17 +2,46 @@ import { useEffect, useMemo, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { api, fileToBase64 } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
-import type { AuthenticatedMe, MainTab, MeResponse, PostItem, TenantMetadata, UploadedImage } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { AppShell } from "@/features/shell/AppShell";
 
+type AppRoute =
+  | { kind: "tenant"; tab: MainTab; subTab?: AdminTab | PostsTab }
+  | { kind: "login" | "tenants" | "ops" };
+
+const tabPaths: Record<MainTab, string> = {
+  post: "/post",
+  posts: "/posts",
+  services: "/services",
+  admin: "/admin",
+};
+
+const postsTabPaths: Record<PostsTab, string> = {
+  mine: "/posts",
+  review: "/posts/review",
+};
+
+const adminTabPaths: Record<AdminTab, string> = {
+  review: "/admin",
+  users: "/admin/users",
+  bans: "/admin/bans",
+  metadata: "/admin/metadata",
+  bots: "/admin/bots",
+  publish: "/admin/publish",
+};
+
 export function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
-  const [activeTab, setActiveTab] = useState<MainTab>("post");
+  const [route, setRoute] = useState<AppRoute>(() => routeFromPath(window.location.pathname));
+  const [activeTab, setActiveTabState] = useState<MainTab>(() => {
+    const initialRoute = routeFromPath(window.location.pathname);
+    return initialRoute.kind === "tenant" ? initialRoute.tab : "post";
+  });
   const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [postText, setPostText] = useState("");
@@ -21,7 +50,6 @@ export function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [showOpsOnly, setShowOpsOnly] = useState(false);
 
   const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
@@ -35,6 +63,29 @@ export function App() {
   async function refreshMe() {
     const data = await api<MeResponse>("/api/me");
     setMe(data);
+  }
+
+  function navigate(nextRoute: AppRoute, mode: "push" | "replace" = "push") {
+    const path = pathFromRoute(nextRoute);
+    if (window.location.pathname !== path) {
+      window.history[mode === "replace" ? "replaceState" : "pushState"](null, "", path);
+    }
+    setRoute(nextRoute);
+    if (nextRoute.kind === "tenant") {
+      setActiveTabState(nextRoute.tab);
+    }
+  }
+
+  function setActiveTab(tab: MainTab) {
+    navigate({ kind: "tenant", tab });
+  }
+
+  function setPostsSubTab(tab: PostsTab) {
+    navigate({ kind: "tenant", tab: "posts", subTab: tab });
+  }
+
+  function setAdminSubTab(tab: AdminTab) {
+    navigate({ kind: "tenant", tab: "admin", subTab: tab });
   }
 
   async function refreshTenantData() {
@@ -77,16 +128,69 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const syncRoute = () => {
+      const nextRoute = routeFromPath(window.location.pathname);
+      setRoute(nextRoute);
+      if (nextRoute.kind === "tenant") {
+        setActiveTabState(nextRoute.tab);
+      }
+    };
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
+  }, []);
+
+  useEffect(() => {
     void refreshTenantData().catch((caught) => {
       setError(caught instanceof Error ? caught.message : "无法读取校园墙数据");
     });
   }, [me]);
 
   useEffect(() => {
+    if (!me?.authenticated || !me.currentMembership) {
+      return;
+    }
+
     if (!availableNavItems.some((item) => item.value === activeTab)) {
       setActiveTab(availableNavItems[0]?.value ?? "post");
     }
-  }, [activeTab, availableNavItems]);
+  }, [activeTab, availableNavItems, me]);
+
+  useEffect(() => {
+    if (!me) {
+      return;
+    }
+
+    if (!me.authenticated) {
+      if (route.kind !== "login") {
+        navigate({ kind: "login" }, "replace");
+      }
+      return;
+    }
+
+    if (route.kind === "login") {
+      navigate(me.needsTenantSelection || !me.currentTenant ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
+      return;
+    }
+
+    if (route.kind === "ops" && me.user.systemRole !== "system_operator") {
+      navigate(me.needsTenantSelection || !me.currentTenant ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
+      return;
+    }
+
+    if ((me.needsTenantSelection || !me.currentTenant || !me.currentMembership) && route.kind !== "tenants" && route.kind !== "ops") {
+      navigate({ kind: "tenants" }, "replace");
+      return;
+    }
+
+    if (route.kind === "tenants" && !me.needsTenantSelection && me.currentTenant && me.currentMembership) {
+      navigate({ kind: "tenant", tab: activeTab }, "replace");
+      return;
+    }
+
+    if (route.kind === "tenant" && window.location.pathname !== pathFromRoute(route)) {
+      navigate(route, "replace");
+    }
+  }, [me, route.kind, route.kind === "tenant" ? route.tab : undefined, route.kind === "tenant" ? route.subTab : undefined]);
 
   async function login(qqUin: string, password: string) {
     setError("");
@@ -95,6 +199,9 @@ export function App() {
       body: JSON.stringify({ qqUin, password }),
     });
     setMe(data);
+    if (data.authenticated) {
+      navigate(data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab });
+    }
   }
 
   async function logout() {
@@ -103,8 +210,7 @@ export function App() {
     setPostText("");
     setUploadedImages([]);
     setPosts([]);
-    setActiveTab("post");
-    setShowOpsOnly(false);
+    navigate({ kind: "login" }, "replace");
   }
 
   async function selectTenant(tenantId: string) {
@@ -113,6 +219,7 @@ export function App() {
       body: JSON.stringify({ tenantId }),
     });
     await refreshMe();
+    navigate({ kind: "tenant", tab: activeTab });
   }
 
   async function uploadFiles(files: FileList | null) {
@@ -179,9 +286,9 @@ export function App() {
     return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} onLogin={login} />;
   }
 
-  if (me.user.systemRole === "system_operator" && (showOpsOnly || me.memberships.length === 0)) {
+  if (me.user.systemRole === "system_operator" && (route.kind === "ops" || me.memberships.length === 0)) {
     if (me.memberships.length > 0) {
-      return <OpsStandaloneScreen me={me} onBackToTenants={() => setShowOpsOnly(false)} onLogout={logout} />;
+      return <OpsStandaloneScreen me={me} onBackToTenants={() => navigate({ kind: "tenants" })} onLogout={logout} />;
     }
 
     return <OpsStandaloneScreen me={me} onLogout={logout} />;
@@ -189,7 +296,7 @@ export function App() {
 
   if (me.needsTenantSelection || !me.currentTenant || !me.currentMembership) {
     if (me.user.systemRole === "system_operator") {
-      return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onOpenOps={() => setShowOpsOnly(true)} onLogout={logout} />;
+      return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onOpenOps={() => navigate({ kind: "ops" })} onLogout={logout} />;
     }
 
     return (
@@ -204,6 +311,7 @@ export function App() {
   return (
     <AppShell
       activeTab={activeTab}
+      adminTab={route.kind === "tenant" && route.tab === "admin" ? (route.subTab as AdminTab | undefined) ?? "review" : "review"}
       me={me as AuthenticatedMe & { currentTenant: NonNullable<AuthenticatedMe["currentTenant"]>; currentMembership: NonNullable<AuthenticatedMe["currentMembership"]> }}
       navItems={availableNavItems}
       metadata={metadata}
@@ -212,18 +320,70 @@ export function App() {
       error={error}
       notice={notice}
       postText={postText}
+      postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? "mine" : "mine"}
       anonymous={anonymous}
       uploadedImages={uploadedImages}
       onActiveTabChange={setActiveTab}
+      onAdminTabChange={setAdminSubTab}
       onAnonymousChange={setAnonymous}
       onFilesSelected={uploadFiles}
       onLogout={logout}
-      onOpenOps={me.user.systemRole === "system_operator" ? () => setShowOpsOnly(true) : undefined}
+      onOpenOps={me.user.systemRole === "system_operator" ? () => navigate({ kind: "ops" }) : undefined}
       onPostTextChange={setPostText}
+      onPostsTabChange={setPostsSubTab}
       onRefreshMe={refreshMe}
       onRefreshTenantData={refreshTenantData}
       onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
       onSubmitPost={submitPost}
     />
   );
+}
+
+function routeFromPath(pathname: string): AppRoute {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  if (normalized === "/login") {
+    return { kind: "login" };
+  }
+  if (normalized === "/tenants") {
+    return { kind: "tenants" };
+  }
+  if (normalized === "/ops") {
+    return { kind: "ops" };
+  }
+
+  const matchedPostsTab = (Object.entries(postsTabPaths) as Array<[PostsTab, string]>).find(([, path]) => path === normalized)?.[0];
+  if (matchedPostsTab) {
+    return { kind: "tenant", tab: "posts", subTab: matchedPostsTab };
+  }
+
+  const matchedAdminTab = (Object.entries(adminTabPaths) as Array<[AdminTab, string]>).find(([, path]) => path === normalized)?.[0];
+  if (matchedAdminTab) {
+    return { kind: "tenant", tab: "admin", subTab: matchedAdminTab };
+  }
+
+  if (normalized === "/posts/mine") {
+    return { kind: "tenant", tab: "posts", subTab: "mine" };
+  }
+  if (normalized === "/admin/review") {
+    return { kind: "tenant", tab: "admin", subTab: "review" };
+  }
+
+  const matchedTab = (Object.entries(tabPaths) as Array<[MainTab, string]>).find(([, path]) => path === normalized)?.[0];
+  return {
+    kind: "tenant",
+    tab: matchedTab ?? "post",
+  };
+}
+
+function pathFromRoute(route: AppRoute) {
+  if (route.kind === "tenant") {
+    if (route.tab === "posts" && route.subTab) {
+      return postsTabPaths[route.subTab as PostsTab] ?? tabPaths.posts;
+    }
+    if (route.tab === "admin" && route.subTab) {
+      return adminTabPaths[route.subTab as AdminTab] ?? tabPaths.admin;
+    }
+    return tabPaths[route.tab];
+  }
+  return `/${route.kind}`;
 }

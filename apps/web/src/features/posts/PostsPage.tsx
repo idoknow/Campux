@@ -16,7 +16,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { PostItem, ReviewPostItem, TenantRole } from "@/types/app";
+import type { PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { EmptyCard, SectionHeader } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -51,10 +51,14 @@ const postTabsTriggerClassName = "!h-full rounded-[6px] p-0 text-base font-bold 
 export function PostsPage({
   posts,
   currentRole,
+  activeTab,
+  onTabChange,
   onRefresh,
 }: {
   posts: PostItem[];
   currentRole: TenantRole;
+  activeTab: PostsTab;
+  onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
 }) {
   const canReview = canAccess(currentRole, "reviewer");
@@ -63,6 +67,12 @@ export function PostsPage({
   const [reviewKeyword, setReviewKeyword] = useState("");
   const [reviewError, setReviewError] = useState("");
   const [busyPostId, setBusyPostId] = useState("");
+
+  useEffect(() => {
+    if (!canReview && activeTab !== "mine") {
+      onTabChange("mine");
+    }
+  }, [activeTab, canReview, onTabChange]);
 
   useEffect(() => {
     if (!canReview) {
@@ -114,7 +124,7 @@ export function PostsPage({
   return (
     <div className="px-4">
       <SectionHeader title="稿件" subtitle="看看你的投稿进度" action="刷新" icon={RefreshCwIcon} onAction={refreshAll} />
-      <Tabs defaultValue="mine" className="mt-3">
+      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="mt-3">
         <TabsList className={`${postTabsListClassName} ${canReview ? "grid-cols-2" : "grid-cols-1"}`}>
           <TabsTrigger value="mine" className={`${postTabsTriggerClassName} data-active:bg-[#42a5f5]`}>
             你的稿件

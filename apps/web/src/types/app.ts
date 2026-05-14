@@ -1,6 +1,8 @@
 import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "services" | "admin";
+export type PostsTab = "mine" | "review";
+export type AdminTab = "review" | "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 
 export type Membership = {
@@ -114,6 +116,48 @@ export type PublishAttemptItem = {
       displayName: string;
     };
   };
+};
+
+export type AdminBotAccount = {
+  id: string;
+  qqUin: string;
+  displayName: string;
+  enabled: boolean;
+  reviewGroupId: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+  connection: {
+    online: boolean;
+    connectionCount: number;
+  };
+  sessions: Array<{
+    id: string;
+    type: string;
+    domain: string;
+    refreshedAt: string;
+    expiresAt: string | null;
+  }>;
+  publishTargets: Array<{
+    id: string;
+    type: string;
+    displayName: string;
+    enabled: boolean;
+    required: boolean;
+  }>;
+};
+
+export type AdminBotEvent = {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  detail: unknown;
+  createdAt: string;
+  actor: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+  } | null;
 };
 
 export type AdminBanRecord = {
