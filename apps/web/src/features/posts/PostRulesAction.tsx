@@ -24,7 +24,7 @@ import {
 
 function RuleButton() {
   return (
-    <button className="mt-2 block w-fit rounded-[5px] bg-[#ff8a65] px-2 py-1 text-left text-lg text-white shadow-sm">
+    <button className="mt-2 block w-fit rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50">
       <span>
         请务必遵守 <strong className="inline font-bold">投稿规则</strong>
       </span>
@@ -34,9 +34,9 @@ function RuleButton() {
 
 function RuleList({ rules }: { rules: string[] }) {
   return (
-    <div className="flex flex-col gap-3 px-4 md:px-5">
+    <div className="flex flex-col gap-2 px-4 md:px-5">
       {rules.map((rule, index) => (
-        <Alert key={rule} className="rounded-2xl">
+        <Alert key={rule} className="rounded-md">
           <CheckIcon />
           <AlertTitle>规则 {index + 1}</AlertTitle>
           <AlertDescription>{rule}</AlertDescription>

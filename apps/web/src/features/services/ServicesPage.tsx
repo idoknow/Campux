@@ -11,25 +11,25 @@ type ServiceAction = "password" | "rules" | "notice" | "";
 
 const servicePalettes = [
   {
-    shell: "border-[#bceaff] bg-[#effaff]",
-    icon: "bg-[#42a5f5] text-white",
+    shell: "border-slate-200 bg-white",
+    icon: "bg-slate-100 text-slate-600",
   },
   {
-    shell: "border-[#d2efb9] bg-[#f4ffe9]",
-    icon: "bg-[#8bc34a] text-white",
+    shell: "border-slate-200 bg-white",
+    icon: "bg-slate-100 text-slate-600",
   },
   {
-    shell: "border-[#ffd596] bg-[#fff8e8]",
-    icon: "bg-[#f8b94c] text-white",
+    shell: "border-slate-200 bg-white",
+    icon: "bg-slate-100 text-slate-600",
   },
   {
-    shell: "border-[#ffc9d6] bg-[#fff0f4]",
-    icon: "bg-[#ff7d9a] text-white",
+    shell: "border-slate-200 bg-white",
+    icon: "bg-slate-100 text-slate-600",
   },
 ];
 const defaultServicePalette = {
-  shell: "border-[#bceaff] bg-[#effaff]",
-  icon: "bg-[#42a5f5] text-white",
+  shell: "border-slate-200 bg-white",
+  icon: "bg-slate-100 text-slate-600",
 };
 
 export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
@@ -58,9 +58,9 @@ export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
   }
 
   return (
-    <div className="px-4 pb-4">
+    <div className="px-4 py-4">
       <SectionHeader title="服务" subtitle="校园墙常用入口" />
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {entries.map((service, index) => (
           <ServiceTile key={service.title} service={service} index={index} onOpen={() => openService(service)} />
         ))}
@@ -79,12 +79,12 @@ function ServiceTile({ service, index, onOpen }: { service: TenantMetadata["serv
   const Icon = pickServiceIcon(service.title);
 
   return (
-    <button className={`flex min-h-24 items-center gap-3 rounded-md border p-3 text-left shadow-none transition hover:-translate-y-0.5 hover:shadow-sm ${palette.shell}`} onClick={onOpen}>
-      <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-[10px] ${palette.icon}`}>
-        <Icon className="size-6" strokeWidth={2.4} />
+    <button className={`flex min-h-20 items-center gap-3 rounded-md border p-3 text-left shadow-none transition hover:border-slate-300 hover:bg-slate-50 ${palette.shell}`} onClick={onOpen}>
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${palette.icon}`}>
+        <Icon className="size-5" strokeWidth={2.1} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-lg font-black text-slate-950">{service.title}</span>
+        <span className="block text-sm font-semibold text-slate-950">{service.title}</span>
         <span className="mt-0.5 block text-sm leading-5 text-slate-600">{service.description ?? "校园服务"}</span>
       </span>
       {service.url ? <ExternalLinkIcon className="size-5 shrink-0 text-slate-400" /> : <ChevronRightIcon className="size-5 shrink-0 text-slate-400" />}
@@ -117,17 +117,17 @@ function PasswordPanel({ onDone }: { onDone: (message: string) => void }) {
   }
 
   return (
-    <section className="mt-4 rounded-md bg-[#effaff] p-4">
+    <section className="product-surface mt-4 p-4">
       <div className="flex items-center gap-2">
-        <KeyRoundIcon className="size-5 text-[#42a5f5]" />
-        <p className="text-lg font-black">修改密码</p>
+        <KeyRoundIcon className="size-5 text-slate-500" />
+        <p className="text-base font-semibold">修改密码</p>
       </div>
       {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Input type="password" placeholder="当前密码" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
         <Input type="password" placeholder="新密码，至少 6 位" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
       </div>
-      <Button className="mt-3 rounded-full bg-[#42a5f5] font-bold hover:bg-[#42a5f5]" disabled={busy || currentPassword.length === 0 || newPassword.length < 6} onClick={() => void submit()}>
+      <Button className="mt-3 font-medium" disabled={busy || currentPassword.length === 0 || newPassword.length < 6} onClick={() => void submit()}>
         <CheckIcon data-icon="inline-start" />
         保存新密码
       </Button>
@@ -137,14 +137,14 @@ function PasswordPanel({ onDone }: { onDone: (message: string) => void }) {
 
 function RulesPanel({ rules }: { rules: string[] }) {
   return (
-    <section className="mt-4 rounded-md bg-[#fff8e8] p-4">
+    <section className="product-surface mt-4 p-4">
       <div className="flex items-center gap-2">
-        <BookOpenIcon className="size-5 text-[#f8b94c]" />
-        <p className="text-lg font-black">投稿规则</p>
+        <BookOpenIcon className="size-5 text-slate-500" />
+        <p className="text-base font-semibold">投稿规则</p>
       </div>
       <div className="mt-3 grid gap-2">
         {rules.map((rule, index) => (
-          <p key={rule} className="rounded-md bg-white px-3 py-2 text-sm font-bold text-slate-700">
+          <p key={rule} className="rounded-md border border-slate-100 bg-white px-3 py-2 text-sm text-slate-700">
             {index + 1}. {rule}
           </p>
         ))}

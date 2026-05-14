@@ -31,22 +31,22 @@ type PostImage = {
 };
 
 const postCardPalettes = [
-  "border-[#ffd596] bg-[#fff8e8]",
-  "border-[#bceaff] bg-[#eefaff]",
-  "border-[#d2efb9] bg-[#f4ffe9]",
-  "border-[#ffc9d6] bg-[#fff0f4]",
+  "border-slate-200 bg-white",
+  "border-slate-200 bg-white",
+  "border-slate-200 bg-white",
+  "border-slate-200 bg-white",
 ];
-const defaultPostCardPalette = "border-[#ffd596] bg-[#fff8e8]";
+const defaultPostCardPalette = "border-slate-200 bg-white";
 
 const statusStyles: Record<string, string> = {
-  pending_approval: "bg-[#ffb94d] text-white",
-  approved: "bg-[#8bc34a] text-white",
-  rejected: "bg-[#ff7d68] text-white",
-  published: "bg-[#42a5f5] text-white",
+  pending_approval: "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
+  approved: "bg-green-50 text-green-800 ring-1 ring-green-200",
+  rejected: "bg-red-50 text-red-700 ring-1 ring-red-200",
+  published: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
 };
 
-const postTabsListClassName = "grid !h-[60px] w-full items-stretch rounded-md bg-[#eef8ff] p-1.5 shadow-none";
-const postTabsTriggerClassName = "!h-full rounded-[6px] p-0 text-base font-bold shadow-none after:hidden data-active:text-white data-active:shadow-none";
+const postTabsListClassName = "product-tabs-list";
+const postTabsTriggerClassName = "product-tabs-trigger after:hidden";
 
 export function PostsPage({
   posts,
@@ -122,15 +122,15 @@ export function PostsPage({
   }
 
   return (
-    <div className="px-4">
+    <div className="px-4 py-4">
       <SectionHeader title="稿件" subtitle="看看你的投稿进度" action="刷新" icon={RefreshCwIcon} onAction={refreshAll} />
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="mt-3">
-        <TabsList className={`${postTabsListClassName} ${canReview ? "grid-cols-2" : "grid-cols-1"}`}>
-          <TabsTrigger value="mine" className={`${postTabsTriggerClassName} data-active:bg-[#42a5f5]`}>
+        <TabsList className={postTabsListClassName}>
+          <TabsTrigger value="mine" className={postTabsTriggerClassName}>
             你的稿件
           </TabsTrigger>
           {canReview ? (
-            <TabsTrigger value="review" className={`${postTabsTriggerClassName} data-active:bg-[#f8b94c]`}>
+            <TabsTrigger value="review" className={postTabsTriggerClassName}>
               审核
             </TabsTrigger>
           ) : null}
@@ -153,7 +153,7 @@ export function PostsPage({
               </select>
               <input
                 value={reviewKeyword}
-                className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-sky-300"
+                className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
                 placeholder="按内容或编号搜索"
                 onChange={(event) => setReviewKeyword(event.target.value)}
                 onKeyDown={(event) => {
@@ -224,26 +224,26 @@ function ReviewCard({
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
 
   return (
-    <Card className={`overflow-hidden rounded-md border-2 shadow-none ${palette}`}>
+    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
       <CardContent className="p-0">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/80 bg-white/65 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
             <InfoPill icon={HashIcon}>稿件 {post.displayId}</InfoPill>
             <InfoPill icon={post.anonymous ? EyeOffIcon : UserIcon}>{post.anonymous ? "前台匿名" : "前台实名"}</InfoPill>
             <InfoPill icon={ImageIcon}>{images.length} 张图</InfoPill>
           </div>
-          <Badge className={`rounded-full px-2.5 py-1 text-xs font-black shadow-none ${statusClassName}`}>{statusLabels[post.status] ?? post.status}</Badge>
+          <Badge className={`rounded-full px-2.5 py-1 text-xs font-semibold shadow-none ${statusClassName}`}>{statusLabels[post.status] ?? post.status}</Badge>
         </div>
 
         <div className="grid gap-3 p-3">
-          <div className="rounded-md border border-white/80 bg-white/80 p-3">
+          <div className="rounded-md border border-slate-100 bg-white p-3">
             <div className="flex items-start gap-2">
-              <span className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#42a5f5] text-white">
+              <span className="grid size-9 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-600">
                 <UserRoundIcon className="size-5" />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate text-base font-black text-slate-950">{authorName}</p>
+                  <p className="truncate text-sm font-semibold text-slate-950">{authorName}</p>
                   <Badge className="rounded-full bg-slate-100 text-slate-600 shadow-none">QQ {authorQq}</Badge>
                 </div>
                 <p className="mt-1 break-all text-xs font-bold text-slate-500">账号 ID：{post.author?.id ?? "未知"}</p>
@@ -251,8 +251,8 @@ function ReviewCard({
             </div>
           </div>
 
-          <div className="rounded-md bg-white/70 p-3">
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-black text-slate-500">
+          <div className="rounded-md bg-white p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
               <span className="inline-flex items-center gap-1">
                 <FileTextIcon className="size-3.5" />
                 {post.text.length} 字
@@ -268,17 +268,17 @@ function ReviewCard({
 
           {images.length > 0 ? <ImageGallery images={images} reviewMode /> : <NoImagePill />}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/80 pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
               <span className="break-all">内部 ID：{shortId(post.id)}</span>
               <span>创建：{formatFullDateTime(post.createdAt)}</span>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" className="bg-[#8bc34a] font-bold hover:bg-[#8bc34a]" disabled={busy} onClick={onApprove}>
+              <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
                 <CheckIcon data-icon="inline-start" />
                 通过
               </Button>
-              <Button size="sm" variant="outline" className="font-bold" disabled={busy} onClick={onReject}>
+              <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onReject}>
                 <XIcon data-icon="inline-start" />
                 拒绝
               </Button>
@@ -309,21 +309,21 @@ function PostCard({ post, palette }: { post: PostItem; palette: string }) {
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
 
   return (
-    <Card className={`overflow-hidden rounded-md border-2 shadow-none ${palette}`}>
+    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
       <CardContent className="p-0">
-        <div className="flex items-start justify-between gap-3 border-b border-white/80 bg-white/60 px-3 py-2">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <InfoPill icon={HashIcon}>{post.displayId}</InfoPill>
               <InfoPill icon={post.anonymous ? EyeOffIcon : UserIcon}>{post.anonymous ? "匿名投稿" : "实名投稿"}</InfoPill>
             </div>
-            <h3 className="mt-2 line-clamp-2 text-lg font-black leading-6 text-slate-950">{post.title || "未命名稿件"}</h3>
+            <h3 className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-slate-950">{post.title || "未命名稿件"}</h3>
           </div>
           <Badge className={`shrink-0 rounded-full px-2.5 py-1 shadow-none ${statusClassName}`}>{statusLabels[post.status] ?? post.status}</Badge>
         </div>
 
         <div className="p-3">
-          <p className="whitespace-pre-wrap rounded-md bg-white/65 p-3 text-[15px] font-medium leading-7 text-slate-800">{post.text}</p>
+          <p className="whitespace-pre-wrap rounded-md bg-white p-3 text-[15px] leading-7 text-slate-800">{post.text}</p>
 
           {images.length > 0 ? <ImageGallery images={images} /> : <NoImagePill />}
 
@@ -332,7 +332,7 @@ function PostCard({ post, palette }: { post: PostItem; palette: string }) {
               <ClockIcon className="size-3.5" />
               {formatPostDate(post.createdAt)}
             </span>
-            <span className="inline-flex items-center gap-1 text-sky-600">
+            <span className="inline-flex items-center gap-1 text-slate-500">
               <SparklesIcon className="size-3.5" />
               {post.status === "published" ? "已出现在墙上" : "等待下一步"}
             </span>
@@ -345,7 +345,7 @@ function PostCard({ post, palette }: { post: PostItem; palette: string }) {
 
 function InfoPill({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-white/85 px-2 py-1 text-xs font-black text-slate-700">
+    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
       <Icon className="size-3.5" />
       {children}
     </span>
@@ -354,7 +354,7 @@ function InfoPill({ icon: Icon, children }: { icon: LucideIcon; children: ReactN
 
 function NoImagePill() {
   return (
-    <div className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-1 text-xs font-bold text-slate-500">
+    <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500">
       <CameraIcon className="size-3.5" />
       没有配图
     </div>
@@ -365,7 +365,7 @@ function ImageGallery({ images, reviewMode = false }: { images: PostImage[]; rev
   return (
     <div className={`mt-3 grid gap-2 ${reviewMode ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-3"}`}>
       {images.slice(0, reviewMode ? 9 : 6).map((image, index) => (
-        <div key={image.key ?? `${image.url}-${index}`} className="relative aspect-square overflow-hidden rounded-[8px] bg-white/75 ring-1 ring-white/80">
+        <div key={image.key ?? `${image.url}-${index}`} className="relative aspect-square overflow-hidden rounded-md bg-slate-50 ring-1 ring-slate-200">
           <img src={getPostImageUrl(image)} alt={image.fileName ?? "稿件图片"} className="h-full w-full object-cover" loading="lazy" />
           {image.fileName && reviewMode ? (
             <div className="absolute inset-x-0 bottom-0 truncate bg-slate-950/55 px-2 py-1 text-[10px] font-bold text-white">{image.fileName}</div>

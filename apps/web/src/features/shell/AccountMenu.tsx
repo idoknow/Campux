@@ -36,18 +36,18 @@ export function AccountMenu({
         <button
           className={
             isDesktop
-              ? "flex w-full items-center gap-3 rounded-md px-1 py-2 text-left hover:bg-slate-50"
-              : "flex h-[42px] w-[42px] items-center justify-center rounded-full"
+              ? "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-slate-50"
+              : "flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white"
           }
           aria-label="账户菜单"
         >
-          <Avatar className={isDesktop ? "h-[50px] w-[50px]" : "h-[38px] w-[38px]"}>
+          <Avatar className={isDesktop ? "h-9 w-9" : "h-7 w-7"}>
             <AvatarImage src={avatarUrl} alt="用户头像" />
             <AvatarFallback>QQ</AvatarFallback>
           </Avatar>
           {isDesktop ? (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-bold">{displayName}</p>
+              <p className="truncate text-sm font-semibold">{displayName}</p>
               <p className="truncate text-xs text-slate-500">{roleLabel}</p>
             </div>
           ) : null}

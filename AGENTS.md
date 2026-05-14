@@ -1,8 +1,12 @@
 # Campux Agent Guide
 
+## Design Source Of Truth
+
+Read [DESIGN.md](./DESIGN.md) before changing signed-in product UI. It is the current product design source of truth: Campux should feel like a compact, quiet internal operating tool with pale gray canvas, centered content, white information surfaces, understated navigation, and natural-width tabs.
+
 ## UI Direction
 
-CampuxNext should keep the visual spirit of the old Campux app. Do not redesign it into a generic SaaS dashboard or a polished admin-console shell.
+CampuxNext should keep domain language and workflow continuity from the old Campux app, while following the quieter operating-tool direction in `DESIGN.md`. Do not redesign it into a marketing site, generic SaaS dashboard, or decorative campus-themed shell.
 
 The product should feel like a lightweight campus wall tool:
 

@@ -74,7 +74,7 @@ export function AppShell({
           onOpenOps={onOpenOps}
         />
 
-        <div className="min-h-dvh w-full bg-background pb-28 md:mx-auto md:h-dvh md:max-w-[760px] md:overflow-y-auto md:border-x md:border-slate-100 md:pb-8">
+        <div className="min-h-dvh w-full bg-background pb-24 md:mx-auto md:h-dvh md:max-w-[980px] md:overflow-y-auto md:border-x md:border-slate-200 md:pb-8">
           <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} />
 
           <main>

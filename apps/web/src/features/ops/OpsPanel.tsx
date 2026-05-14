@@ -38,7 +38,7 @@ export function OpsPanel() {
   const [tenantForm, setTenantForm] = useState({
     name: "",
     slug: "",
-    themeColor: "#42a5f5",
+    themeColor: "#111827",
     botQqUin: "",
   });
   const [error, setError] = useState("");
@@ -120,7 +120,7 @@ export function OpsPanel() {
       setTenants(data.tenants);
       const created = data.tenants.find((tenant) => tenant.slug === tenantForm.slug.trim());
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
-      setTenantForm({ name: "", slug: "", themeColor: "#42a5f5", botQqUin: "" });
+      setTenantForm({ name: "", slug: "", themeColor: "#111827", botQqUin: "" });
       setNotice("新校园墙已创建。");
       await refreshTenants(created?.id);
     } catch (caught) {
@@ -159,8 +159,8 @@ export function OpsPanel() {
                 租户生命周期
               </div>
             </div>
-            <div className="mb-3 rounded-md bg-sky-50 p-3">
-              <div className="mb-2 flex items-center gap-2 text-sm font-black text-sky-900">
+            <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <PlusIcon className="size-4" />
                 添加租户
               </div>
@@ -168,11 +168,11 @@ export function OpsPanel() {
                 <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
                 <Input placeholder="slug，例如 canton-wall" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
                 <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
-                  <span className="h-9 rounded-md border border-white shadow-sm" style={{ backgroundColor: tenantForm.themeColor }} />
+                  <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
                   <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
                 </div>
                 <Input placeholder="Bot QQ，可选" value={tenantForm.botQqUin} onChange={(event) => setTenantForm({ ...tenantForm, botQqUin: event.target.value })} />
-                <Button className="rounded-full bg-[#42a5f5] font-bold hover:bg-[#42a5f5]" disabled={creatingTenant || tenantForm.name.trim().length === 0 || tenantForm.slug.trim().length === 0} onClick={() => void createTenant()}>
+                <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0 || tenantForm.slug.trim().length === 0} onClick={() => void createTenant()}>
                   <PlusIcon data-icon="inline-start" />
                   创建
                 </Button>
@@ -182,7 +182,7 @@ export function OpsPanel() {
               {tenants.map((tenant) => (
                 <button
                   key={tenant.id}
-                  className={`rounded-md border px-3 py-2 text-left transition ${selectedTenant?.id === tenant.id ? "border-sky-300 bg-sky-50" : "border-slate-100 bg-white hover:bg-slate-50"}`}
+                  className={`rounded-md border px-3 py-2 text-left transition ${selectedTenant?.id === tenant.id ? "border-slate-300 bg-slate-100" : "border-slate-100 bg-white hover:bg-slate-50"}`}
                   onClick={() => setSelectedTenantId(tenant.id)}
                 >
                   <span className="flex items-center justify-between gap-2">
@@ -201,7 +201,7 @@ export function OpsPanel() {
             <CardContent className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-xl font-black">{selectedTenant.name}</p>
+                  <p className="text-lg font-semibold">{selectedTenant.name}</p>
                   <p className="mt-1 text-sm text-slate-500">{selectedTenant.slug}</p>
                 </div>
                 <Badge variant={selectedTenant.status === "active" ? "secondary" : "outline"}>{statusLabels[selectedTenant.status]}</Badge>
@@ -252,14 +252,14 @@ export function OpsPanel() {
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <Card className="rounded-md">
           <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 font-black">
+            <div className="mb-3 flex items-center gap-2 font-semibold">
               <UsersRoundIcon className="size-4" />
               全局用户
             </div>
             <div className="flex max-h-80 flex-col gap-2 overflow-auto">
               {users.slice(0, 12).map((user) => (
                 <div key={user.id} className="rounded-md bg-slate-50 p-2">
-                  <p className="truncate text-sm font-black">{user.displayName ?? user.qqUin}</p>
+                  <p className="truncate text-sm font-semibold">{user.displayName ?? user.qqUin}</p>
                   <p className="text-xs text-slate-500">
                     {user.memberships.length} 个校园墙{user.systemRole ? " · 系统运维" : ""}
                   </p>
@@ -271,14 +271,14 @@ export function OpsPanel() {
 
         <Card className="rounded-md">
           <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 font-black">
+            <div className="mb-3 flex items-center gap-2 font-semibold">
               <BotIcon className="size-4" />
               Bot 与发布目标
             </div>
             <div className="flex max-h-80 flex-col gap-2 overflow-auto">
               {bots.slice(0, 12).map((bot) => (
                 <div key={bot.id} className="rounded-md bg-slate-50 p-2">
-                  <p className="truncate text-sm font-black">{bot.displayName}</p>
+                  <p className="truncate text-sm font-semibold">{bot.displayName}</p>
                   <p className="text-xs text-slate-500">{bot.tenant.name} · {bot.publishTargets.length} 个发布目标</p>
                 </div>
               ))}
@@ -288,14 +288,14 @@ export function OpsPanel() {
 
         <Card className="rounded-md">
           <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 font-black">
+            <div className="mb-3 flex items-center gap-2 font-semibold">
               <ActivityIcon className="size-4" />
               审计日志
             </div>
             <div className="flex max-h-80 flex-col gap-2 overflow-auto">
               {auditLogs.slice(0, 12).map((log) => (
                 <div key={log.id} className="rounded-md bg-slate-50 p-2">
-                  <p className="truncate text-sm font-black">{log.action}</p>
+                  <p className="truncate text-sm font-semibold">{log.action}</p>
                   <p className="text-xs text-slate-500">{log.tenant?.name ?? "全局"} · {log.actor?.displayName ?? log.actor?.qqUin ?? "系统"}</p>
                 </div>
               ))}
@@ -317,7 +317,7 @@ function StatusSummary({ title, value, tone }: { title: string; value: number; t
   return (
     <div className={`rounded-md px-4 py-3 ${toneClass}`}>
       <p className="text-sm font-bold">{title}</p>
-      <p className="mt-1 text-2xl font-black">{value}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
     </div>
   );
 }
@@ -326,19 +326,19 @@ function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-md border border-slate-100 bg-white px-3 py-2">
       <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-black">{value}</p>
+      <p className="mt-1 text-base font-semibold">{value}</p>
     </div>
   );
 }
 
 function MetricCard({ title, value, icon: Icon }: { title: string; value: number; icon: typeof ActivityIcon }) {
   return (
-    <div className="rounded-md bg-sky-50 px-4 py-3 text-sky-900">
-      <div className="flex items-center gap-2 text-sm font-bold">
+    <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-slate-800">
+      <div className="flex items-center gap-2 text-sm font-medium">
         <Icon className="size-4" />
         {title}
       </div>
-      <p className="mt-1 text-2xl font-black">{value}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
     </div>
   );
 }

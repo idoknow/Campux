@@ -43,60 +43,60 @@ export function PostPage({
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col px-4 py-4">
       {metadata.banner ? (
-        <div className="flex min-h-10 items-center gap-2 bg-[#f8b94c] px-4 py-2 text-sm text-white">
+        <div className="mb-3 flex min-h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <MegaphoneIcon className="size-4 shrink-0" strokeWidth={2.3} />
           <p className="min-w-0 truncate">{metadata.banner}</p>
         </div>
       ) : null}
 
       {error ? (
-        <Alert variant="destructive" className="mx-4 my-2">
+        <Alert variant="destructive" className="mb-3">
           <AlertTitle>操作失败</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
 
       {notice ? (
-        <Alert className="mx-4 my-2 border-green-200 bg-green-50">
+        <Alert className="mb-3 border-green-200 bg-green-50">
           <CheckIcon />
           <AlertTitle>提交成功</AlertTitle>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       ) : null}
 
-      <section className="px-4 pt-4">
+      <section className="product-surface p-4">
         <Textarea
           value={postText}
           maxLength={1000}
           placeholder="有什么新鲜事？！"
-          className="min-h-40 w-full resize-none rounded-none border-0 bg-white px-0 py-2 text-lg leading-8 text-slate-900 shadow-none placeholder:text-slate-500 focus-visible:ring-0"
+          className="min-h-36 w-full resize-none rounded-none border-0 bg-white px-0 py-1 text-base leading-7 text-slate-900 shadow-none placeholder:text-slate-400 focus-visible:ring-0"
           onChange={(event) => onPostTextChange(event.target.value)}
         />
 
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           {uploadedImages.map((image) => (
-            <button key={image.key} className="h-[70px] w-[70px] overflow-hidden rounded-[10px] bg-slate-100" onClick={() => onRemoveImage(image.key)}>
+            <button key={image.key} className="h-16 w-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100" onClick={() => onRemoveImage(image.key)}>
               <img src={image.previewUrl} alt={image.fileName} className="h-full w-full object-cover" />
             </button>
           ))}
           {uploadedImages.length < 9 ? (
             <Button
               variant="outline"
-              className="h-[70px] w-[70px] rounded-none border-0 bg-white p-0 text-black shadow-none hover:bg-white"
+              className="h-16 w-16 rounded-md border border-dashed border-slate-300 bg-white p-0 text-slate-500 shadow-none hover:bg-slate-50"
               disabled={busy}
               aria-label="添加图片"
               onClick={() => inputRef.current?.click()}
             >
-              <ImagePlusIcon className="!size-[70px] stroke-[1.35]" />
+              <ImagePlusIcon className="!size-7 stroke-[1.8]" />
             </Button>
           ) : null}
           <input ref={inputRef} hidden multiple accept="image/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
 
-        <div className="mt-3 w-fit rounded-[5px] bg-[#8bc34a] px-2 py-1 text-lg text-white shadow-sm">
-          <div className="flex items-center gap-4">
+        <div className="mt-3 w-fit rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <div className="flex items-center gap-3">
             <span>匿名投稿</span>
             <Switch checked={anonymous} onCheckedChange={onAnonymousChange} aria-label="匿名投稿" />
           </div>
@@ -111,11 +111,11 @@ export function PostPage({
               {busy ? "提交中" : "投稿"}
             </span>
           </button>
-          <span className="text-xs text-slate-400">{postText.length}/1000</span>
+          <span className="text-xs text-slate-500">{postText.length}/1000</span>
         </div>
       </section>
 
-      <section className="mx-4 mt-4 rounded-md bg-sky-50 px-3 py-3">
+      <section className="product-surface mt-3 px-3 py-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="font-semibold text-slate-900">稿件状态</p>
