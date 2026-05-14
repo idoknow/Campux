@@ -51,38 +51,38 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.22 0.04 253);
+  --background: oklch(0.965 0.004 255);
+  --foreground: oklch(0.205 0.015 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.04 253);
+  --card-foreground: oklch(0.205 0.015 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.04 253);
-  --primary: oklch(0.68 0.16 246);
-  --primary-foreground: oklch(0.99 0.004 240);
-  --secondary: oklch(0.935 0.055 238);
-  --secondary-foreground: oklch(0.31 0.074 248);
-  --muted: oklch(0.94 0.022 248);
-  --muted-foreground: oklch(0.52 0.04 254);
-  --accent: oklch(0.91 0.1 77);
-  --accent-foreground: oklch(0.36 0.07 60);
+  --popover-foreground: oklch(0.205 0.015 255);
+  --primary: oklch(0.235 0.015 255);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.93 0.006 255);
+  --secondary-foreground: oklch(0.27 0.015 255);
+  --muted: oklch(0.925 0.006 255);
+  --muted-foreground: oklch(0.49 0.018 255);
+  --accent: oklch(0.92 0.01 255);
+  --accent-foreground: oklch(0.25 0.015 255);
   --destructive: oklch(0.62 0.22 24);
   --destructive-foreground: oklch(0.98 0.01 25);
-  --border: oklch(0.9 0.025 248);
-  --input: oklch(0.9 0.025 248);
-  --ring: oklch(0.68 0.16 246);
+  --border: oklch(0.89 0.006 255);
+  --input: oklch(0.89 0.006 255);
+  --ring: oklch(0.58 0.02 255);
   --chart-1: oklch(0.68 0.16 246);
   --chart-2: oklch(0.78 0.17 70);
   --chart-3: oklch(0.7 0.14 145);
   --chart-4: oklch(0.68 0.18 350);
   --chart-5: oklch(0.64 0.14 285);
-  --sidebar: oklch(0.985 0.01 248);
-  --sidebar-foreground: oklch(0.22 0.04 253);
-  --sidebar-primary: oklch(0.68 0.16 246);
-  --sidebar-primary-foreground: oklch(0.99 0.004 240);
-  --sidebar-accent: oklch(0.935 0.055 238);
-  --sidebar-accent-foreground: oklch(0.31 0.074 248);
-  --sidebar-border: oklch(0.9 0.025 248);
-  --sidebar-ring: oklch(0.68 0.16 246);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.205 0.015 255);
+  --sidebar-primary: oklch(0.235 0.015 255);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.93 0.006 255);
+  --sidebar-accent-foreground: oklch(0.27 0.015 255);
+  --sidebar-border: oklch(0.89 0.006 255);
+  --sidebar-ring: oklch(0.58 0.02 255);
 }
 
 @layer base {
@@ -94,7 +94,7 @@
     @apply bg-background text-foreground;
     min-width: 320px;
     min-height: 100dvh;
-    background: #fff;
+    background: #f6f7f9;
     font-family:
       "Geist Variable",
       "PingFang SC",
@@ -110,12 +110,12 @@
 
 .campux-postbtn {
   border: none;
-  border-radius: 20px;
-  background: linear-gradient(32deg, #03a9f4, #f441a5, #ffeb3b, #03a9f4);
+  border-radius: 8px;
+  background: #111827;
   padding: 0;
   font-weight: 700;
-  letter-spacing: 0.05rem;
-  transition: all 1.5s ease;
+  letter-spacing: 0;
+  transition: background-color 0.15s ease;
 }
 
 .campux-postbtn span {
@@ -124,12 +124,56 @@
   width: 100%;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  padding: 10px 50px;
+  border-radius: 8px;
+  padding: 9px 24px;
   color: #fff;
-  background: #ffffff10;
-  font-size: 17px;
+  background: transparent;
+  font-size: 14px;
   transition: color 0.4s ease-in-out;
+}
+
+.campux-postbtn:disabled {
+  background: #cbd5e1;
+}
+
+.product-surface {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.product-tabs-list {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  height: 36px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  padding: 3px;
+  box-shadow: none;
+}
+
+.product-tabs-trigger {
+  height: 28px !important;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0 12px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+
+.product-tabs-trigger[data-state="active"],
+.product-tabs-trigger[data-active] {
+  background: #f1f5f9 !important;
+  color: #111827 !important;
+  font-weight: 700;
 }
 
 .dark {

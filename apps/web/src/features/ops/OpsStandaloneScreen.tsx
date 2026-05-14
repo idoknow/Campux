@@ -13,10 +13,10 @@ export function OpsStandaloneScreen({
   onLogout: () => void;
 }) {
   return (
-    <main className="min-h-dvh bg-white">
-      <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+    <main className="min-h-dvh bg-background">
+      <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
         <div className="min-w-0">
-          <h1 className="inline-block pr-2 text-[1.65rem] font-black leading-tight tracking-tight text-slate-950">Campux</h1>
+          <h1 className="inline-block pr-2 text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
           <span className="align-baseline text-sm text-slate-600">系统运维</span>
           <p className="mt-1 truncate text-xs text-slate-500">{me.user.displayName ?? me.user.qqUin}</p>
         </div>
@@ -32,7 +32,7 @@ export function OpsStandaloneScreen({
           </Button>
         </div>
       </header>
-      <div className="mx-auto max-w-5xl py-4">
+      <div className="mx-auto max-w-6xl py-4">
         <OpsPanel />
       </div>
     </main>

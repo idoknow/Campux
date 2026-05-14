@@ -19,8 +19,8 @@ export function SectionHeader({
   return (
     <div className="flex items-center justify-between gap-3">
       <div>
-        <h2 className="text-2xl font-black">{title}</h2>
-        <p className="text-sm text-muted-foreground">{subtitle}</p>
+        <h2 className="text-xl font-semibold tracking-normal text-slate-950">{title}</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
       </div>
       {action && Icon ? (
         <Button variant="outline" size="sm" onClick={() => void onAction?.()}>
@@ -34,7 +34,7 @@ export function SectionHeader({
 
 export function ListButton({ title, description, icon: Icon }: { title: string; description: string; icon: LucideIcon }) {
   return (
-    <Button variant="outline" className="h-auto justify-start gap-3 rounded-xl p-3">
+    <Button variant="outline" className="h-auto justify-start gap-3 rounded-md p-3">
       <Icon data-icon="inline-start" />
       <span className="flex min-w-0 flex-1 flex-col items-start">
         <span className="font-medium">{title}</span>
