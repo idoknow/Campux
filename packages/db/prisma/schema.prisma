@@ -159,8 +159,26 @@ model BotAccount {
   createdAt      DateTime        @default(now())
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   publishTargets PublishTarget[]
+  sessions       BotSession[]
 
   @@unique([tenantId, qqUin])
+}
+
+model BotSession {
+  id           String     @id @default(uuid())
+  botAccountId String
+  type         String     @default("qzone")
+  domain       String     @default("user.qzone.qq.com")
+  cookies      Json
+  rawCookies   String?
+  refreshedAt  DateTime   @default(now())
+  expiresAt    DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  botAccount   BotAccount @relation(fields: [botAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([botAccountId, type, domain])
+  @@index([botAccountId, refreshedAt])
 }
 
 model PublishTarget {

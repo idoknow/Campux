@@ -52,8 +52,8 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 当前主要问题：
 
 - 改密、封禁、OAuth、历史迁移仍未进入本轮 Phase 4-8 范围。
-- QZone 发布 adapter 当前是开发期 mock，真实 cookie 登录、加密存储和线上发布需要接真实平台凭据后替换 adapter。
-- Bot runtime 当前提供服务端注册/审核命令 API，真实 OneBot 常驻连接还需要接入运行环境。
+- QZone 发布 adapter 当前是开发期 mock，cookie session 已通过 OneBot `get_cookies` 刷新并加密落库；线上发布仍需替换真实 QZone adapter。
+- Bot runtime 已接入 OneBot v11 反向 WebSocket，真实协议端连接地址为 `/onebot/v11/ws`。
 - 租户开通流程已有运维生命周期管理基础，但还没有完整表单化创建向导。
 
 ## 当前 Phase 状态
@@ -65,8 +65,8 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 | Phase 3：投稿核心链路 | 已完成 | S3/MinIO 上传、创建投稿、我的稿件、待审核状态 | 取消/撤回 UI 仍可补强 |
 | Phase 4：审核员与租户内管理 | 已完成 | 待审核列表、通过/拒绝、日志、成员角色、发布目标、租户展示配置、角色化前端入口 | 封禁/拒绝原因库可后续增强 |
 | Phase 5：发布队列与多墙号发布 | 已完成 | 内存队列、`PublishTarget`、`PublishAttempt`、fan-out、重试、聚合状态、重启恢复扫描、失败原因展示 | 真实平台失败分类可后续细化 |
-| Phase 6：Bot 注册、审核群与命令路由 | 已完成 | Bot 注册授权 API、按 Bot 所属租户授予 membership、审核群命令按租户路由、跨租户隔离校验 | OneBot 常驻连接需接真实运行环境 |
-| Phase 7：QZone 发布与文本转图迁移 | 已完成 | TS `renderPostCard()`、安全 XML 转义模板、QZone mock adapter、verbose 写入、发布日志 | 真实 QZone cookie 加密和线上发布 adapter 待凭据接入 |
+| Phase 6：Bot 注册、审核群与命令路由 | 已完成 | OneBot v11 反向 WS、私聊注册、私聊重置密码、审核群通知、`#通过`、`#拒绝`、租户隔离校验 | 更多群内辅助命令可后续补强 |
+| Phase 7：QZone 发布与文本转图迁移 | 已完成 | TS `renderPostCard()`、安全 XML 转义模板、QZone mock adapter、verbose 写入、发布日志、QZone cookies 协议刷新、Bot session 加密落库 | 真实 QZone 线上发布 adapter 待凭据接入 |
 | Phase 8：系统运维后台 | 已完成 | 独立入口、租户生命周期、全局用户/membership、Bot/发布目标、队列状态、审计日志 | 表单化租户开通向导可继续打磨 |
 | Phase 9：历史数据迁移与兼容 | 未开始 | 无 | SQLite/Mongo/S3/OAuth 迁移脚本 |
 
@@ -252,6 +252,7 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 - 注册时按 Bot/命令上下文授权对应校园墙 membership。
 - 审核群通知。
 - 审核命令。
+- QZone cookies 刷新命令：审核群内 `#登录` 或 `#刷新qzone cookies`，通过 OneBot `get_cookies(domain='user.qzone.qq.com')` 获取。
 - 群号、Bot 账号、校园墙的绑定关系。
 
 验收标准：
@@ -260,6 +261,7 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 - 同一个用户可通过不同校园墙 Bot 获得多个 membership。
 - 审核群命令只能作用于绑定校园墙的稿件。
 - 不同校园墙的审核群互不串数据。
+- matcha OneBot mock 客户端可以完成私聊注册、重置密码、审核群刷新 cookies、通过、拒绝的端到端验证。
 
 ## Phase 7：QZone 发布与文本转图迁移
 

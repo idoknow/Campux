@@ -7,6 +7,7 @@ import { createS3Client } from "@campux/integrations";
 import { requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
+import type { OneBotRuntime } from "../runtime/onebot";
 
 const uploadSchema = z.object({
   fileName: z.string().min(1),
@@ -47,7 +48,7 @@ async function ensureBucket(config: CampuxConfig) {
   return s3;
 }
 
-export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig) {
+export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, oneBot?: OneBotRuntime) {
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
@@ -146,6 +147,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig) {
           },
         },
       });
+    });
+
+    oneBot?.notifyNewPost(post.id).catch((error) => {
+      app.log.warn({ error, postId: post.id }, "failed to notify review group");
     });
 
     return {

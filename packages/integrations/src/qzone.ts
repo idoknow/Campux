@@ -6,6 +6,7 @@ export type QZonePublishInput = {
   text: string;
   renderedCard: Uint8Array;
   imageUrls: string[];
+  cookies?: Record<string, string> | null;
 };
 
 export type QZonePublishResult = {
@@ -14,6 +15,8 @@ export type QZonePublishResult = {
     mode: "mock-qzone";
     renderedBytes: number;
     imageCount: number;
+    cookieStatus: "available" | "missing";
+    cookieNames: string[];
     publishedAt: string;
   };
 };
@@ -34,6 +37,8 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
       mode: "mock-qzone",
       renderedBytes: input.renderedCard.byteLength,
       imageCount: input.imageUrls.length,
+      cookieStatus: input.cookies && Object.keys(input.cookies).length > 0 ? "available" : "missing",
+      cookieNames: input.cookies ? Object.keys(input.cookies) : [],
       publishedAt: new Date().toISOString(),
     },
   };

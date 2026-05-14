@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
+import { OneBotRuntime } from "./runtime/onebot";
 import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publishing";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
@@ -9,6 +10,7 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerBotRoutes } from "./routes/bot";
 import { registerHealthRoutes } from "./routes/health";
 import { registerMetadataRoutes } from "./routes/metadata";
+import { registerOneBotRoutes } from "./routes/onebot";
 import { registerPostRoutes } from "./routes/posts";
 import { registerReviewRoutes } from "./routes/review";
 import { registerSystemRoutes } from "./routes/system";
@@ -29,15 +31,17 @@ await app.register(cors, {
 const queue = createRuntimeQueue({
   logger: app.log,
 });
+const oneBot = new OneBotRuntime(queue, app.log);
 registerPublishingWorker(queue, app.log);
 
+await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
 registerAuthRoutes(app, config);
 registerTenantRoutes(app);
 registerMetadataRoutes(app);
-registerAdminRoutes(app, queue);
+registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
-registerPostRoutes(app, config);
+registerPostRoutes(app, config, oneBot);
 registerReviewRoutes(app, queue);
 registerSystemRoutes(app, queue);
 
