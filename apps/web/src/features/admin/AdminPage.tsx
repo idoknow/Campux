@@ -314,7 +314,7 @@ export function AdminPage({
     }
   }
 
-  async function updateBotConfig(botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId">>) {
+  async function updateBotConfig(botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds">>) {
     setBusy(true);
     try {
       await api(`/api/admin/bots/${botId}`, {
@@ -549,11 +549,7 @@ export function AdminPage({
                 onAdd={() => void addBot()}
                 onDelete={(id) => void deleteBot(id)}
                 onUpdateConfig={(botId, patch) => void updateBotConfig(botId, patch)}
-                onSaveTemplate={(botId, template) => void saveBotPublishTemplate(botId, template)}
                 onRefresh={() => void refreshAdminData()}
-                onRefreshQZone={(botId, mode) => void refreshQZoneCookies(botId, mode)}
-                onCheckQZone={(botId) => void checkQZoneCookies(botId)}
-                onViewCookies={(botId) => void viewQZoneCookies(botId)}
               />
             </TabsContent>
 
@@ -856,11 +852,7 @@ function BotsPanel({
   onAdd,
   onDelete,
   onUpdateConfig,
-  onSaveTemplate,
   onRefresh,
-  onRefreshQZone,
-  onCheckQZone,
-  onViewCookies,
 }: {
   bots: AdminBotAccount[];
   events: AdminBotEvent[];
@@ -869,12 +861,8 @@ function BotsPanel({
   onFormChange: (form: BotForm) => void;
   onAdd: () => void;
   onDelete: (id: string) => void;
-  onUpdateConfig: (botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId">>) => void;
-  onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
+  onUpdateConfig: (botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds">>) => void;
   onRefresh: () => void;
-  onRefreshQZone: (botId: string, mode: "protocol" | "qr") => void;
-  onCheckQZone: (botId: string) => void;
-  onViewCookies: (botId: string) => void;
 }) {
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
@@ -933,35 +921,6 @@ function BotsPanel({
 
                 <BotConfigEditor bot={bot} busy={busy} onSave={(patch) => onUpdateConfig(bot.id, patch)} />
                 <OneBotConnectionBox bot={bot} />
-
-                <div className="product-subsection mt-3 p-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-slate-500">QZone session</p>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" disabled={busy} onClick={() => onCheckQZone(bot.id)}>检测</Button>
-                      <Button variant="outline" size="sm" disabled={busy} onClick={() => onRefreshQZone(bot.id, "protocol")}>协议刷新</Button>
-                      <Button variant="outline" size="sm" disabled={busy} onClick={() => onRefreshQZone(bot.id, "qr")}>扫码登录</Button>
-                      <Button variant="outline" size="sm" disabled={busy || bot.sessions.length === 0} onClick={() => onViewCookies(bot.id)}>查看 cookies</Button>
-                    </div>
-                  </div>
-                  {bot.sessions.length === 0 ? (
-                    <p className="mt-1 text-sm font-bold text-slate-500">还没有刷新 cookies</p>
-                  ) : (
-                    bot.sessions.map((session) => (
-                      <div key={session.id} className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
-                        <p className="text-sm font-bold text-slate-700">
-                          {session.domain} · {sessionStatusLabel(session.status)}
-                        </p>
-                        <p className="mt-0.5 text-xs font-semibold text-slate-500">
-                          刷新 {formatDateTime(session.refreshedAt)} · 检测 {session.checkedAt ? formatDateTime(session.checkedAt) : "未检测"}
-                        </p>
-                        {session.message ? <p className="mt-0.5 text-xs font-semibold text-slate-500">{session.message}</p> : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <BotPublishTemplateEditor bot={bot} busy={busy} onSave={(template) => onSaveTemplate(bot.id, template)} />
               </div>
             ))
           )}
@@ -1022,21 +981,31 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
+  const [userMessageReply, setUserMessageReply] = useState(bot.userMessageReply);
+  const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
   const [enabled, setEnabled] = useState(bot.enabled);
 
   useEffect(() => {
     setDisplayName(bot.displayName);
     setReviewGroupId(bot.reviewGroupId ?? "");
+    setUserMessageReply(bot.userMessageReply);
+    setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
-  const changed = trimmedDisplayName !== bot.displayName || trimmedReviewGroupId !== (bot.reviewGroupId ?? "") || enabled !== bot.enabled;
+  const trimmedUserMessageReply = userMessageReply.trim();
+  const normalizedCooldownSeconds = Math.max(0, Number(userMessageReplyCooldownSeconds || 0));
+  const changed = trimmedDisplayName !== bot.displayName
+    || trimmedReviewGroupId !== (bot.reviewGroupId ?? "")
+    || trimmedUserMessageReply !== bot.userMessageReply
+    || normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds
+    || enabled !== bot.enabled;
 
   return (
     <div className="product-subsection mt-3 p-2">
@@ -1048,11 +1017,13 @@ function BotConfigEditor({
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || !trimmedDisplayName || !changed}
+          disabled={busy || !trimmedDisplayName || !trimmedUserMessageReply || !changed}
           onClick={() =>
             onSave({
               displayName: trimmedDisplayName,
               reviewGroupId: trimmedReviewGroupId || null,
+              userMessageReply: trimmedUserMessageReply,
+              userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
               enabled,
             })
           }
@@ -1067,6 +1038,24 @@ function BotConfigEditor({
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
           启用
         </label>
+      </div>
+      <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
+        <Textarea
+          className="min-h-24 bg-white"
+          value={userMessageReply}
+          onChange={(event) => setUserMessageReply(event.target.value)}
+          placeholder="用户没有发送命令时自动回复的消息"
+        />
+        <div className="rounded-md border border-slate-200 bg-white p-2">
+          <p className="text-xs font-semibold text-slate-500">自动回复限速</p>
+          <Input
+            className="mt-2 bg-white"
+            inputMode="numeric"
+            value={userMessageReplyCooldownSeconds}
+            onChange={(event) => setUserMessageReplyCooldownSeconds(event.target.value.replace(/\D/g, ""))}
+          />
+          <p className="mt-1 text-xs font-semibold text-slate-400">秒内不重复回复；填 0 表示不限速。命令消息不受影响。</p>
+        </div>
       </div>
     </div>
   );
@@ -1266,6 +1255,8 @@ function PublishPanel({
                       reviewGroupId: null,
                       connectionToken: target.botAccount.connectionToken,
                       publishTextTemplate: target.botAccount.publishTextTemplate,
+                      userMessageReply: "",
+                      userMessageReplyCooldownSeconds: 60,
                       lastSeenAt: null,
                       createdAt: "",
                       connection: { online: false, connectionCount: 0 },

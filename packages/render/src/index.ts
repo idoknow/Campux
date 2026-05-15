@@ -140,7 +140,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   </div>
   <div id="footer">
     <span>${escapeHtml(footer)}</span>
-    <span>开发 @RockChinQ | @Soulter</span>
+    <span>https://campux.top</span>
   </div>
   <img id="bg-fixed-br" src="${corner}">
 </body>

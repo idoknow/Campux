@@ -85,6 +85,7 @@ const reviewHelp = [
 export class OneBotRuntime {
   private readonly connections = new Set<OneBotConnection>();
   private readonly pendingActions = new Map<string, PendingAction>();
+  private readonly privateAutoReplyAt = new Map<string, number>();
 
   constructor(
     private readonly queue: RuntimeQueue,
@@ -387,7 +388,10 @@ export class OneBotRuntime {
 
     const command = parseCommand(extractPlainText(event));
     if (!command) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, privateHelp).catch(() => undefined);
+      const bot = await findEnabledBot(botQqUin);
+      if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp).catch(() => undefined);
+      }
       return;
     }
 
@@ -415,7 +419,8 @@ export class OneBotRuntime {
         return;
       }
 
-      await this.sendPrivateMessage(botQqUin, userQqUin, privateHelp);
+      const bot = await findEnabledBot(botQqUin);
+      await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp);
     } catch (error) {
       await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
     }
@@ -545,6 +550,22 @@ export class OneBotRuntime {
     } catch (error) {
       await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
     }
+  }
+
+  private shouldSendPrivateAutoReply(botAccountId: string, userQqUin: string, cooldownSeconds: number) {
+    if (cooldownSeconds <= 0) {
+      return true;
+    }
+
+    const key = `${botAccountId}:${userQqUin}`;
+    const now = Date.now();
+    const lastAt = this.privateAutoReplyAt.get(key) ?? 0;
+    if (now - lastAt < cooldownSeconds * 1000) {
+      return false;
+    }
+
+    this.privateAutoReplyAt.set(key, now);
+    return true;
   }
 
   private async getQZoneCookiesFromProtocol(botQqUin: string) {

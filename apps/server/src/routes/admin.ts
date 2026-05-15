@@ -68,6 +68,8 @@ const botPatchSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   enabled: z.boolean().optional(),
   reviewGroupId: z.string().trim().max(40).nullable().optional(),
+  userMessageReply: z.string().trim().min(1).max(1000).optional(),
+  userMessageReplyCooldownSeconds: z.number().int().min(0).max(86_400).optional(),
   publishTextTemplate: publishTextTemplateSchema.optional(),
 });
 
@@ -493,6 +495,8 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
         ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
         ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
+        ...(body.userMessageReply === undefined ? {} : { userMessageReply: body.userMessageReply }),
+        ...(body.userMessageReplyCooldownSeconds === undefined ? {} : { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds }),
         ...(body.publishTextTemplate === undefined ? {} : { publishTextTemplate: body.publishTextTemplate }),
       },
       include: {
@@ -1015,6 +1019,8 @@ function toBotAccount(
     reviewGroupId: string | null;
     connectionToken: string;
     publishTextTemplate: Prisma.JsonValue;
+    userMessageReply: string;
+    userMessageReplyCooldownSeconds: number;
     lastSeenAt: Date | null;
     createdAt: Date;
     sessions: Array<{
@@ -1045,6 +1051,8 @@ function toBotAccount(
     reviewGroupId: bot.reviewGroupId,
     connectionToken: bot.connectionToken,
     publishTextTemplate: normalizePublishTextTemplate(bot.publishTextTemplate),
+    userMessageReply: bot.userMessageReply,
+    userMessageReplyCooldownSeconds: bot.userMessageReplyCooldownSeconds,
     lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
     createdAt: bot.createdAt.toISOString(),
     connection: connection ?? {
