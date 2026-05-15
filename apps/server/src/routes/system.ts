@@ -14,6 +14,13 @@ const tenantPatchSchema = z.object({
   host: z.string().max(255).nullable().optional(),
 });
 
+const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
+
+const userMembershipCreateSchema = z.object({
+  tenantId: z.string().min(1),
+  role: tenantRoleSchema,
+});
+
 const tenantCreateSchema = z.object({
   name: z.string().min(1).max(80),
   slug: z.string().min(2).max(64).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
@@ -28,10 +35,11 @@ const paginationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
-const systemUserRoleFilterSchema = z.enum(["system_operator", "admin", "reviewer", "submitter", "test_account"]);
+const systemUserRoleFilterSchema = z.enum(["admin", "reviewer", "submitter"]);
 
 const systemUsersQuerySchema = paginationQuerySchema.extend({
   roles: z.string().optional(),
+  tenantId: z.string().optional(),
 });
 
 const defaultPostRules = [
@@ -298,26 +306,16 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     await requireSystemOperator(request, reply);
     const query = systemUsersQuerySchema.parse(request.query);
     const roleFilters = parseSystemUserRoleFilters(query.roles);
-    const where: Prisma.UserWhereInput =
-      roleFilters.length > 0
-        ? {
-            OR: roleFilters.map((role) => {
-              if (role === "system_operator") {
-                return { systemRole: "system_operator" };
-              }
-              if (role === "test_account") {
-                return { isTestAccount: true };
-              }
-              return {
-                memberships: {
-                  some: {
-                    role,
-                  },
-                },
-              };
-            }),
-          }
-        : {};
+    const where: Prisma.UserWhereInput = query.tenantId
+      ? {
+          memberships: {
+            some: {
+              tenantId: query.tenantId,
+              ...(roleFilters.length > 0 ? { role: { in: roleFilters } } : {}),
+            },
+          },
+        }
+      : {};
     const [total, users] = await Promise.all([
       prisma.user.count({ where }),
       prisma.user.findMany({
@@ -361,6 +359,62 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
           },
         })),
       })),
+    };
+  });
+
+  app.post("/api/system/users/:userId/memberships", async (request, reply) => {
+    const context = await requireSystemOperator(request, reply);
+    const params = z.object({ userId: z.string().min(1) }).parse(request.params);
+    const body = userMembershipCreateSchema.parse(request.body);
+
+    const [user, tenant] = await Promise.all([
+      prisma.user.findUnique({ where: { id: params.userId } }),
+      prisma.tenant.findUnique({ where: { id: body.tenantId } }),
+    ]);
+    if (!user) {
+      return reply.code(404).send({ message: "用户不存在" });
+    }
+    if (!tenant) {
+      return reply.code(404).send({ message: "租户不存在" });
+    }
+
+    const membership = await prisma.tenantMembership.upsert({
+      where: {
+        tenantId_userId: {
+          tenantId: tenant.id,
+          userId: user.id,
+        },
+      },
+      update: {
+        role: body.role,
+      },
+      create: {
+        tenantId: tenant.id,
+        userId: user.id,
+        role: body.role,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: tenant.id,
+      actorId: context.user.id,
+      action: "system.member.assign",
+      targetType: "membership",
+      targetId: membership.id,
+      detail: {
+        qqUin: user.qqUin.toString(),
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        role: body.role,
+      },
+    });
+
+    return {
+      ok: true,
+      membership: {
+        id: membership.id,
+        role: membership.role,
+      },
     };
   });
 

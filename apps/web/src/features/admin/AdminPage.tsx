@@ -1176,17 +1176,23 @@ function BotConfigEditor({
 }
 
 function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
-  const [template, setTemplate] = useState<PublishTextTemplate>(() => bot.publishTextTemplate);
+  const [template, setTemplate] = useState<PublishTextTemplate>(() => normalizePublishTemplate(bot.publishTextTemplate));
 
   useEffect(() => {
-    setTemplate(bot.publishTextTemplate);
+    setTemplate(normalizePublishTemplate(bot.publishTextTemplate));
   }, [bot.publishTextTemplate]);
 
   const previewParts = [];
   if (template.customText.trim()) previewParts.push(template.customText.trim());
   if (template.includePostId) previewParts.push("#12");
   if (template.includeAuthorMention) previewParts.push("@{uin:10000,nick:,who:1}");
-  const preview = [previewParts.join(" ").trim(), ...(template.includeLinks ? ["https://example.com/activity"] : [])].filter(Boolean).join("\n") || "#12";
+  const preview = [
+    previewParts.join(" ").trim(),
+    template.suffixText.trim(),
+    ...(template.includeLinks ? ["https://example.com/activity"] : []),
+  ]
+    .filter(Boolean)
+    .join("\n") || "#12";
 
   return (
     <div className="product-subsection mt-3 p-2">
@@ -1199,7 +1205,26 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
           保存模板
         </Button>
       </div>
-      <Input className="mt-2 bg-white" placeholder="固定前缀，可留空" value={template.customText} onChange={(event) => setTemplate({ ...template, customText: event.target.value })} />
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        <label className="text-xs font-semibold text-slate-500">
+          固定前缀，可留空
+          <Textarea
+            className="mt-1 min-h-20 resize-y bg-white text-sm"
+            value={template.customText}
+            onChange={(event) => setTemplate({ ...template, customText: event.target.value })}
+            placeholder="会显示在稿件编号和 @ 用户之前"
+          />
+        </label>
+        <label className="text-xs font-semibold text-slate-500">
+          固定后缀，可留空
+          <Textarea
+            className="mt-1 min-h-20 resize-y bg-white text-sm"
+            value={template.suffixText}
+            onChange={(event) => setTemplate({ ...template, suffixText: event.target.value })}
+            placeholder="会另起一行显示在编号之后"
+          />
+        </label>
+      </div>
       <div className="mt-2 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
         <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
           <input type="checkbox" checked={template.includePostId} onChange={(event) => setTemplate({ ...template, includePostId: event.target.checked })} />
@@ -1220,6 +1245,16 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
       </div>
     </div>
   );
+}
+
+function normalizePublishTemplate(template: PublishTextTemplate): PublishTextTemplate {
+  return {
+    customText: template.customText ?? "",
+    suffixText: template.suffixText ?? "",
+    includePostId: template.includePostId,
+    includeAuthorMention: template.includeAuthorMention,
+    includeLinks: template.includeLinks,
+  };
 }
 
 function BotMetric({ label, value, icon: Icon }: { label: string; value: string; icon?: LucideIcon }) {
