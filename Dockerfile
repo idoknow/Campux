@@ -30,4 +30,4 @@ COPY --from=build /app /app
 
 EXPOSE 8989
 
-CMD ["sh", "-c", "bun --cwd packages/db prisma migrate deploy && exec bun --cwd apps/server src/index.ts"]
+CMD ["bun", "--cwd", "apps/server", "src/index.ts"]

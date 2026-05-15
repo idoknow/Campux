@@ -17,15 +17,25 @@ export function issueSessionToken() {
   return randomBytes(32).toString("base64url");
 }
 
+function serializeSessionCookie(value: string, maxAgeSeconds: number) {
+  return [
+    `${sessionCookieName}=${encodeURIComponent(value)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`,
+    process.env.NODE_ENV === "production" ? "Secure" : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("; ");
+}
+
 export function setSessionCookie(reply: FastifyReply, token: string) {
-  reply.header(
-    "Set-Cookie",
-    `${sessionCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${sessionMaxAgeSeconds}`,
-  );
+  reply.header("Set-Cookie", serializeSessionCookie(token, sessionMaxAgeSeconds));
 }
 
 export function clearSessionCookie(reply: FastifyReply) {
-  reply.header("Set-Cookie", `${sessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  reply.header("Set-Cookie", serializeSessionCookie("", 0));
 }
 
 export function getCookie(request: FastifyRequest, name: string) {

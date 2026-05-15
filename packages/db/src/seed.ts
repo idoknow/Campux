@@ -48,6 +48,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
       name: tenant.name,
       status: "active",
       themeColor: tenant.themeColor,
+      nextPostDisplayId: 1,
     },
   });
 
