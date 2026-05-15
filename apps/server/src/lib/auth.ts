@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { TenantRole } from "@campux/db";
 import { prisma } from "./prisma";
+import { findTenantByRequestHost } from "./tenant-host";
 
 export const sessionCookieName = "campux_session";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 7;
@@ -94,6 +95,31 @@ export async function getSessionContext(request: FastifyRequest) {
     return null;
   }
 
+  const hostTenant = await findTenantByRequestHost(request);
+  if (hostTenant) {
+    const hostMembership = session.user.memberships.find((membership) => membership.tenantId === hostTenant.id);
+    if (!hostMembership) {
+      return null;
+    }
+    if (session.selectedTenantId !== hostTenant.id) {
+      await prisma.accountSession.update({
+        where: { id: session.id },
+        data: { selectedTenantId: hostTenant.id },
+      });
+      session.selectedTenantId = hostTenant.id;
+      session.selectedTenant = hostTenant;
+    }
+
+    return {
+      session,
+      user: session.user,
+      memberships: [hostMembership],
+      selectedTenant: hostTenant,
+      selectedMembership: hostMembership,
+      hostTenant,
+    };
+  }
+
   const selectedMembership = session.selectedTenantId
     ? session.user.memberships.find((membership) => membership.tenantId === session.selectedTenantId)
     : null;
@@ -104,6 +130,7 @@ export async function getSessionContext(request: FastifyRequest) {
     memberships: session.user.memberships,
     selectedTenant: session.selectedTenant,
     selectedMembership,
+    hostTenant: null,
   };
 }
 

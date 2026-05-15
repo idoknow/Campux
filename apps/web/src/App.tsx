@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
+import { toast } from "sonner";
 import { api, fileToBase64 } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
 import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
@@ -26,8 +27,7 @@ const postsTabPaths: Record<PostsTab, string> = {
 };
 
 const adminTabPaths: Record<AdminTab, string> = {
-  review: "/admin",
-  users: "/admin/users",
+  users: "/admin",
   bans: "/admin/bans",
   metadata: "/admin/metadata",
   bots: "/admin/bots",
@@ -48,7 +48,6 @@ export function App() {
   const [anonymous, setAnonymous] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
@@ -141,7 +140,7 @@ export function App() {
 
   useEffect(() => {
     void refreshTenantData().catch((caught) => {
-      setError(caught instanceof Error ? caught.message : "无法读取校园墙数据");
+      toast.error(caught instanceof Error ? caught.message : "无法读取校园墙数据");
     });
   }, [me]);
 
@@ -228,7 +227,6 @@ export function App() {
     }
 
     setBusy(true);
-    setError("");
     try {
       const nextImages: UploadedImage[] = [];
       for (const file of Array.from(files).slice(0, 9 - uploadedImages.length)) {
@@ -245,7 +243,7 @@ export function App() {
       }
       setUploadedImages((current) => [...current, ...nextImages]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "图片上传失败");
+      toast.error(caught instanceof Error ? caught.message : "图片上传失败");
     } finally {
       setBusy(false);
     }
@@ -253,8 +251,6 @@ export function App() {
 
   async function submitPost() {
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       await api("/api/posts", {
         method: "POST",
@@ -267,12 +263,12 @@ export function App() {
       setPostText("");
       setUploadedImages([]);
       setAnonymous(false);
-      setNotice("投稿已提交，等待审核。");
+      toast.success("投稿已提交，等待审核。");
       const data = await api<{ posts: PostItem[] }>("/api/posts/mine");
       setPosts(data.posts);
       setActiveTab("posts");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "投稿失败");
+      toast.error(caught instanceof Error ? caught.message : "投稿失败");
     } finally {
       setBusy(false);
     }
@@ -311,14 +307,12 @@ export function App() {
   return (
     <AppShell
       activeTab={activeTab}
-      adminTab={route.kind === "tenant" && route.tab === "admin" ? (route.subTab as AdminTab | undefined) ?? "review" : "review"}
+      adminTab={route.kind === "tenant" && route.tab === "admin" ? (route.subTab as AdminTab | undefined) ?? "users" : "users"}
       me={me as AuthenticatedMe & { currentTenant: NonNullable<AuthenticatedMe["currentTenant"]>; currentMembership: NonNullable<AuthenticatedMe["currentMembership"]> }}
       navItems={availableNavItems}
       metadata={metadata}
       posts={posts}
       busy={busy}
-      error={error}
-      notice={notice}
       postText={postText}
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? "mine" : "mine"}
       anonymous={anonymous}
@@ -364,8 +358,11 @@ function routeFromPath(pathname: string): AppRoute {
   if (normalized === "/posts/mine") {
     return { kind: "tenant", tab: "posts", subTab: "mine" };
   }
+  if (normalized === "/admin/users") {
+    return { kind: "tenant", tab: "admin", subTab: "users" };
+  }
   if (normalized === "/admin/review") {
-    return { kind: "tenant", tab: "admin", subTab: "review" };
+    return { kind: "tenant", tab: "posts", subTab: "review" };
   }
 
   const matchedTab = (Object.entries(tabPaths) as Array<[MainTab, string]>).find(([, path]) => path === normalized)?.[0];

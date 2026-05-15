@@ -278,6 +278,9 @@ export async function refreshQZoneCookiesViaBot({
       rawCookies: null,
       refreshedAt: new Date(),
       expiresAt: null,
+      healthStatus: "unchecked",
+      healthCheckedAt: null,
+      healthMessage: "cookies 已刷新，等待可用性检测",
     },
     create: {
       botAccountId: bot.id,
@@ -285,6 +288,7 @@ export async function refreshQZoneCookiesViaBot({
       domain: qzoneCookieDomain,
       cookies: encryptJson(cookies),
       rawCookies: null,
+      healthMessage: "cookies 已刷新，等待可用性检测",
     },
   });
 

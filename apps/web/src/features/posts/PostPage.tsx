@@ -1,9 +1,8 @@
 import { useRef } from "react";
 import type { TenantSummary } from "@campux/domain";
-import { CheckIcon, ImagePlusIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { ImagePlusIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { TenantMetadata, UploadedImage } from "@/types/app";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -12,9 +11,7 @@ import { PostRulesAction } from "./PostRulesAction";
 
 export function PostPage({
   busy,
-  error,
   metadata,
-  notice,
   postText,
   anonymous,
   selectedTenant,
@@ -26,9 +23,7 @@ export function PostPage({
   onSubmit,
 }: {
   busy: boolean;
-  error: string;
   metadata: TenantMetadata;
-  notice: string;
   postText: string;
   anonymous: boolean;
   selectedTenant: TenantSummary;
@@ -49,21 +44,6 @@ export function PostPage({
           <MegaphoneIcon className="size-4 shrink-0" strokeWidth={2.3} />
           <p className="min-w-0 truncate">{metadata.banner}</p>
         </div>
-      ) : null}
-
-      {error ? (
-        <Alert variant="destructive" className="mb-3">
-          <AlertTitle>操作失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {notice ? (
-        <Alert className="mb-3 border-green-200 bg-green-50">
-          <CheckIcon />
-          <AlertTitle>提交成功</AlertTitle>
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
       ) : null}
 
       <section className="product-surface p-4">

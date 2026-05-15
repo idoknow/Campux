@@ -5,6 +5,7 @@ export type RenderPostCardInput = {
   tenantName: string;
   authorName: string;
   authorQq?: string;
+  cornerQq?: string | undefined;
   text: string;
   createdAt: Date;
   anonymous: boolean;
@@ -16,7 +17,7 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
   const browser = await getBrowser();
   const page = await browser.newPage({
     viewport: {
-      width: 900,
+      width: 1280,
       height: 720,
     },
     deviceScaleFactor: 1,
@@ -68,7 +69,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const author = input.anonymous ? "匿名" : input.authorName || input.authorQq || "用户";
   const footer = input.anonymous ? `匿名用户 发表于 ${createdAt}` : `${input.authorQq ?? input.authorName} 发表于 ${createdAt}`;
   const avatar = input.anonymous ? anonymousAvatarDataUrl() : await qqAvatarDataUrl(input.authorQq);
-  const corner = await qqAvatarDataUrl(process.env.CAMPUX_RENDER_CORNER_QQ);
+  const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
+  const banner = "";
 
   return `<!DOCTYPE html>
 <html>
@@ -76,38 +78,77 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <style>
-    * { box-sizing: border-box; }
-    html, body { margin: 0; background: #fff; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }
-    body { width: 900px; color: #061328; }
-    .bar { height: 30px; background: #1E88E5; }
-    .wrap { position: relative; min-height: 650px; overflow: hidden; padding: 52px 56px 28px; }
-    .corner { position: absolute; top: -120px; right: -170px; width: 500px; height: 500px; border-radius: 50%; opacity: .18; object-fit: cover; }
-    .head { display: flex; align-items: flex-start; gap: 32px; }
-    .avatar { width: 132px; height: 132px; flex: 0 0 auto; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 28px rgba(15, 23, 42, .2); }
-    .main { min-width: 0; flex: 1; }
-    .name { display: block; font-size: 56px; font-weight: 900; line-height: 1.12; letter-spacing: 0; }
-    .text { display: block; width: 100%; margin-top: 44px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 42px; font-weight: 700; line-height: 1.38; letter-spacing: .06em; color: #172033; }
-    .footer { display: flex; justify-content: space-between; gap: 24px; padding: 0 56px 28px; color: #64748b; font-size: 24px; font-weight: 700; }
-    .footer span { min-width: 0; overflow-wrap: anywhere; }
+    #nickname {
+      font-weight: bold;
+      font-size: 4.5rem;
+      line-height: 1.2;
+      margin-bottom: 0;
+    }
+
+    #words {
+      font-family: Microsoft Yahei;
+      font-size: 3.3rem;
+      display: block;
+      width: 65rem;
+      margin-top: 4rem;
+      word-spacing: 0.3rem;
+      letter-spacing: 0.3rem;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+
+    img {
+      width: 18%;
+      height: 18%;
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    }
+
+    #footer {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      padding: 0px 2rem;
+      font-size: 2.2rem;
+      margin: 1rem;
+      color: #666
+    }
+
+    #bg-fixed-br {
+      position: fixed;
+      top: -120px;
+      right: -170px;
+      width: 500px;
+      height: 500px;
+      opacity: 0.25;
+    }
   </style>
 </head>
-<body>
-  <div class="bar"></div>
-  <div class="wrap">
-    <img class="corner" src="${corner}" />
-    <div class="head">
-      <img class="avatar" src="${avatar}" />
-      <div class="main">
-        <span class="name">${escapeHtml(author)}</span>
-        <span class="text">${escapeHtml(input.text)}</span>
+<body style="margin: 0">
+  <div id="title-bar" style="background-color: #1E88E5; height: 5%; width: calc(100% + 50px); padding: 16px; border-radius: 0 0 8px 8px; font-weight: bold">
+    <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
+  </div>
+  <div style="padding: 2.5rem; min-height: 550px;">
+    <div style="display: flex;">
+      <img id="avatar" src="${avatar}" />
+      <div style="margin-left: 32px; margin-top: 32px">
+        <span id="nickname">${escapeHtml(author)}</span>
+        <span id="words">${escapeHtml(input.text)}</span>
       </div>
     </div>
   </div>
-  <div class="footer">
+  <div id="footer">
     <span>${escapeHtml(footer)}</span>
-    <span>Campux</span>
+    <span>开发 @RockChinQ | @Soulter</span>
   </div>
+  <img id="bg-fixed-br" src="${corner}">
 </body>
+<script type="text/javascript">
+  if (document.getElementById('title-bar').innerText.trim() === '') {
+    document.getElementById('title-bar').style.display = 'none';
+  }
+</script>
 </html>`;
 }
 

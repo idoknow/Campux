@@ -202,10 +202,21 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       return reply.code(403).send({ message: "没有权限预览该稿件" });
     }
 
+    const previewBot = await prisma.botAccount.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        enabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
     const bytes = await renderPostCard({
       tenantName: post.tenant.name,
       authorName: post.author.displayName ?? post.author.qqUin.toString(),
       authorQq: post.author.qqUin.toString(),
+      cornerQq: previewBot?.qqUin.toString(),
       text: post.text,
       createdAt: post.createdAt,
       anonymous: post.anonymous,

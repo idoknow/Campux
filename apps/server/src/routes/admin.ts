@@ -3,10 +3,14 @@ import { z } from "zod";
 import type { TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
+import { decryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
 import { enqueueAttempt } from "../runtime/publishing";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
+import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
+import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
+import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 
 const roleSchema = z.enum(["submitter", "reviewer", "admin"]);
 
@@ -28,6 +32,7 @@ const targetPatchSchema = z.object({
   required: z.boolean().optional(),
   publishDelaySeconds: z.number().int().min(0).max(86_400).optional(),
   failurePolicy: z.string().min(1).max(80).optional(),
+  qzoneRefreshMode: z.enum(["protocol", "qr"]).optional(),
 });
 
 const targetCreateSchema = z.object({
@@ -36,6 +41,7 @@ const targetCreateSchema = z.object({
   enabled: z.boolean().default(true),
   required: z.boolean().default(true),
   publishDelaySeconds: z.number().int().min(0).max(86_400).default(0),
+  qzoneRefreshMode: z.enum(["protocol", "qr"]).default("protocol"),
 });
 
 const botCreateSchema = z.object({
@@ -47,6 +53,15 @@ const botCreateSchema = z.object({
 });
 
 const botParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
+const botLoginParamsSchema = z.object({
+  id: z.string().min(1),
+  loginId: z.string().min(1),
+});
+
+const botParamsOnlySchema = z.object({
   id: z.string().min(1),
 });
 
@@ -390,6 +405,123 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     };
   });
 
+  app.post("/api/admin/bots/:id/qzone-cookies/protocol", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsSchema.parse(request.params);
+    const bot = await prisma.botAccount.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+    if (!bot) {
+      return reply.code(404).send({ message: "Bot 账号不存在" });
+    }
+    if (!oneBot) {
+      return reply.code(503).send({ message: "OneBot 运行时不可用" });
+    }
+    const data = await oneBot.callAction(bot.qqUin.toString(), "get_cookies", {
+      domain: qzoneCookieDomain,
+    });
+    const rawCookies = extractCookiesFromActionData(data);
+    const result = await refreshQZoneCookiesViaBot({
+      botQqUin: bot.qqUin.toString(),
+      operatorQqUin: context.user.qqUin.toString(),
+      groupId: bot.reviewGroupId,
+      rawCookies,
+    });
+    return {
+      cookieNames: result.cookieNames,
+    };
+  });
+
+  app.post("/api/admin/bots/:id/qzone-cookies/check", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsOnlySchema.parse(request.params);
+    const session = await prisma.botSession.findFirst({
+      where: {
+        type: "qzone",
+        domain: qzoneCookieDomain,
+        botAccount: {
+          id: params.id,
+          tenantId: context.selectedTenant.id,
+        },
+      },
+      orderBy: {
+        refreshedAt: "desc",
+      },
+    });
+    if (!session) {
+      return reply.code(404).send({ message: "这个 Bot 还没有 QZone cookies" });
+    }
+
+    const updated = await checkAndUpdateQZoneSession(session.id);
+    return {
+      session: updated ? toBotSession(updated) : null,
+    };
+  });
+
+  app.get("/api/admin/bots/:id/qzone-cookies", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsOnlySchema.parse(request.params);
+    const session = await prisma.botSession.findFirst({
+      where: {
+        type: "qzone",
+        domain: qzoneCookieDomain,
+        botAccount: {
+          id: params.id,
+          tenantId: context.selectedTenant.id,
+        },
+      },
+      include: {
+        botAccount: true,
+      },
+      orderBy: {
+        refreshedAt: "desc",
+      },
+    });
+    if (!session) {
+      return reply.code(404).send({ message: "这个 Bot 还没有 QZone cookies" });
+    }
+
+    const cookies = toCookieRecord(decryptJson(session.cookies));
+    return {
+      bot: {
+        id: session.botAccount.id,
+        qqUin: session.botAccount.qqUin.toString(),
+        displayName: session.botAccount.displayName,
+      },
+      session: toBotSession(session),
+      cookies: Object.entries(cookies).map(([name, value]) => ({ name, value })),
+      cookieHeader: Object.entries(cookies).map(([name, value]) => `${name}=${value}`).join("; "),
+    };
+  });
+
+  app.post("/api/admin/bots/:id/qzone-login", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsSchema.parse(request.params);
+    const bot = await prisma.botAccount.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+    if (!bot) {
+      return reply.code(404).send({ message: "Bot 账号不存在" });
+    }
+    return startQZoneQrLogin({
+      botAccountId: bot.id,
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+    });
+  });
+
+  app.get("/api/admin/bots/:id/qzone-login/:loginId", async (request, reply) => {
+    await requireTenantRole(request, reply, "admin");
+    const params = botLoginParamsSchema.parse(request.params);
+    return pollQZoneQrLogin(params.loginId);
+  });
+
   app.delete("/api/admin/bots/:id", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const params = botParamsSchema.parse(request.params);
@@ -438,7 +570,20 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         tenantId: context.selectedTenant.id,
       },
       include: {
-        botAccount: true,
+        botAccount: {
+          include: {
+            sessions: {
+              where: {
+                type: "qzone",
+                domain: qzoneCookieDomain,
+              },
+              orderBy: {
+                refreshedAt: "desc",
+              },
+              take: 1,
+            },
+          },
+        },
       },
       orderBy: {
         displayName: "asc",
@@ -472,9 +617,23 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         enabled: body.enabled,
         required: body.required,
         publishDelaySeconds: body.publishDelaySeconds,
+        qzoneRefreshMode: body.qzoneRefreshMode,
       },
       include: {
-        botAccount: true,
+        botAccount: {
+          include: {
+            sessions: {
+              where: {
+                type: "qzone",
+                domain: qzoneCookieDomain,
+              },
+              orderBy: {
+                refreshedAt: "desc",
+              },
+              take: 1,
+            },
+          },
+        },
       },
     });
 
@@ -502,6 +661,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         publishTarget: {
           include: {
             botAccount: true,
+          },
+        },
+        post: {
+          include: {
+            author: true,
           },
         },
       },
@@ -537,6 +701,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       ...(body.required === undefined ? {} : { required: body.required }),
       ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
       ...(body.failurePolicy === undefined ? {} : { failurePolicy: body.failurePolicy }),
+      ...(body.qzoneRefreshMode === undefined ? {} : { qzoneRefreshMode: body.qzoneRefreshMode }),
     };
     const updated = await prisma.publishTarget.update({
       where: {
@@ -544,7 +709,20 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       },
       data: updateData,
       include: {
-        botAccount: true,
+        botAccount: {
+          include: {
+            sessions: {
+              where: {
+                type: "qzone",
+                domain: qzoneCookieDomain,
+              },
+              orderBy: {
+                refreshedAt: "desc",
+              },
+              take: 1,
+            },
+          },
+        },
       },
     });
 
@@ -574,6 +752,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         publishTarget: {
           include: {
             botAccount: true,
+          },
+        },
+        post: {
+          include: {
+            author: true,
           },
         },
       },
@@ -660,13 +843,25 @@ function toPublishTarget(target: {
   required: boolean;
   publishDelaySeconds: number;
   failurePolicy: string;
+  qzoneRefreshMode: string;
   botAccount: {
     id: string;
     qqUin: bigint;
     displayName: string;
     enabled: boolean;
+    sessions: Array<{
+      id: string;
+      type: string;
+      domain: string;
+      refreshedAt: Date;
+      expiresAt: Date | null;
+      healthStatus: string;
+      healthCheckedAt: Date | null;
+      healthMessage: string | null;
+    }>;
   };
 }) {
+  const session = target.botAccount.sessions[0];
   return {
     id: target.id,
     type: target.type,
@@ -675,11 +870,13 @@ function toPublishTarget(target: {
     required: target.required,
     publishDelaySeconds: target.publishDelaySeconds,
     failurePolicy: target.failurePolicy,
+    qzoneRefreshMode: target.qzoneRefreshMode,
     botAccount: {
       id: target.botAccount.id,
       qqUin: target.botAccount.qqUin.toString(),
       displayName: target.botAccount.displayName,
       enabled: target.botAccount.enabled,
+      qzoneSession: session ? toBotSession(session) : null,
     },
   };
 }
@@ -699,6 +896,9 @@ function toBotAccount(
       domain: string;
       refreshedAt: Date;
       expiresAt: Date | null;
+      healthStatus: string;
+      healthCheckedAt: Date | null;
+      healthMessage: string | null;
     }>;
     publishTargets: Array<{
       id: string;
@@ -722,13 +922,7 @@ function toBotAccount(
       online: false,
       connectionCount: 0,
     },
-    sessions: bot.sessions.map((session) => ({
-      id: session.id,
-      type: session.type,
-      domain: session.domain,
-      refreshedAt: session.refreshedAt.toISOString(),
-      expiresAt: session.expiresAt?.toISOString() ?? null,
-    })),
+    sessions: bot.sessions.map(toBotSession),
     publishTargets: bot.publishTargets.map((target) => ({
       id: target.id,
       type: target.type,
@@ -737,6 +931,55 @@ function toBotAccount(
       required: target.required,
     })),
   };
+}
+
+function toBotSession(session: {
+  id: string;
+  type: string;
+  domain: string;
+  refreshedAt: Date;
+  expiresAt: Date | null;
+  healthStatus: string;
+  healthCheckedAt: Date | null;
+  healthMessage: string | null;
+}) {
+  return {
+    id: session.id,
+    type: session.type,
+    domain: session.domain,
+    refreshedAt: session.refreshedAt.toISOString(),
+    expiresAt: session.expiresAt?.toISOString() ?? null,
+    status: session.expiresAt && session.expiresAt.getTime() <= Date.now() ? "expired" : session.healthStatus,
+    checkedAt: session.healthCheckedAt?.toISOString() ?? null,
+    message: session.healthMessage,
+  };
+}
+
+function extractCookiesFromActionData(data: unknown) {
+  if (typeof data === "string") {
+    return data;
+  }
+  if (data && typeof data === "object" && "cookies" in data) {
+    const cookies = (data as { cookies?: unknown }).cookies;
+    if (typeof cookies === "string") {
+      return cookies;
+    }
+    if (cookies && typeof cookies === "object") {
+      return Object.entries(cookies as Record<string, unknown>)
+        .map(([name, value]) => `${name}=${String(value)}`)
+        .join("; ");
+    }
+  }
+  throw new Error("协议端没有返回 cookies 数据");
+}
+
+function toCookieRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([name, cookieValue]) => (typeof cookieValue === "string" ? [[name, cookieValue]] : [])),
+  );
 }
 
 function toTenantBotEvent(event: {
@@ -777,6 +1020,17 @@ function toPublishAttempt(attempt: {
   nextRunAt: Date | null;
   externalId: string | null;
   updatedAt: Date;
+  post: {
+    id: string;
+    displayId: number;
+    text: string;
+    anonymous: boolean;
+    status: string;
+    author: {
+      qqUin: bigint;
+      displayName: string | null;
+    };
+  };
   publishTarget: {
     id: string;
     displayName: string;
@@ -802,6 +1056,17 @@ function toPublishAttempt(attempt: {
       botAccount: {
         qqUin: attempt.publishTarget.botAccount.qqUin.toString(),
         displayName: attempt.publishTarget.botAccount.displayName,
+      },
+    },
+    post: {
+      id: attempt.post.id,
+      displayId: attempt.post.displayId,
+      text: attempt.post.text,
+      anonymous: attempt.post.anonymous,
+      status: attempt.post.status,
+      author: {
+        qqUin: attempt.post.author.qqUin.toString(),
+        displayName: attempt.post.author.displayName,
       },
     },
   };

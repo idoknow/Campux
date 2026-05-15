@@ -9,20 +9,21 @@ import {
   FileTextIcon,
   HashIcon,
   ImageIcon,
-  RefreshCwIcon,
   SparklesIcon,
   UserIcon,
   UserRoundIcon,
   XIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
-import { EmptyCard, SectionHeader } from "@/components/app/utility";
+import { EmptyCard } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type PostImage = {
@@ -74,7 +75,6 @@ export function PostsPage({
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
   const [reviewStatus, setReviewStatus] = useState("pending_approval");
   const [reviewKeyword, setReviewKeyword] = useState("");
-  const [reviewError, setReviewError] = useState("");
   const [busyPostId, setBusyPostId] = useState("");
   const [preview, setPreview] = useState<RenderPreviewState>(() => ({
     open: false,
@@ -105,7 +105,7 @@ export function PostsPage({
     }
 
     void refreshReviewPosts().catch((caught) => {
-      setReviewError(caught instanceof Error ? caught.message : "无法读取审核列表");
+      toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
   }, [canReview, reviewStatus]);
 
@@ -126,20 +126,19 @@ export function PostsPage({
     }
     const data = await api<{ posts: ReviewPostItem[] }>(`/api/review/posts?${params}`);
     setReviewPosts(data.posts);
-    setReviewError("");
   }
 
   async function reviewPost(id: string, action: "approve" | "reject") {
     setBusyPostId(id);
-    setReviewError("");
     try {
       await api(`/api/review/posts/${id}/${action}`, {
         method: "POST",
         body: JSON.stringify({}),
       });
+      toast.success(action === "approve" ? "已通过，正在生成发布任务。" : "已拒绝。");
       await refreshAll();
     } catch (caught) {
-      setReviewError(caught instanceof Error ? caught.message : "审核失败");
+      toast.error(caught instanceof Error ? caught.message : "审核失败");
     } finally {
       setBusyPostId("");
     }
@@ -184,34 +183,42 @@ export function PostsPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
-      <SectionHeader title="稿件" subtitle="看看你的投稿进度" action="刷新" icon={RefreshCwIcon} onAction={refreshAll} />
-      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="mt-3 min-h-0 flex-1">
-        <TabsList className={postTabsListClassName}>
-          <TabsTrigger value="mine" className={postTabsTriggerClassName}>
-            你的稿件
-          </TabsTrigger>
-          {canReview ? (
-            <TabsTrigger value="review" className={postTabsTriggerClassName}>
-              审核
+      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="min-h-0 flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <TabsList className={postTabsListClassName}>
+            <TabsTrigger value="mine" className={postTabsTriggerClassName}>
+              你的稿件
             </TabsTrigger>
-          ) : null}
-        </TabsList>
+            {canReview ? (
+              <TabsTrigger value="review" className={postTabsTriggerClassName}>
+                审核
+              </TabsTrigger>
+            ) : null}
+          </TabsList>
+          <Button variant="outline" size="sm" onClick={() => void refreshAll()}>
+            刷新
+          </Button>
+        </div>
         <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           <PostList posts={posts} onPreview={(post) => void openRenderPreview(post)} />
         </TabsContent>
         {canReview ? (
           <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
-            {reviewError ? <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{reviewError}</p> : null}
             <div className="product-subsection mb-3 grid gap-2 p-3 sm:grid-cols-[160px_minmax(0,1fr)_auto]">
-              <select value={reviewStatus} className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" onChange={(event) => setReviewStatus(event.target.value)}>
-                <option value="pending_approval">待审核</option>
-                <option value="approved">已通过</option>
-                <option value="rejected">已拒绝</option>
-                <option value="publishing">发布中</option>
-                <option value="published">已发布</option>
-                <option value="failed">发布失败</option>
-                <option value="all">全部</option>
-              </select>
+              <Select value={reviewStatus} onValueChange={setReviewStatus}>
+                <SelectTrigger className="h-10 w-full bg-white font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending_approval">待审核</SelectItem>
+                  <SelectItem value="approved">已通过</SelectItem>
+                  <SelectItem value="rejected">已拒绝</SelectItem>
+                  <SelectItem value="publishing">发布中</SelectItem>
+                  <SelectItem value="published">已发布</SelectItem>
+                  <SelectItem value="failed">发布失败</SelectItem>
+                  <SelectItem value="all">全部</SelectItem>
+                </SelectContent>
+              </Select>
               <input
                 value={reviewKeyword}
                 className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"

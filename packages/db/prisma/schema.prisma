@@ -47,6 +47,7 @@ enum PublishAttemptStatus {
 model Tenant {
   id             String             @id @default(uuid())
   slug           String             @unique
+  host           String?            @unique
   name           String
   status         TenantStatus       @default(active)
   themeColor     String             @default("#e0574f")
@@ -173,6 +174,9 @@ model BotSession {
   rawCookies   String?
   refreshedAt  DateTime   @default(now())
   expiresAt    DateTime?
+  healthStatus String     @default("unchecked")
+  healthCheckedAt DateTime?
+  healthMessage String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   botAccount   BotAccount @relation(fields: [botAccountId], references: [id], onDelete: Cascade)
@@ -191,6 +195,7 @@ model PublishTarget {
   required            Boolean          @default(true)
   publishDelaySeconds Int              @default(0)
   failurePolicy       String           @default("block_post")
+  qzoneRefreshMode    String           @default("protocol")
   tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   botAccount          BotAccount       @relation(fields: [botAccountId], references: [id], onDelete: Cascade)
   attempts            PublishAttempt[]

@@ -17,8 +17,6 @@ export function AppShell({
   metadata,
   posts,
   busy,
-  error,
-  notice,
   postText,
   postsTab,
   anonymous,
@@ -43,8 +41,6 @@ export function AppShell({
   metadata: TenantMetadata;
   posts: PostItem[];
   busy: boolean;
-  error: string;
-  notice: string;
   postText: string;
   postsTab: PostsTab;
   anonymous: boolean;
@@ -81,9 +77,7 @@ export function AppShell({
             <TabsContent value="post" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <PostPage
                 busy={busy}
-                error={error}
                 metadata={metadata}
-                notice={notice}
                 postText={postText}
                 anonymous={anonymous}
                 selectedTenant={me.currentTenant}
@@ -107,7 +101,6 @@ export function AppShell({
             <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <AdminPage
                 activeTab={adminTab}
-                currentRole={me.currentMembership.role}
                 selectedTenant={me.currentTenant}
                 metadata={metadata}
                 onTabChange={onAdminTabChange}

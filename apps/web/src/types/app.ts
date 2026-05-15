@@ -2,7 +2,7 @@ import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "services" | "admin";
 export type PostsTab = "mine" | "review";
-export type AdminTab = "review" | "users" | "bans" | "metadata" | "bots" | "publish";
+export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 
 export type Membership = {
@@ -92,11 +92,13 @@ export type PublishTargetItem = {
   required: boolean;
   publishDelaySeconds: number;
   failurePolicy: string;
+  qzoneRefreshMode: "protocol" | "qr";
   botAccount: {
     id: string;
     qqUin: string;
     displayName: string;
     enabled: boolean;
+    qzoneSession: AdminBotSession | null;
   };
 };
 
@@ -108,6 +110,17 @@ export type PublishAttemptItem = {
   nextRunAt: string | null;
   externalId: string | null;
   updatedAt: string;
+  post: {
+    id: string;
+    displayId: number;
+    text: string;
+    anonymous: boolean;
+    status: string;
+    author: {
+      qqUin: string;
+      displayName: string | null;
+    };
+  };
   publishTarget: {
     id: string;
     displayName: string;
@@ -137,6 +150,9 @@ export type AdminBotAccount = {
     domain: string;
     refreshedAt: string;
     expiresAt: string | null;
+    status: "unchecked" | "available" | "invalid" | "expired";
+    checkedAt: string | null;
+    message: string | null;
   }>;
   publishTargets: Array<{
     id: string;
@@ -146,6 +162,8 @@ export type AdminBotAccount = {
     required: boolean;
   }>;
 };
+
+export type AdminBotSession = AdminBotAccount["sessions"][number];
 
 export type AdminBotEvent = {
   id: string;
@@ -185,6 +203,7 @@ export type TenantStatus = "active" | "paused" | "archived";
 export type SystemTenant = {
   id: string;
   slug: string;
+  host: string | null;
   name: string;
   status: TenantStatus;
   createdAt: string;

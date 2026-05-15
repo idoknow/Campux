@@ -11,6 +11,7 @@ export function toTenantSummary(
   return {
     id: tenant.id,
     slug: tenant.slug,
+    host: tenant.host,
     name: tenant.name,
     status: tenant.status,
     themeColor: tenant.themeColor,
