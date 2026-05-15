@@ -258,7 +258,7 @@ export async function refreshQZoneCookiesViaBot({
 }) {
   const bot = await findEnabledBot(botQqUin);
   assertReviewGroup(bot, groupId);
-  const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "admin");
+  const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
   const cookies = parseCookieString(rawCookies);
 
   if (!cookies.p_skey && !cookies.skey) {
@@ -327,13 +327,12 @@ export function parseCookieString(rawCookies: string) {
 }
 
 export async function findEnabledBot(botQqUin: string) {
-  const bot = await prisma.botAccount.findFirst({
+  const bot = await prisma.botAccount.findUnique({
     where: {
       qqUin: BigInt(botQqUin),
-      enabled: true,
     },
   });
-  if (!bot) {
+  if (!bot || !bot.enabled) {
     throw new BotWorkflowError("Bot 未绑定校园墙", 404);
   }
   return bot;

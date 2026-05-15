@@ -35,8 +35,8 @@ await app.register(cors, {
 const queue = createRuntimeQueue({
   logger: app.log,
 });
-const oneBot = new OneBotRuntime(queue, app.log);
-registerPublishingWorker(queue, app.log, config);
+const oneBot = new OneBotRuntime(queue, app.log, config);
+registerPublishingWorker(queue, app.log, config, oneBot);
 
 await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
@@ -72,7 +72,7 @@ app.addHook("onClose", async () => {
 
 await queue.start();
 await recoverPublishAttempts(queue, app.log);
-const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log);
+const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();

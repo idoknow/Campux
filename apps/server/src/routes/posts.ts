@@ -262,6 +262,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
         },
       },
     });
+    oneBot?.notifyPostCancelled(updated.id).catch((error) => {
+      app.log.warn({ error, postId: updated.id }, "failed to notify post cancellation");
+    });
 
     return {
       post: toPostListItem(updated),

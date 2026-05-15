@@ -98,6 +98,7 @@ export type PublishTargetItem = {
     qqUin: string;
     displayName: string;
     enabled: boolean;
+    connectionToken: string;
     publishTextTemplate: PublishTextTemplate;
     qzoneSession: AdminBotSession | null;
   };
@@ -172,6 +173,7 @@ export type AdminBotAccount = {
   displayName: string;
   enabled: boolean;
   reviewGroupId: string | null;
+  connectionToken: string;
   publishTextTemplate: PublishTextTemplate;
   lastSeenAt: string | null;
   createdAt: string;

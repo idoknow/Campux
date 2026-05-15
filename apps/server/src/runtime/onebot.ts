@@ -1,10 +1,16 @@
+import { Buffer } from "node:buffer";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { FastifyBaseLogger } from "fastify";
+import type { CampuxConfig } from "@campux/config";
+import { createS3Client } from "@campux/integrations";
 import {
+  assertReviewGroup,
   BotWorkflowError,
   findEnabledBot,
   qzoneCookieDomain,
   refreshQZoneCookiesViaBot,
   registerUserViaBot,
+  requireBotTenantRole,
   reviewPostViaBot,
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
@@ -14,12 +20,15 @@ import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 
 type OneBotConnection = {
   socket: WebSocketLike;
+  botAccountId: string;
+  tenantId: string;
   selfId: string | null;
 };
 
 type WebSocketLike = {
   readyState: number;
   send(data: string, callback?: (error?: Error) => void): void;
+  close?(code?: number, reason?: string): void;
   on(event: "message", listener: (data: { toString(): string }) => void): void;
   on(event: "close", listener: () => void): void;
   on(event: "error", listener: (error: Error) => void): void;
@@ -38,6 +47,11 @@ type OneBotActionResponse = {
   data?: unknown;
   message?: string;
   wording?: string;
+};
+
+type ImagePayload = {
+  key?: string;
+  fileName?: string;
 };
 
 type OneBotMessageEvent = {
@@ -63,6 +77,7 @@ const reviewHelp = [
   "审核命令：",
   "#通过 <稿件id>",
   "#拒绝 <理由> <稿件id>",
+  "#重发 <稿件id>",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
 ].join("\n");
@@ -74,18 +89,24 @@ export class OneBotRuntime {
   constructor(
     private readonly queue: RuntimeQueue,
     private readonly logger: FastifyBaseLogger,
+    private readonly config?: CampuxConfig,
   ) {}
 
-  handleConnection(socket: WebSocketLike, request: { headers: Record<string, string | string[] | undefined>; url?: string }) {
-    const selfId = this.getSelfIdFromRequest(request);
+  async handleConnection(socket: WebSocketLike, request: { headers: Record<string, string | string[] | undefined>; url?: string }) {
+    const auth = await this.authenticateConnection(request);
+    if (!auth) {
+      socket.close?.(1008, "invalid onebot token");
+      this.logger.warn("onebot websocket rejected");
+      return;
+    }
     const connection: OneBotConnection = {
       socket,
-      selfId,
+      botAccountId: auth.id,
+      tenantId: auth.tenantId,
+      selfId: auth.qqUin.toString(),
     };
     this.connections.add(connection);
-    if (selfId) {
-      this.markBotSeen(selfId).catch((error) => this.logger.warn({ error, selfId }, "failed to mark onebot bot seen"));
-    }
+    this.markBotSeen(connection).catch((error) => this.logger.warn({ error, selfId: connection.selfId }, "failed to mark onebot bot seen"));
 
     socket.on("message", (data) => {
       this.handleSocketMessage(connection, data.toString()).catch((error) => {
@@ -99,7 +120,7 @@ export class OneBotRuntime {
       this.logger.warn({ error }, "onebot websocket error");
     });
 
-    this.logger.info({ selfId }, "onebot websocket connected");
+    this.logger.info({ botAccountId: connection.botAccountId, tenantId: connection.tenantId, selfId: connection.selfId }, "onebot websocket connected");
   }
 
   async notifyNewPost(postId: string) {
@@ -126,7 +147,8 @@ export class OneBotRuntime {
       },
     });
 
-    const imageCount = Array.isArray(post.images) ? post.images.length : 0;
+    const images = Array.isArray(post.images) ? post.images : [];
+    const imageCount = images.length;
     const lines = [
       `${post.tenant.name} 新稿件 #${post.displayId}`,
       `投稿人：${post.anonymous ? "匿名" : `${post.author.displayName ?? "未命名"}（${post.author.qqUin.toString()}）`}`,
@@ -137,15 +159,115 @@ export class OneBotRuntime {
       `通过：#通过 ${post.displayId}`,
       `拒绝：#拒绝 <理由> ${post.displayId}`,
     ];
+    const imageSegments = await this.loadPostImageSegments(post.images);
+    const message =
+      imageSegments.length > 0
+        ? [
+            {
+              type: "text",
+              data: {
+                text: lines.join("\n"),
+              },
+            },
+            ...imageSegments,
+          ]
+        : lines.join("\n");
 
     for (const bot of bots) {
       if (!bot.reviewGroupId) {
         continue;
       }
-      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, lines.join("\n")).catch((error) => {
+      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
         this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify review group");
       });
     }
+  }
+
+  async notifyPostCancelled(postId: string) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        tenant: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    await this.broadcastReviewGroup(post.tenantId, `稿件已取消：#${post.displayId}`);
+  }
+
+  async notifyPublishSucceeded(postId: string, targetId: string, externalId: string) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        tenant: true,
+      },
+    });
+    const target = await prisma.publishTarget.findUnique({
+      where: {
+        id: targetId,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    await this.broadcastReviewGroup(post.tenantId, `已成功发表：#${post.displayId}${target ? `\n目标：${target.displayName}` : ""}\n外部 ID：${externalId}`);
+  }
+
+  async notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        tenant: true,
+      },
+    });
+    const target = await prisma.publishTarget.findUnique({
+      where: {
+        id: targetId,
+      },
+      include: {
+        botAccount: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    const lines = [
+      options?.needsLogin ? `发表失败：#${post.displayId}，QZone cookies 未登录或已失效。` : `发表失败：#${post.displayId}`,
+      target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
+      `原因：${message}`,
+      options?.needsLogin ? "请在群内发送 #登录 或 #扫码登录 重新登录后，再重试发布。" : null,
+      options?.nextRunAt ? `下次重试：${formatDateTime(options.nextRunAt)}` : null,
+    ].filter((line): line is string => Boolean(line));
+    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+  }
+
+  async notifyQZoneCookiesInvalid(botAccountId: string, message: string) {
+    const bot = await prisma.botAccount.findUnique({
+      where: {
+        id: botAccountId,
+      },
+    });
+    if (!bot || !bot.reviewGroupId) {
+      return;
+    }
+    await this.sendGroupMessage(
+      bot.qqUin.toString(),
+      bot.reviewGroupId,
+      [
+        "QQ空间cookies已失效，请 @ 并发送 #登录 或 #扫码登录 命令进行重新登录。",
+        `墙号：${bot.displayName} / QQ ${bot.qqUin.toString()}`,
+        `检测结果：${message}`,
+      ].join("\n"),
+    ).catch((error) => {
+      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify qzone cookies invalid");
+    });
   }
 
   getBotConnectionStatus(botQqUin: string) {
@@ -168,6 +290,26 @@ export class OneBotRuntime {
       group_id: Number(groupId),
       message,
     });
+  }
+
+  async broadcastReviewGroup(tenantId: string, message: unknown) {
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId,
+        enabled: true,
+        reviewGroupId: {
+          not: null,
+        },
+      },
+    });
+    for (const bot of bots) {
+      if (!bot.reviewGroupId) {
+        continue;
+      }
+      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
+        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to broadcast review group message");
+      });
+    }
   }
 
   async callAction(botQqUin: string, action: string, params: Record<string, unknown>, timeoutMs = 8_000) {
@@ -217,8 +359,10 @@ export class OneBotRuntime {
 
     const selfId = normalizeId((event as OneBotMessageEvent).self_id);
     if (selfId && connection.selfId !== selfId) {
-      connection.selfId = selfId;
-      await this.markBotSeen(selfId);
+      this.logger.warn({ expectedSelfId: connection.selfId, actualSelfId: selfId }, "onebot event self_id mismatch");
+      connection.socket.close?.(1008, "self_id mismatch");
+      this.connections.delete(connection);
+      return;
     }
 
     if ((event as OneBotMessageEvent).post_type !== "message") {
@@ -348,6 +492,8 @@ export class OneBotRuntime {
 
       if (["扫码登录", "二维码登录", "qzone扫码登录"].includes(command.name)) {
         const bot = await findEnabledBot(botQqUin);
+        assertReviewGroup(bot, groupId);
+        await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
         const task = await startQZoneQrLogin({
           botAccountId: bot.id,
           tenantId: bot.tenantId,
@@ -379,6 +525,19 @@ export class OneBotRuntime {
           }
         }
         await this.sendGroupMessage(botQqUin, groupId, "扫码登录超时，请重新发送 #扫码登录。");
+        return;
+      }
+
+      if (command.name === "重发") {
+        const displayId = parseDisplayId(command.args);
+        if (!displayId) {
+          await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+          return;
+        }
+        const bot = await findEnabledBot(botQqUin);
+        assertReviewGroup(bot, groupId);
+        await enqueuePublishFanoutByDisplayId(this.queue, bot.tenantId, displayId, operatorQqUin);
+        await this.sendGroupMessage(botQqUin, groupId, `已重新加入发布队列：#${displayId}`);
         return;
       }
 
@@ -424,30 +583,125 @@ export class OneBotRuntime {
     return null;
   }
 
-  private getSelfIdFromRequest(request: { headers: Record<string, string | string[] | undefined>; url?: string }) {
-    const header = request.headers["x-self-id"];
-    if (Array.isArray(header)) {
-      return header[0] ?? null;
-    }
-    if (header) {
-      return header;
-    }
+  private async authenticateConnection(request: { headers: Record<string, string | string[] | undefined>; url?: string }) {
     const url = request.url ? new URL(request.url, "http://localhost") : null;
-    return url?.searchParams.get("self_id") ?? null;
+    const botId = getHeaderValue(request.headers["x-bot-id"]) ?? url?.searchParams.get("bot_id") ?? null;
+    const token = getHeaderValue(request.headers["x-onebot-token"]) ?? url?.searchParams.get("token") ?? url?.searchParams.get("access_token") ?? null;
+    if (!botId || !token) {
+      return null;
+    }
+
+    const bot = await prisma.botAccount.findFirst({
+      where: {
+        id: botId,
+        connectionToken: token,
+        enabled: true,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        qqUin: true,
+      },
+    });
+    if (!bot) {
+      return null;
+    }
+    return bot;
   }
 
-  private async markBotSeen(selfId: string) {
-    await findEnabledBot(selfId);
-    await prisma.botAccount.updateMany({
+  private async markBotSeen(connection: OneBotConnection) {
+    await prisma.botAccount.update({
       where: {
-        qqUin: BigInt(selfId),
-        enabled: true,
+        id: connection.botAccountId,
       },
       data: {
         lastSeenAt: new Date(),
       },
     });
   }
+
+  private async loadPostImageSegments(images: unknown) {
+    if (!this.config || !Array.isArray(images)) {
+      return [];
+    }
+    const s3 = createS3Client(this.config);
+    const segments = [];
+    for (const image of images) {
+      const candidate = image as ImagePayload;
+      if (!candidate.key) {
+        continue;
+      }
+      try {
+        const object = await s3.send(
+          new GetObjectCommand({
+            Bucket: this.config.s3.bucket,
+            Key: candidate.key,
+          }),
+        );
+        const body = object.Body;
+        if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
+          continue;
+        }
+        const bytes = await body.transformToByteArray();
+        const contentType = object.ContentType ?? inferImageContentType(candidate.fileName ?? candidate.key);
+        segments.push({
+          type: "image",
+          data: {
+            file: `base64://${Buffer.from(bytes).toString("base64")}`,
+            type: contentType,
+          },
+        });
+      } catch (error) {
+        this.logger.warn({ error, imageKey: candidate.key }, "failed to load post image for onebot notification");
+      }
+    }
+    return segments;
+  }
+}
+
+async function enqueuePublishFanoutByDisplayId(queue: RuntimeQueue, tenantId: string, displayId: number, operatorQqUin: string) {
+  const { enqueuePublishFanout } = await import("./publishing");
+  const { operator } = await requireBotTenantRole(tenantId, operatorQqUin, "reviewer");
+  const post = await prisma.post.findFirst({
+    where: {
+      tenantId,
+      displayId,
+    },
+  });
+  if (!post) {
+    throw new BotWorkflowError(`稿件 #${displayId} 不存在`, 404);
+  }
+  await enqueuePublishFanout(queue, tenantId, post.id, operator.id);
+}
+
+function formatDateTime(date: Date) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function inferImageContentType(name: string) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+  if (lower.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (lower.endsWith(".gif")) {
+    return "image/gif";
+  }
+  return "image/jpeg";
+}
+
+function getHeaderValue(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
 }
 
 function extractPlainText(event: OneBotMessageEvent) {

@@ -12,15 +12,20 @@ import type { RuntimeJob, RuntimeQueue } from "./queue";
 const maxPublishAttempts = 3;
 export const defaultPublishIntervalSeconds = 300;
 
+type PublishingNotifier = {
+  notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
+  notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }): Promise<void>;
+};
+
 type ImagePayload = {
   key?: string;
   url?: string;
   fileName?: string;
 };
 
-export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig) {
+export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, notifier?: PublishingNotifier) {
   queue.registerHandler("publishPost", async (job) => {
-    await handlePublishAttempt(queue, logger, config, job);
+    await handlePublishAttempt(queue, logger, config, job, notifier);
   });
 }
 
@@ -213,7 +218,7 @@ export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId:
   });
 }
 
-async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLogger, config: CampuxConfig, job: RuntimeJob) {
+async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, job: RuntimeJob, notifier?: PublishingNotifier) {
   const attemptId = typeof job.payload.attemptId === "string" ? job.payload.attemptId : "";
   if (!attemptId) {
     throw new Error("publish attempt id missing");
@@ -334,6 +339,9 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
         comment: `${attempt.publishTarget.displayName} 发布成功：${result.externalId}`,
       },
     });
+    await notifier?.notifyPublishSucceeded(attempt.postId, attempt.publishTargetId, result.externalId).catch((error) => {
+      logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish success");
+    });
   } catch (caught) {
     const currentAttempt = await prisma.publishAttempt.findUniqueOrThrow({
       where: {
@@ -342,7 +350,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
     });
     const message = caught instanceof Error ? caught.message : "发布失败";
     const verbose = caught instanceof QZonePublishError ? toInputJson(caught.verbose) : Prisma.JsonNull;
-    const shouldRetry = currentAttempt.attempt < maxPublishAttempts;
+    const needsLogin = isQZoneLoginRequiredError(message);
+    const shouldRetry = !needsLogin && currentAttempt.attempt < maxPublishAttempts;
     const nextRunAt = shouldRetry
       ? await resolveNextPublishRunAt({
           tenantId: attempt.tenantId,
@@ -375,9 +384,27 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
     if (nextRunAt) {
       enqueueAttempt(queue, attempt.tenantId, attempt.id, nextRunAt);
     }
+    if (needsLogin || !nextRunAt) {
+      await notifier?.notifyPublishFailed(attempt.postId, attempt.publishTargetId, message, { needsLogin, nextRunAt }).catch((error) => {
+        logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish failure");
+      });
+    }
   }
 
   await refreshAggregatePostStatus(attempt.postId);
+}
+
+function isQZoneLoginRequiredError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("cookie") ||
+    normalized.includes("cookies") ||
+    message.includes("登录") ||
+    message.includes("p_skey") ||
+    message.includes("skey") ||
+    message.includes("uin") ||
+    message.includes("g_tk")
+  );
 }
 
 async function refreshAggregatePostStatus(postId: string) {

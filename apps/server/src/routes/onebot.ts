@@ -9,6 +9,9 @@ export async function registerOneBotRoutes(app: FastifyInstance, oneBot: OneBotR
     oneBot.handleConnection(socket, {
       headers: request.headers,
       url: request.url,
+    }).catch((error) => {
+      app.log.warn({ error }, "onebot websocket authentication failed");
+      socket.close(1011, "onebot authentication failed");
     });
   });
 }
