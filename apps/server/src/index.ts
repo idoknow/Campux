@@ -18,14 +18,18 @@ import { registerPostRoutes } from "./routes/posts";
 import { registerReviewRoutes } from "./routes/review";
 import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
+import { runDatabaseMigrations } from "./lib/migrations";
 import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
+import { ensureBotSessionSecretConfigured } from "./lib/secret-json";
 
 const config = loadConfig();
+ensureBotSessionSecretConfigured();
 const app = Fastify({
   logger: {
     level: config.nodeEnv === "production" ? "info" : "debug",
   },
 });
+await runDatabaseMigrations(app.log);
 
 await app.register(cors, {
   origin: config.webOrigin,

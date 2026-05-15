@@ -224,6 +224,47 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     throw new Error("publish attempt id missing");
   }
 
+  const now = new Date();
+  const claimed = await prisma.publishAttempt.updateMany({
+    where: {
+      id: attemptId,
+      OR: [
+        {
+          status: "queued",
+          OR: [
+            {
+              nextRunAt: null,
+            },
+            {
+              nextRunAt: {
+                lte: now,
+              },
+            },
+          ],
+        },
+        {
+          status: "failed",
+          nextRunAt: {
+            lte: now,
+          },
+        },
+      ],
+    },
+    data: {
+      status: "running",
+      attempt: {
+        increment: 1,
+      },
+      lastError: null,
+      verbose: Prisma.JsonNull,
+      nextRunAt: null,
+    },
+  });
+  if (claimed.count === 0) {
+    logger.info({ attemptId }, "publish attempt claim skipped");
+    return;
+  }
+
   const attempt = await prisma.publishAttempt.findUnique({
     where: {
       id: attemptId,
@@ -256,7 +297,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     },
   });
 
-  if (!attempt || attempt.status === "succeeded" || attempt.status === "skipped") {
+  if (!attempt) {
     return;
   }
 
@@ -273,21 +314,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     await refreshAggregatePostStatus(attempt.postId);
     return;
   }
-
-  await prisma.publishAttempt.update({
-    where: {
-      id: attempt.id,
-    },
-    data: {
-      status: "running",
-      attempt: {
-        increment: 1,
-      },
-      lastError: null,
-      verbose: Prisma.JsonNull,
-      nextRunAt: null,
-    },
-  });
 
   try {
     const renderedCard = await renderPostCard({

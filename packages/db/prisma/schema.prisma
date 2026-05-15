@@ -51,6 +51,7 @@ model Tenant {
   name           String
   status         TenantStatus       @default(active)
   themeColor     String             @default("#e0574f")
+  nextPostDisplayId Int                @default(1)
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   memberships    TenantMembership[]

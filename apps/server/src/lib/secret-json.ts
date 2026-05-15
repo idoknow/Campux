@@ -40,6 +40,10 @@ function getKey() {
   return createHash("sha256").update(secret).digest();
 }
 
+export function ensureBotSessionSecretConfigured() {
+  getKey();
+}
+
 function isEncryptedJsonEnvelope(value: Prisma.JsonValue): value is EncryptedJsonEnvelope {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;

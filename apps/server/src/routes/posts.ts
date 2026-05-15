@@ -124,20 +124,26 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
     }
 
     const post = await prisma.$transaction(async (tx) => {
-      const aggregate = await tx.post.aggregate({
+      const tenant = await tx.tenant.update({
         where: {
-          tenantId: context.selectedTenant.id,
+          id: context.selectedTenant.id,
         },
-        _max: {
-          displayId: true,
+        data: {
+          nextPostDisplayId: {
+            increment: 1,
+          },
+        },
+        select: {
+          nextPostDisplayId: true,
         },
       });
+      const displayId = tenant.nextPostDisplayId - 1;
 
       return tx.post.create({
         data: {
           tenantId: context.selectedTenant.id,
           authorId: context.user.id,
-          displayId: (aggregate._max.displayId ?? 0) + 1,
+          displayId,
           text: body.text,
           anonymous: body.anonymous,
           images: body.images,
