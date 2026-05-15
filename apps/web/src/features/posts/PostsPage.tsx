@@ -22,12 +22,21 @@ import { EmptyCard, SectionHeader } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type PostImage = {
   key?: string;
   url?: string;
   fileName?: string;
+};
+
+type RenderPreviewState = {
+  open: boolean;
+  loading: boolean;
+  error: string;
+  url: string;
+  title: string;
 };
 
 const postCardPalettes = [
@@ -67,6 +76,21 @@ export function PostsPage({
   const [reviewKeyword, setReviewKeyword] = useState("");
   const [reviewError, setReviewError] = useState("");
   const [busyPostId, setBusyPostId] = useState("");
+  const [preview, setPreview] = useState<RenderPreviewState>(() => ({
+    open: false,
+    loading: false,
+    error: "",
+    url: "",
+    title: "",
+  }));
+
+  useEffect(() => {
+    return () => {
+      if (preview.url) {
+        URL.revokeObjectURL(preview.url);
+      }
+    };
+  }, [preview.url]);
 
   useEffect(() => {
     if (!canReview && activeTab !== "mine") {
@@ -121,6 +145,43 @@ export function PostsPage({
     }
   }
 
+  async function openRenderPreview(post: PostItem) {
+    setPreview((current) => {
+      if (current.url) {
+        URL.revokeObjectURL(current.url);
+      }
+      return {
+        open: true,
+        loading: true,
+        error: "",
+        url: "",
+        title: `稿件 ${post.displayId} 渲染预览`,
+      };
+    });
+
+    try {
+      const response = await fetch(`/api/posts/${post.id}/render-preview`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || `预览失败：${response.status}`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      setPreview((current) => ({
+        ...current,
+        loading: false,
+        url,
+      }));
+    } catch (caught) {
+      setPreview((current) => ({
+        ...current,
+        loading: false,
+        error: caught instanceof Error ? caught.message : "渲染预览失败",
+      }));
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <SectionHeader title="稿件" subtitle="看看你的投稿进度" action="刷新" icon={RefreshCwIcon} onAction={refreshAll} />
@@ -136,7 +197,7 @@ export function PostsPage({
           ) : null}
         </TabsList>
         <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-          <PostList posts={posts} />
+          <PostList posts={posts} onPreview={(post) => void openRenderPreview(post)} />
         </TabsContent>
         {canReview ? (
           <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
@@ -167,11 +228,30 @@ export function PostsPage({
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-              <ReviewList posts={reviewPosts} busyPostId={busyPostId} onApprove={(id) => void reviewPost(id, "approve")} onReject={(id) => void reviewPost(id, "reject")} />
+              <ReviewList
+                posts={reviewPosts}
+                busyPostId={busyPostId}
+                onPreview={(post) => void openRenderPreview(post)}
+                onApprove={(id) => void reviewPost(id, "approve")}
+                onReject={(id) => void reviewPost(id, "reject")}
+              />
             </div>
           </TabsContent>
         ) : null}
       </Tabs>
+      <Dialog open={preview.open} onOpenChange={(open) => setPreview((current) => ({ ...current, open }))}>
+        <DialogContent className="w-[min(720px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>{preview.title}</DialogTitle>
+            <DialogDescription>这里展示实际发布前生成的稿件渲染图。</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-48 overflow-auto px-5 pb-5">
+            {preview.loading ? <p className="py-12 text-center text-sm font-bold text-slate-500">正在渲染...</p> : null}
+            {preview.error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{preview.error}</p> : null}
+            {preview.url ? <img src={preview.url} alt={preview.title} className="mx-auto w-full max-w-[560px] rounded-md border border-slate-200 bg-white" /> : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -179,11 +259,13 @@ export function PostsPage({
 function ReviewList({
   posts,
   busyPostId,
+  onPreview,
   onApprove,
   onReject,
 }: {
   posts: ReviewPostItem[];
   busyPostId: string;
+  onPreview: (post: ReviewPostItem) => void;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
 }) {
@@ -199,6 +281,7 @@ function ReviewList({
           post={post}
           palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
           busy={busyPostId === post.id}
+          onPreview={() => onPreview(post)}
           onApprove={() => onApprove(post.id)}
           onReject={() => onReject(post.id)}
         />
@@ -211,12 +294,14 @@ function ReviewCard({
   post,
   palette,
   busy,
+  onPreview,
   onApprove,
   onReject,
 }: {
   post: ReviewPostItem;
   palette: string;
   busy: boolean;
+  onPreview: () => void;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -235,6 +320,7 @@ function ReviewCard({
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
+          actions={<PreviewButton onClick={onPreview} />}
         />
 
         <div className="product-subsection p-3">
@@ -277,7 +363,7 @@ function ReviewCard({
   );
 }
 
-function PostList({ posts }: { posts: PostItem[] }) {
+function PostList({ posts, onPreview }: { posts: PostItem[]; onPreview: (post: PostItem) => void }) {
   if (posts.length === 0) {
     return <EmptyCard title="还没有稿件，先去投一条吧" />;
   }
@@ -285,13 +371,13 @@ function PostList({ posts }: { posts: PostItem[] }) {
   return (
     <div className="flex flex-col gap-3">
       {posts.map((post, index) => (
-        <PostCard key={post.id} post={post} palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette} />
+        <PostCard key={post.id} post={post} palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette} onPreview={() => onPreview(post)} />
       ))}
     </div>
   );
 }
 
-function PostCard({ post, palette }: { post: PostItem; palette: string }) {
+function PostCard({ post, palette, onPreview }: { post: PostItem; palette: string; onPreview: () => void }) {
   const images = getPostImages(post.images);
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
 
@@ -306,6 +392,7 @@ function PostCard({ post, palette }: { post: PostItem; palette: string }) {
           status={post.status}
           statusClassName={statusClassName}
           title={post.title || "未命名稿件"}
+          actions={<PreviewButton onClick={onPreview} />}
         />
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} />
@@ -335,6 +422,7 @@ function PostMetaHeader({
   status,
   statusClassName,
   title,
+  actions,
 }: {
   displayId: string | number;
   anonymous: boolean;
@@ -343,6 +431,7 @@ function PostMetaHeader({
   status: string;
   statusClassName: string;
   title?: string;
+  actions?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -354,8 +443,20 @@ function PostMetaHeader({
         </div>
         {title ? <h3 className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-slate-950">{title}</h3> : null}
       </div>
-      <Badge className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold shadow-none ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {actions}
+        <Badge className={`rounded-full px-2.5 py-1 text-xs font-semibold shadow-none ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
+      </div>
     </div>
+  );
+}
+
+function PreviewButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold" onClick={onClick}>
+      <ImageIcon data-icon="inline-start" />
+      预览图
+    </Button>
   );
 }
 

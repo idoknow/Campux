@@ -4,7 +4,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CampuxConfig } from "@campux/config";
 import { createS3Client } from "@campux/integrations";
-import { requireTenantContext } from "../lib/auth";
+import { renderPostCard } from "@campux/render";
+import { hasTenantRole, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -17,6 +18,10 @@ const uploadSchema = z.object({
 
 const fileQuerySchema = z.object({
   key: z.string().min(1),
+});
+
+const postParamsSchema = z.object({
+  id: z.string().min(1),
 });
 
 const createPostSchema = z.object({
@@ -176,9 +181,44 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
     };
   });
 
+  app.get("/api/posts/:id/render-preview", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+      include: {
+        author: true,
+        tenant: true,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.authorId !== context.user.id && !hasTenantRole(context.selectedMembership.role, "reviewer")) {
+      return reply.code(403).send({ message: "没有权限预览该稿件" });
+    }
+
+    const bytes = await renderPostCard({
+      tenantName: post.tenant.name,
+      authorName: post.author.displayName ?? post.author.qqUin.toString(),
+      authorQq: post.author.qqUin.toString(),
+      text: post.text,
+      createdAt: post.createdAt,
+      anonymous: post.anonymous,
+    });
+
+    reply.header("Cache-Control", "private, max-age=60");
+    reply.type("image/jpeg");
+    return reply.send(Buffer.from(bytes));
+  });
+
   app.post("/api/posts/:id/cancel", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
-    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
         id: params.id,
