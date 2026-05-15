@@ -77,10 +77,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
 
   const botAccount = await prisma.botAccount.upsert({
     where: {
-      tenantId_qqUin: {
-        tenantId: tenant.id,
-        qqUin: BigInt(tenant.id === "tenant-canton" ? "2854199010" : "2854199020"),
-      },
+      qqUin: BigInt(tenant.id === "tenant-canton" ? "2854199010" : "2854199020"),
     },
     update: {
       displayName: `${tenant.name} 1 号墙`,

@@ -365,14 +365,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     const body = botCreateSchema.parse(request.body);
     const existing = await prisma.botAccount.findUnique({
       where: {
-        tenantId_qqUin: {
-          tenantId: context.selectedTenant.id,
-          qqUin: BigInt(body.qqUin),
-        },
+        qqUin: BigInt(body.qqUin),
       },
     });
     if (existing) {
-      return reply.code(409).send({ message: "这个机器人已经绑定到当前校园墙" });
+      return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
     }
 
     const bot = await prisma.botAccount.create({
@@ -919,6 +916,7 @@ function toPublishTarget(target: {
     qqUin: bigint;
     displayName: string;
     enabled: boolean;
+    connectionToken: string;
     publishTextTemplate: Prisma.JsonValue;
     sessions: Array<{
       id: string;
@@ -947,6 +945,7 @@ function toPublishTarget(target: {
       qqUin: target.botAccount.qqUin.toString(),
       displayName: target.botAccount.displayName,
       enabled: target.botAccount.enabled,
+      connectionToken: target.botAccount.connectionToken,
       publishTextTemplate: normalizePublishTextTemplate(target.botAccount.publishTextTemplate),
       qzoneSession: session ? toBotSession(session) : null,
     },
@@ -960,6 +959,7 @@ function toBotAccount(
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
+    connectionToken: string;
     publishTextTemplate: Prisma.JsonValue;
     lastSeenAt: Date | null;
     createdAt: Date;
@@ -989,6 +989,7 @@ function toBotAccount(
     displayName: bot.displayName,
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
+    connectionToken: bot.connectionToken,
     publishTextTemplate: normalizePublishTextTemplate(bot.publishTextTemplate),
     lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
     createdAt: bot.createdAt.toISOString(),

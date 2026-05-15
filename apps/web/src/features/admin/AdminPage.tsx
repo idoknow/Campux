@@ -841,6 +841,8 @@ function BotsPanel({
                   <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
                 </div>
 
+                <OneBotConnectionBox bot={bot} />
+
                 <div className="product-subsection mt-3 p-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-slate-500">QZone session</p>
@@ -892,6 +894,33 @@ function BotsPanel({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
+  const url = buildOneBotConnectionUrl(bot);
+
+  async function copyUrl() {
+    await navigator.clipboard.writeText(url);
+    toast.success("OneBot 连接 URL 已复制。");
+  }
+
+  return (
+    <div className="product-subsection mt-3 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-slate-500">协议端连接</p>
+        <Button variant="outline" size="sm" onClick={() => void copyUrl()}>
+          <CopyIcon data-icon="inline-start" />
+          复制 URL
+        </Button>
+      </div>
+      <div className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+        <p className="break-all font-mono text-xs leading-5 text-slate-700">{url}</p>
+      </div>
+      <p className="mt-1 text-xs font-semibold text-slate-500">
+        每个机器人都有独立 token，协议端用这个地址连接后会自动归属到当前校园墙。
+      </p>
+    </div>
   );
 }
 
@@ -1086,6 +1115,7 @@ function PublishPanel({
                       displayName: target.botAccount.displayName,
                       enabled: target.botAccount.enabled,
                       reviewGroupId: null,
+                      connectionToken: target.botAccount.connectionToken,
                       publishTextTemplate: target.botAccount.publishTextTemplate,
                       lastSeenAt: null,
                       createdAt: "",
@@ -1367,6 +1397,14 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function buildOneBotConnectionUrl(bot: AdminBotAccount) {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const url = new URL("/onebot/v11/ws", `${protocol}//${window.location.host}`);
+  url.searchParams.set("bot_id", bot.id);
+  url.searchParams.set("token", bot.connectionToken);
+  return url.toString();
 }
 
 function formatBytes(value: unknown) {

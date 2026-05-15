@@ -156,6 +156,7 @@ model BotAccount {
   displayName    String
   enabled        Boolean         @default(true)
   reviewGroupId  String?
+  connectionToken String          @default(uuid())
   publishTextTemplate Json        @default("{\"includePostId\":true,\"includeAuthorMention\":false,\"includeLinks\":false,\"customText\":\"\"}")
   lastSeenAt     DateTime?
   createdAt      DateTime        @default(now())
@@ -164,6 +165,8 @@ model BotAccount {
   sessions       BotSession[]
 
   @@unique([tenantId, qqUin])
+  @@unique([qqUin])
+  @@unique([connectionToken])
 }
 
 model BotSession {

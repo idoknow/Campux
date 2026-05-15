@@ -96,6 +96,19 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         return reply.code(409).send({ message: "这个 host 已经绑定到其他校园墙" });
       }
     }
+    if (body.botQqUin) {
+      const existingBot = await prisma.botAccount.findUnique({
+        where: {
+          qqUin: BigInt(body.botQqUin),
+        },
+        select: {
+          id: true,
+        },
+      });
+      if (existingBot) {
+        return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
+      }
+    }
 
     const tenant = await prisma.$transaction(async (tx) => {
       const created = await tx.tenant.create({
