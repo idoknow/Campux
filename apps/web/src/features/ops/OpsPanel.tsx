@@ -77,6 +77,7 @@ export function OpsPanel() {
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
   const [userKeyword, setUserKeyword] = useState("");
+  const [userKeywordDraft, setUserKeywordDraft] = useState("");
   const [userTenantFilterId, setUserTenantFilterId] = useState("");
   const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>([]);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
@@ -495,12 +496,18 @@ export function OpsPanel() {
                 users={users}
                 loading={loadingUsers}
                 pagination={usersPagination}
-                keyword={userKeyword}
+                keyword={userKeywordDraft}
                 selectedRoleFilters={selectedUserRoleFilters}
                 selectedTenantFilterId={userTenantFilterId}
                 tenants={tenants}
-                onKeywordChange={(keyword) => {
-                  setUserKeyword(keyword);
+                onKeywordChange={setUserKeywordDraft}
+                onKeywordSearch={() => {
+                  setUserKeyword(userKeywordDraft);
+                  setUserPage(1);
+                }}
+                onKeywordClear={() => {
+                  setUserKeywordDraft("");
+                  setUserKeyword("");
                   setUserPage(1);
                 }}
                 onClearRoleFilters={() => {
@@ -618,6 +625,8 @@ function GlobalUsersTable({
   selectedTenantFilterId,
   tenants,
   onKeywordChange,
+  onKeywordClear,
+  onKeywordSearch,
   onClearRoleFilters,
   onTenantFilterChange,
   onOpenAssignMembership,
@@ -632,6 +641,8 @@ function GlobalUsersTable({
   selectedTenantFilterId: string;
   tenants: SystemTenant[];
   onKeywordChange: (keyword: string) => void;
+  onKeywordClear: () => void;
+  onKeywordSearch: () => void;
   onClearRoleFilters: () => void;
   onTenantFilterChange: (tenantId: string) => void;
   onOpenAssignMembership: (user: SystemUser) => void;
@@ -652,13 +663,22 @@ function GlobalUsersTable({
             placeholder="按 QQ 号或昵称搜索账号"
             value={keyword}
             onChange={(event) => onKeywordChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onKeywordSearch();
+              }
+            }}
           />
         </div>
         {keyword ? (
-          <Button variant="outline" size="sm" className="shrink-0" onClick={() => onKeywordChange("")}>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={onKeywordClear}>
             清除搜索
           </Button>
         ) : null}
+        <Button variant="outline" size="sm" className="shrink-0" onClick={onKeywordSearch}>
+          搜索
+        </Button>
       </div>
       <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
