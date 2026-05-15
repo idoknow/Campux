@@ -18,7 +18,7 @@ RUN bun run build
 FROM oven/bun:${BUN_VERSION}-alpine AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates chromium font-noto-cjk openssl
+RUN apk add --no-cache ca-certificates chromium font-noto-cjk font-noto-emoji openssl
 
 ENV NODE_ENV=production
 ENV CAMPUX_SERVER_HOST=0.0.0.0

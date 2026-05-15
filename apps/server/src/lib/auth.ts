@@ -10,6 +10,19 @@ const sessionMaxAgeSeconds = 60 * 60 * 24 * 7;
 export type SessionContext = Awaited<ReturnType<typeof getSessionContext>>;
 export type ActiveBanContext = Awaited<ReturnType<typeof findActiveBan>>;
 
+const tenantSummaryInclude = {
+  _count: {
+    select: {
+      botAccounts: true,
+      posts: {
+        where: {
+          status: "pending_approval" as const,
+        },
+      },
+    },
+  },
+};
+
 export function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -83,12 +96,16 @@ export async function getSessionContext(request: FastifyRequest) {
       tokenHash: hashToken(token),
     },
     include: {
-      selectedTenant: true,
+      selectedTenant: {
+        include: tenantSummaryInclude,
+      },
       user: {
         include: {
           memberships: {
             include: {
-              tenant: true,
+              tenant: {
+                include: tenantSummaryInclude,
+              },
             },
             orderBy: {
               createdAt: "asc",

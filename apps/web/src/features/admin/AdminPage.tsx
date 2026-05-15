@@ -780,7 +780,7 @@ function BansPanel({
                     </Badge>
                   </div>
                   <p className="mt-1 text-sm text-slate-600">{ban.comment}</p>
-                  <p className="text-xs text-slate-500">结束时间：{formatDateTime(ban.endsAt)}</p>
+                  <p className="text-xs text-slate-500">结束时间：{formatBanDateTime(ban.endsAt)}</p>
                 </div>
                 {ban.active ? (
                   <Button variant="outline" size="sm" onClick={() => onUnban(ban.id)}>
@@ -1624,6 +1624,20 @@ function formatDateTime(value: string) {
     return value;
   }
   return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatBanDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",

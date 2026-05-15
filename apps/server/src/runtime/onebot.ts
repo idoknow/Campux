@@ -151,8 +151,9 @@ export class OneBotRuntime {
     const images = Array.isArray(post.images) ? post.images : [];
     const imageCount = images.length;
     const lines = [
-      `${post.tenant.name} 新稿件 #${post.displayId}`,
-      `投稿人：${post.anonymous ? "匿名" : `${post.author.displayName ?? "未命名"}（${post.author.qqUin.toString()}）`}`,
+      `${post.tenant.name} 新稿件`,
+      `编号：#${post.displayId}`,
+      `投稿人：${post.anonymous ? `匿名（QQ ${post.author.qqUin.toString()}）` : `${post.author.displayName ?? "未命名"}（QQ ${post.author.qqUin.toString()}）`}`,
       `图片：${imageCount} 张`,
       "",
       post.text,

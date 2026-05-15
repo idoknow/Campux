@@ -84,6 +84,7 @@ export function PostsPage({
   const [reviewStatus, setReviewStatus] = useState("pending_approval");
   const [reviewKeyword, setReviewKeyword] = useState("");
   const [busyPostId, setBusyPostId] = useState("");
+  const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
     open: false,
     postId: "",
@@ -158,6 +159,21 @@ export function PostsPage({
     }
   }
 
+  async function cancelPost(id: string) {
+    setBusyCancelPostId(id);
+    try {
+      await api(`/api/posts/${id}/cancel`, {
+        method: "POST",
+      });
+      toast.success("已取消稿件，并通知审核群。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "取消失败");
+    } finally {
+      setBusyCancelPostId("");
+    }
+  }
+
   async function submitReject() {
     const reason = rejectDialog.reason.trim();
     if (!rejectDialog.postId || reason.length === 0) {
@@ -165,6 +181,14 @@ export function PostsPage({
       return;
     }
     await reviewPost(rejectDialog.postId, "reject", reason);
+    setRejectDialog({ open: false, postId: "", displayId: null, reason: "" });
+  }
+
+  async function rejectWithoutReason() {
+    if (!rejectDialog.postId) {
+      return;
+    }
+    await reviewPost(rejectDialog.postId, "reject", "无理由");
     setRejectDialog({ open: false, postId: "", displayId: null, reason: "" });
   }
 
@@ -224,7 +248,7 @@ export function PostsPage({
           </Button>
         </div>
         <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-          <PostList posts={posts} onPreview={(post) => void openRenderPreview(post)} />
+          <PostList posts={posts} busyCancelPostId={busyCancelPostId} onPreview={(post) => void openRenderPreview(post)} onCancel={(post) => void cancelPost(post.id)} />
         </TabsContent>
         {canReview ? (
           <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
@@ -300,6 +324,9 @@ export function PostsPage({
               <Button variant="outline" onClick={() => setRejectDialog({ open: false, postId: "", displayId: null, reason: "" })}>
                 取消
               </Button>
+              <Button variant="outline" disabled={busyPostId === rejectDialog.postId} onClick={() => void rejectWithoutReason()}>
+                无理由拒绝
+              </Button>
               <Button disabled={busyPostId === rejectDialog.postId || rejectDialog.reason.trim().length === 0} onClick={() => void submitReject()}>
                 确认拒绝
               </Button>
@@ -364,6 +391,7 @@ function ReviewCard({
   const authorName = post.author?.displayName ?? "未命名用户";
   const authorQq = post.author?.qqUin ?? "未知 QQ";
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
+  const canReviewPost = post.status === "pending_approval";
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
@@ -402,23 +430,35 @@ function ReviewCard({
             <span className="break-all">内部 ID：{shortId(post.id)}</span>
             <span>创建：{formatFullDateTime(post.createdAt)}</span>
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
-              <CheckIcon data-icon="inline-start" />
-              通过
-            </Button>
-            <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onReject}>
-              <XIcon data-icon="inline-start" />
-              拒绝
-            </Button>
-          </div>
+          {canReviewPost ? (
+            <div className="flex gap-2">
+              <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
+                <CheckIcon data-icon="inline-start" />
+                通过
+              </Button>
+              <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onReject}>
+                <XIcon data-icon="inline-start" />
+                拒绝
+              </Button>
+            </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function PostList({ posts, onPreview }: { posts: PostItem[]; onPreview: (post: PostItem) => void }) {
+function PostList({
+  posts,
+  busyCancelPostId,
+  onPreview,
+  onCancel,
+}: {
+  posts: PostItem[];
+  busyCancelPostId: string;
+  onPreview: (post: PostItem) => void;
+  onCancel: (post: PostItem) => void;
+}) {
   if (posts.length === 0) {
     return <EmptyCard title="还没有稿件，先去投一条吧" />;
   }
@@ -426,15 +466,35 @@ function PostList({ posts, onPreview }: { posts: PostItem[]; onPreview: (post: P
   return (
     <div className="flex flex-col gap-3">
       {posts.map((post, index) => (
-        <PostCard key={post.id} post={post} palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette} onPreview={() => onPreview(post)} />
+        <PostCard
+          key={post.id}
+          post={post}
+          palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
+          cancelBusy={busyCancelPostId === post.id}
+          onPreview={() => onPreview(post)}
+          onCancel={() => onCancel(post)}
+        />
       ))}
     </div>
   );
 }
 
-function PostCard({ post, palette, onPreview }: { post: PostItem; palette: string; onPreview: () => void }) {
+function PostCard({
+  post,
+  palette,
+  cancelBusy,
+  onPreview,
+  onCancel,
+}: {
+  post: PostItem;
+  palette: string;
+  cancelBusy: boolean;
+  onPreview: () => void;
+  onCancel: () => void;
+}) {
   const images = getPostImages(post.images);
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
+  const canCancel = post.status === "pending_approval";
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
@@ -447,7 +507,12 @@ function PostCard({ post, palette, onPreview }: { post: PostItem; palette: strin
           status={post.status}
           statusClassName={statusClassName}
           title={post.title || "未命名稿件"}
-          actions={<PreviewButton onClick={onPreview} />}
+          actions={
+            <>
+              <PreviewButton onClick={onPreview} />
+              {canCancel ? <CancelButton busy={cancelBusy} onClick={onCancel} /> : null}
+            </>
+          }
         />
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} />
@@ -511,6 +576,15 @@ function PreviewButton({ onClick }: { onClick: () => void }) {
     <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold" onClick={onClick}>
       <ImageIcon data-icon="inline-start" />
       预览图
+    </Button>
+  );
+}
+
+function CancelButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold text-red-700 hover:text-red-700" disabled={busy} onClick={onClick}>
+      <XIcon data-icon="inline-start" />
+      取消
     </Button>
   );
 }

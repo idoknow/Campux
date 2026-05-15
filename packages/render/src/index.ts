@@ -78,6 +78,14 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <style>
+    :root {
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+    }
+
+    body {
+      font-family: inherit;
+    }
+
     #nickname {
       font-weight: bold;
       font-size: 4.5rem;
@@ -86,7 +94,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
     }
 
     #words {
-      font-family: Microsoft Yahei;
+      font-family: inherit;
       font-size: 3.3rem;
       display: block;
       width: 65rem;
