@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { TenantRole } from "@campux/db";
+import { hashPassword, type TenantRole } from "@campux/db";
 import { hasTenantRole } from "./auth";
 import { writeAuditLog } from "./audit";
 import { prisma } from "./prisma";
@@ -47,7 +47,7 @@ export async function registerUserViaBot({
   });
   const existingMembership = existingUser?.memberships.find((membership) => membership.tenantId === bot.tenantId);
   const shouldSetPassword = !existingUser || resetExistingPassword;
-  const passwordHash = shouldSetPassword ? await Bun.password.hash(password) : null;
+  const passwordHash = shouldSetPassword ? await hashPassword(password) : null;
 
   const user = existingUser
     ? await prisma.user.update({
@@ -62,7 +62,7 @@ export async function registerUserViaBot({
     : await prisma.user.create({
         data: {
           qqUin: BigInt(userQqUin),
-          passwordHash: passwordHash ?? (await Bun.password.hash(password)),
+          passwordHash: passwordHash ?? (await hashPassword(password)),
           ...(displayName ? { displayName } : {}),
         },
       });
@@ -142,7 +142,7 @@ export async function resetPasswordViaBot({
       id: user.id,
     },
     data: {
-      passwordHash: await Bun.password.hash(password),
+      passwordHash: await hashPassword(password),
     },
   });
   await markBotSeen(bot.id);

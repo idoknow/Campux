@@ -65,7 +65,7 @@ const publishTextTemplateSchema = z.object({
 });
 
 const botPatchSchema = z.object({
-  displayName: z.string().min(1).max(80).optional(),
+  displayName: z.string().trim().min(1).max(80).optional(),
   enabled: z.boolean().optional(),
   reviewGroupId: z.string().trim().max(40).nullable().optional(),
   publishTextTemplate: publishTextTemplateSchema.optional(),
