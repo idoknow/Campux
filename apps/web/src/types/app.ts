@@ -40,6 +40,7 @@ export type MeResponse =
         qqUin: string;
         displayName: string | null;
         systemRole: "system_operator" | null;
+        passwordChangeRequired: boolean;
       };
       memberships: Membership[];
       currentTenant: TenantSummary | null;
@@ -246,6 +247,11 @@ export type AdminBotEvent = {
 
 export type TenantStats = {
   generatedAt: string;
+  range: {
+    days: number;
+    since: string;
+    until: string;
+  };
   overview: {
     totalPosts: number;
     recent7Posts: number;

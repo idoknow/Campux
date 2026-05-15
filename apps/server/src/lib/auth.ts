@@ -201,6 +201,10 @@ export async function requireTenantContext(request: FastifyRequest, reply: Fasti
     reply.code(403);
     throw new Error(`账号已被封禁：${context.activeBan.comment}`);
   }
+  if (context.user.passwordChangeRequired) {
+    reply.code(403);
+    throw new Error("请先修改初始密码");
+  }
 
   return {
     ...context,

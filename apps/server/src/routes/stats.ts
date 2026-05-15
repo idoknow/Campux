@@ -10,14 +10,16 @@ export function registerStatsRoutes(app: FastifyInstance) {
   app.get("/api/stats/tenant", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
     const tenantId = context.selectedTenant.id;
+    const rangeDays = parseRangeDays(request.query);
     const now = new Date();
     const since7 = new Date(now.getTime() - 7 * dayMs);
-    const since14 = new Date(now.getTime() - 14 * dayMs);
     const since30 = new Date(now.getTime() - 30 * dayMs);
+    const sinceRange = startOfDay(new Date(now.getTime() - (rangeDays - 1) * dayMs));
 
     const [
       posts,
-      recentPosts,
+      recentPosts30d,
+      rangePosts,
       postStatusGroups,
       memberRoleGroups,
       activeBanCount,
@@ -47,6 +49,21 @@ export function registerStatsRoutes(app: FastifyInstance) {
         where: {
           tenantId,
           createdAt: { gte: since30 },
+        },
+        select: {
+          id: true,
+          authorId: true,
+          status: true,
+          anonymous: true,
+          images: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.post.findMany({
+        where: {
+          tenantId,
+          createdAt: { gte: sinceRange },
         },
         select: {
           id: true,
@@ -134,7 +151,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
         where: {
           tenantId,
           newStatus: { in: ["approved", "rejected"] },
-          createdAt: { gte: since30 },
+          createdAt: { gte: sinceRange },
         },
         select: {
           postId: true,
@@ -147,7 +164,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
         by: ["action"],
         where: {
           tenantId,
-          createdAt: { gte: since30 },
+          createdAt: { gte: sinceRange },
         },
         _count: { _all: true },
       }),
@@ -169,7 +186,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
     }
 
     const totalPosts = posts.length;
-    const recent7Posts = recentPosts.filter((post) => post.createdAt >= since7);
+    const recent7Posts = recentPosts30d.filter((post) => post.createdAt >= since7);
     const reviewedLogs = reviewLogs.filter((log) => postById.has(log.postId));
     const reviewDurations = reviewedLogs
       .map((log) => {
@@ -183,7 +200,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
     const postsWithImages = posts.filter((post) => getImageCount(post.images) > 0).length;
     const anonymousPosts = posts.filter((post) => post.anonymous).length;
     const uniqueAuthors = new Set(posts.map((post) => post.authorId)).size;
-    const activeAuthors30d = new Set(recentPosts.map((post) => post.authorId)).size;
+    const activeAuthors30d = new Set(recentPosts30d.map((post) => post.authorId)).size;
 
     const publishStatusCounts = Object.fromEntries(publishAttemptStatuses.map((status) => [status, 0]));
     for (const group of publishAttemptGroups) {
@@ -223,10 +240,15 @@ export function registerStatsRoutes(app: FastifyInstance) {
 
     return {
       generatedAt: now.toISOString(),
+      range: {
+        days: rangeDays,
+        since: sinceRange.toISOString(),
+        until: now.toISOString(),
+      },
       overview: {
         totalPosts,
         recent7Posts: recent7Posts.length,
-        recent30Posts: recentPosts.length,
+        recent30Posts: recentPosts30d.length,
         uniqueAuthors,
         activeAuthors30d,
         anonymousPosts,
@@ -239,10 +261,10 @@ export function registerStatsRoutes(app: FastifyInstance) {
       },
       posts: {
         byStatus: statusCounts,
-        daily: buildDailySeries(recentPosts, since14, now),
-        userDaily: buildUserDailySeries(memberships, since14, now),
-        hourly: buildHourlySeries(recentPosts),
-        topAuthors30d: buildTopAuthors(recentPosts),
+        daily: buildDailySeries(rangePosts, sinceRange, now),
+        userDaily: buildUserDailySeries(memberships, sinceRange, now),
+        hourly: buildHourlySeries(rangePosts),
+        topAuthors30d: buildTopAuthors(rangePosts),
       },
       review: {
         reviewed30d: reviewedLogs.length,
@@ -306,6 +328,12 @@ export function registerStatsRoutes(app: FastifyInstance) {
 
 function getImageCount(images: unknown) {
   return Array.isArray(images) ? images.length : 0;
+}
+
+function parseRangeDays(query: unknown) {
+  const rawValue = query && typeof query === "object" && "days" in query ? (query as { days?: unknown }).days : undefined;
+  const value = typeof rawValue === "string" ? Number(rawValue) : typeof rawValue === "number" ? rawValue : 14;
+  return [7, 14, 30, 90].includes(value) ? value : 14;
 }
 
 function buildDailySeries(posts: Array<{ createdAt: Date; status: string }>, start: Date, end: Date) {
