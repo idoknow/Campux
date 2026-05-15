@@ -48,3 +48,68 @@ jobs:
           tags: ${{ steps.meta.outputs.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Redeploy production stack
+        if: github.ref == 'refs/heads/deploy/prod'
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_USERNAME: ${{ secrets.PORTAINER_USERNAME }}
+          PORTAINER_PASSWORD: ${{ secrets.PORTAINER_PASSWORD }}
+          PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+          PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
+          PORTAINER_REPOSITORY_USERNAME: ${{ secrets.PORTAINER_REPOSITORY_USERNAME }}
+          PORTAINER_REPOSITORY_PASSWORD: ${{ secrets.PORTAINER_REPOSITORY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${PORTAINER_URL:?PORTAINER_URL secret is required}"
+          : "${PORTAINER_USERNAME:?PORTAINER_USERNAME secret is required}"
+          : "${PORTAINER_PASSWORD:?PORTAINER_PASSWORD secret is required}"
+          : "${PORTAINER_REPOSITORY_USERNAME:?PORTAINER_REPOSITORY_USERNAME secret is required}"
+          : "${PORTAINER_REPOSITORY_PASSWORD:?PORTAINER_REPOSITORY_PASSWORD secret is required}"
+
+          stack_id="${PORTAINER_STACK_ID:-96}"
+          endpoint_id="${PORTAINER_ENDPOINT_ID:-10}"
+          portainer_url="${PORTAINER_URL%/}"
+
+          jwt="$(
+            jq -n \
+              --arg username "$PORTAINER_USERNAME" \
+              --arg password "$PORTAINER_PASSWORD" \
+              '{Username: $username, Password: $password}' \
+            | curl -fsS \
+                -X POST "$portainer_url/api/auth" \
+                -H 'Content-Type: application/json' \
+                --data-binary @- \
+            | jq -r '.jwt'
+          )"
+
+          if [ -z "$jwt" ] || [ "$jwt" = "null" ]; then
+            echo "Failed to authenticate to Portainer" >&2
+            exit 1
+          fi
+
+          jq -n \
+            --arg repositoryUsername "$PORTAINER_REPOSITORY_USERNAME" \
+            --arg repositoryPassword "$PORTAINER_REPOSITORY_PASSWORD" \
+            '{
+              env: [],
+              prune: false,
+              pullImage: true,
+              repositoryAuthentication: true,
+              repositoryUsername: $repositoryUsername,
+              repositoryPassword: $repositoryPassword,
+              repositoryReferenceName: "refs/heads/main"
+            }' \
+          | curl -fsS \
+              -X PUT "$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id" \
+              -H "Authorization: Bearer $jwt" \
+              -H 'Content-Type: application/json' \
+              --data-binary @-
+
+      - name: Check production health
+        if: github.ref == 'refs/heads/deploy/prod'
+        run: |
+          curl -fsS --retry 12 --retry-delay 5 --retry-all-errors \
+            https://campux-admin.idoknow.top/api/health
