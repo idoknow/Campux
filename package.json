@@ -21,7 +21,11 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
+    "prisma": "6.8.2",
     "typescript": "^5.8.3",
     "vitepress": "^1.6.4"
+  },
+  "dependencies": {
+    "@prisma/client": "6.8.2"
   }
 }

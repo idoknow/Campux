@@ -3,18 +3,20 @@ import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
 import { api, fileToBase64 } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
-import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { BannedScreen } from "@/features/auth/BannedScreen";
 import { RequiredPasswordChangeScreen } from "@/features/auth/RequiredPasswordChangeScreen";
 import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
+import { OAuthAuthorizeScreen } from "@/features/oauth/OAuthAuthorizeScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { AppShell } from "@/features/shell/AppShell";
 
 type AppRoute =
   | { kind: "tenant"; tab: MainTab; subTab?: AdminTab | PostsTab }
-  | { kind: "login" | "tenants" | "ops" };
+  | { kind: "login" | "tenants" | "ops" }
+  | { kind: "oauth"; search: string };
 
 const tabPaths: Record<MainTab, string> = {
   post: "/post",
@@ -67,6 +69,7 @@ export function App() {
     return initialRoute.kind === "tenant" ? initialRoute.tab : "post";
   });
   const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
+  const [oauthClientResponse, setOAuthClientResponse] = useState<OAuthAuthorizeClientResponse | null>(null);
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [postsPagination, setPostsPagination] = useState<Pagination>(() => defaultPagination());
   const [postsPage, setPostsPage] = useState(1);
@@ -94,7 +97,8 @@ export function App() {
 
   function navigate(nextRoute: AppRoute, mode: "push" | "replace" = "push") {
     const path = pathFromRoute(nextRoute);
-    if (window.location.pathname !== path) {
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    if (currentPath !== path) {
       window.history[mode === "replace" ? "replaceState" : "pushState"](null, "", path);
     }
     setRoute(nextRoute);
@@ -114,6 +118,38 @@ export function App() {
   function setAdminSubTab(tab: AdminTab) {
     navigate({ kind: "tenant", tab: "admin", subTab: tab });
   }
+
+  useEffect(() => {
+    if (route.kind !== "oauth" || !me?.authenticated || !me.currentTenant || !me.currentMembership) {
+      setOAuthClientResponse(null);
+      return;
+    }
+
+    const searchParams = new URLSearchParams(route.search);
+    const clientId = searchParams.get("client_id");
+    if (!clientId) {
+      setOAuthClientResponse(null);
+      return;
+    }
+
+    let ignore = false;
+    void api<OAuthAuthorizeClientResponse>(`/api/oauth/clients/${encodeURIComponent(clientId)}`)
+      .then((data) => {
+        if (!ignore) {
+          setOAuthClientResponse(data);
+        }
+      })
+      .catch((caught) => {
+        if (!ignore) {
+          setOAuthClientResponse(null);
+          toast.error(caught instanceof Error ? caught.message : "无法读取 OAuth 应用信息");
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [me, route]);
 
   async function refreshTenantData(page = postsPage) {
     if (!me?.authenticated || !me.currentTenant || me.activeBan) {
@@ -204,7 +240,7 @@ export function App() {
     }
 
     if (!me.authenticated) {
-      if (route.kind !== "login") {
+      if (route.kind !== "login" && route.kind !== "oauth") {
         navigate({ kind: "login" }, "replace");
       }
       return;
@@ -220,7 +256,7 @@ export function App() {
       return;
     }
 
-    if ((me.needsTenantSelection || !me.currentTenant || !me.currentMembership) && route.kind !== "tenants" && route.kind !== "ops") {
+    if ((me.needsTenantSelection || !me.currentTenant || !me.currentMembership) && route.kind !== "tenants" && route.kind !== "ops" && route.kind !== "oauth") {
       navigate({ kind: "tenants" }, "replace");
       return;
     }
@@ -242,6 +278,9 @@ export function App() {
     });
     setMe(data);
     if (data.authenticated) {
+      if (route.kind === "oauth") {
+        return;
+      }
       if (data.user.passwordChangeRequired) {
         navigate({ kind: "login" }, "replace");
         return;
@@ -286,6 +325,9 @@ export function App() {
       body: JSON.stringify({ tenantId }),
     });
     await refreshMe();
+    if (route.kind === "oauth") {
+      return;
+    }
     navigate({ kind: "tenant", tab: activeTab });
   }
 
@@ -390,6 +432,18 @@ export function App() {
     );
   }
 
+  if (route.kind === "oauth") {
+    return (
+      <OAuthAuthorizeScreen
+        me={me as AuthenticatedMe & { currentTenant: NonNullable<AuthenticatedMe["currentTenant"]>; currentMembership: NonNullable<AuthenticatedMe["currentMembership"]> }}
+        search={route.search}
+        clientResponse={oauthClientResponse}
+        onLogout={logout}
+        onRequireTenantSelection={() => navigate({ kind: "tenants" })}
+      />
+    );
+  }
+
   return (
     <AppShell
       activeTab={activeTab}
@@ -443,6 +497,9 @@ function routeFromPath(pathname: string): AppRoute {
   if (normalized === "/ops") {
     return { kind: "ops" };
   }
+  if (normalized === "/oauth/authorize") {
+    return { kind: "oauth", search: window.location.search };
+  }
 
   const matchedPostsTab = (Object.entries(postsTabPaths) as Array<[PostsTab, string]>).find(([, path]) => path === normalized)?.[0];
   if (matchedPostsTab) {
@@ -481,6 +538,9 @@ function pathFromRoute(route: AppRoute) {
     }
     return tabPaths[route.tab];
   }
+  if (route.kind === "oauth") {
+    return `/oauth/authorize${route.search}`;
+  }
   return `/${route.kind}`;
 }
 
@@ -507,6 +567,9 @@ function pageTitleFromRoute(route: AppRoute) {
   }
   if (route.kind === "ops") {
     return "运维面板";
+  }
+  if (route.kind === "oauth") {
+    return "OAuth 授权";
   }
   if (route.kind !== "tenant") {
     return "Campux";

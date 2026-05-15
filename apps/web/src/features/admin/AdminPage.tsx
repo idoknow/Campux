@@ -6,7 +6,7 @@ import { BotIcon, CopyIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, Sh
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,32 @@ type PublishTargetForm = {
   qzoneRefreshMode: "protocol" | "qr";
 };
 
+type OAuthClientForm = {
+  name: string;
+  description: string;
+  redirectUrisText: string;
+  scopesText: string;
+  enabled: boolean;
+  pkceRequired: boolean;
+};
+
+type OAuthClientSecretModal = {
+  open: boolean;
+  clientName: string;
+  clientId: string;
+  clientSecret: string;
+};
+
+const defaultOAuthSettings: OAuthServerSettings = {
+  enabled: false,
+  authorizationCodeTtlMinutes: 10,
+  accessTokenTtlMinutes: 24 * 60,
+  refreshTokenTtlDays: 30,
+  pkceRequired: true,
+  allowPlainPkce: false,
+  stateKey: null,
+};
+
 const DEFAULT_PUBLISH_INTERVAL_SECONDS = 10;
 
 type PublishTargetPatch = Partial<Pick<PublishTargetItem, "displayName" | "enabled" | "required" | "publishDelaySeconds" | "qzoneRefreshMode">>;
@@ -93,6 +119,8 @@ export function AdminPage({
   onSaved: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TenantSettingsForm>(() => toForm(selectedTenant, metadata));
+  const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
+  const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
   const [members, setMembers] = useState<AdminMember[]>([]);
   const [bots, setBots] = useState<AdminBotAccount[]>([]);
   const [botEvents, setBotEvents] = useState<AdminBotEvent[]>([]);
@@ -172,12 +200,14 @@ export function AdminPage({
   async function refreshAdminData() {
     setAdminLoading(true);
     try {
-      const [memberData, botData, targetData, attemptData, banData] = await Promise.all([
-      fetchMembers(memberPage),
-      api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
-      api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
-      api<{ attempts: PublishAttemptItem[] }>("/api/admin/publish-attempts?limit=20"),
-      fetchBanRecords(banPage),
+      const [memberData, botData, targetData, attemptData, banData, oauthSettingsData, oauthClientData] = await Promise.all([
+        fetchMembers(memberPage),
+        api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
+        api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
+        api<{ attempts: PublishAttemptItem[] }>("/api/admin/publish-attempts?limit=20"),
+        fetchBanRecords(banPage),
+        api<OAuthClientSettingsResponse>("/api/admin/oauth/settings"),
+        api<{ clients: OAuthClientItem[] }>("/api/admin/oauth/clients"),
       ]);
       setMembers(memberData.members);
       setMemberPagination(memberData.pagination);
@@ -187,6 +217,8 @@ export function AdminPage({
       setAttempts(attemptData.attempts);
       setBans(banData.bans);
       setBanPagination(banData.pagination);
+      setOAuthSettings(oauthSettingsData.settings);
+      setOAuthClients(oauthClientData.clients);
     } finally {
       setAdminLoading(false);
     }
@@ -260,6 +292,104 @@ export function AdminPage({
       toast.success("元数据已保存。");
     } catch (caught) {
       toast.error(caught instanceof SyntaxError ? "服务入口 JSON 格式不正确" : caught instanceof Error ? caught.message : "保存失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveOAuthSettings(nextSettings: OAuthServerSettings) {
+    setBusy(true);
+    try {
+      await api<OAuthClientSettingsResponse>("/api/admin/oauth/settings", {
+        method: "PATCH",
+        body: JSON.stringify(nextSettings),
+      });
+      await refreshAdminData();
+      toast.success("OAuth 设置已保存。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "保存 OAuth 设置失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createOAuthClient(form: OAuthClientForm) {
+    setBusy(true);
+    try {
+      const data = await api<OAuthClientSecretResponse>("/api/admin/oauth/clients", {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.name,
+          description: form.description.trim() || null,
+          redirectUris: form.redirectUrisText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+          scopes: form.scopesText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+          enabled: form.enabled,
+          pkceRequired: form.pkceRequired,
+        }),
+      });
+      await refreshAdminData();
+      toast.success("OAuth 应用已创建。");
+      return data;
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "创建 OAuth 应用失败");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateOAuthClient(id: string, form: OAuthClientForm) {
+    setBusy(true);
+    try {
+      const data = await api<{ client: OAuthClientItem }>(`/api/admin/oauth/clients/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: form.name,
+          description: form.description.trim() || null,
+          redirectUris: form.redirectUrisText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+          scopes: form.scopesText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+          enabled: form.enabled,
+          pkceRequired: form.pkceRequired,
+        }),
+      });
+      await refreshAdminData();
+      toast.success("OAuth 应用已更新。");
+      return data;
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "更新 OAuth 应用失败");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rotateOAuthClientSecret(id: string) {
+    setBusy(true);
+    try {
+      const data = await api<OAuthClientSecretResponse>(`/api/admin/oauth/clients/${id}/secret`, {
+        method: "POST",
+      });
+      await refreshAdminData();
+      toast.success("OAuth 密钥已重置。");
+      return data;
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "重置 OAuth 密钥失败");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteOAuthClient(id: string) {
+    setBusy(true);
+    try {
+      await api(`/api/admin/oauth/clients/${id}`, {
+        method: "DELETE",
+      });
+      await refreshAdminData();
+      toast.success("OAuth 应用已删除。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "删除 OAuth 应用失败");
     } finally {
       setBusy(false);
     }
@@ -614,7 +744,20 @@ export function AdminPage({
             </TabsContent>
 
             <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-              <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} />
+              <div className="flex flex-col gap-4">
+                <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} />
+                <OAuthPanel
+                  settings={oauthSettings}
+                  clients={oauthClients}
+                  busy={busy}
+                  loading={adminLoading}
+                  onSaveSettings={saveOAuthSettings}
+                  onCreateClient={(clientForm) => createOAuthClient(clientForm)}
+                  onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
+                  onRotateSecret={(id) => rotateOAuthClientSecret(id)}
+                  onDeleteClient={(id) => deleteOAuthClient(id)}
+                />
+              </div>
             </TabsContent>
 
             <TabsContent value="bots" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
@@ -955,6 +1098,292 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
           <SaveIcon data-icon="inline-start" />
           保存元数据
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OAuthPanel({
+  settings,
+  clients,
+  busy,
+  loading,
+  onSaveSettings,
+  onCreateClient,
+  onUpdateClient,
+  onRotateSecret,
+  onDeleteClient,
+}: {
+  settings: OAuthServerSettings;
+  clients: OAuthClientItem[];
+  busy: boolean;
+  loading: boolean;
+  onSaveSettings: (settings: OAuthServerSettings) => Promise<void>;
+  onCreateClient: (form: OAuthClientForm) => Promise<OAuthClientSecretResponse | null>;
+  onUpdateClient: (id: string, form: OAuthClientForm) => Promise<{ client: OAuthClientItem } | null>;
+  onRotateSecret: (id: string) => Promise<OAuthClientSecretResponse | null>;
+  onDeleteClient: (id: string) => Promise<void>;
+}) {
+  const [settingsForm, setSettingsForm] = useState<OAuthServerSettings>(settings);
+  const [clientDialogOpen, setClientDialogOpen] = useState(false);
+  const [editingClient, setEditingClient] = useState<OAuthClientItem | null>(null);
+  const [clientForm, setClientForm] = useState<OAuthClientForm>(() => defaultOAuthClientForm());
+  const [secretModal, setSecretModal] = useState<OAuthClientSecretModal>({ open: false, clientId: "", clientName: "", clientSecret: "" });
+
+  useEffect(() => {
+    setSettingsForm(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    if (!clientDialogOpen) {
+      setEditingClient(null);
+      setClientForm(defaultOAuthClientForm());
+    }
+  }, [clientDialogOpen]);
+
+  function openCreateDialog() {
+    setEditingClient(null);
+    setClientForm(defaultOAuthClientForm());
+    setClientDialogOpen(true);
+  }
+
+  function openEditDialog(client: OAuthClientItem) {
+    setEditingClient(client);
+    setClientForm(oauthClientToForm(client));
+    setClientDialogOpen(true);
+  }
+
+  async function saveClient() {
+    const payload = {
+      ...clientForm,
+      description: clientForm.description.trim(),
+    };
+
+    if (editingClient) {
+      const result = await onUpdateClient(editingClient.id, payload);
+      if (result) {
+        setClientDialogOpen(false);
+      }
+      return;
+    }
+
+    const created = await onCreateClient(payload);
+    if (created) {
+      setClientDialogOpen(false);
+      setSecretModal({ open: true, clientId: created.client.id, clientName: created.client.name, clientSecret: created.clientSecret });
+    }
+  }
+
+  async function rotateSecret(client: OAuthClientItem) {
+    const rotated = await onRotateSecret(client.id);
+    if (rotated) {
+      setSecretModal({ open: true, clientId: rotated.client.id, clientName: rotated.client.name, clientSecret: rotated.clientSecret });
+    }
+  }
+
+  async function copySecret() {
+    await navigator.clipboard.writeText(secretModal.clientSecret);
+    toast.success("密钥已复制。");
+  }
+
+  return (
+    <Card className="rounded-md border-slate-200 bg-white shadow-none">
+      <CardContent className="p-4">
+        <PanelTitle
+          icon={ShieldCheckIcon}
+          title="OAuth 服务"
+          description="管理授权服务器开关、令牌生命周期和 OAuth 应用"
+          color="product-accent-violet"
+          action={
+            <Button variant="outline" size="sm" onClick={openCreateDialog} disabled={busy}>
+              新建应用
+            </Button>
+          }
+        />
+
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">OAuth 服务器设置</p>
+              <p className="mt-1 text-xs text-slate-500">控制是否允许授权、令牌和 PKCE 行为。</p>
+            </div>
+            <Badge className={`rounded-full shadow-none ${settingsForm.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>
+              {settingsForm.enabled ? "已启用" : "已停用"}
+            </Badge>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1 text-sm font-medium">
+              <span className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={settingsForm.enabled} onChange={(event) => setSettingsForm({ ...settingsForm, enabled: event.target.checked })} />
+                启用 OAuth 服务
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              授权码有效期（分钟）
+              <Input type="number" min={1} max={1440} value={settingsForm.authorizationCodeTtlMinutes} onChange={(event) => setSettingsForm({ ...settingsForm, authorizationCodeTtlMinutes: Number(event.target.value) || 0 })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Access Token 有效期（分钟）
+              <Input type="number" min={5} max={10080} value={settingsForm.accessTokenTtlMinutes} onChange={(event) => setSettingsForm({ ...settingsForm, accessTokenTtlMinutes: Number(event.target.value) || 0 })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Refresh Token 有效期（天）
+              <Input type="number" min={1} max={3650} value={settingsForm.refreshTokenTtlDays} onChange={(event) => setSettingsForm({ ...settingsForm, refreshTokenTtlDays: Number(event.target.value) || 0 })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium md:col-span-2">
+              <span className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={settingsForm.pkceRequired} onChange={(event) => setSettingsForm({ ...settingsForm, pkceRequired: event.target.checked })} />
+                强制 PKCE
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm font-medium md:col-span-2">
+              <span className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={settingsForm.allowPlainPkce} onChange={(event) => setSettingsForm({ ...settingsForm, allowPlainPkce: event.target.checked })} />
+                允许 plain PKCE（不推荐）
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm font-medium md:col-span-2">
+              <span className="inline-flex items-center gap-2">
+                OAuth 状态加密密钥（可选）
+              </span>
+              <div className="flex gap-2">
+                <Input className="font-mono" value={settingsForm.stateKey ?? ""} onChange={(event) => setSettingsForm({ ...settingsForm, stateKey: event.target.value || null })} />
+                <Button size="sm" onClick={() => {
+                  const arr = new Uint8Array(32);
+                  crypto.getRandomValues(arr);
+                  const bin = String.fromCharCode(...Array.from(arr));
+                  const b64 = btoa(bin);
+                  setSettingsForm((s) => ({ ...s, stateKey: b64 }));
+                  toast.success("已生成 stateKey，请保存设置。");
+                }}>
+                  生成密钥
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setSettingsForm((s) => ({ ...s, stateKey: null }))}>
+                  清除
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">用于可选地加密/解密 `state` 参数（Base64，32 字节）。</p>
+            </label>
+          </div>
+          <Button className="mt-4 px-5 font-medium" disabled={busy} onClick={() => void onSaveSettings(settingsForm)}>
+            保存 OAuth 设置
+          </Button>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-950">OAuth 应用</p>
+            <p className="mt-1 text-xs text-slate-500">注册第三方应用，保存后只展示一次密钥。</p>
+          </div>
+          <span className="text-xs font-medium text-slate-500">共 {clients.length} 个应用</span>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-2">
+          {loading ? <LoadingBlock title="正在加载 OAuth 应用..." /> : null}
+          {!loading && clients.length === 0 ? <EmptyCard title="暂无 OAuth 应用" /> : null}
+          {!loading && clients.map((client) => (
+            <div key={client.id} className="product-row-card flex flex-col gap-3 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-semibold text-slate-950">{client.name}</p>
+                    <Badge className={`rounded-full shadow-none ${client.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>
+                      {client.enabled ? "启用" : "停用"}
+                    </Badge>
+                    {client.pkceRequired ? <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none">PKCE</Badge> : null}
+                  </div>
+                  <p className="mt-1 break-all text-xs font-mono text-slate-500">Client ID: {client.clientId}</p>
+                  {client.description ? <p className="mt-1 text-sm text-slate-600">{client.description}</p> : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => openEditDialog(client)}>编辑</Button>
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => void rotateSecret(client)}>重置密钥</Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      if (!window.confirm(`确定要删除 OAuth 应用“${client.name}”吗？`)) {
+                        return;
+                      }
+                      void onDeleteClient(client.id);
+                    }}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-3 text-xs text-slate-500 md:grid-cols-2">
+                <div>
+                  <p className="font-medium text-slate-500">回调地址</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words font-mono text-slate-600">{client.redirectUris.join("\n")}</p>
+                </div>
+                <div>
+                  <p className="font-medium text-slate-500">Scopes</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words font-mono text-slate-600">{client.scopes.join("\n")}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
+          <DialogContent className="w-[min(720px,calc(100vw-32px))]">
+            <DialogHeader>
+              <DialogTitle>{editingClient ? "编辑 OAuth 应用" : "新建 OAuth 应用"}</DialogTitle>
+              <DialogDescription>填写应用信息、回调地址和允许的权限范围。</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3 px-5 pb-5 md:grid-cols-2">
+              <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                应用名称
+                <Input value={clientForm.name} onChange={(event) => setClientForm({ ...clientForm, name: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                应用说明
+                <Input value={clientForm.description} onChange={(event) => setClientForm({ ...clientForm, description: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                回调地址，每行一个
+                <Textarea className="min-h-28" value={clientForm.redirectUrisText} onChange={(event) => setClientForm({ ...clientForm, redirectUrisText: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                允许的 Scope，每行一个
+                <Textarea className="min-h-28" value={clientForm.scopesText} onChange={(event) => setClientForm({ ...clientForm, scopesText: event.target.value })} />
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" checked={clientForm.enabled} onChange={(event) => setClientForm({ ...clientForm, enabled: event.target.checked })} />
+                启用应用
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" checked={clientForm.pkceRequired} onChange={(event) => setClientForm({ ...clientForm, pkceRequired: event.target.checked })} />
+                强制 PKCE
+              </label>
+              <div className="md:col-span-2 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setClientDialogOpen(false)}>取消</Button>
+                <Button disabled={busy || !clientForm.name.trim() || !clientForm.redirectUrisText.trim()} onClick={() => void saveClient()}>
+                  {editingClient ? "保存应用" : "创建应用"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={secretModal.open} onOpenChange={(open) => setSecretModal((current) => ({ ...current, open }))}>
+          <DialogContent className="w-[min(720px,calc(100vw-32px))]">
+            <DialogHeader>
+              <DialogTitle>{secretModal.clientName} 的密钥</DialogTitle>
+              <DialogDescription>这个密钥只会完整显示一次，请尽快保存到你的应用配置中。</DialogDescription>
+            </DialogHeader>
+            <div className="px-5 pb-5">
+              <Textarea readOnly value={secretModal.clientSecret} className="min-h-24 resize-none bg-slate-50 font-mono text-xs" />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void copySecret()} disabled={!secretModal.clientSecret}>
+                  复制密钥
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
@@ -1775,6 +2204,28 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     banner: metadata.banner,
     postRulesText: metadata.postRules.join("\n"),
     servicesText: JSON.stringify(metadata.services, null, 2),
+  };
+}
+
+function defaultOAuthClientForm(): OAuthClientForm {
+  return {
+    name: "",
+    description: "",
+    redirectUrisText: "",
+    scopesText: "profile",
+    enabled: true,
+    pkceRequired: true,
+  };
+}
+
+function oauthClientToForm(client: OAuthClientItem): OAuthClientForm {
+  return {
+    name: client.name,
+    description: client.description ?? "",
+    redirectUrisText: client.redirectUris.join("\n"),
+    scopesText: client.scopes.join("\n"),
+    enabled: client.enabled,
+    pkceRequired: client.pkceRequired,
   };
 }
 
