@@ -1,8 +1,9 @@
 import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "./password";
 
 const prisma = new PrismaClient();
 
-const passwordHash = await Bun.password.hash("campux123");
+const passwordHash = await hashPassword("campux123");
 
 const tenants = [
   {

@@ -55,6 +55,8 @@ type PublishTargetForm = {
 
 const DEFAULT_PUBLISH_INTERVAL_SECONDS = 300;
 
+type PublishTargetPatch = Partial<Pick<PublishTargetItem, "displayName" | "enabled" | "required" | "publishDelaySeconds" | "qzoneRefreshMode">>;
+
 type QZoneLoginState = {
   open: boolean;
   botId: string;
@@ -312,6 +314,22 @@ export function AdminPage({
     }
   }
 
+  async function updateBotConfig(botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId">>) {
+    setBusy(true);
+    try {
+      await api(`/api/admin/bots/${botId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      toast.success("机器人配置已保存。");
+      await refreshAdminData();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "保存机器人配置失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveBotPublishTemplate(botId: string, publishTextTemplate: PublishTextTemplate) {
     setBusy(true);
     try {
@@ -329,19 +347,23 @@ export function AdminPage({
   }
 
   async function toggleTarget(target: PublishTargetItem) {
-    await api(`/api/admin/publish-targets/${target.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled: !target.enabled }),
-    });
-    await refreshAdminData();
+    await patchTarget(target, { enabled: !target.enabled });
   }
 
-  async function patchTarget(target: PublishTargetItem, patch: Partial<Pick<PublishTargetItem, "enabled" | "required" | "publishDelaySeconds" | "qzoneRefreshMode">>) {
-    await api(`/api/admin/publish-targets/${target.id}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    });
-    await refreshAdminData();
+  async function patchTarget(target: PublishTargetItem, patch: PublishTargetPatch) {
+    setBusy(true);
+    try {
+      await api(`/api/admin/publish-targets/${target.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      toast.success("发布目标配置已保存。");
+      await refreshAdminData();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "保存发布目标失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function addPublishTarget() {
@@ -526,6 +548,7 @@ export function AdminPage({
                 onFormChange={setBotForm}
                 onAdd={() => void addBot()}
                 onDelete={(id) => void deleteBot(id)}
+                onUpdateConfig={(botId, patch) => void updateBotConfig(botId, patch)}
                 onSaveTemplate={(botId, template) => void saveBotPublishTemplate(botId, template)}
                 onRefresh={() => void refreshAdminData()}
                 onRefreshQZone={(botId, mode) => void refreshQZoneCookies(botId, mode)}
@@ -832,6 +855,7 @@ function BotsPanel({
   onFormChange,
   onAdd,
   onDelete,
+  onUpdateConfig,
   onSaveTemplate,
   onRefresh,
   onRefreshQZone,
@@ -845,6 +869,7 @@ function BotsPanel({
   onFormChange: (form: BotForm) => void;
   onAdd: () => void;
   onDelete: (id: string) => void;
+  onUpdateConfig: (botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId">>) => void;
   onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
   onRefresh: () => void;
   onRefreshQZone: (botId: string, mode: "protocol" | "qr") => void;
@@ -906,6 +931,7 @@ function BotsPanel({
                   <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
                 </div>
 
+                <BotConfigEditor bot={bot} busy={busy} onSave={(patch) => onUpdateConfig(bot.id, patch)} />
                 <OneBotConnectionBox bot={bot} />
 
                 <div className="product-subsection mt-3 p-2">
@@ -985,6 +1011,63 @@ function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
       <p className="mt-1 text-xs font-semibold text-slate-500">
         每个机器人都有独立 token，协议端用这个地址连接后会自动归属到当前校园墙。
       </p>
+    </div>
+  );
+}
+
+function BotConfigEditor({
+  bot,
+  busy,
+  onSave,
+}: {
+  bot: AdminBotAccount;
+  busy: boolean;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId">>) => void;
+}) {
+  const [displayName, setDisplayName] = useState(bot.displayName);
+  const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
+  const [enabled, setEnabled] = useState(bot.enabled);
+
+  useEffect(() => {
+    setDisplayName(bot.displayName);
+    setReviewGroupId(bot.reviewGroupId ?? "");
+    setEnabled(bot.enabled);
+  }, [bot.displayName, bot.reviewGroupId, bot.enabled]);
+
+  const trimmedDisplayName = displayName.trim();
+  const trimmedReviewGroupId = reviewGroupId.trim();
+  const changed = trimmedDisplayName !== bot.displayName || trimmedReviewGroupId !== (bot.reviewGroupId ?? "") || enabled !== bot.enabled;
+
+  return (
+    <div className="product-subsection mt-3 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">基础配置</p>
+          <p className="mt-0.5 text-xs text-slate-400">修改机器人显示名、审核群和启用状态。</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !trimmedDisplayName || !changed}
+          onClick={() =>
+            onSave({
+              displayName: trimmedDisplayName,
+              reviewGroupId: trimmedReviewGroupId || null,
+              enabled,
+            })
+          }
+        >
+          保存配置
+        </Button>
+      </div>
+      <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <Input className="bg-white" placeholder="显示名" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <Input className="bg-white" placeholder="审核群号，可留空" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600">
+          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+          启用
+        </label>
+      </div>
     </div>
   );
 }
@@ -1073,7 +1156,7 @@ function PublishPanel({
   onFormChange: (form: PublishTargetForm) => void;
   onAdd: () => void;
   onToggleTarget: (target: PublishTargetItem) => void;
-  onPatchTarget: (target: PublishTargetItem, patch: Partial<Pick<PublishTargetItem, "enabled" | "required" | "publishDelaySeconds" | "qzoneRefreshMode">>) => void;
+  onPatchTarget: (target: PublishTargetItem, patch: PublishTargetPatch) => void;
   onRefreshQZone: (botId: string, mode: "protocol" | "qr") => void;
   onCheckQZone: (botId: string) => void;
   onViewCookies: (botId: string) => void;
@@ -1153,6 +1236,7 @@ function PublishPanel({
                     <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
                     <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测 QZone cookies 可用性"}</p>
                   </div>
+                  <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button variant={target.enabled ? "secondary" : "outline"} size="sm" onClick={() => onToggleTarget(target)}>
                       {target.enabled ? "启用中" : "已停用"}
@@ -1242,6 +1326,91 @@ function PublishPanel({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PublishTargetConfigEditor({
+  target,
+  busy,
+  onSave,
+}: {
+  target: PublishTargetItem;
+  busy: boolean;
+  onSave: (patch: PublishTargetPatch) => void;
+}) {
+  const [displayName, setDisplayName] = useState(target.displayName);
+  const [enabled, setEnabled] = useState(target.enabled);
+  const [required, setRequired] = useState(target.required);
+  const [publishDelaySeconds, setPublishDelaySeconds] = useState(String(Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)));
+  const [qzoneRefreshMode, setQzoneRefreshMode] = useState<"protocol" | "qr">(target.qzoneRefreshMode);
+
+  useEffect(() => {
+    setDisplayName(target.displayName);
+    setEnabled(target.enabled);
+    setRequired(target.required);
+    setPublishDelaySeconds(String(Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)));
+    setQzoneRefreshMode(target.qzoneRefreshMode);
+  }, [target.displayName, target.enabled, target.required, target.publishDelaySeconds, target.qzoneRefreshMode]);
+
+  const normalizedDelay = Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), DEFAULT_PUBLISH_INTERVAL_SECONDS);
+  const normalizedName = displayName.trim();
+  const changed = normalizedName !== target.displayName
+    || enabled !== target.enabled
+    || required !== target.required
+    || normalizedDelay !== Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)
+    || qzoneRefreshMode !== target.qzoneRefreshMode;
+
+  return (
+    <div className="product-subsection mt-3 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">目标配置</p>
+          <p className="mt-0.5 text-xs text-slate-400">调整这个发布目标的名称、启用状态、风控间隔和登录刷新方式。</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !changed || normalizedName.length === 0}
+          onClick={() => onSave({
+            displayName: normalizedName,
+            enabled,
+            required,
+            publishDelaySeconds: normalizedDelay,
+            qzoneRefreshMode,
+          })}
+        >
+          <SaveIcon data-icon="inline-start" />
+          保存配置
+        </Button>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_180px]">
+        <Input className="bg-white" placeholder="发布目标名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <Input
+          className="bg-white"
+          inputMode="numeric"
+          placeholder="风控间隔秒"
+          value={publishDelaySeconds}
+          onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
+        />
+        <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
+          <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="protocol">协议自动获取 cookies</SelectItem>
+            <SelectItem value="qr">扫码登录刷新 cookies</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+          启用这个发布目标
+        </label>
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+          <input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} />
+          失败时阻塞稿件完成
+        </label>
+      </div>
+    </div>
   );
 }
 

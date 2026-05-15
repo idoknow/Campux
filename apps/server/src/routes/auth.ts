@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { CampuxConfig } from "@campux/config";
+import { hashPassword, verifyPassword } from "@campux/db";
 import { z } from "zod";
 import { clearSessionCookie, createSession, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { prisma } from "../lib/prisma";
@@ -51,7 +52,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       },
     });
 
-    if (!user || !(await Bun.password.verify(body.password, user.passwordHash))) {
+    if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
       return reply.code(401).send({
         message: "账号或密码错误",
       });
@@ -123,7 +124,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       },
     });
 
-    if (!(await Bun.password.verify(body.currentPassword, user.passwordHash))) {
+    if (!(await verifyPassword(body.currentPassword, user.passwordHash))) {
       return reply.code(401).send({ message: "当前密码不正确" });
     }
 
@@ -132,7 +133,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         id: user.id,
       },
       data: {
-        passwordHash: await Bun.password.hash(body.newPassword),
+        passwordHash: await hashPassword(body.newPassword),
       },
     });
 
