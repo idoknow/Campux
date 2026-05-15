@@ -194,6 +194,7 @@ export type AdminBotAccount = {
   publishTextTemplate: PublishTextTemplate;
   userMessageReply: string;
   userMessageReplyCooldownSeconds: number;
+  reviewGroupMessageReply: string;
   lastSeenAt: string | null;
   createdAt: string;
   connection: {
