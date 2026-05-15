@@ -37,6 +37,13 @@ type BotForm = {
   createPublishTarget: boolean;
 };
 
+type PublishTargetForm = {
+  botAccountId: string;
+  displayName: string;
+  publishDelaySeconds: string;
+  required: boolean;
+};
+
 const managementTabsListClassName = "product-tabs-list";
 const managementTabsTriggerClassName = "product-tabs-trigger after:hidden";
 
@@ -69,6 +76,7 @@ export function AdminPage({
   const [onlyActiveBans, setOnlyActiveBans] = useState(true);
   const [banForm, setBanForm] = useState<BanForm>(() => defaultBanForm());
   const [botForm, setBotForm] = useState<BotForm>(() => defaultBotForm());
+  const [targetForm, setTargetForm] = useState<PublishTargetForm>(() => defaultPublishTargetForm());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -113,16 +121,18 @@ export function AdminPage({
       return;
     }
 
-    const [memberData, botData, targetData, banData] = await Promise.all([
+    const [memberData, botData, targetData, attemptData, banData] = await Promise.all([
       api<{ members: AdminMember[] }>("/api/admin/members"),
       api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
       api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
+      api<{ attempts: PublishAttemptItem[] }>("/api/admin/publish-attempts?limit=20"),
       fetchBanRecords(),
     ]);
     setMembers(memberData.members);
     setBots(botData.bots);
     setBotEvents(botData.events);
     setTargets(targetData.targets);
+    setAttempts(attemptData.attempts);
     setBans(banData.bans);
   }
 
@@ -275,11 +285,49 @@ export function AdminPage({
     await refreshAdminData();
   }
 
+  async function patchTarget(target: PublishTargetItem, patch: Partial<Pick<PublishTargetItem, "enabled" | "required" | "publishDelaySeconds">>) {
+    await api(`/api/admin/publish-targets/${target.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    await refreshAdminData();
+  }
+
+  async function addPublishTarget() {
+    const botAccountId = targetForm.botAccountId || bots[0]?.id;
+    if (!botAccountId) {
+      setError("需要先添加机器人。");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/api/admin/publish-targets", {
+        method: "POST",
+        body: JSON.stringify({
+          botAccountId,
+          displayName: targetForm.displayName.trim(),
+          required: targetForm.required,
+          publishDelaySeconds: Number(targetForm.publishDelaySeconds || 0),
+        }),
+      });
+      setTargetForm(defaultPublishTargetForm());
+      setNotice("发布目标已添加。");
+      await refreshAdminData();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "添加发布目标失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retryAttempt(id: string) {
     await api(`/api/admin/publish-attempts/${id}/retry`, {
       method: "POST",
     });
-    setAttempts((current) => current.map((attempt) => (attempt.id === id ? { ...attempt, status: "queued", lastError: null } : attempt)));
+    await refreshAdminData();
   }
 
   return (
@@ -369,7 +417,18 @@ export function AdminPage({
             </TabsContent>
 
             <TabsContent value="publish" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-              <PublishPanel targets={targets} attempts={attempts} onToggleTarget={(target) => void toggleTarget(target)} onRetry={(id) => void retryAttempt(id)} />
+              <PublishPanel
+                targets={targets}
+                attempts={attempts}
+                bots={bots}
+                form={targetForm}
+                busy={busy}
+                onFormChange={setTargetForm}
+                onAdd={() => void addPublishTarget()}
+                onToggleTarget={(target) => void toggleTarget(target)}
+                onPatchTarget={(target, patch) => void patchTarget(target, patch)}
+                onRetry={(id) => void retryAttempt(id)}
+              />
             </TabsContent>
           </>
         ) : null}
@@ -733,52 +792,130 @@ function BotMetric({ label, value, icon: Icon }: { label: string; value: string;
 function PublishPanel({
   targets,
   attempts,
+  bots,
+  form,
+  busy,
+  onFormChange,
+  onAdd,
   onToggleTarget,
+  onPatchTarget,
   onRetry,
 }: {
   targets: PublishTargetItem[];
   attempts: PublishAttemptItem[];
+  bots: AdminBotAccount[];
+  form: PublishTargetForm;
+  busy: boolean;
+  onFormChange: (form: PublishTargetForm) => void;
+  onAdd: () => void;
   onToggleTarget: (target: PublishTargetItem) => void;
+  onPatchTarget: (target: PublishTargetItem, patch: Partial<Pick<PublishTargetItem, "enabled" | "required" | "publishDelaySeconds">>) => void;
   onRetry: (id: string) => void;
 }) {
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
         <PanelTitle icon={ShieldCheckIcon} title="发布目标" description="管理墙号发布目标和失败重试" color="product-accent-rose" />
-        <div className="mt-3 flex flex-col gap-2">
-          {targets.map((target) => (
-            <div key={target.id} className="product-row-card p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="font-semibold">{target.displayName}</p>
-                  <p className="text-xs text-slate-500">{target.botAccount.displayName} · {target.botAccount.qqUin}</p>
-                </div>
-                <Button variant={target.enabled ? "secondary" : "outline"} size="sm" onClick={() => onToggleTarget(target)}>
-                  {target.enabled ? "启用中" : "已停用"}
-                </Button>
-              </div>
-            </div>
-          ))}
+
+        <div className="product-subsection mt-4 grid gap-2 p-3 md:grid-cols-[1fr_1fr_120px_auto]">
+          <select
+            className="h-10 rounded-md border border-slate-200 bg-white px-2 text-sm font-bold"
+            value={form.botAccountId}
+            onChange={(event) => onFormChange({ ...form, botAccountId: event.target.value })}
+          >
+            <option value="">选择机器人</option>
+            {bots.map((bot) => (
+              <option key={bot.id} value={bot.id}>
+                {bot.displayName} · {bot.qqUin}
+              </option>
+            ))}
+          </select>
+          <Input placeholder="目标名称，例如 1 号墙 QZone" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+          <Input
+            inputMode="numeric"
+            placeholder="延迟秒"
+            value={form.publishDelaySeconds}
+            onChange={(event) => onFormChange({ ...form, publishDelaySeconds: event.target.value.replace(/\D/g, "") })}
+          />
+          <Button className="font-medium" disabled={busy || bots.length === 0 || form.displayName.trim().length === 0} onClick={onAdd}>
+            <PlusIcon data-icon="inline-start" />
+            添加
+          </Button>
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 md:col-span-4">
+            <input type="checkbox" checked={form.required} onChange={(event) => onFormChange({ ...form, required: event.target.checked })} />
+            作为必需发布目标，失败时阻塞稿件完成
+          </label>
         </div>
-        {attempts.length > 0 ? (
-          <div className="product-subsection mt-4 p-3">
-            <p className="font-semibold">最近发布详情</p>
+
+        <div className="mt-3 flex flex-col gap-2">
+          {targets.length === 0 ? (
+            <EmptyCard title="还没有发布目标，添加后审核通过的稿件会自动进入发布队列" />
+          ) : (
+            targets.map((target) => (
+              <div key={target.id} className="product-row-card p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold">{target.displayName}</p>
+                      <Badge className={`rounded-full shadow-none ${target.required ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200" : "bg-slate-100 text-slate-600"}`}>
+                        {target.required ? "必需" : "可选"}
+                      </Badge>
+                      <Badge className={`rounded-full shadow-none ${target.botAccount.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>
+                        {target.botAccount.enabled ? "Bot 启用" : "Bot 停用"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {target.botAccount.displayName} · QQ {target.botAccount.qqUin} · 延迟 {target.publishDelaySeconds}s
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant={target.enabled ? "secondary" : "outline"} size="sm" onClick={() => onToggleTarget(target)}>
+                      {target.enabled ? "启用中" : "已停用"}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { required: !target.required })}>
+                      {target.required ? "改为可选" : "设为必需"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="product-subsection mt-4 p-3">
+          <p className="font-semibold">最近发布详情</p>
+          {attempts.length === 0 ? (
+            <p className="mt-2 text-sm font-bold text-slate-500">还没有发布记录。</p>
+          ) : (
             <div className="mt-2 flex flex-col gap-2">
               {attempts.map((attempt) => (
-                <div key={attempt.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span>{attempt.publishTarget.displayName}</span>
-                  <span className="font-bold">{statusLabels[attempt.status] ?? attempt.status}</span>
-                  {attempt.status === "failed" ? (
-                    <Button size="sm" variant="outline" onClick={() => onRetry(attempt.id)}>
-                      <RotateCcwIcon data-icon="inline-start" />
-                      重试
-                    </Button>
-                  ) : null}
+                <div key={attempt.id} className="product-row-card p-3 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{attempt.publishTarget.displayName}</span>
+                        <Badge className={`rounded-full shadow-none ${publishAttemptBadgeClass(attempt.status)}`}>{statusLabels[attempt.status] ?? attempt.status}</Badge>
+                        <span className="text-xs font-bold text-slate-500">第 {attempt.attempt} 次</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {attempt.publishTarget.botAccount.displayName} · QQ {attempt.publishTarget.botAccount.qqUin} · 更新 {formatDateTime(attempt.updatedAt)}
+                      </p>
+                      {attempt.externalId ? <p className="mt-1 break-all text-xs font-bold text-slate-500">外部 ID：{attempt.externalId}</p> : null}
+                      {attempt.nextRunAt ? <p className="mt-1 text-xs font-bold text-amber-700">下次执行：{formatDateTime(attempt.nextRunAt)}</p> : null}
+                      {attempt.lastError ? <p className="mt-2 break-all rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{attempt.lastError}</p> : null}
+                    </div>
+                    {attempt.status === "failed" ? (
+                      <Button size="sm" variant="outline" onClick={() => onRetry(attempt.id)}>
+                        <RotateCcwIcon data-icon="inline-start" />
+                        重试
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        ) : null}
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -831,6 +968,15 @@ function defaultBotForm(): BotForm {
   };
 }
 
+function defaultPublishTargetForm(): PublishTargetForm {
+  return {
+    botAccountId: "",
+    displayName: "",
+    publishDelaySeconds: "0",
+    required: true,
+  };
+}
+
 function toLocalDateTimeValue(date: Date) {
   const offset = date.getTimezoneOffset();
   const local = new Date(date.getTime() - offset * 60 * 1000);
@@ -865,4 +1011,15 @@ function formatBotEventAction(action: string) {
     "publish_attempt.retry": "重试发布",
   };
   return labels[action] ?? action;
+}
+
+function publishAttemptBadgeClass(status: string) {
+  const classes: Record<string, string> = {
+    queued: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+    running: "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
+    succeeded: "bg-green-50 text-green-800 ring-1 ring-green-200",
+    failed: "bg-red-50 text-red-700 ring-1 ring-red-200",
+    skipped: "bg-slate-100 text-slate-600",
+  };
+  return classes[status] ?? "bg-slate-100 text-slate-600";
 }

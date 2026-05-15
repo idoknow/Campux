@@ -54,6 +54,10 @@ const attemptParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+const attemptQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
 const postParamsSchema = z.object({
   id: z.string().min(1),
 });
@@ -487,6 +491,31 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     };
   });
 
+  app.get("/api/admin/publish-attempts", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const query = attemptQuerySchema.parse(request.query);
+    const attempts = await prisma.publishAttempt.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+      },
+      include: {
+        publishTarget: {
+          include: {
+            botAccount: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+      take: query.limit,
+    });
+
+    return {
+      attempts: attempts.map(toPublishAttempt),
+    };
+  });
+
   app.patch("/api/admin/publish-targets/:id", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const params = targetParamsSchema.parse(request.params);
@@ -578,6 +607,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       },
       data: {
         status: "queued",
+        attempt: 0,
         lastError: null,
         nextRunAt: new Date(),
       },
@@ -744,6 +774,7 @@ function toPublishAttempt(attempt: {
   status: string;
   attempt: number;
   lastError: string | null;
+  nextRunAt: Date | null;
   externalId: string | null;
   updatedAt: Date;
   publishTarget: {
@@ -761,6 +792,7 @@ function toPublishAttempt(attempt: {
     status: attempt.status,
     attempt: attempt.attempt,
     lastError: attempt.lastError,
+    nextRunAt: attempt.nextRunAt?.toISOString() ?? null,
     externalId: attempt.externalId,
     updatedAt: attempt.updatedAt.toISOString(),
     publishTarget: {
