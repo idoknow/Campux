@@ -12,12 +12,16 @@
     "dev:server": "bun --cwd apps/server dev",
     "build": "bun --cwd apps/web build && bun --cwd apps/server build",
     "typecheck": "bun --cwd apps/web typecheck && bun --cwd apps/server typecheck",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "db:generate": "bun --cwd packages/db prisma generate",
     "db:migrate": "bun --cwd packages/db prisma migrate dev",
     "db:seed": "bun --cwd packages/db src/seed.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitepress": "^1.6.4"
   }
 }
