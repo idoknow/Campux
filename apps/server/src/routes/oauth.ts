@@ -576,8 +576,10 @@ export function registerOAuthRoutes(app: FastifyInstance) {
         description: body.description === undefined ? client.description : body.description,
         enabled: body.enabled ?? client.enabled,
         pkceRequired: body.pkceRequired ?? client.pkceRequired,
-        redirectUris: body.redirectUris ? normalizeRedirectUris(body.redirectUris) : client.redirectUris,
-        scopes: body.scopes ? Array.from(new Set(body.scopes.map((scope) => scope.trim()).filter(Boolean))) : client.scopes,
+        ...(body.redirectUris !== undefined ? { redirectUris: normalizeRedirectUris(body.redirectUris) } : {}),
+        ...(body.scopes !== undefined
+          ? { scopes: Array.from(new Set(body.scopes.map((scope) => scope.trim()).filter(Boolean))) }
+          : {}),
       },
     });
 
