@@ -8,6 +8,7 @@ export const sessionCookieName = "campux_session";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 7;
 
 export type SessionContext = Awaited<ReturnType<typeof getSessionContext>>;
+export type ActiveBanContext = Awaited<ReturnType<typeof findActiveBan>>;
 
 export function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -120,12 +121,15 @@ export async function getSessionContext(request: FastifyRequest) {
       session.selectedTenant = hostTenant;
     }
 
+    const activeBan = await findActiveBan(hostTenant.id, session.user.id);
+
     return {
       session,
       user: session.user,
       memberships: [hostMembership],
       selectedTenant: hostTenant,
       selectedMembership: hostMembership,
+      activeBan,
       hostTenant,
     };
   }
@@ -140,8 +144,24 @@ export async function getSessionContext(request: FastifyRequest) {
     memberships: session.user.memberships,
     selectedTenant: session.selectedTenant,
     selectedMembership,
+    activeBan: session.selectedTenantId ? await findActiveBan(session.selectedTenantId, session.user.id) : null,
     hostTenant: null,
   };
+}
+
+export async function findActiveBan(tenantId: string, userId: string) {
+  return prisma.banRecord.findFirst({
+    where: {
+      tenantId,
+      userId,
+      endsAt: {
+        gt: new Date(),
+      },
+    },
+    orderBy: {
+      endsAt: "desc",
+    },
+  });
 }
 
 export async function requireSession(request: FastifyRequest, reply: FastifyReply) {
@@ -159,6 +179,10 @@ export async function requireTenantContext(request: FastifyRequest, reply: Fasti
   if (!context.selectedTenant || !context.selectedMembership) {
     reply.code(400);
     throw new Error("请先选择校园墙");
+  }
+  if (context.activeBan) {
+    reply.code(403);
+    throw new Error(`账号已被封禁：${context.activeBan.comment}`);
   }
 
   return {

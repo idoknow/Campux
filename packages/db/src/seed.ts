@@ -104,6 +104,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
       displayName: "主墙号",
       enabled: true,
       required: true,
+      publishDelaySeconds: 10,
     },
     create: {
       id: `${tenant.id}-qzone-primary`,
@@ -112,6 +113,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
       displayName: "主墙号",
       enabled: true,
       required: true,
+      publishDelaySeconds: 10,
     },
   });
 }

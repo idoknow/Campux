@@ -16,6 +16,14 @@ export type CurrentMembership = {
   role: TenantRole;
 };
 
+export type ActiveBan = {
+  id: string;
+  comment: string;
+  startsAt: string;
+  endsAt: string;
+  createdAt: string;
+};
+
 export type MeResponse =
   | { authenticated: false }
   | {
@@ -29,6 +37,7 @@ export type MeResponse =
       memberships: Membership[];
       currentTenant: TenantSummary | null;
       currentMembership: CurrentMembership | null;
+      activeBan: ActiveBan | null;
       needsTenantSelection: boolean;
     };
 
