@@ -39,14 +39,16 @@ const RuleButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"butto
 
 function RuleList({ rules }: { rules: string[] }) {
   return (
-    <div className="flex flex-col gap-2 px-4 md:px-5">
-      {rules.map((rule, index) => (
-        <Alert key={rule} className="rounded-md">
-          <CheckIcon />
-          <AlertTitle>规则 {index + 1}</AlertTitle>
-          <AlertDescription>{rule}</AlertDescription>
-        </Alert>
-      ))}
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-5">
+      <div className="flex flex-col gap-2 pb-1">
+        {rules.map((rule, index) => (
+          <Alert key={rule} className="rounded-md">
+            <CheckIcon />
+            <AlertTitle>规则 {index + 1}</AlertTitle>
+            <AlertDescription>{rule}</AlertDescription>
+          </Alert>
+        ))}
+      </div>
     </div>
   );
 }
@@ -59,13 +61,13 @@ export function PostRulesAction({ rules }: { rules: string[] }) {
           <DrawerTrigger asChild>
             <RuleButton />
           </DrawerTrigger>
-          <DrawerContent>
-            <DrawerHeader>
+          <DrawerContent className="max-h-[85dvh]">
+            <DrawerHeader className="shrink-0">
               <DrawerTitle>投稿规则</DrawerTitle>
               <DrawerDescription>发布前请确认内容符合当前校园墙规范。</DrawerDescription>
             </DrawerHeader>
             <RuleList rules={rules} />
-            <DrawerFooter>
+            <DrawerFooter className="shrink-0">
               <DrawerClose asChild>
                 <Button>好的</Button>
               </DrawerClose>
@@ -79,13 +81,13 @@ export function PostRulesAction({ rules }: { rules: string[] }) {
           <DialogTrigger asChild>
             <RuleButton />
           </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
+          <DialogContent className="max-h-[min(720px,calc(100dvh-48px))]">
+            <DialogHeader className="shrink-0">
               <DialogTitle>投稿规则</DialogTitle>
               <DialogDescription>发布前请确认内容符合当前校园墙规范。</DialogDescription>
             </DialogHeader>
             <RuleList rules={rules} />
-            <DialogFooter>
+            <DialogFooter className="shrink-0">
               <DialogClose asChild>
                 <Button>好的</Button>
               </DialogClose>

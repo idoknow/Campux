@@ -770,12 +770,6 @@ function getHeaderValue(value: string | string[] | undefined) {
 }
 
 function extractPlainText(event: OneBotMessageEvent) {
-  if (typeof event.raw_message === "string") {
-    return event.raw_message;
-  }
-  if (typeof event.message === "string") {
-    return event.message;
-  }
   if (Array.isArray(event.message)) {
     return event.message
       .map((segment) => {
@@ -783,6 +777,12 @@ function extractPlainText(event: OneBotMessageEvent) {
         return item.type === "text" ? (item.data?.text ?? "") : "";
       })
       .join("");
+  }
+  if (typeof event.message === "string") {
+    return event.message;
+  }
+  if (typeof event.raw_message === "string") {
+    return event.raw_message;
   }
   return "";
 }
@@ -806,7 +806,16 @@ function escapeRegex(value: string) {
 
 function parseCommand(input: string) {
   const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
-  const match = normalized.match(/^[#/]\s*([^\s]+)\s*(.*)$/);
+  const commandStart = normalized.search(/[#/]/);
+  if (commandStart < 0) {
+    return null;
+  }
+  const prefix = normalized.slice(0, commandStart).trim();
+  if (prefix && !prefix.startsWith("@")) {
+    return null;
+  }
+  const commandText = normalized.slice(commandStart);
+  const match = commandText.match(/^[#/]\s*([^\s]+)\s*(.*)$/);
   const name = match?.[1];
   if (!match || !name) {
     return null;

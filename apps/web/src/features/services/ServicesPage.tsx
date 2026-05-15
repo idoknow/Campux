@@ -34,7 +34,7 @@ const defaultServicePalette = {
 };
 
 export function ServicesPage({ metadata, loading }: { metadata: TenantMetadata; loading: boolean }) {
-  const entries = metadata.services.length > 0 ? metadata.services : defaultMetadata.services;
+  const entries = buildServiceEntries(metadata.services);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
 
@@ -72,6 +72,24 @@ export function ServicesPage({ metadata, loading }: { metadata: TenantMetadata; 
       </div>
     </div>
   );
+}
+
+function buildServiceEntries(services: TenantMetadata["services"]) {
+  if (services.length === 0) {
+    return defaultMetadata.services;
+  }
+
+  const builtInServices = defaultMetadata.services.filter((service) => isPasswordService(service) || isRulesService(service));
+  const customServices = services.filter((service) => !isPasswordService(service) && !isRulesService(service));
+  return [...builtInServices, ...customServices];
+}
+
+function isPasswordService(service: TenantMetadata["services"][number]) {
+  return service.title.includes("密码") || service.title.includes("账号");
+}
+
+function isRulesService(service: TenantMetadata["services"][number]) {
+  return service.title.includes("规则") || service.title.includes("指南");
 }
 
 function ServiceTile({ service, index, onOpen }: { service: TenantMetadata["services"][number]; index: number; onOpen: () => void }) {
