@@ -58,7 +58,8 @@ const botCreateSchema = z.object({
 });
 
 const publishTextTemplateSchema = z.object({
-  customText: z.string().max(160).default(""),
+  customText: z.string().max(1000).default(""),
+  suffixText: z.string().max(1000).default(""),
   includePostId: z.boolean().default(true),
   includeAuthorMention: z.boolean().default(false),
   includeLinks: z.boolean().default(false),
@@ -1135,6 +1136,7 @@ function normalizePublishTextTemplate(value: Prisma.JsonValue) {
   const record = value as Record<string, unknown>;
   return {
     customText: typeof record.customText === "string" ? record.customText : "",
+    suffixText: typeof record.suffixText === "string" ? record.suffixText : "",
     includePostId: typeof record.includePostId === "boolean" ? record.includePostId : true,
     includeAuthorMention: typeof record.includeAuthorMention === "boolean" ? record.includeAuthorMention : false,
     includeLinks: typeof record.includeLinks === "boolean" ? record.includeLinks : false,
@@ -1144,6 +1146,7 @@ function normalizePublishTextTemplate(value: Prisma.JsonValue) {
 function defaultPublishTextTemplate() {
   return {
     customText: "",
+    suffixText: "",
     includePostId: true,
     includeAuthorMention: false,
     includeLinks: false,

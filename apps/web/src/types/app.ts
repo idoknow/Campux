@@ -221,6 +221,7 @@ export type AdminBotAccount = {
 
 export type PublishTextTemplate = {
   customText: string;
+  suffixText: string;
   includePostId: boolean;
   includeAuthorMention: boolean;
   includeLinks: boolean;

@@ -11,6 +11,7 @@ import {
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
+  ShieldPlusIcon,
   UsersRoundIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +21,9 @@ import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const statusLabels: Record<TenantStatus, string> = {
@@ -48,14 +51,12 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
 ];
 
 type OpsTab = "users" | "audit";
-type SystemUserRoleFilter = "system_operator" | "admin" | "reviewer" | "submitter" | "test_account";
+type SystemUserRoleFilter = TenantRole;
 
 const userRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }> = [
-  { value: "system_operator", label: "系统运维" },
   { value: "admin", label: "管理员" },
   { value: "reviewer", label: "审核员" },
   { value: "submitter", label: "用户" },
-  { value: "test_account", label: "测试账号" },
 ];
 
 function defaultPagination(): Pagination {
@@ -73,6 +74,7 @@ export function OpsPanel() {
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
+  const [userTenantFilterId, setUserTenantFilterId] = useState("");
   const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>([]);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
@@ -82,6 +84,9 @@ export function OpsPanel() {
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
+  const [assigningMembership, setAssigningMembership] = useState(false);
+  const [membershipDialogUser, setMembershipDialogUser] = useState<SystemUser | null>(null);
+  const [membershipForm, setMembershipForm] = useState<{ tenantId: string; role: TenantRole }>({ tenantId: "", role: "submitter" });
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
   const [savingHost, setSavingHost] = useState(false);
@@ -132,7 +137,10 @@ export function OpsPanel() {
         page: String(page),
         limit: String(usersPagination.limit),
       });
-      if (selectedUserRoleFilters.length > 0) {
+      if (userTenantFilterId) {
+        params.set("tenantId", userTenantFilterId);
+      }
+      if (userTenantFilterId && selectedUserRoleFilters.length > 0) {
         params.set("roles", selectedUserRoleFilters.join(","));
       }
       const data = await api<{ total: number; users: SystemUser[]; pagination: Pagination }>(`/api/system/users?${params}`);
@@ -170,7 +178,7 @@ export function OpsPanel() {
     void refreshUsers(userPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取全局用户");
     });
-  }, [userPage, selectedUserRoleFilters]);
+  }, [userPage, userTenantFilterId, selectedUserRoleFilters]);
 
   useEffect(() => {
     void refreshAudit(auditPage).catch((caught) => {
@@ -255,6 +263,39 @@ export function OpsPanel() {
   function toggleUserRoleFilter(role: SystemUserRoleFilter) {
     setSelectedUserRoleFilters((current) => (current.includes(role) ? current.filter((item) => item !== role) : [...current, role]));
     setUserPage(1);
+  }
+
+  function changeUserTenantFilter(tenantId: string) {
+    setUserTenantFilterId(tenantId === "all" ? "" : tenantId);
+    setSelectedUserRoleFilters([]);
+    setUserPage(1);
+  }
+
+  function openMembershipDialog(user: SystemUser) {
+    const firstTenant = tenants.find((tenant) => tenant.status === "active") ?? tenants[0];
+    setMembershipDialogUser(user);
+    setMembershipForm({ tenantId: firstTenant?.id ?? "", role: "submitter" });
+  }
+
+  async function assignMembership() {
+    if (!membershipDialogUser || !membershipForm.tenantId) {
+      return;
+    }
+
+    setAssigningMembership(true);
+    try {
+      await api(`/api/system/users/${membershipDialogUser.id}/memberships`, {
+        method: "POST",
+        body: JSON.stringify(membershipForm),
+      });
+      toast.success("用户身份已更新。");
+      setMembershipDialogUser(null);
+      await Promise.all([refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "添加身份失败");
+    } finally {
+      setAssigningMembership(false);
+    }
   }
 
   return (
@@ -446,10 +487,14 @@ export function OpsPanel() {
                 loading={loadingUsers}
                 pagination={usersPagination}
                 selectedRoleFilters={selectedUserRoleFilters}
+                selectedTenantFilterId={userTenantFilterId}
+                tenants={tenants}
                 onClearRoleFilters={() => {
                   setSelectedUserRoleFilters([]);
                   setUserPage(1);
                 }}
+                onTenantFilterChange={changeUserTenantFilter}
+                onOpenAssignMembership={openMembershipDialog}
                 onPageChange={setUserPage}
                 onToggleRoleFilter={toggleUserRoleFilter}
               />
@@ -461,6 +506,59 @@ export function OpsPanel() {
           </Tabs>
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(membershipDialogUser)} onOpenChange={(open) => !open && setMembershipDialogUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>添加租户身份</DialogTitle>
+            <DialogDescription>
+              给 {membershipDialogUser?.displayName ?? membershipDialogUser?.qqUin ?? "用户"} 添加或更新某个校园墙内的身份。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 px-5">
+            <label className="text-sm font-semibold text-slate-700">
+              校园墙
+              <Select value={membershipForm.tenantId} onValueChange={(tenantId) => setMembershipForm({ ...membershipForm, tenantId })}>
+                <SelectTrigger className="mt-1 w-full bg-white">
+                  <SelectValue placeholder="选择校园墙" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tenants.map((tenant) => (
+                    <SelectItem key={tenant.id} value={tenant.id}>
+                      {tenant.name} · {statusLabels[tenant.status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="text-sm font-semibold text-slate-700">
+              身份
+              <Select value={membershipForm.role} onValueChange={(role) => setMembershipForm({ ...membershipForm, role: role as TenantRole })}>
+                <SelectTrigger className="mt-1 w-full bg-white">
+                  <SelectValue placeholder="选择身份" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="submitter">用户</SelectItem>
+                  <SelectItem value="reviewer">审核员</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <p className="rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+              如果该用户已经在这个校园墙里，保存后会直接更新他的身份。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={assigningMembership} onClick={() => setMembershipDialogUser(null)}>
+              取消
+            </Button>
+            <Button disabled={assigningMembership || !membershipForm.tenantId} onClick={() => void assignMembership()}>
+              <ShieldPlusIcon data-icon="inline-start" />
+              保存身份
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -501,7 +599,11 @@ function GlobalUsersTable({
   loading,
   pagination,
   selectedRoleFilters,
+  selectedTenantFilterId,
+  tenants,
   onClearRoleFilters,
+  onTenantFilterChange,
+  onOpenAssignMembership,
   onPageChange,
   onToggleRoleFilter,
 }: {
@@ -509,7 +611,11 @@ function GlobalUsersTable({
   loading: boolean;
   pagination: Pagination;
   selectedRoleFilters: SystemUserRoleFilter[];
+  selectedTenantFilterId: string;
+  tenants: SystemTenant[];
   onClearRoleFilters: () => void;
+  onTenantFilterChange: (tenantId: string) => void;
+  onOpenAssignMembership: (user: SystemUser) => void;
   onPageChange: (page: number) => void;
   onToggleRoleFilter: (role: SystemUserRoleFilter) => void;
 }) {
@@ -523,13 +629,31 @@ function GlobalUsersTable({
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
             <FilterIcon className="size-4" />
-            身份筛选
+            按租户身份筛选
           </div>
           {selectedRoleFilters.length > 0 ? (
             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onClearRoleFilters}>
               清除筛选
             </Button>
           ) : null}
+        </div>
+        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Select value={selectedTenantFilterId || "all"} onValueChange={onTenantFilterChange}>
+            <SelectTrigger className="w-full bg-white sm:w-72">
+              <SelectValue placeholder="选择校园墙" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部用户</SelectItem>
+              {tenants.map((tenant) => (
+                <SelectItem key={tenant.id} value={tenant.id}>
+                  {tenant.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs font-semibold text-slate-500">
+            {selectedTenantFilterId ? "筛选该校园墙内的具体身份" : "选择校园墙后再按身份过滤"}
+          </span>
         </div>
         <div className="flex flex-wrap gap-2">
           {userRoleFilters.map((filter) => {
@@ -539,6 +663,7 @@ function GlobalUsersTable({
                 key={filter.value}
                 type="button"
                 variant={active ? "secondary" : "outline"}
+                disabled={!selectedTenantFilterId}
                 size="sm"
                 className={active ? "h-8 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50" : "h-8 bg-white"}
                 onClick={() => onToggleRoleFilter(filter.value)}
@@ -576,6 +701,10 @@ function GlobalUsersTable({
             <div className="text-xs text-slate-500">
               <p>创建：{formatDateTime(user.createdAt)}</p>
               <p className="mt-1">加入：{user.memberships.length} 个校园墙</p>
+              <Button variant="outline" size="sm" className="mt-2 h-7 px-2 text-xs" disabled={tenants.length === 0} onClick={() => onOpenAssignMembership(user)}>
+                <ShieldPlusIcon data-icon="inline-start" />
+                添加身份
+              </Button>
             </div>
           </div>
         ))}

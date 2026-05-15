@@ -575,6 +575,7 @@ function toInputJson(value: unknown): Prisma.InputJsonValue {
 
 type PublishCaptionTemplate = {
   customText?: string;
+  suffixText?: string;
   includePostId?: boolean;
   includeAuthorMention?: boolean;
   includeLinks?: boolean;
@@ -591,6 +592,9 @@ function renderPublishCaption(value: Prisma.JsonValue | null | undefined, post: 
   }
   const firstLine = [template.customText?.trim(), ...parts].filter(Boolean).join(" ").trim();
   const lines = firstLine ? [firstLine] : [];
+  if (template.suffixText?.trim()) {
+    lines.push(template.suffixText.trim());
+  }
   if (template.includeLinks) {
     lines.push(...extractLinks(post.text));
   }
@@ -604,6 +608,7 @@ function normalizePublishCaptionTemplate(value: Prisma.JsonValue | null | undefi
   const record = value as Record<string, unknown>;
   return {
     customText: typeof record.customText === "string" ? record.customText : "",
+    suffixText: typeof record.suffixText === "string" ? record.suffixText : "",
     includePostId: typeof record.includePostId === "boolean" ? record.includePostId : true,
     includeAuthorMention: typeof record.includeAuthorMention === "boolean" ? record.includeAuthorMention : false,
     includeLinks: typeof record.includeLinks === "boolean" ? record.includeLinks : false,
@@ -613,6 +618,7 @@ function normalizePublishCaptionTemplate(value: Prisma.JsonValue | null | undefi
 function defaultPublishCaptionTemplate(): Required<PublishCaptionTemplate> {
   return {
     customText: "",
+    suffixText: "",
     includePostId: true,
     includeAuthorMention: false,
     includeLinks: false,
