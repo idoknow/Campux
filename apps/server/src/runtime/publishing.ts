@@ -1,6 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { Prisma } from "@campux/db";
-import { publishToQZone } from "@campux/integrations";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import type { CampuxConfig } from "@campux/config";
+import { Prisma } from "@campux/db";
+import { createS3Client, publishToQZone, QZonePublishError } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
@@ -8,14 +10,17 @@ import { decryptJson } from "../lib/secret-json";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
+export const defaultPublishIntervalSeconds = 300;
 
 type ImagePayload = {
+  key?: string;
   url?: string;
+  fileName?: string;
 };
 
-export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger) {
+export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig) {
   queue.registerHandler("publishPost", async (job) => {
-    await handlePublishAttempt(queue, logger, job);
+    await handlePublishAttempt(queue, logger, config, job);
   });
 }
 
@@ -113,7 +118,11 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
 
   const attempts = [];
   for (const target of targets) {
-    const nextRunAt = new Date(Date.now() + target.publishDelaySeconds * 1000);
+    const nextRunAt = await resolveNextPublishRunAt({
+      tenantId,
+      botAccountId: target.botAccountId,
+      intervalSeconds: target.publishDelaySeconds,
+    });
     const attempt = await prisma.publishAttempt.upsert({
       where: {
         postId_publishTargetId: {
@@ -124,6 +133,8 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
       update: {
         status: "queued",
         lastError: null,
+        externalId: null,
+        verbose: Prisma.JsonNull,
         nextRunAt,
       },
       create: {
@@ -141,6 +152,56 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
   return attempts;
 }
 
+export function effectivePublishIntervalSeconds(value: number | null | undefined) {
+  return Math.max(value ?? 0, defaultPublishIntervalSeconds);
+}
+
+export async function resolveNextPublishRunAt(options: {
+  tenantId: string;
+  botAccountId: string;
+  intervalSeconds?: number | null;
+  excludeAttemptId?: string;
+}) {
+  const intervalMs = effectivePublishIntervalSeconds(options.intervalSeconds) * 1_000;
+  const now = Date.now();
+  const recentAttempts = await prisma.publishAttempt.findMany({
+    where: {
+      tenantId: options.tenantId,
+      ...(options.excludeAttemptId ? { id: { not: options.excludeAttemptId } } : {}),
+      publishTarget: {
+        botAccountId: options.botAccountId,
+      },
+      OR: [
+        {
+          status: {
+            in: ["queued", "running"],
+          },
+        },
+        {
+          updatedAt: {
+            gte: new Date(now - intervalMs),
+          },
+        },
+      ],
+    },
+    select: {
+      nextRunAt: true,
+      updatedAt: true,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    take: 50,
+  });
+
+  const latestAnchor = recentAttempts.reduce((latest, attempt) => {
+    const anchor = attempt.nextRunAt?.getTime() ?? attempt.updatedAt.getTime();
+    return Math.max(latest, anchor);
+  }, 0);
+
+  return new Date(Math.max(now + intervalMs, latestAnchor + intervalMs));
+}
+
 export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId: string, runAt = new Date()) {
   return queue.enqueue({
     name: "publishPost",
@@ -152,7 +213,7 @@ export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId:
   });
 }
 
-async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLogger, job: RuntimeJob) {
+async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLogger, config: CampuxConfig, job: RuntimeJob) {
   const attemptId = typeof job.payload.attemptId === "string" ? job.payload.attemptId : "";
   if (!attemptId) {
     throw new Error("publish attempt id missing");
@@ -218,6 +279,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
         increment: 1,
       },
       lastError: null,
+      verbose: Prisma.JsonNull,
       nextRunAt: null,
     },
   });
@@ -232,14 +294,22 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
       createdAt: attempt.post.createdAt,
       anonymous: attempt.post.anonymous,
     });
+    const captionText = renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
+      postId: attempt.post.displayId,
+      text: attempt.post.text,
+      anonymous: attempt.post.anonymous,
+      authorQq: attempt.post.author.qqUin.toString(),
+    });
+    const postImages = await loadPostImages(config, attempt.post.images);
     const result = await publishToQZone({
       tenantId: attempt.tenantId,
       postId: attempt.postId,
       targetId: attempt.publishTargetId,
       targetName: attempt.publishTarget.displayName,
-      text: attempt.post.text,
+      text: captionText,
       renderedCard,
       imageUrls: getImageUrls(attempt.post.images),
+      images: postImages,
       cookies: toCookieRecord(attempt.publishTarget.botAccount.sessions[0]?.cookies),
     });
 
@@ -250,7 +320,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
       data: {
         status: "succeeded",
         externalId: result.externalId,
-        verbose: result.verbose,
+        verbose: toInputJson(result.verbose),
         lastError: null,
         nextRunAt: null,
       },
@@ -271,8 +341,16 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
       },
     });
     const message = caught instanceof Error ? caught.message : "发布失败";
+    const verbose = caught instanceof QZonePublishError ? toInputJson(caught.verbose) : Prisma.JsonNull;
     const shouldRetry = currentAttempt.attempt < maxPublishAttempts;
-    const nextRunAt = shouldRetry ? new Date(Date.now() + 5_000) : null;
+    const nextRunAt = shouldRetry
+      ? await resolveNextPublishRunAt({
+          tenantId: attempt.tenantId,
+          botAccountId: attempt.publishTarget.botAccountId,
+          intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+          excludeAttemptId: attempt.id,
+        })
+      : null;
     await prisma.publishAttempt.update({
       where: {
         id: attempt.id,
@@ -280,6 +358,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
       data: {
         status: "failed",
         lastError: message,
+        verbose,
         nextRunAt,
       },
     });
@@ -373,6 +452,36 @@ function getImageUrls(images: unknown) {
   });
 }
 
+async function loadPostImages(config: CampuxConfig, images: unknown) {
+  if (!Array.isArray(images)) {
+    return [];
+  }
+  const s3 = createS3Client(config);
+  const result = [];
+  for (const image of images) {
+    const candidate = image as ImagePayload;
+    if (!candidate.key) {
+      continue;
+    }
+    const object = await s3.send(
+      new GetObjectCommand({
+        Bucket: config.s3.bucket,
+        Key: candidate.key,
+      }),
+    );
+    const body = object.Body;
+    if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
+      continue;
+    }
+    const bytes = await body.transformToByteArray();
+    result.push({
+      name: candidate.fileName ?? candidate.key.split("/").pop() ?? "post-image.jpg",
+      bytes,
+    });
+  }
+  return result;
+}
+
 function toCookieRecord(value: Prisma.JsonValue | undefined) {
   if (!value) {
     return null;
@@ -385,4 +494,58 @@ function toCookieRecord(value: Prisma.JsonValue | undefined) {
   return Object.fromEntries(
     Object.entries(decrypted).flatMap(([name, cookieValue]) => (typeof cookieValue === "string" ? [[name, cookieValue]] : [])),
   );
+}
+
+function toInputJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+type PublishCaptionTemplate = {
+  customText?: string;
+  includePostId?: boolean;
+  includeAuthorMention?: boolean;
+  includeLinks?: boolean;
+};
+
+function renderPublishCaption(value: Prisma.JsonValue | null | undefined, post: { postId: number; text: string; anonymous: boolean; authorQq: string }) {
+  const template = normalizePublishCaptionTemplate(value);
+  const parts = [];
+  if (template.includePostId) {
+    parts.push(`#${post.postId}`);
+  }
+  if (template.includeAuthorMention && !post.anonymous) {
+    parts.push(`@{uin:${post.authorQq},nick:,who:1}`);
+  }
+  const firstLine = [template.customText?.trim(), ...parts].filter(Boolean).join(" ").trim();
+  const lines = firstLine ? [firstLine] : [];
+  if (template.includeLinks) {
+    lines.push(...extractLinks(post.text));
+  }
+  return lines.join("\n").trim() || `#${post.postId}`;
+}
+
+function normalizePublishCaptionTemplate(value: Prisma.JsonValue | null | undefined): PublishCaptionTemplate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return defaultPublishCaptionTemplate();
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    customText: typeof record.customText === "string" ? record.customText : "",
+    includePostId: typeof record.includePostId === "boolean" ? record.includePostId : true,
+    includeAuthorMention: typeof record.includeAuthorMention === "boolean" ? record.includeAuthorMention : false,
+    includeLinks: typeof record.includeLinks === "boolean" ? record.includeLinks : false,
+  };
+}
+
+function defaultPublishCaptionTemplate(): Required<PublishCaptionTemplate> {
+  return {
+    customText: "",
+    includePostId: true,
+    includeAuthorMention: false,
+    includeLinks: false,
+  };
+}
+
+function extractLinks(text: string) {
+  return text.match(/https?:\/\/[^\s]+/g) ?? [];
 }

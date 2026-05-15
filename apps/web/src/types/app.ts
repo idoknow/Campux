@@ -98,6 +98,7 @@ export type PublishTargetItem = {
     qqUin: string;
     displayName: string;
     enabled: boolean;
+    publishTextTemplate: PublishTextTemplate;
     qzoneSession: AdminBotSession | null;
   };
 };
@@ -109,6 +110,7 @@ export type PublishAttemptItem = {
   lastError: string | null;
   nextRunAt: string | null;
   externalId: string | null;
+  verbose: PublishAttemptVerbose | null;
   updatedAt: string;
   post: {
     id: string;
@@ -132,12 +134,45 @@ export type PublishAttemptItem = {
   };
 };
 
+export type PublishAttemptVerbose = {
+  mode?: string;
+  targetName?: string;
+  renderedBytes?: number;
+  imageCount?: number;
+  renderedImageIncluded?: boolean;
+  cookieStatus?: string;
+  cookieNames?: string[];
+  uin?: string | null;
+  publishedAt?: string | null;
+  note?: string;
+  http?: Array<{
+    label: string;
+    durationMs?: number;
+    request: {
+      method: string;
+      url: string;
+      headers?: Record<string, string>;
+      body?: Record<string, string>;
+    };
+    response?: {
+      status: number;
+      statusText: string;
+      headers?: Record<string, string>;
+      body: string;
+      parsed?: unknown;
+    };
+    error?: string;
+  }>;
+  [key: string]: unknown;
+};
+
 export type AdminBotAccount = {
   id: string;
   qqUin: string;
   displayName: string;
   enabled: boolean;
   reviewGroupId: string | null;
+  publishTextTemplate: PublishTextTemplate;
   lastSeenAt: string | null;
   createdAt: string;
   connection: {
@@ -161,6 +196,13 @@ export type AdminBotAccount = {
     enabled: boolean;
     required: boolean;
   }>;
+};
+
+export type PublishTextTemplate = {
+  customText: string;
+  includePostId: boolean;
+  includeAuthorMention: boolean;
+  includeLinks: boolean;
 };
 
 export type AdminBotSession = AdminBotAccount["sessions"][number];

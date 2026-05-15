@@ -57,7 +57,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         author: true,
       },
       orderBy: {
-        createdAt: "asc",
+        createdAt: "desc",
       },
       take: 100,
     });
