@@ -1,4 +1,4 @@
-import type { AdminTab, AuthenticatedMe, MainTab, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
@@ -17,8 +17,10 @@ export function AppShell({
   metadata,
   posts,
   busy,
+  dataLoading,
   postText,
   postsTab,
+  postsPagination,
   anonymous,
   uploadedImages,
   onActiveTabChange,
@@ -29,6 +31,7 @@ export function AppShell({
   onOpenOps,
   onPostTextChange,
   onPostsTabChange,
+  onPostsPageChange,
   onRefreshTenantData,
   onRefreshMe,
   onRemoveImage,
@@ -41,8 +44,10 @@ export function AppShell({
   metadata: TenantMetadata;
   posts: PostItem[];
   busy: boolean;
+  dataLoading: boolean;
   postText: string;
   postsTab: PostsTab;
+  postsPagination: Pagination;
   anonymous: boolean;
   uploadedImages: UploadedImage[];
   onActiveTabChange: (tab: MainTab) => void;
@@ -53,6 +58,7 @@ export function AppShell({
   onOpenOps: (() => void) | undefined;
   onPostTextChange: (value: string) => void;
   onPostsTabChange: (tab: PostsTab) => void;
+  onPostsPageChange: (page: number) => void;
   onRefreshTenantData: () => Promise<void>;
   onRefreshMe: () => Promise<void>;
   onRemoveImage: (key: string) => void;
@@ -77,6 +83,7 @@ export function AppShell({
             <TabsContent value="post" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <PostPage
                 busy={busy}
+                loading={dataLoading}
                 metadata={metadata}
                 postText={postText}
                 anonymous={anonymous}
@@ -91,11 +98,20 @@ export function AppShell({
             </TabsContent>
 
             <TabsContent value="posts" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
-              <PostsPage posts={posts} currentRole={me.currentMembership.role} activeTab={postsTab} onTabChange={onPostsTabChange} onRefresh={onRefreshTenantData} />
+              <PostsPage
+                posts={posts}
+                currentRole={me.currentMembership.role}
+                activeTab={postsTab}
+                minePagination={postsPagination}
+                mineLoading={dataLoading}
+                onMinePageChange={onPostsPageChange}
+                onTabChange={onPostsTabChange}
+                onRefresh={onRefreshTenantData}
+              />
             </TabsContent>
 
             <TabsContent value="services" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
-              <ServicesPage metadata={metadata} />
+              <ServicesPage metadata={metadata} loading={dataLoading} />
             </TabsContent>
 
             <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">

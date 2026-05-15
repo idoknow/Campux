@@ -237,24 +237,28 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
 
   app.get("/api/system/users", async (request, reply) => {
     await requireSystemOperator(request, reply);
-    const users = await prisma.user.findMany({
-      include: {
-        memberships: {
-          include: {
-            tenant: true,
-          },
-          orderBy: {
-            createdAt: "asc",
+    const [total, users] = await Promise.all([
+      prisma.user.count(),
+      prisma.user.findMany({
+        include: {
+          memberships: {
+            include: {
+              tenant: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
           },
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 100,
-    });
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 100,
+      }),
+    ]);
 
     return {
+      total,
       users: users.map((user) => ({
         id: user.id,
         qqUin: user.qqUin.toString(),

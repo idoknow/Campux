@@ -5,12 +5,14 @@ import { defaultMetadata } from "@/lib/app-model";
 import type { TenantMetadata, UploadedImage } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LoadingBlock } from "@/components/app/utility";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 
 export function PostPage({
   busy,
+  loading,
   metadata,
   postText,
   anonymous,
@@ -23,6 +25,7 @@ export function PostPage({
   onSubmit,
 }: {
   busy: boolean;
+  loading: boolean;
   metadata: TenantMetadata;
   postText: string;
   anonymous: boolean;
@@ -39,6 +42,7 @@ export function PostPage({
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
+      {loading ? <LoadingBlock title="正在加载校园墙配置..." /> : null}
       {metadata.banner ? (
         <div className="mb-3 flex min-h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <MegaphoneIcon className="size-4 shrink-0" strokeWidth={2.3} />

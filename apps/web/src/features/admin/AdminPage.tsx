@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -6,8 +6,8 @@ import { BotIcon, CopyIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, Sh
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
-import { EmptyCard } from "@/components/app/utility";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
+import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,7 +28,7 @@ type TenantSettingsForm = {
 };
 
 type BanForm = {
-  userId: string;
+  qqUin: string;
   comment: string;
   endsAt: string;
 };
@@ -100,7 +100,15 @@ export function AdminPage({
   const [attempts, setAttempts] = useState<PublishAttemptItem[]>([]);
   const [bans, setBans] = useState<AdminBanRecord[]>([]);
   const [memberKeyword, setMemberKeyword] = useState("");
+  const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>("all");
+  const [memberPage, setMemberPage] = useState(1);
+  const [memberPagination, setMemberPagination] = useState<Pagination>(() => defaultPagination());
+  const [tenantMemberTotal, setTenantMemberTotal] = useState(0);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [banKeyword, setBanKeyword] = useState("");
+  const [banPage, setBanPage] = useState(1);
+  const [banPagination, setBanPagination] = useState<Pagination>(() => defaultPagination());
+  const [bansLoading, setBansLoading] = useState(false);
   const [onlyActiveBans, setOnlyActiveBans] = useState(true);
   const [memberForm, setMemberForm] = useState<MemberForm>(() => defaultMemberForm());
   const [banForm, setBanForm] = useState<BanForm>(() => defaultBanForm());
@@ -117,18 +125,7 @@ export function AdminPage({
     cookies: [],
   }));
   const [busy, setBusy] = useState(false);
-
-  const filteredMembers = useMemo(() => {
-    const keyword = memberKeyword.trim().toLowerCase();
-    if (!keyword) {
-      return members;
-    }
-
-    return members.filter((member) => {
-      const name = member.user.displayName?.toLowerCase() ?? "";
-      return name.includes(keyword) || member.user.qqUin.includes(keyword);
-    });
-  }, [memberKeyword, members]);
+  const [adminLoading, setAdminLoading] = useState(false);
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
@@ -139,6 +136,18 @@ export function AdminPage({
       toast.error(caught instanceof Error ? caught.message : "无法读取管理数据");
     });
   }, [selectedTenant.id]);
+
+  useEffect(() => {
+    void refreshMembers(memberPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取用户列表");
+    });
+  }, [selectedTenant.id, memberKeyword, memberRoleFilter, memberPage]);
+
+  useEffect(() => {
+    void refreshBans(banPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取封禁列表");
+    });
+  }, [selectedTenant.id, banKeyword, onlyActiveBans, banPage]);
 
   useEffect(() => {
     if (activeTab !== "publish" && activeTab !== "bots") {
@@ -161,35 +170,75 @@ export function AdminPage({
   }, [qzoneLogin.open, qzoneLogin.status, qzoneLogin.botId, qzoneLogin.loginId]);
 
   async function refreshAdminData() {
-    const [memberData, botData, targetData, attemptData, banData] = await Promise.all([
-      api<{ members: AdminMember[] }>("/api/admin/members"),
+    setAdminLoading(true);
+    try {
+      const [memberData, botData, targetData, attemptData, banData] = await Promise.all([
+      fetchMembers(memberPage),
       api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
       api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
       api<{ attempts: PublishAttemptItem[] }>("/api/admin/publish-attempts?limit=20"),
-      fetchBanRecords(),
-    ]);
-    setMembers(memberData.members);
-    setBots(botData.bots);
-    setBotEvents(botData.events);
-    setTargets(targetData.targets);
-    setAttempts(attemptData.attempts);
-    setBans(banData.bans);
+      fetchBanRecords(banPage),
+      ]);
+      setMembers(memberData.members);
+      setMemberPagination(memberData.pagination);
+      setBots(botData.bots);
+      setBotEvents(botData.events);
+      setTargets(targetData.targets);
+      setAttempts(attemptData.attempts);
+      setBans(banData.bans);
+      setBanPagination(banData.pagination);
+    } finally {
+      setAdminLoading(false);
+    }
   }
 
-  async function fetchBanRecords() {
+  async function fetchMembers(page = memberPage) {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(memberPagination.limit),
+      role: memberRoleFilter,
+    });
+    const keyword = memberKeyword.trim();
+    if (keyword.length > 0) {
+      params.set("q", keyword);
+    }
+    return api<{ members: AdminMember[]; pagination: Pagination; tenantMemberTotal: number }>(`/api/admin/members?${params}`);
+  }
+
+  async function refreshMembers(page = memberPage) {
+    setMembersLoading(true);
+    try {
+      const data = await fetchMembers(page);
+      setMembers(data.members);
+      setMemberPagination(data.pagination);
+      setTenantMemberTotal(data.tenantMemberTotal);
+    } finally {
+      setMembersLoading(false);
+    }
+  }
+
+  async function fetchBanRecords(page = banPage) {
     const params = new URLSearchParams({
       onlyActive: String(onlyActiveBans),
+      page: String(page),
+      limit: String(banPagination.limit),
     });
     const keyword = banKeyword.trim();
     if (keyword.length > 0) {
       params.set("q", keyword);
     }
-    return api<{ bans: AdminBanRecord[] }>(`/api/admin/ban-records?${params}`);
+    return api<{ bans: AdminBanRecord[]; pagination: Pagination }>(`/api/admin/ban-records?${params}`);
   }
 
-  async function refreshBans() {
-    const data = await fetchBanRecords();
-    setBans(data.bans);
+  async function refreshBans(page = banPage) {
+    setBansLoading(true);
+    try {
+      const data = await fetchBanRecords(page);
+      setBans(data.bans);
+      setBanPagination(data.pagination);
+    } finally {
+      setBansLoading(false);
+    }
   }
 
   async function saveSettings() {
@@ -255,7 +304,7 @@ export function AdminPage({
       await api("/api/admin/ban-records", {
         method: "POST",
         body: JSON.stringify({
-          userId: banForm.userId,
+          qqUin: banForm.qqUin,
           comment: banForm.comment,
           endsAt: new Date(banForm.endsAt).toISOString(),
         }),
@@ -500,19 +549,37 @@ export function AdminPage({
             发布
           </TabsTrigger>
         </TabsList>
+        {adminLoading ? (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">
+            <span className="size-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+            正在加载管理数据...
+          </div>
+        ) : null}
 
             <TabsContent value="users" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <UsersPanel
-                members={filteredMembers}
+                members={members}
+                pagination={memberPagination}
+                tenantMemberTotal={tenantMemberTotal}
                 keyword={memberKeyword}
+                roleFilter={memberRoleFilter}
                 form={memberForm}
                 busy={busy}
-                onKeywordChange={setMemberKeyword}
+                loading={membersLoading || adminLoading}
+                onKeywordChange={(value) => {
+                  setMemberKeyword(value);
+                  setMemberPage(1);
+                }}
+                onRoleFilterChange={(value) => {
+                  setMemberRoleFilter(value);
+                  setMemberPage(1);
+                }}
+                onPageChange={setMemberPage}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
                 onRoleChange={(id, role) => void updateMemberRole(id, role)}
                 onPrepareBan={(member) => {
-                  setBanForm((current) => ({ ...current, userId: member.user.id }));
+                  setBanForm((current) => ({ ...current, qqUin: member.user.qqUin }));
                   onTabChange("bans");
                 }}
               />
@@ -521,14 +588,22 @@ export function AdminPage({
             <TabsContent value="bans" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <BansPanel
                 bans={bans}
-                members={members}
+                pagination={banPagination}
                 form={banForm}
                 keyword={banKeyword}
                 onlyActive={onlyActiveBans}
                 busy={busy}
+                loading={bansLoading || adminLoading}
                 onFormChange={setBanForm}
-                onKeywordChange={setBanKeyword}
-                onOnlyActiveChange={setOnlyActiveBans}
+                onKeywordChange={(value) => {
+                  setBanKeyword(value);
+                  setBanPage(1);
+                }}
+                onOnlyActiveChange={(value) => {
+                  setOnlyActiveBans(value);
+                  setBanPage(1);
+                }}
+                onPageChange={setBanPage}
                 onRefresh={() => void refreshBans()}
                 onSubmit={() => void banUser()}
                 onUnban={(id) => void unban(id)}
@@ -627,20 +702,32 @@ export function AdminPage({
 
 function UsersPanel({
   members,
+  pagination,
+  tenantMemberTotal,
   keyword,
+  roleFilter,
   form,
   busy,
+  loading,
   onKeywordChange,
+  onRoleFilterChange,
+  onPageChange,
   onFormChange,
   onAddMember,
   onRoleChange,
   onPrepareBan,
 }: {
   members: AdminMember[];
+  pagination: Pagination;
+  tenantMemberTotal: number;
   keyword: string;
+  roleFilter: "all" | TenantRole;
   form: MemberForm;
   busy: boolean;
+  loading: boolean;
   onKeywordChange: (value: string) => void;
+  onRoleFilterChange: (value: "all" | TenantRole) => void;
+  onPageChange: (page: number) => void;
   onFormChange: (form: MemberForm) => void;
   onAddMember: () => void;
   onRoleChange: (id: string, role: TenantRole) => void;
@@ -650,6 +737,9 @@ function UsersPanel({
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
         <PanelTitle icon={UserRoundIcon} title="用户管理" description="搜索用户、调整角色或准备封禁" color="product-accent-blue" />
+        <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-800">
+          当前校园墙共有 {tenantMemberTotal} 个用户
+        </div>
         <div className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">
           <Input
             className="bg-white"
@@ -672,13 +762,31 @@ function UsersPanel({
             添加用户
           </Button>
         </div>
-        <Input className="mt-3 bg-white" placeholder="输入 QQ 或昵称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
+          <Input className="bg-white" placeholder="输入 QQ 或昵称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
+          <Select value={roleFilter} onValueChange={(value) => onRoleFilterChange(value as "all" | TenantRole)}>
+            <SelectTrigger className="bg-white font-bold">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部身份</SelectItem>
+              <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+              <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
+              <SelectItem value="admin">{roleLabels.admin}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="mt-3 flex flex-col gap-2">
-          {members.map((member) => (
+          {loading ? <LoadingBlock title="正在加载用户列表..." /> : null}
+          {!loading && members.length === 0 ? <EmptyCard title="暂无用户" /> : null}
+          {!loading && members.map((member) => (
             <div key={member.id} className="product-row-card flex flex-wrap items-center justify-between gap-2 p-3">
-              <div className="min-w-0">
-                <p className="truncate font-semibold">{member.user.displayName ?? member.user.qqUin}</p>
-                <p className="text-xs text-slate-500">{member.user.qqUin}</p>
+              <div className="flex min-w-0 items-center gap-3">
+                <QqAvatar qqUin={member.user.qqUin} name={member.user.displayName ?? member.user.qqUin} />
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{member.user.displayName ?? member.user.qqUin}</p>
+                  <p className="text-xs text-slate-500">QQ {member.user.qqUin}</p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Select value={member.role} onValueChange={(role) => onRoleChange(member.id, role as TenantRole)}>
@@ -698,6 +806,7 @@ function UsersPanel({
             </div>
           ))}
         </div>
+        <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
       </CardContent>
     </Card>
   );
@@ -705,27 +814,31 @@ function UsersPanel({
 
 function BansPanel({
   bans,
-  members,
+  pagination,
   form,
   keyword,
   onlyActive,
   busy,
+  loading,
   onFormChange,
   onKeywordChange,
   onOnlyActiveChange,
+  onPageChange,
   onRefresh,
   onSubmit,
   onUnban,
 }: {
   bans: AdminBanRecord[];
-  members: AdminMember[];
+  pagination: Pagination;
   form: BanForm;
   keyword: string;
   onlyActive: boolean;
   busy: boolean;
+  loading: boolean;
   onFormChange: (form: BanForm) => void;
   onKeywordChange: (value: string) => void;
   onOnlyActiveChange: (value: boolean) => void;
+  onPageChange: (page: number) => void;
   onRefresh: () => void;
   onSubmit: () => void;
   onUnban: (id: string) => void;
@@ -735,22 +848,16 @@ function BansPanel({
       <CardContent className="p-4">
         <PanelTitle icon={ShieldCheckIcon} title="封禁管理" description="查看封禁记录，或临时封禁用户" color="product-accent-rose" />
         <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
-          <Select value={form.userId || "none"} onValueChange={(userId) => onFormChange({ ...form, userId: userId === "none" ? "" : userId })}>
-            <SelectTrigger className="h-10 w-full bg-white font-bold">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">选择用户</SelectItem>
-              {members.filter((member) => member.role !== "admin").map((member) => (
-                <SelectItem key={member.id} value={member.user.id}>
-                  {member.user.displayName ?? member.user.qqUin}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            className="bg-white"
+            inputMode="numeric"
+            placeholder="输入要封禁的 QQ 号"
+            value={form.qqUin}
+            onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })}
+          />
           <Input className="bg-white" placeholder="封禁原因" value={form.comment} onChange={(event) => onFormChange({ ...form, comment: event.target.value })} />
           <Input className="bg-white" type="datetime-local" value={form.endsAt} onChange={(event) => onFormChange({ ...form, endsAt: event.target.value })} />
-          <Button className="font-medium" variant="destructive" disabled={busy || !form.userId || !form.comment || !form.endsAt} onClick={onSubmit}>
+          <Button className="font-medium" variant="destructive" disabled={busy || !form.qqUin || !form.comment || !form.endsAt} onClick={onSubmit}>
             封禁
           </Button>
         </div>
@@ -767,20 +874,26 @@ function BansPanel({
         </div>
 
         <div className="mt-3 flex flex-col gap-2">
-          {bans.length === 0 ? (
+          {loading ? (
+            <LoadingBlock title="正在加载封禁记录..." />
+          ) : bans.length === 0 ? (
             <EmptyCard title="暂无封禁记录" />
           ) : (
             bans.map((ban) => (
             <div key={ban.id} className="product-row-card flex flex-wrap items-center justify-between gap-2 p-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold">{ban.user?.displayName ?? ban.user?.qqUin ?? "未知用户"}</p>
-                    <Badge className={`rounded-full shadow-none ${ban.active ? "bg-red-50 text-red-700 ring-1 ring-red-200" : "bg-slate-100 text-slate-500"}`}>
-                      {ban.active ? "生效中" : "已结束"}
-                    </Badge>
+                <div className="flex min-w-0 items-start gap-3">
+                  {ban.user ? <QqAvatar qqUin={ban.user.qqUin} name={ban.user.displayName ?? ban.user.qqUin} /> : <div className="size-10 rounded-full bg-slate-100" />}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold">{ban.user?.displayName ?? ban.user?.qqUin ?? "未知用户"}</p>
+                      <Badge className={`rounded-full shadow-none ${ban.active ? "bg-red-50 text-red-700 ring-1 ring-red-200" : "bg-slate-100 text-slate-500"}`}>
+                        {ban.active ? "生效中" : "已结束"}
+                      </Badge>
+                    </div>
+                    {ban.user ? <p className="text-xs text-slate-500">QQ {ban.user.qqUin}</p> : null}
+                    <p className="mt-1 text-sm text-slate-600">{ban.comment}</p>
+                    <p className="text-xs text-slate-500">结束时间：{formatBanDateTime(ban.endsAt)}</p>
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">{ban.comment}</p>
-                  <p className="text-xs text-slate-500">结束时间：{formatBanDateTime(ban.endsAt)}</p>
                 </div>
                 {ban.active ? (
                   <Button variant="outline" size="sm" onClick={() => onUnban(ban.id)}>
@@ -791,6 +904,7 @@ function BansPanel({
             ))
           )}
         </div>
+        <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
       </CardContent>
     </Card>
   );
@@ -1580,7 +1694,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
 function defaultBanForm(): BanForm {
   const endsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   return {
-    userId: "",
+    qqUin: "",
     comment: "",
     endsAt: toLocalDateTimeValue(endsAt),
   };
@@ -1610,6 +1724,31 @@ function defaultPublishTargetForm(): PublishTargetForm {
     required: true,
     qzoneRefreshMode: "protocol",
   };
+}
+
+function defaultPagination(): Pagination {
+  return {
+    page: 1,
+    limit: 10,
+    total: 0,
+    pageCount: 1,
+  };
+}
+
+function QqAvatar({ qqUin, name }: { qqUin: string; name: string }) {
+  return (
+    <img
+      src={qqAvatarUrl(qqUin)}
+      alt={name}
+      className="size-10 shrink-0 rounded-full border border-slate-200 bg-slate-50 object-cover"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+    />
+  );
+}
+
+function qqAvatarUrl(qqUin: string) {
+  return `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(qqUin)}&s=100`;
 }
 
 function toLocalDateTimeValue(date: Date) {
