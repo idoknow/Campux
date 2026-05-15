@@ -117,3 +117,52 @@ jobs:
         run: |
           curl -fsS --retry 12 --retry-delay 5 --retry-all-errors \
             https://admin.campux.top/api/health
+
+  deploy-docs:
+    name: Deploy Docs
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/deploy/prod'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check docs changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            before="HEAD^"
+          fi
+          if git diff --quiet "$before" "$GITHUB_SHA" -- docs package.json bun.lock; then
+            echo "docs=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Bun
+        if: steps.changes.outputs.docs == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: steps.changes.outputs.docs == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Build docs
+        if: steps.changes.outputs.docs == 'true'
+        run: bun run docs:build
+
+      - name: Deploy docs to Cloudflare Pages
+        if: steps.changes.outputs.docs == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          bunx wrangler pages deploy docs/.vitepress/dist \
+            --project-name campux \
+            --branch deploy/prod
