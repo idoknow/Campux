@@ -6,6 +6,7 @@ node_modules/
 dist/
 build/
 .vite/
+docs/.vitepress/cache/
 coverage/
 *.tsbuildinfo
 
