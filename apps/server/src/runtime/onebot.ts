@@ -420,7 +420,7 @@ export class OneBotRuntime {
       return;
     }
 
-    const command = parseCommand(extractPlainText(event));
+    const command = parsePrivateCommand(extractPlainText(event));
     if (!command) {
       const bot = await findEnabledBot(botQqUin);
       if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
@@ -822,6 +822,23 @@ function parseCommand(input: string) {
   }
   return {
     name,
+    args: match[2]?.trim() ?? "",
+  };
+}
+
+function parsePrivateCommand(input: string) {
+  const command = parseCommand(input);
+  if (command) {
+    return command;
+  }
+
+  const normalized = input.trim();
+  const match = normalized.match(/^(注册账号|重置密码)(?:\s+(.*))?$/);
+  if (!match?.[1]) {
+    return null;
+  }
+  return {
+    name: match[1],
     args: match[2]?.trim() ?? "",
   };
 }

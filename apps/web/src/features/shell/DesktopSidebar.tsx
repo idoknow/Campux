@@ -34,16 +34,20 @@ export function DesktopSidebar({
 
       <div className="flex min-h-0 flex-1 flex-col justify-between px-3 py-4">
         <TabsList className="grid h-auto w-full grid-cols-1 gap-1 bg-transparent p-0">
-          {navItems.map((item) => (
-            <TabsTrigger
-              key={item.value}
-              value={item.value}
-              className="h-9 justify-start rounded-full px-3 text-sm text-slate-600 shadow-none data-[state=active]:bg-blue-50 data-[state=active]:font-bold data-[state=active]:text-blue-700 data-[state=active]:shadow-none"
-            >
-              <span className="mr-2 text-base">{item.emoji}</span>
-              {item.label}
-            </TabsTrigger>
-          ))}
+          {navItems.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <TabsTrigger
+                key={item.value}
+                value={item.value}
+                className="h-9 justify-start rounded-full px-3 text-sm text-slate-600 shadow-none data-[state=active]:bg-blue-50 data-[state=active]:font-bold data-[state=active]:text-blue-700 data-[state=active]:shadow-none"
+              >
+                <Icon className="mr-2 size-4.5" strokeWidth={2.1} />
+                {item.label}
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
 
         <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="desktop" />

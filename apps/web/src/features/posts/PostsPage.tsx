@@ -48,6 +48,13 @@ type RejectDialogState = {
   reason: string;
 };
 
+type ImagePreviewState = {
+  open: boolean;
+  images: PostImage[];
+  index: number;
+  title: string;
+};
+
 const postCardPalettes = [
   "border-slate-200 bg-white",
   "border-slate-200 bg-white",
@@ -105,6 +112,12 @@ export function PostsPage({
     loading: false,
     error: "",
     url: "",
+    title: "",
+  }));
+  const [imagePreview, setImagePreview] = useState<ImagePreviewState>(() => ({
+    open: false,
+    images: [],
+    index: 0,
     title: "",
   }));
 
@@ -246,6 +259,29 @@ export function PostsPage({
     }
   }
 
+  function openImagePreview(images: PostImage[], index: number, title: string) {
+    setImagePreview({
+      open: true,
+      images,
+      index,
+      title,
+    });
+  }
+
+  function shiftImagePreview(offset: number) {
+    setImagePreview((current) => {
+      if (current.images.length === 0) {
+        return current;
+      }
+      return {
+        ...current,
+        index: (current.index + offset + current.images.length) % current.images.length,
+      };
+    });
+  }
+
+  const activePreviewImage = imagePreview.images[imagePreview.index] ?? null;
+
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="min-h-0 flex-1">
@@ -269,7 +305,13 @@ export function PostsPage({
             <LoadingBlock title="正在加载你的稿件..." />
           ) : (
             <>
-              <PostList posts={posts} busyCancelPostId={busyCancelPostId} onPreview={(post) => void openRenderPreview(post)} onCancel={(post) => void cancelPost(post.id)} />
+              <PostList
+                posts={posts}
+                busyCancelPostId={busyCancelPostId}
+                onPreview={(post) => void openRenderPreview(post)}
+                onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+                onCancel={(post) => void cancelPost(post.id)}
+              />
               <PaginationControls pagination={minePagination} busy={mineLoading} onPageChange={onMinePageChange} />
             </>
           )}
@@ -322,6 +364,7 @@ export function PostsPage({
                     posts={reviewPosts}
                     busyPostId={busyPostId}
                     onPreview={(post) => void openRenderPreview(post)}
+                    onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                     onApprove={(id) => void reviewPost(id, "approve")}
                     onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
                   />
@@ -342,6 +385,42 @@ export function PostsPage({
             {preview.loading ? <p className="py-12 text-center text-sm font-bold text-slate-500">正在渲染...</p> : null}
             {preview.error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{preview.error}</p> : null}
             {preview.url ? <img src={preview.url} alt={preview.title} className="mx-auto w-full max-w-[560px] rounded-md border border-slate-200 bg-white" /> : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
+        <DialogContent className="w-[min(920px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>{imagePreview.title}</DialogTitle>
+            <DialogDescription>
+              {imagePreview.images.length > 0 ? `${imagePreview.index + 1} / ${imagePreview.images.length}` : "暂无图片"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-5 pb-5">
+            {activePreviewImage ? (
+              <div className="grid gap-3">
+                <div className="grid max-h-[70dvh] place-items-center overflow-auto rounded-md border border-slate-200 bg-slate-50">
+                  <img
+                    src={getPostImageUrl(activePreviewImage)}
+                    alt={activePreviewImage.fileName ?? imagePreview.title}
+                    className="max-h-[70dvh] w-auto max-w-full object-contain"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="min-w-0 truncate text-xs font-bold text-slate-500">{activePreviewImage.fileName ?? "上传图片"}</p>
+                  {imagePreview.images.length > 1 ? (
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => shiftImagePreview(-1)}>
+                        上一张
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => shiftImagePreview(1)}>
+                        下一张
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
@@ -389,12 +468,14 @@ function ReviewList({
   posts,
   busyPostId,
   onPreview,
+  onImagePreview,
   onApprove,
   onReject,
 }: {
   posts: ReviewPostItem[];
   busyPostId: string;
   onPreview: (post: ReviewPostItem) => void;
+  onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onApprove: (id: string) => void;
   onReject: (post: ReviewPostItem) => void;
 }) {
@@ -411,6 +492,7 @@ function ReviewList({
           palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
           busy={busyPostId === post.id}
           onPreview={() => onPreview(post)}
+          onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
           onApprove={() => onApprove(post.id)}
           onReject={() => onReject(post)}
         />
@@ -424,6 +506,7 @@ function ReviewCard({
   palette,
   busy,
   onPreview,
+  onImagePreview,
   onApprove,
   onReject,
 }: {
@@ -431,6 +514,7 @@ function ReviewCard({
   palette: string;
   busy: boolean;
   onPreview: () => void;
+  onImagePreview: (images: PostImage[], index: number) => void;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -470,7 +554,7 @@ function ReviewCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} />
 
-        {images.length > 0 ? <ImageGallery images={images} reviewMode /> : <NoImagePill />}
+        {images.length > 0 ? <ImageGallery images={images} reviewMode onImageClick={onImagePreview} /> : <NoImagePill />}
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
@@ -499,11 +583,13 @@ function PostList({
   posts,
   busyCancelPostId,
   onPreview,
+  onImagePreview,
   onCancel,
 }: {
   posts: PostItem[];
   busyCancelPostId: string;
   onPreview: (post: PostItem) => void;
+  onImagePreview: (post: PostItem, images: PostImage[], index: number) => void;
   onCancel: (post: PostItem) => void;
 }) {
   if (posts.length === 0) {
@@ -519,6 +605,7 @@ function PostList({
           palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
           cancelBusy={busyCancelPostId === post.id}
           onPreview={() => onPreview(post)}
+          onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
           onCancel={() => onCancel(post)}
         />
       ))}
@@ -531,12 +618,14 @@ function PostCard({
   palette,
   cancelBusy,
   onPreview,
+  onImagePreview,
   onCancel,
 }: {
   post: PostItem;
   palette: string;
   cancelBusy: boolean;
   onPreview: () => void;
+  onImagePreview: (images: PostImage[], index: number) => void;
   onCancel: () => void;
 }) {
   const images = getPostImages(post.images);
@@ -564,7 +653,7 @@ function PostCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} />
 
-        {images.length > 0 ? <ImageGallery images={images} /> : <NoImagePill />}
+        {images.length > 0 ? <ImageGallery images={images} onImageClick={onImagePreview} /> : <NoImagePill />}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
           <span className="inline-flex items-center gap-1">
@@ -673,11 +762,17 @@ function NoImagePill() {
   );
 }
 
-function ImageGallery({ images, reviewMode = false }: { images: PostImage[]; reviewMode?: boolean }) {
+function ImageGallery({ images, reviewMode = false, onImageClick }: { images: PostImage[]; reviewMode?: boolean; onImageClick?: (images: PostImage[], index: number) => void }) {
   return (
     <div className={`mt-3 grid gap-2 ${reviewMode ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-3"}`}>
       {images.slice(0, reviewMode ? 9 : 6).map((image, index) => (
-        <div key={image.key ?? `${image.url}-${index}`} className="relative aspect-square overflow-hidden rounded-md bg-slate-50 ring-1 ring-slate-200">
+        <button
+          key={image.key ?? `${image.url}-${index}`}
+          type="button"
+          className="relative aspect-square overflow-hidden rounded-md bg-slate-50 text-left ring-1 ring-slate-200 transition hover:ring-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          onClick={() => onImageClick?.(images, index)}
+          aria-label={`查看图片 ${index + 1}`}
+        >
           <img src={getPostImageUrl(image)} alt={image.fileName ?? "稿件图片"} className="h-full w-full object-cover" loading="lazy" />
           {image.fileName && reviewMode ? (
             <div className="absolute inset-x-0 bottom-0 truncate bg-slate-950/55 px-2 py-1 text-[10px] font-bold text-white">{image.fileName}</div>
@@ -685,7 +780,7 @@ function ImageGallery({ images, reviewMode = false }: { images: PostImage[]; rev
           {index === (reviewMode ? 8 : 5) && images.length > (reviewMode ? 9 : 6) ? (
             <div className="absolute inset-0 grid place-items-center bg-slate-950/45 text-lg font-black text-white">+{images.length - (reviewMode ? 9 : 6)}</div>
           ) : null}
-        </div>
+        </button>
       ))}
     </div>
   );
