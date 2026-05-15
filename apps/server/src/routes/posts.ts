@@ -57,8 +57,11 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
-    const expectedPrefix = `tenants/${context.selectedTenant.id}/uploads/`;
-    if (!query.key.startsWith(expectedPrefix)) {
+    const allowedPrefixes = [
+      `tenants/${context.selectedTenant.id}/uploads/`,
+      `tenants/${context.selectedTenant.id}/legacy/`,
+    ];
+    if (!allowedPrefixes.some((prefix) => query.key.startsWith(prefix))) {
       return reply.code(403).send({ message: "没有访问该图片的权限" });
     }
 
