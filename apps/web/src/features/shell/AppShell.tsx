@@ -63,8 +63,8 @@ export function AppShell({
   onSubmitPost: () => void;
 }) {
   return (
-    <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as MainTab)} className="min-h-dvh md:h-dvh">
-      <div className="min-h-dvh bg-background md:flex md:h-dvh md:overflow-hidden">
+    <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as MainTab)} className="h-dvh overflow-hidden">
+      <div className="h-dvh overflow-hidden bg-background md:flex">
         <DesktopSidebar
           activeTab={activeTab}
           me={me}
@@ -74,11 +74,11 @@ export function AppShell({
           onOpenOps={onOpenOps}
         />
 
-        <div className="min-h-dvh w-full bg-background pb-24 md:mx-auto md:h-dvh md:max-w-[980px] md:overflow-y-auto md:border-x md:border-slate-200 md:pb-8">
+        <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:mx-auto md:max-w-[980px] md:border-x md:border-slate-200">
           <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} />
 
-          <main>
-            <TabsContent value="post" className="m-0">
+          <main className="min-h-0 flex-1 overflow-hidden">
+            <TabsContent value="post" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <PostPage
                 busy={busy}
                 error={error}
@@ -96,15 +96,15 @@ export function AppShell({
               />
             </TabsContent>
 
-            <TabsContent value="posts" className="m-0">
+            <TabsContent value="posts" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <PostsPage posts={posts} currentRole={me.currentMembership.role} activeTab={postsTab} onTabChange={onPostsTabChange} onRefresh={onRefreshTenantData} />
             </TabsContent>
 
-            <TabsContent value="services" className="m-0">
+            <TabsContent value="services" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <ServicesPage metadata={metadata} />
             </TabsContent>
 
-            <TabsContent value="admin" className="m-0">
+            <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <AdminPage
                 activeTab={adminTab}
                 currentRole={me.currentMembership.role}

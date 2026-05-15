@@ -31,7 +31,7 @@ export function DesktopSidebar({
             <TabsTrigger
               key={item.value}
               value={item.value}
-              className="h-9 justify-start rounded-full px-3 text-sm text-slate-600 shadow-none data-[state=active]:bg-slate-100 data-[state=active]:font-bold data-[state=active]:text-slate-950 data-[state=active]:shadow-none"
+              className="h-9 justify-start rounded-full px-3 text-sm text-slate-600 shadow-none data-[state=active]:bg-blue-50 data-[state=active]:font-bold data-[state=active]:text-blue-700 data-[state=active]:shadow-none"
             >
               <span className="mr-2 text-base">{item.emoji}</span>
               {item.label}

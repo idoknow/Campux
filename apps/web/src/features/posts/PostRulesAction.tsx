@@ -24,7 +24,7 @@ import {
 
 function RuleButton() {
   return (
-    <button className="mt-2 block w-fit rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50">
+    <button className="mt-2 block w-fit rounded-md border px-3 py-2 text-left text-sm font-medium product-accent-amber hover:bg-amber-100/60">
       <span>
         请务必遵守 <strong className="inline font-bold">投稿规则</strong>
       </span>
