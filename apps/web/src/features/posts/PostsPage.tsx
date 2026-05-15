@@ -25,6 +25,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 
 type PostImage = {
   key?: string;
@@ -38,6 +39,13 @@ type RenderPreviewState = {
   error: string;
   url: string;
   title: string;
+};
+
+type RejectDialogState = {
+  open: boolean;
+  postId: string;
+  displayId: number | null;
+  reason: string;
 };
 
 const postCardPalettes = [
@@ -76,6 +84,12 @@ export function PostsPage({
   const [reviewStatus, setReviewStatus] = useState("pending_approval");
   const [reviewKeyword, setReviewKeyword] = useState("");
   const [busyPostId, setBusyPostId] = useState("");
+  const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
+    open: false,
+    postId: "",
+    displayId: null,
+    reason: "",
+  }));
   const [preview, setPreview] = useState<RenderPreviewState>(() => ({
     open: false,
     loading: false,
@@ -128,12 +142,12 @@ export function PostsPage({
     setReviewPosts(data.posts);
   }
 
-  async function reviewPost(id: string, action: "approve" | "reject") {
+  async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
     setBusyPostId(id);
     try {
       await api(`/api/review/posts/${id}/${action}`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify(comment ? { comment } : {}),
       });
       toast.success(action === "approve" ? "已通过，正在生成发布任务。" : "已拒绝。");
       await refreshAll();
@@ -142,6 +156,16 @@ export function PostsPage({
     } finally {
       setBusyPostId("");
     }
+  }
+
+  async function submitReject() {
+    const reason = rejectDialog.reason.trim();
+    if (!rejectDialog.postId || reason.length === 0) {
+      toast.error("请填写拒绝理由。");
+      return;
+    }
+    await reviewPost(rejectDialog.postId, "reject", reason);
+    setRejectDialog({ open: false, postId: "", displayId: null, reason: "" });
   }
 
   async function openRenderPreview(post: PostItem) {
@@ -240,7 +264,7 @@ export function PostsPage({
                 busyPostId={busyPostId}
                 onPreview={(post) => void openRenderPreview(post)}
                 onApprove={(id) => void reviewPost(id, "approve")}
-                onReject={(id) => void reviewPost(id, "reject")}
+                onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
               />
             </div>
           </TabsContent>
@@ -259,6 +283,30 @@ export function PostsPage({
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={rejectDialog.open} onOpenChange={(open) => setRejectDialog((current) => ({ ...current, open }))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>拒绝稿件 {rejectDialog.displayId ? `#${rejectDialog.displayId}` : ""}</DialogTitle>
+            <DialogDescription>填写给投稿人的拒绝理由，系统会尝试通过本校园墙的所有墙号私聊通知。</DialogDescription>
+          </DialogHeader>
+          <div className="px-5 pb-5">
+            <Textarea
+              className="min-h-28 bg-white"
+              value={rejectDialog.reason}
+              onChange={(event) => setRejectDialog((current) => ({ ...current, reason: event.target.value }))}
+              placeholder="例如：信息不完整，请补充时间、地点和联系方式后重新投稿。"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setRejectDialog({ open: false, postId: "", displayId: null, reason: "" })}>
+                取消
+              </Button>
+              <Button disabled={busyPostId === rejectDialog.postId || rejectDialog.reason.trim().length === 0} onClick={() => void submitReject()}>
+                确认拒绝
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -274,7 +322,7 @@ function ReviewList({
   busyPostId: string;
   onPreview: (post: ReviewPostItem) => void;
   onApprove: (id: string) => void;
-  onReject: (id: string) => void;
+  onReject: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
     return <EmptyCard title="暂时没有待审核稿件" />;
@@ -290,7 +338,7 @@ function ReviewList({
           busy={busyPostId === post.id}
           onPreview={() => onPreview(post)}
           onApprove={() => onApprove(post.id)}
-          onReject={() => onReject(post.id)}
+          onReject={() => onReject(post)}
         />
       ))}
     </div>

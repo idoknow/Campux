@@ -6,6 +6,7 @@ import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import type { RuntimeQueue } from "../runtime/queue";
+import type { OneBotRuntime } from "../runtime/onebot";
 
 const postParamsSchema = z.object({
   id: z.string().min(1),
@@ -20,7 +21,7 @@ const reviewQuerySchema = z.object({
   q: z.string().max(80).optional(),
 });
 
-export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue) {
+export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/review/posts", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
     const query = reviewQuerySchema.parse(request.query);
@@ -146,7 +147,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       return reply.code(409).send({ message: "只有待审核稿件可以拒绝" });
     }
 
-    await prisma.post.update({
+    const updated = await prisma.post.update({
       where: {
         id: post.id,
       },
@@ -174,6 +175,10 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         displayId: post.displayId,
         comment: body.comment?.trim() || null,
       },
+    });
+
+    oneBot?.notifyReviewResult(updated.id, "rejected", body.comment?.trim() || "审核拒绝").catch((error) => {
+      app.log.warn({ error, postId: updated.id }, "failed to notify review rejection");
     });
 
     return {

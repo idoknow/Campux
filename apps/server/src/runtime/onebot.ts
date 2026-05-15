@@ -199,6 +199,39 @@ export class OneBotRuntime {
     await this.broadcastReviewGroup(post.tenantId, `稿件已取消：#${post.displayId}`);
   }
 
+  async notifyReviewResult(postId: string, status: "approved" | "rejected", comment?: string | null) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        author: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId: post.tenantId,
+        enabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+    const message = status === "approved"
+      ? `您的稿件 #${post.displayId} 已通过审核`
+      : `您的稿件 #${post.displayId} 未通过审核，原因：${comment?.trim() || "审核拒绝"}`;
+
+    for (const bot of bots) {
+      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, message).catch((error) => {
+        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify review result");
+      });
+    }
+  }
+
   async notifyPublishSucceeded(postId: string, targetId: string, externalId: string) {
     const post = await prisma.post.findUnique({
       where: {
@@ -455,7 +488,7 @@ export class OneBotRuntime {
           action: "approve",
         });
         await this.sendGroupMessage(botQqUin, groupId, `已通过 #${displayId}`);
-        await this.sendPrivateMessage(botQqUin, result.post.author.qqUin, `您的稿件 #${displayId} 已通过审核`).catch(() => undefined);
+        await this.notifyReviewResult(result.post.id, "approved").catch(() => undefined);
         return;
       }
 
@@ -475,11 +508,7 @@ export class OneBotRuntime {
           comment: parsed.comment,
         });
         await this.sendGroupMessage(botQqUin, groupId, `已拒绝 #${parsed.displayId}，原因：${parsed.comment}`);
-        await this.sendPrivateMessage(
-          botQqUin,
-          result.post.author.qqUin,
-          `您的稿件 #${parsed.displayId} 未通过审核，原因：${parsed.comment}`,
-        ).catch(() => undefined);
+        await this.notifyReviewResult(result.post.id, "rejected", parsed.comment).catch(() => undefined);
         return;
       }
 
