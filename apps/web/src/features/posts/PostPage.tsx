@@ -43,7 +43,7 @@ export function PostPage({
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
 
   return (
-    <div className="flex flex-col px-4 py-4">
+    <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
       {metadata.banner ? (
         <div className="mb-3 flex min-h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <MegaphoneIcon className="size-4 shrink-0" strokeWidth={2.3} />
@@ -95,7 +95,7 @@ export function PostPage({
           <input ref={inputRef} hidden multiple accept="image/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
 
-        <div className="mt-3 w-fit rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+        <div className="mt-3 w-fit rounded-md border px-3 py-2 text-sm product-accent-green">
           <div className="flex items-center gap-3">
             <span>匿名投稿</span>
             <Switch checked={anonymous} onCheckedChange={onAnonymousChange} aria-label="匿名投稿" />
@@ -115,7 +115,7 @@ export function PostPage({
         </div>
       </section>
 
-      <section className="product-surface mt-3 px-3 py-3">
+      <section className="mt-3 rounded-md border border-blue-100 bg-blue-50/45 px-3 py-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="font-semibold text-slate-900">稿件状态</p>

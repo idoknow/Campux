@@ -122,9 +122,9 @@ export function PostsPage({
   }
 
   return (
-    <div className="px-4 py-4">
+    <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <SectionHeader title="稿件" subtitle="看看你的投稿进度" action="刷新" icon={RefreshCwIcon} onAction={refreshAll} />
-      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="mt-3">
+      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="mt-3 min-h-0 flex-1">
         <TabsList className={postTabsListClassName}>
           <TabsTrigger value="mine" className={postTabsTriggerClassName}>
             你的稿件
@@ -135,13 +135,13 @@ export function PostsPage({
             </TabsTrigger>
           ) : null}
         </TabsList>
-        <TabsContent value="mine" className="mt-3">
+        <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           <PostList posts={posts} />
         </TabsContent>
         {canReview ? (
-          <TabsContent value="review" className="mt-3">
+          <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
             {reviewError ? <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{reviewError}</p> : null}
-            <div className="mb-3 grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)_auto]">
+            <div className="product-subsection mb-3 grid gap-2 p-3 sm:grid-cols-[160px_minmax(0,1fr)_auto]">
               <select value={reviewStatus} className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold" onChange={(event) => setReviewStatus(event.target.value)}>
                 <option value="pending_approval">待审核</option>
                 <option value="approved">已通过</option>
@@ -166,7 +166,9 @@ export function PostsPage({
                 筛选
               </Button>
             </div>
-            <ReviewList posts={reviewPosts} busyPostId={busyPostId} onApprove={(id) => void reviewPost(id, "approve")} onReject={(id) => void reviewPost(id, "reject")} />
+            <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+              <ReviewList posts={reviewPosts} busyPostId={busyPostId} onApprove={(id) => void reviewPost(id, "approve")} onReject={(id) => void reviewPost(id, "reject")} />
+            </div>
           </TabsContent>
         ) : null}
       </Tabs>
@@ -225,64 +227,49 @@ function ReviewCard({
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
-      <CardContent className="p-0">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <InfoPill icon={HashIcon}>稿件 {post.displayId}</InfoPill>
-            <InfoPill icon={post.anonymous ? EyeOffIcon : UserIcon}>{post.anonymous ? "前台匿名" : "前台实名"}</InfoPill>
-            <InfoPill icon={ImageIcon}>{images.length} 张图</InfoPill>
+      <CardContent className="grid gap-3 p-3">
+        <PostMetaHeader
+          displayId={`稿件 ${post.displayId}`}
+          anonymous={post.anonymous}
+          anonymousLabel={post.anonymous ? "前台匿名" : "前台实名"}
+          imageCount={images.length}
+          status={post.status}
+          statusClassName={statusClassName}
+        />
+
+        <div className="product-subsection p-3">
+          <div className="flex items-start gap-2">
+            <span className="grid size-9 shrink-0 place-items-center rounded-md bg-white text-slate-600 ring-1 ring-slate-200">
+              <UserRoundIcon className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="truncate text-sm font-semibold text-slate-950">{authorName}</p>
+                <Badge className="rounded-full bg-white text-slate-600 ring-1 ring-slate-200 shadow-none">QQ {authorQq}</Badge>
+              </div>
+              <p className="mt-1 break-all text-xs font-bold text-slate-500">账号 ID：{post.author?.id ?? "未知"}</p>
+            </div>
           </div>
-          <Badge className={`rounded-full px-2.5 py-1 text-xs font-semibold shadow-none ${statusClassName}`}>{statusLabels[post.status] ?? post.status}</Badge>
         </div>
 
-        <div className="grid gap-3 p-3">
-          <div className="rounded-md border border-slate-100 bg-white p-3">
-            <div className="flex items-start gap-2">
-              <span className="grid size-9 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-600">
-                <UserRoundIcon className="size-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate text-sm font-semibold text-slate-950">{authorName}</p>
-                  <Badge className="rounded-full bg-slate-100 text-slate-600 shadow-none">QQ {authorQq}</Badge>
-                </div>
-                <p className="mt-1 break-all text-xs font-bold text-slate-500">账号 ID：{post.author?.id ?? "未知"}</p>
-              </div>
-            </div>
+        <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} />
+
+        {images.length > 0 ? <ImageGallery images={images} reviewMode /> : <NoImagePill />}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+            <span className="break-all">内部 ID：{shortId(post.id)}</span>
+            <span>创建：{formatFullDateTime(post.createdAt)}</span>
           </div>
-
-          <div className="rounded-md bg-white p-3">
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
-              <span className="inline-flex items-center gap-1">
-                <FileTextIcon className="size-3.5" />
-                {post.text.length} 字
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <ClockIcon className="size-3.5" />
-                {formatFullDateTime(post.createdAt)}
-              </span>
-              {post.updatedAt !== post.createdAt ? <span>更新 {formatFullDateTime(post.updatedAt)}</span> : null}
-            </div>
-            <p className="whitespace-pre-wrap text-[15px] font-medium leading-7 text-slate-800">{post.text}</p>
-          </div>
-
-          {images.length > 0 ? <ImageGallery images={images} reviewMode /> : <NoImagePill />}
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
-              <span className="break-all">内部 ID：{shortId(post.id)}</span>
-              <span>创建：{formatFullDateTime(post.createdAt)}</span>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
-                <CheckIcon data-icon="inline-start" />
-                通过
-              </Button>
-              <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onReject}>
-                <XIcon data-icon="inline-start" />
-                拒绝
-              </Button>
-            </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
+              <CheckIcon data-icon="inline-start" />
+              通过
+            </Button>
+            <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onReject}>
+              <XIcon data-icon="inline-start" />
+              拒绝
+            </Button>
           </div>
         </div>
       </CardContent>
@@ -310,36 +297,84 @@ function PostCard({ post, palette }: { post: PostItem; palette: string }) {
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
-      <CardContent className="p-0">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <InfoPill icon={HashIcon}>{post.displayId}</InfoPill>
-              <InfoPill icon={post.anonymous ? EyeOffIcon : UserIcon}>{post.anonymous ? "匿名投稿" : "实名投稿"}</InfoPill>
-            </div>
-            <h3 className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-slate-950">{post.title || "未命名稿件"}</h3>
-          </div>
-          <Badge className={`shrink-0 rounded-full px-2.5 py-1 shadow-none ${statusClassName}`}>{statusLabels[post.status] ?? post.status}</Badge>
-        </div>
+      <CardContent className="grid gap-3 p-3">
+        <PostMetaHeader
+          displayId={post.displayId}
+          anonymous={post.anonymous}
+          anonymousLabel={post.anonymous ? "匿名投稿" : "实名投稿"}
+          imageCount={images.length}
+          status={post.status}
+          statusClassName={statusClassName}
+          title={post.title || "未命名稿件"}
+        />
 
-        <div className="p-3">
-          <p className="whitespace-pre-wrap rounded-md bg-white p-3 text-[15px] leading-7 text-slate-800">{post.text}</p>
+        <PostTextBlock text={post.text} createdAt={post.createdAt} />
 
-          {images.length > 0 ? <ImageGallery images={images} /> : <NoImagePill />}
+        {images.length > 0 ? <ImageGallery images={images} /> : <NoImagePill />}
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
-            <span className="inline-flex items-center gap-1">
-              <ClockIcon className="size-3.5" />
-              {formatPostDate(post.createdAt)}
-            </span>
-            <span className="inline-flex items-center gap-1 text-slate-500">
-              <SparklesIcon className="size-3.5" />
-              {post.status === "published" ? "已出现在墙上" : "等待下一步"}
-            </span>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
+          <span className="inline-flex items-center gap-1">
+            <ClockIcon className="size-3.5" />
+            {formatPostDate(post.createdAt)}
+          </span>
+          <span className="inline-flex items-center gap-1 text-slate-500">
+            <SparklesIcon className="size-3.5" />
+            {post.status === "published" ? "已出现在墙上" : "等待下一步"}
+          </span>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PostMetaHeader({
+  displayId,
+  anonymous,
+  anonymousLabel,
+  imageCount,
+  status,
+  statusClassName,
+  title,
+}: {
+  displayId: string | number;
+  anonymous: boolean;
+  anonymousLabel: string;
+  imageCount: number;
+  status: string;
+  statusClassName: string;
+  title?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <InfoPill icon={HashIcon}>{displayId}</InfoPill>
+          <InfoPill icon={anonymous ? EyeOffIcon : UserIcon}>{anonymousLabel}</InfoPill>
+          <InfoPill icon={ImageIcon}>{imageCount} 张图</InfoPill>
+        </div>
+        {title ? <h3 className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-slate-950">{title}</h3> : null}
+      </div>
+      <Badge className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold shadow-none ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
+    </div>
+  );
+}
+
+function PostTextBlock({ text, createdAt, updatedAt }: { text: string; createdAt: string; updatedAt?: string }) {
+  return (
+    <div className="product-row-card p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          <FileTextIcon className="size-3.5" />
+          {text.length} 字
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <ClockIcon className="size-3.5" />
+          {formatFullDateTime(createdAt)}
+        </span>
+        {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
+      </div>
+      <p className="whitespace-pre-wrap text-[15px] font-medium leading-7 text-slate-800">{text}</p>
+    </div>
   );
 }
 

@@ -57,7 +57,7 @@
   --card-foreground: oklch(0.205 0.015 255);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.205 0.015 255);
-  --primary: oklch(0.235 0.015 255);
+  --primary: oklch(0.58 0.18 250);
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.93 0.006 255);
   --secondary-foreground: oklch(0.27 0.015 255);
@@ -69,7 +69,7 @@
   --destructive-foreground: oklch(0.98 0.01 25);
   --border: oklch(0.89 0.006 255);
   --input: oklch(0.89 0.006 255);
-  --ring: oklch(0.58 0.02 255);
+  --ring: oklch(0.62 0.13 250);
   --chart-1: oklch(0.68 0.16 246);
   --chart-2: oklch(0.78 0.17 70);
   --chart-3: oklch(0.7 0.14 145);
@@ -111,7 +111,7 @@
 .campux-postbtn {
   border: none;
   border-radius: 8px;
-  background: #111827;
+  background: #2563eb;
   padding: 0;
   font-weight: 700;
   letter-spacing: 0;
@@ -137,6 +137,18 @@
 }
 
 .product-surface {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.product-subsection {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.product-row-card {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
@@ -171,9 +183,39 @@
 
 .product-tabs-trigger[data-state="active"],
 .product-tabs-trigger[data-active] {
-  background: #f1f5f9 !important;
-  color: #111827 !important;
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
   font-weight: 700;
+}
+
+.product-accent-blue {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.product-accent-green {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.product-accent-amber {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.product-accent-rose {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.product-accent-violet {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #6d28d9;
 }
 
 .dark {

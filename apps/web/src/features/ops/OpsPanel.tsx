@@ -144,10 +144,10 @@ export function OpsPanel() {
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <MetricCard title="全局用户" value={users.length} icon={UsersRoundIcon} />
-        <MetricCard title="Bot 账号" value={bots.length} icon={BotIcon} />
-        <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} />
-        <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} />
+        <MetricCard title="全局用户" value={users.length} icon={UsersRoundIcon} accent="blue" />
+        <MetricCard title="Bot 账号" value={bots.length} icon={BotIcon} accent="violet" />
+        <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} accent="amber" />
+        <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -331,9 +331,16 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function MetricCard({ title, value, icon: Icon }: { title: string; value: number; icon: typeof ActivityIcon }) {
+function MetricCard({ title, value, icon: Icon, accent }: { title: string; value: number; icon: typeof ActivityIcon; accent: "blue" | "violet" | "amber" | "rose" }) {
+  const accentClass = {
+    blue: "product-accent-blue",
+    violet: "product-accent-violet",
+    amber: "product-accent-amber",
+    rose: "product-accent-rose",
+  }[accent];
+
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-slate-800">
+    <div className={`rounded-md border px-4 py-3 ${accentClass}`}>
       <div className="flex items-center gap-2 text-sm font-medium">
         <Icon className="size-4" />
         {title}

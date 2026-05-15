@@ -11,25 +11,25 @@ type ServiceAction = "password" | "rules" | "notice" | "";
 
 const servicePalettes = [
   {
-    shell: "border-slate-200 bg-white",
-    icon: "bg-slate-100 text-slate-600",
+    shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35",
+    icon: "product-accent-blue",
   },
   {
-    shell: "border-slate-200 bg-white",
-    icon: "bg-slate-100 text-slate-600",
+    shell: "border-slate-200 bg-white hover:border-green-200 hover:bg-green-50/35",
+    icon: "product-accent-green",
   },
   {
-    shell: "border-slate-200 bg-white",
-    icon: "bg-slate-100 text-slate-600",
+    shell: "border-slate-200 bg-white hover:border-amber-200 hover:bg-amber-50/35",
+    icon: "product-accent-amber",
   },
   {
-    shell: "border-slate-200 bg-white",
-    icon: "bg-slate-100 text-slate-600",
+    shell: "border-slate-200 bg-white hover:border-rose-200 hover:bg-rose-50/35",
+    icon: "product-accent-rose",
   },
 ];
 const defaultServicePalette = {
-  shell: "border-slate-200 bg-white",
-  icon: "bg-slate-100 text-slate-600",
+  shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35",
+  icon: "product-accent-blue",
 };
 
 export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
@@ -58,18 +58,22 @@ export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
   }
 
   return (
-    <div className="px-4 py-4">
+    <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <SectionHeader title="服务" subtitle="校园墙常用入口" />
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {entries.map((service, index) => (
-          <ServiceTile key={service.title} service={service} index={index} onOpen={() => openService(service)} />
-        ))}
-      </div>
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+        <div className="product-surface p-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {entries.map((service, index) => (
+              <ServiceTile key={service.title} service={service} index={index} onOpen={() => openService(service)} />
+            ))}
+          </div>
+        </div>
 
-      {activeAction === "password" ? <PasswordPanel onDone={(message) => setNotice(message)} /> : null}
-      {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
-      {activeAction === "notice" && notice ? <p className="mt-4 px-1 text-sm font-bold text-slate-500">{notice}</p> : null}
-      {notice && activeAction !== "notice" ? <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm font-bold text-green-700">{notice}</p> : null}
+        {activeAction === "password" ? <PasswordPanel onDone={(message) => setNotice(message)} /> : null}
+        {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
+        {activeAction === "notice" && notice ? <p className="mt-4 px-1 text-sm font-bold text-slate-500">{notice}</p> : null}
+        {notice && activeAction !== "notice" ? <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm font-bold text-green-700">{notice}</p> : null}
+      </div>
     </div>
   );
 }
@@ -79,8 +83,8 @@ function ServiceTile({ service, index, onOpen }: { service: TenantMetadata["serv
   const Icon = pickServiceIcon(service.title);
 
   return (
-    <button className={`flex min-h-20 items-center gap-3 rounded-md border p-3 text-left shadow-none transition hover:border-slate-300 hover:bg-slate-50 ${palette.shell}`} onClick={onOpen}>
-      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${palette.icon}`}>
+    <button className={`flex min-h-20 items-center gap-3 rounded-md border p-3 text-left shadow-none transition ${palette.shell}`} onClick={onOpen}>
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border ${palette.icon}`}>
         <Icon className="size-5" strokeWidth={2.1} />
       </span>
       <span className="min-w-0 flex-1">

@@ -14,7 +14,7 @@ export function MobileTabBar({ navItems }: { navItems: NavItem[] }) {
           <TabsTrigger
             key={item.value}
             value={item.value}
-            className="h-[52px] flex-col gap-1 rounded-md text-[12px] font-medium leading-none text-slate-500 shadow-none data-active:bg-slate-100 data-active:text-slate-950 data-active:shadow-none"
+            className="h-[52px] flex-col gap-1 rounded-md text-[12px] font-medium leading-none text-slate-500 shadow-none data-active:bg-blue-50 data-active:text-blue-700 data-active:shadow-none"
           >
             <Icon className="size-5" strokeWidth={2.1} />
             {item.label}

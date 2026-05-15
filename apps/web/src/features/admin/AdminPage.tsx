@@ -283,13 +283,13 @@ export function AdminPage({
   }
 
   return (
-    <div className="px-4 py-4">
+    <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <SectionHeader title="管理" subtitle="审核、用户、封禁和校园墙配置" />
 
       {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p> : null}
       {notice ? <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm font-medium text-green-700">{notice}</p> : null}
 
-      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="mt-3">
+      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="mt-3 min-h-0 flex-1">
         <TabsList className={managementTabsListClassName}>
           <TabsTrigger value="review" className={managementTabsTriggerClassName}>
             审核
@@ -315,13 +315,13 @@ export function AdminPage({
           ) : null}
         </TabsList>
 
-        <TabsContent value="review" className="mt-4">
+        <TabsContent value="review" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           <ReviewPanel posts={reviewPosts} onRefresh={() => void refreshAdminData()} onApprove={(id) => void reviewPost(id, "approve")} onReject={(id) => void reviewPost(id, "reject")} />
         </TabsContent>
 
         {isAdmin ? (
           <>
-            <TabsContent value="users" className="mt-4">
+            <TabsContent value="users" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <UsersPanel
                 members={filteredMembers}
                 keyword={memberKeyword}
@@ -334,7 +334,7 @@ export function AdminPage({
               />
             </TabsContent>
 
-            <TabsContent value="bans" className="mt-4">
+            <TabsContent value="bans" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <BansPanel
                 bans={bans}
                 members={members}
@@ -351,11 +351,11 @@ export function AdminPage({
               />
             </TabsContent>
 
-            <TabsContent value="metadata" className="mt-4">
+            <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} />
             </TabsContent>
 
-            <TabsContent value="bots" className="mt-4">
+            <TabsContent value="bots" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <BotsPanel
                 bots={bots}
                 events={botEvents}
@@ -368,7 +368,7 @@ export function AdminPage({
               />
             </TabsContent>
 
-            <TabsContent value="publish" className="mt-4">
+            <TabsContent value="publish" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <PublishPanel targets={targets} attempts={attempts} onToggleTarget={(target) => void toggleTarget(target)} onRetry={(id) => void retryAttempt(id)} />
             </TabsContent>
           </>
@@ -392,13 +392,13 @@ function ReviewPanel({
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={ClipboardListIcon} title="审核队列" description={`${posts.length} 条待处理`} color="bg-slate-700" action={<Button variant="outline" size="sm" onClick={onRefresh}>刷新</Button>} />
+        <PanelTitle icon={ClipboardListIcon} title="审核队列" description={`${posts.length} 条待处理`} color="product-accent-amber" action={<Button variant="outline" size="sm" onClick={onRefresh}>刷新</Button>} />
         <div className="mt-3 flex flex-col gap-2">
           {posts.length === 0 ? (
             <EmptyCard title="暂时没有待审核稿件" />
           ) : (
             posts.map((post) => (
-              <div key={post.id} className="rounded-md bg-white p-3">
+              <div key={post.id} className="product-row-card p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
@@ -444,11 +444,11 @@ function UsersPanel({
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={UserRoundIcon} title="用户管理" description="搜索用户、调整角色或准备封禁" color="bg-slate-700" />
+        <PanelTitle icon={UserRoundIcon} title="用户管理" description="搜索用户、调整角色或准备封禁" color="product-accent-blue" />
         <Input className="mt-3 bg-white" placeholder="输入 QQ 或昵称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
         <div className="mt-3 flex flex-col gap-2">
           {members.map((member) => (
-            <div key={member.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-3">
+            <div key={member.id} className="product-row-card flex flex-wrap items-center justify-between gap-2 p-3">
               <div className="min-w-0">
                 <p className="truncate font-semibold">{member.user.displayName ?? member.user.qqUin}</p>
                 <p className="text-xs text-slate-500">{member.user.qqUin}</p>
@@ -501,7 +501,7 @@ function BansPanel({
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={ShieldCheckIcon} title="封禁管理" description="查看封禁记录，或临时封禁用户" color="bg-slate-700" />
+        <PanelTitle icon={ShieldCheckIcon} title="封禁管理" description="查看封禁记录，或临时封禁用户" color="product-accent-rose" />
         <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
           <select className="h-10 rounded-md border border-slate-200 bg-white px-2 text-sm font-bold" value={form.userId} onChange={(event) => onFormChange({ ...form, userId: event.target.value })}>
             <option value="">选择用户</option>
@@ -534,7 +534,7 @@ function BansPanel({
             <EmptyCard title="暂无封禁记录" />
           ) : (
             bans.map((ban) => (
-              <div key={ban.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-3">
+            <div key={ban.id} className="product-row-card flex flex-wrap items-center justify-between gap-2 p-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold">{ban.user?.displayName ?? ban.user?.qqUin ?? "未知用户"}</p>
@@ -563,7 +563,7 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={MegaphoneIcon} title="元数据" description="校园墙名称、公告、投稿规则和服务入口" color="bg-slate-700" />
+        <PanelTitle icon={MegaphoneIcon} title="元数据" description="校园墙名称、公告、投稿规则和服务入口" color="product-accent-green" />
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="grid gap-1 text-sm font-medium">
             校园墙名称
@@ -632,11 +632,11 @@ function BotsPanel({
           icon={BotIcon}
           title="机器人"
           description="管理当前校园墙的 Bot、连接状态和事件"
-          color="bg-slate-700"
+          color="product-accent-violet"
           action={<Button variant="outline" size="sm" onClick={onRefresh}>刷新</Button>}
         />
 
-        <div className="mt-4 grid gap-2 rounded-md bg-white p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+        <div className="product-subsection mt-4 grid gap-2 p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
           <Input placeholder="Bot QQ" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value })} />
           <Input placeholder="显示名，例如 1 号墙" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
           <Input placeholder="审核群号，可选" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value })} />
@@ -655,7 +655,7 @@ function BotsPanel({
             <p className="text-sm font-bold text-slate-500">还没有绑定机器人。</p>
           ) : (
             bots.map((bot) => (
-              <div key={bot.id} className="rounded-md bg-white p-3">
+              <div key={bot.id} className="product-row-card p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -680,7 +680,7 @@ function BotsPanel({
                   <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
                 </div>
 
-                <div className="mt-3 rounded-md bg-slate-50 p-2">
+                <div className="product-subsection mt-3 p-2">
                   <p className="text-xs font-semibold text-slate-500">QZone session</p>
                   {bot.sessions.length === 0 ? (
                     <p className="mt-1 text-sm font-bold text-slate-500">还没有刷新 cookies</p>
@@ -697,14 +697,14 @@ function BotsPanel({
           )}
         </div>
 
-        <div className="mt-4 rounded-md bg-white p-3">
+        <div className="product-subsection mt-4 p-3">
           <p className="font-semibold text-slate-950">最近事件</p>
           <div className="mt-2 flex flex-col gap-2">
             {events.length === 0 ? (
               <p className="text-sm font-bold text-slate-500">暂无 Bot 事件。</p>
             ) : (
               events.slice(0, 12).map((event) => (
-                <div key={event.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2 text-sm">
+                <div key={event.id} className="product-row-card flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
                   <span className="font-semibold text-slate-700">{formatBotEventAction(event.action)}</span>
                   <span className="text-slate-500">{event.actor?.displayName ?? event.actor?.qqUin ?? "系统"}</span>
                   <span className="text-xs font-bold text-slate-400">{formatDateTime(event.createdAt)}</span>
@@ -744,10 +744,10 @@ function PublishPanel({
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={ShieldCheckIcon} title="发布目标" description="管理墙号发布目标和失败重试" color="bg-slate-700" />
+        <PanelTitle icon={ShieldCheckIcon} title="发布目标" description="管理墙号发布目标和失败重试" color="product-accent-rose" />
         <div className="mt-3 flex flex-col gap-2">
           {targets.map((target) => (
-            <div key={target.id} className="rounded-md bg-white p-3">
+            <div key={target.id} className="product-row-card p-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="font-semibold">{target.displayName}</p>
@@ -761,7 +761,7 @@ function PublishPanel({
           ))}
         </div>
         {attempts.length > 0 ? (
-          <div className="mt-4 rounded-md bg-white p-3">
+          <div className="product-subsection mt-4 p-3">
             <p className="font-semibold">最近发布详情</p>
             <div className="mt-2 flex flex-col gap-2">
               {attempts.map((attempt) => (
@@ -788,7 +788,7 @@ function PanelTitle({ icon: Icon, title, description, color, action }: { icon: L
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-2">
-        <span className={`grid size-10 place-items-center rounded-[10px] text-white ${color}`}>
+        <span className={`grid size-10 place-items-center rounded-md border ${color}`}>
           <Icon className="size-5" />
         </span>
         <div>
