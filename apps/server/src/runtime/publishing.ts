@@ -32,9 +32,17 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
 
   const attempts = await prisma.publishAttempt.findMany({
     where: {
-      status: {
-        in: ["queued", "failed"],
-      },
+      OR: [
+        {
+          status: "queued",
+        },
+        {
+          status: "failed",
+          nextRunAt: {
+            not: null,
+          },
+        },
+      ],
       post: {
         status: {
           in: ["publishing", "partially_failed", "failed"],

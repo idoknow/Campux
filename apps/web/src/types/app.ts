@@ -105,6 +105,7 @@ export type PublishAttemptItem = {
   status: string;
   attempt: number;
   lastError: string | null;
+  nextRunAt: string | null;
   externalId: string | null;
   updatedAt: string;
   publishTarget: {
