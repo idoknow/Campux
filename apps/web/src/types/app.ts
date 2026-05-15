@@ -175,6 +175,8 @@ export type AdminBotAccount = {
   reviewGroupId: string | null;
   connectionToken: string;
   publishTextTemplate: PublishTextTemplate;
+  userMessageReply: string;
+  userMessageReplyCooldownSeconds: number;
   lastSeenAt: string | null;
   createdAt: string;
   connection: {
