@@ -4,8 +4,10 @@ import {
   ArchiveIcon,
   BotIcon,
   Building2Icon,
+  CheckIcon,
   ClipboardListIcon,
   ClockIcon,
+  FilterIcon,
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
@@ -46,6 +48,15 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
 ];
 
 type OpsTab = "users" | "audit";
+type SystemUserRoleFilter = "system_operator" | "admin" | "reviewer" | "submitter" | "test_account";
+
+const userRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }> = [
+  { value: "system_operator", label: "系统运维" },
+  { value: "admin", label: "管理员" },
+  { value: "reviewer", label: "审核员" },
+  { value: "submitter", label: "用户" },
+  { value: "test_account", label: "测试账号" },
+];
 
 function defaultPagination(): Pagination {
   return {
@@ -62,6 +73,7 @@ export function OpsPanel() {
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
+  const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>([]);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
@@ -116,7 +128,14 @@ export function OpsPanel() {
   async function refreshUsers(page = userPage) {
     setLoadingUsers(true);
     try {
-      const data = await api<{ total: number; users: SystemUser[]; pagination: Pagination }>(`/api/system/users?page=${page}&limit=${usersPagination.limit}`);
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(usersPagination.limit),
+      });
+      if (selectedUserRoleFilters.length > 0) {
+        params.set("roles", selectedUserRoleFilters.join(","));
+      }
+      const data = await api<{ total: number; users: SystemUser[]; pagination: Pagination }>(`/api/system/users?${params}`);
       setUsers(data.users);
       setUsersPagination(data.pagination);
       setUserPage(data.pagination.page);
@@ -151,7 +170,7 @@ export function OpsPanel() {
     void refreshUsers(userPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取全局用户");
     });
-  }, [userPage]);
+  }, [userPage, selectedUserRoleFilters]);
 
   useEffect(() => {
     void refreshAudit(auditPage).catch((caught) => {
@@ -231,6 +250,11 @@ export function OpsPanel() {
     } finally {
       setSavingHost(false);
     }
+  }
+
+  function toggleUserRoleFilter(role: SystemUserRoleFilter) {
+    setSelectedUserRoleFilters((current) => (current.includes(role) ? current.filter((item) => item !== role) : [...current, role]));
+    setUserPage(1);
   }
 
   return (
@@ -417,7 +441,18 @@ export function OpsPanel() {
             </div>
 
             <TabsContent value="users" className="mt-4">
-              <GlobalUsersTable users={users} loading={loadingUsers} pagination={usersPagination} onPageChange={setUserPage} />
+              <GlobalUsersTable
+                users={users}
+                loading={loadingUsers}
+                pagination={usersPagination}
+                selectedRoleFilters={selectedUserRoleFilters}
+                onClearRoleFilters={() => {
+                  setSelectedUserRoleFilters([]);
+                  setUserPage(1);
+                }}
+                onPageChange={setUserPage}
+                onToggleRoleFilter={toggleUserRoleFilter}
+              />
             </TabsContent>
 
             <TabsContent value="audit" className="mt-4">
@@ -465,12 +500,18 @@ function GlobalUsersTable({
   users,
   loading,
   pagination,
+  selectedRoleFilters,
+  onClearRoleFilters,
   onPageChange,
+  onToggleRoleFilter,
 }: {
   users: SystemUser[];
   loading: boolean;
   pagination: Pagination;
+  selectedRoleFilters: SystemUserRoleFilter[];
+  onClearRoleFilters: () => void;
   onPageChange: (page: number) => void;
+  onToggleRoleFilter: (role: SystemUserRoleFilter) => void;
 }) {
   if (loading && users.length === 0) {
     return <InlineLoading title="正在加载全局用户..." />;
@@ -478,6 +519,37 @@ function GlobalUsersTable({
 
   return (
     <div>
+      <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+            <FilterIcon className="size-4" />
+            身份筛选
+          </div>
+          {selectedRoleFilters.length > 0 ? (
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onClearRoleFilters}>
+              清除筛选
+            </Button>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {userRoleFilters.map((filter) => {
+            const active = selectedRoleFilters.includes(filter.value);
+            return (
+              <Button
+                key={filter.value}
+                type="button"
+                variant={active ? "secondary" : "outline"}
+                size="sm"
+                className={active ? "h-8 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50" : "h-8 bg-white"}
+                onClick={() => onToggleRoleFilter(filter.value)}
+              >
+                {active ? <CheckIcon data-icon="inline-start" /> : null}
+                {filter.label}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
       <div className="overflow-hidden rounded-md border border-slate-200">
         {users.map((user) => (
           <div key={user.id} className="grid gap-3 border-b border-slate-100 bg-white p-3 last:border-b-0 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(150px,0.6fr)]">
