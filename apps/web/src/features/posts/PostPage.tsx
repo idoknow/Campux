@@ -1,10 +1,12 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { ImagePlusIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { TenantMetadata, UploadedImage } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { LoadingBlock } from "@/components/app/utility";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,12 +35,33 @@ export function PostPage({
   uploadedImages: UploadedImage[];
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
-  onFilesSelected: (files: FileList | null) => void;
+  onFilesSelected: (files: ArrayLike<File> | null) => void;
   onRemoveImage: (key: string) => void;
   onSubmit: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [imageToRemove, setImageToRemove] = useState<UploadedImage | null>(null);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
+
+  function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (files.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    onFilesSelected(files);
+  }
+
+  function confirmRemoveImage() {
+    if (!imageToRemove) {
+      return;
+    }
+    onRemoveImage(imageToRemove.key);
+    setImageToRemove(null);
+  }
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
@@ -57,11 +80,12 @@ export function PostPage({
           placeholder="有什么新鲜事？！"
           className="min-h-36 w-full resize-none rounded-none border-0 bg-white px-0 py-1 text-base leading-7 text-slate-900 shadow-none placeholder:text-slate-400 focus-visible:ring-0"
           onChange={(event) => onPostTextChange(event.target.value)}
+          onPaste={pasteImages}
         />
 
         <div className="mt-3 flex flex-wrap gap-2">
           {uploadedImages.map((image) => (
-            <button key={image.key} className="h-16 w-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100" onClick={() => onRemoveImage(image.key)}>
+            <button key={image.key} className="h-16 w-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100" onClick={() => setImageToRemove(image)}>
               <img src={image.previewUrl} alt={image.fileName} className="h-full w-full object-cover" />
             </button>
           ))}
@@ -110,6 +134,28 @@ export function PostPage({
           </Badge>
         </div>
       </section>
+
+      <Dialog open={Boolean(imageToRemove)} onOpenChange={(open) => !open && setImageToRemove(null)}>
+        <DialogContent className="w-[min(420px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>删除这张图片？</DialogTitle>
+            <DialogDescription>删除后如果还需要这张图，需要重新选择或粘贴上传。</DialogDescription>
+          </DialogHeader>
+          {imageToRemove ? (
+            <div className="px-5">
+              <img src={imageToRemove.previewUrl} alt={imageToRemove.fileName} className="max-h-72 w-full rounded-md border border-slate-200 bg-slate-50 object-contain" />
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImageToRemove(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={confirmRemoveImage}>
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

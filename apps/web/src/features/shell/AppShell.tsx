@@ -54,7 +54,7 @@ export function AppShell({
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
-  onFilesSelected: (files: FileList | null) => void;
+  onFilesSelected: (files: ArrayLike<File> | null) => void;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
   onSelectTenant: (tenantId: string) => Promise<void>;
