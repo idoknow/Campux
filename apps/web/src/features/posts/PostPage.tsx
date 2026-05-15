@@ -44,9 +44,9 @@ export function PostPage({
     <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
       {loading ? <LoadingBlock title="正在加载校园墙配置..." /> : null}
       {metadata.banner ? (
-        <div className="mb-3 flex min-h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <MegaphoneIcon className="size-4 shrink-0" strokeWidth={2.3} />
-          <p className="min-w-0 truncate">{metadata.banner}</p>
+        <div className="mb-3 flex min-h-9 items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900">
+          <MegaphoneIcon className="mt-0.5 size-4 shrink-0" strokeWidth={2.3} />
+          <p className="min-w-0 whitespace-pre-wrap break-words">{metadata.banner}</p>
         </div>
       ) : null}
 

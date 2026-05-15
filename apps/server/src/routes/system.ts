@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { Prisma } from "@campux/db";
 import { z } from "zod";
 import { requireSystemOperator } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
@@ -25,6 +26,12 @@ const tenantCreateSchema = z.object({
 const paginationQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
+const systemUserRoleFilterSchema = z.enum(["system_operator", "admin", "reviewer", "submitter", "test_account"]);
+
+const systemUsersQuerySchema = paginationQuerySchema.extend({
+  roles: z.string().optional(),
 });
 
 const defaultPostRules = [
@@ -289,10 +296,32 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
 
   app.get("/api/system/users", async (request, reply) => {
     await requireSystemOperator(request, reply);
-    const query = paginationQuerySchema.parse(request.query);
+    const query = systemUsersQuerySchema.parse(request.query);
+    const roleFilters = parseSystemUserRoleFilters(query.roles);
+    const where: Prisma.UserWhereInput =
+      roleFilters.length > 0
+        ? {
+            OR: roleFilters.map((role) => {
+              if (role === "system_operator") {
+                return { systemRole: "system_operator" };
+              }
+              if (role === "test_account") {
+                return { isTestAccount: true };
+              }
+              return {
+                memberships: {
+                  some: {
+                    role,
+                  },
+                },
+              };
+            }),
+          }
+        : {};
     const [total, users] = await Promise.all([
-      prisma.user.count(),
+      prisma.user.count({ where }),
       prisma.user.findMany({
+        where,
         include: {
           memberships: {
             include: {
@@ -445,4 +474,14 @@ function toPagination(page: number, limit: number, total: number) {
     total,
     pageCount: Math.max(1, Math.ceil(total / limit)),
   };
+}
+
+function parseSystemUserRoleFilters(value: string | undefined) {
+  if (!value) {
+    return [];
+  }
+  return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))]
+    .map((item) => systemUserRoleFilterSchema.safeParse(item))
+    .filter((result) => result.success)
+    .map((result) => result.data);
 }
