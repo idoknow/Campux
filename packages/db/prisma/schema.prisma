@@ -121,6 +121,9 @@ model Post {
   tenantId        String
   authorId        String
   displayId       Int
+  legacyTenantSlug String?
+  legacyDisplayId Int?
+  legacyUuid      String?
   text            String
   images          Json             @default("[]")
   anonymous       Boolean          @default(false)
@@ -133,6 +136,7 @@ model Post {
   publishAttempts PublishAttempt[]
 
   @@unique([tenantId, displayId])
+  @@unique([tenantId, legacyDisplayId])
   @@index([tenantId, status, createdAt])
 }
 
