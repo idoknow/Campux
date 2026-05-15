@@ -5,6 +5,49 @@ export type PostsTab = "mine" | "review";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 
+export type OAuthServerSettings = {
+  enabled: boolean;
+  authorizationCodeTtlMinutes: number;
+  accessTokenTtlMinutes: number;
+  refreshTokenTtlDays: number;
+  pkceRequired: boolean;
+  allowPlainPkce: boolean;
+  stateKey?: string | null;
+};
+
+export type OAuthClientItem = {
+  id: string;
+  tenantId: string;
+  clientId: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  pkceRequired: boolean;
+  redirectUris: string[];
+  scopes: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OAuthClientSecretResponse = {
+  client: OAuthClientItem;
+  clientSecret: string;
+};
+
+export type OAuthAuthorizeClientResponse = {
+  client: OAuthClientItem;
+  settings: OAuthServerSettings;
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+};
+
+export type OAuthClientSettingsResponse = {
+  settings: OAuthServerSettings;
+};
+
 export type Pagination = {
   page: number;
   limit: number;

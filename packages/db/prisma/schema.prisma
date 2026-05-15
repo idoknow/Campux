@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -57,6 +58,9 @@ model Tenant {
   memberships    TenantMembership[]
   sessions       AccountSession[]
   metadata       TenantMetadata[]
+  oauthClients   OAuthClient[]
+  oauthAuthorizationCodes OAuthAuthorizationCode[]
+  oauthAccessTokens OAuthAccessToken[]
   posts          Post[]
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
@@ -75,6 +79,8 @@ model User {
   memberships TenantMembership[]
   posts       Post[]
   sessions    AccountSession[]
+  oauthAuthorizationCodes OAuthAuthorizationCode[]
+  oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
 }
 
@@ -115,6 +121,71 @@ model TenantMetadata {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, key])
+}
+
+model OAuthClient {
+  id                  String                    @id @default(uuid())
+  tenantId            String
+  clientId            String                    @unique
+  clientSecretHash    String?
+  name                String
+  description         String?
+  enabled             Boolean                   @default(true)
+  pkceRequired        Boolean                   @default(true)
+  redirectUris        Json                      @default("[]")
+  scopes              Json                      @default("[]")
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  authorizationCodes  OAuthAuthorizationCode[]
+  accessTokens        OAuthAccessToken[]
+
+  @@index([tenantId, enabled])
+  @@index([tenantId, name])
+}
+
+model OAuthAuthorizationCode {
+  id                  String      @id @default(uuid())
+  tenantId            String
+  clientId            String
+  userId              String
+  codeHash            String      @unique
+  redirectUri         String
+  scope               String
+  state               String?
+  codeChallenge       String?
+  codeChallengeMethod  String      @default("S256")
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  createdAt           DateTime    @default(now())
+  tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client              OAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, clientId, expiresAt])
+  @@index([userId, createdAt])
+}
+
+model OAuthAccessToken {
+  id                String      @id @default(uuid())
+  tenantId          String
+  clientId          String
+  userId            String
+  tokenHash         String      @unique
+  refreshTokenHash  String?     @unique
+  scope             String
+  expiresAt         DateTime
+  refreshExpiresAt  DateTime?
+  revokedAt         DateTime?
+  lastUsedAt        DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client            OAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, clientId, expiresAt])
+  @@index([userId, createdAt])
 }
 
 model Post {
