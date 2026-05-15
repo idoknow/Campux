@@ -56,7 +56,7 @@ export async function registerUserViaBot({
         },
         data: {
           ...(passwordHash ? { passwordHash } : {}),
-          ...(displayName ? { displayName } : {}),
+          ...(!existingUser.displayName && displayName ? { displayName } : {}),
         },
       })
     : await prisma.user.create({
@@ -67,20 +67,23 @@ export async function registerUserViaBot({
         },
       });
 
+  const membershipRole = existingMembership && hasTenantRole(existingMembership.role, role) ? existingMembership.role : role;
   const membership = existingMembership
-    ? await prisma.tenantMembership.update({
-        where: {
-          id: existingMembership.id,
-        },
-        data: {
-          role,
-        },
-      })
+    ? membershipRole === existingMembership.role
+      ? existingMembership
+      : await prisma.tenantMembership.update({
+          where: {
+            id: existingMembership.id,
+          },
+          data: {
+            role: membershipRole,
+          },
+        })
     : await prisma.tenantMembership.create({
         data: {
           tenantId: bot.tenantId,
           userId: user.id,
-          role,
+          role: membershipRole,
         },
       });
 
@@ -94,7 +97,8 @@ export async function registerUserViaBot({
     detail: {
       botQqUin,
       userQqUin,
-      role,
+      requestedRole: role,
+      role: membershipRole,
       resetExistingPassword,
     },
   });
