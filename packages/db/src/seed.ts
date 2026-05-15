@@ -136,6 +136,7 @@ async function seedUser({
     update: {
       displayName,
       passwordHash,
+      passwordChangeRequired: false,
       isTestAccount,
       systemRole: systemRole ?? null,
     },
@@ -143,6 +144,7 @@ async function seedUser({
       qqUin: BigInt(qqUin),
       displayName,
       passwordHash,
+      passwordChangeRequired: false,
       isTestAccount,
       systemRole: systemRole ?? null,
     },

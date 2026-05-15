@@ -56,6 +56,7 @@ export async function registerUserViaBot({
         },
         data: {
           ...(passwordHash ? { passwordHash } : {}),
+          ...(passwordHash ? { passwordChangeRequired: true } : {}),
           ...(!existingUser.displayName && displayName ? { displayName } : {}),
         },
       })
@@ -63,6 +64,7 @@ export async function registerUserViaBot({
         data: {
           qqUin: BigInt(userQqUin),
           passwordHash: passwordHash ?? (await hashPassword(password)),
+          passwordChangeRequired: true,
           ...(displayName ? { displayName } : {}),
         },
       });
@@ -143,6 +145,7 @@ export async function resetPasswordViaBot({
     },
     data: {
       passwordHash: await hashPassword(password),
+      passwordChangeRequired: true,
     },
   });
   await markBotSeen(bot.id);

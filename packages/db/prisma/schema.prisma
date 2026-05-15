@@ -68,6 +68,7 @@ model User {
   qqUin       BigInt             @unique
   displayName String?
   passwordHash String
+  passwordChangeRequired Boolean @default(false)
   isTestAccount Boolean           @default(false)
   systemRole  SystemRole?
   createdAt   DateTime           @default(now())

@@ -20,12 +20,13 @@ export function toTenantSummary(
   };
 }
 
-export function toPublicUser(user: Pick<User, "id" | "qqUin" | "displayName" | "systemRole">) {
+export function toPublicUser(user: Pick<User, "id" | "qqUin" | "displayName" | "systemRole" | "passwordChangeRequired">) {
   return {
     id: user.id,
     qqUin: user.qqUin.toString(),
     displayName: user.displayName,
     systemRole: user.systemRole,
+    passwordChangeRequired: user.passwordChangeRequired,
   };
 }
 

@@ -7,6 +7,7 @@ import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, Pagination, PostIt
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { BannedScreen } from "@/features/auth/BannedScreen";
+import { RequiredPasswordChangeScreen } from "@/features/auth/RequiredPasswordChangeScreen";
 import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { AppShell } from "@/features/shell/AppShell";
@@ -241,7 +242,32 @@ export function App() {
     });
     setMe(data);
     if (data.authenticated) {
+      if (data.user.passwordChangeRequired) {
+        navigate({ kind: "login" }, "replace");
+        return;
+      }
       navigate(data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab });
+    }
+  }
+
+  async function completeRequiredPasswordChange(newPassword: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api("/api/auth/password/required", {
+        method: "POST",
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await api<MeResponse>("/api/me");
+      setMe(data);
+      if (data.authenticated) {
+        navigate(data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
+      }
+      toast.success("密码已更新。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "修改密码失败");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -324,6 +350,10 @@ export function App() {
 
   if (!me.authenticated) {
     return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} onLogin={login} />;
+  }
+
+  if (me.user.passwordChangeRequired) {
+    return <RequiredPasswordChangeScreen busy={busy} error={error} onChangePassword={completeRequiredPasswordChange} onLogout={logout} />;
   }
 
   if (me.currentTenant && me.currentMembership && me.activeBan) {

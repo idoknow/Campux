@@ -21,6 +21,10 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6).max(128),
 });
 
+const requiredPasswordChangeSchema = z.object({
+  newPassword: z.string().min(6).max(128),
+});
+
 export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
   app.post("/api/auth/login", async (request, reply) => {
     const body = loginSchema.parse(request.body);
@@ -138,6 +142,27 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       },
       data: {
         passwordHash: await hashPassword(body.newPassword),
+        passwordChangeRequired: false,
+      },
+    });
+
+    return { ok: true };
+  });
+
+  app.post("/api/auth/password/required", async (request, reply) => {
+    const context = await requireSession(request, reply);
+    const body = requiredPasswordChangeSchema.parse(request.body);
+    if (!context.user.passwordChangeRequired) {
+      return reply.code(409).send({ message: "当前账号不需要强制修改密码" });
+    }
+
+    await prisma.user.update({
+      where: {
+        id: context.user.id,
+      },
+      data: {
+        passwordHash: await hashPassword(body.newPassword),
+        passwordChangeRequired: false,
       },
     });
 
@@ -173,6 +198,10 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const body = selectTenantSchema.parse(request.body);
+    if (context.user.passwordChangeRequired) {
+      return reply.code(403).send({ message: "请先修改初始密码" });
+    }
+
     const hostTenant = await findTenantByRequestHost(request);
     if (hostTenant && body.tenantId !== hostTenant.id) {
       return reply.code(403).send({ message: "当前域名只能访问对应的校园墙" });

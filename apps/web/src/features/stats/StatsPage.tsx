@@ -4,6 +4,7 @@ import {
   ActivityIcon,
   BarChart3Icon,
   BotIcon,
+  CalendarRangeIcon,
   ClockIcon,
   ImageIcon,
   MegaphoneIcon,
@@ -39,14 +40,17 @@ const auditActionLabels: Record<string, string> = {
   "ban.create": "封禁用户",
 };
 
+const timeRanges = [7, 14, 30, 90] as const;
+
 export function StatsPage({ loading }: { loading: boolean }) {
   const [stats, setStats] = useState<TenantStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(14);
 
-  async function refreshStats() {
+  async function refreshStats(days = rangeDays) {
     setStatsLoading(true);
     try {
-      const data = await api<TenantStats>("/api/stats/tenant");
+      const data = await api<TenantStats>(`/api/stats/tenant?days=${days}`);
       setStats(data);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "无法读取统计数据");
@@ -56,25 +60,41 @@ export function StatsPage({ loading }: { loading: boolean }) {
   }
 
   useEffect(() => {
-    void refreshStats();
-  }, []);
+    void refreshStats(rangeDays);
+  }, [rangeDays]);
 
   const maxHourly = useMemo(() => Math.max(1, ...(stats?.posts.hourly.map((hour) => hour.total) ?? [1])), [stats]);
+  const currentRangeLabel = stats ? `近 ${stats.range.days} 天` : `近 ${rangeDays} 天`;
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
+    <div className="h-full min-w-0 overflow-x-hidden overflow-y-auto px-4 py-4 pb-24 md:pb-6">
       {loading || statsLoading ? <LoadingBlock title="正在整理统计数据..." /> : null}
       {!stats && !statsLoading ? <EmptyCard title="暂时没有统计数据" /> : null}
       {stats ? (
-        <div className="grid gap-3">
+        <div className="grid min-w-0 gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-500">
               <BarChart3Icon className="size-4" />
               最近更新：{formatDateTime(stats.generatedAt)}
             </div>
-            <Button variant="outline" size="sm" disabled={statsLoading} onClick={() => void refreshStats()}>
-              刷新
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex h-9 items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
+                <CalendarRangeIcon className="ml-2 size-4 text-slate-400" />
+                {timeRanges.map((days) => (
+                  <button
+                    key={days}
+                    className={`h-7 rounded-full px-3 text-xs font-bold transition ${rangeDays === days ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"}`}
+                    type="button"
+                    onClick={() => setRangeDays(days)}
+                  >
+                    {days} 天
+                  </button>
+                ))}
+              </div>
+              <Button variant="outline" size="sm" disabled={statsLoading} onClick={() => void refreshStats()}>
+                刷新
+              </Button>
+            </div>
           </div>
 
           <div className="grid gap-2 md:grid-cols-4">
@@ -84,9 +104,9 @@ export function StatsPage({ loading }: { loading: boolean }) {
             <MetricCard icon={SparklesIcon} label="发布成功率" value={stats.publishing.successRate === null ? "暂无" : `${stats.publishing.successRate}%`} sub={`${stats.publishing.byStatus.succeeded ?? 0} 成功 / ${stats.publishing.byStatus.failed ?? 0} 失败`} />
           </div>
 
-          <section className="product-surface p-4">
+          <section className="product-surface min-w-0 p-4">
             <SectionTitle icon={ActivityIcon} title="稿件概览" />
-            <div className="mt-3 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <StatusGrid values={stats.posts.byStatus} labels={statusLabels} />
               <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
                 <SmallFact label="匿名比例" value={formatPercent(stats.overview.anonymousRate)} detail={`${stats.overview.anonymousPosts} 条匿名稿件`} />
@@ -96,12 +116,12 @@ export function StatsPage({ loading }: { loading: boolean }) {
             </div>
           </section>
 
-          <section className="product-surface p-4">
+          <section className="product-surface min-w-0 p-4">
             <SectionTitle icon={BarChart3Icon} title="稿件与用户走势" />
-            <div className="mt-3 grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="mt-3 grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <LineChartPanel
-                title="近 14 天稿件数量"
-                description="每日新增稿件、已通过稿件与通过率"
+                title={`${currentRangeLabel}稿件数量`}
+                description={`${currentRangeLabel}每日新增稿件、已通过稿件与通过率`}
                 height={240}
                 series={[
                   { label: "新增稿件", color: "#2563eb", values: stats.posts.daily.map((day) => ({ label: formatDay(day.date), value: day.total })) },
@@ -110,8 +130,8 @@ export function StatsPage({ loading }: { loading: boolean }) {
                 footer={<ApprovalRateStrip daily={stats.posts.daily} />}
               />
               <LineChartPanel
-                title="近 14 天用户数量"
-                description="累计租户用户与每日新增用户"
+                title={`${currentRangeLabel}用户数量`}
+                description={`${currentRangeLabel}累计租户用户与每日新增用户`}
                 height={240}
                 series={[
                   { label: "累计用户", color: "#7c3aed", values: stats.posts.userDaily.map((day) => ({ label: formatDay(day.date), value: day.totalMembers })) },
@@ -121,8 +141,8 @@ export function StatsPage({ loading }: { loading: boolean }) {
             </div>
           </section>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            <section className="product-surface p-4">
+          <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+            <section className="product-surface min-w-0 p-4">
               <SectionTitle icon={ClockIcon} title="时段分布" />
               <div className="mt-3 grid grid-cols-12 gap-1">
                 {stats.posts.hourly.map((hour) => (
@@ -134,12 +154,12 @@ export function StatsPage({ loading }: { loading: boolean }) {
               </div>
             </section>
 
-            <section className="product-surface p-4">
+            <section className="product-surface min-w-0 p-4">
               <SectionTitle icon={UsersRoundIcon} title="用户与审核" />
               <div className="mt-3 grid gap-2">
                 <SmallFact label="成员总数" value={stats.members.total} detail={`用户 ${stats.members.byRole.submitter ?? 0} / 审核员 ${stats.members.byRole.reviewer ?? 0} / 管理员 ${stats.members.byRole.admin ?? 0}`} />
-                <SmallFact label="近 30 天审核" value={stats.review.reviewed30d} detail={`通过 ${stats.review.approved30d} / 拒绝 ${stats.review.rejected30d}`} />
-                <SmallFact label="高频投稿账号" value={stats.posts.topAuthors30d.length} detail={stats.posts.topAuthors30d.length ? "按近 30 天投稿量排序" : "暂无活跃投稿"} />
+                <SmallFact label={`${currentRangeLabel}审核`} value={stats.review.reviewed30d} detail={`通过 ${stats.review.approved30d} / 拒绝 ${stats.review.rejected30d}`} />
+                <SmallFact label="高频投稿账号" value={stats.posts.topAuthors30d.length} detail={stats.posts.topAuthors30d.length ? `按${currentRangeLabel}投稿量排序` : "暂无活跃投稿"} />
                 {stats.posts.topAuthors30d.map((author) => (
                   <BarRow key={author.authorId} label={shortId(author.authorId)} value={author.count} max={Math.max(1, stats.posts.topAuthors30d[0]?.count ?? 1)} detail="条" />
                 ))}
@@ -147,7 +167,7 @@ export function StatsPage({ loading }: { loading: boolean }) {
             </section>
           </div>
 
-          <section className="product-surface p-4">
+          <section className="product-surface min-w-0 p-4">
             <SectionTitle icon={BotIcon} title="机器人与发布目标" />
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {stats.bots.map((bot) => (
@@ -171,9 +191,9 @@ export function StatsPage({ loading }: { loading: boolean }) {
             </div>
           </section>
 
-          <section className="product-surface p-4">
+          <section className="product-surface min-w-0 p-4">
             <SectionTitle icon={SparklesIcon} title="发布质量" />
-            <div className="mt-3 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <StatusGrid values={stats.publishing.byStatus} labels={publishStatusLabels} />
               <div className="grid gap-2">
                 {stats.publishing.targets.map((target) => (
@@ -194,8 +214,8 @@ export function StatsPage({ loading }: { loading: boolean }) {
             </div>
           </section>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            <section className="product-surface p-4">
+          <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+            <section className="product-surface min-w-0 p-4">
               <SectionTitle icon={ShieldAlertIcon} title="最近发布失败" />
               <div className="mt-3 grid gap-2">
                 {stats.publishing.recentFailures.map((failure) => (
@@ -213,7 +233,7 @@ export function StatsPage({ loading }: { loading: boolean }) {
               </div>
             </section>
 
-            <section className="product-surface p-4">
+            <section className="product-surface min-w-0 p-4">
               <SectionTitle icon={ImageIcon} title="操作审计" />
               <div className="mt-3 grid gap-2">
                 {stats.audit.actions30d.map((action) => (
@@ -242,7 +262,7 @@ function SectionTitle({ icon: Icon, title }: { icon: typeof ActivityIcon; title:
 
 function MetricCard({ icon: Icon, label, value, sub }: { icon: typeof ActivityIcon; label: string; value: number | string; sub: string }) {
   return (
-    <div className="product-surface p-3">
+    <div className="product-surface min-w-0 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-bold text-slate-500">{label}</p>
         <Icon className="size-4 text-slate-400" />
@@ -255,7 +275,7 @@ function MetricCard({ icon: Icon, label, value, sub }: { icon: typeof ActivityIc
 
 function SmallFact({ label, value, detail }: { label: string; value: number | string; detail: string }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+    <div className="min-w-0 rounded-md border border-slate-200 bg-white p-3 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
       <p className="text-xs font-bold text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-black text-slate-950">{value}</p>
       <p className="mt-1 text-xs font-semibold text-slate-500">{detail}</p>
@@ -275,6 +295,7 @@ type ChartSeries = {
 };
 
 function LineChartPanel({ title, description, series, height, footer }: { title: string; description: string; series: ChartSeries[]; height: number; footer?: ReactNode }) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const allValues = series.flatMap((item) => item.values.map((point) => point.value));
   const maxValue = Math.max(1, ...allValues);
   const minValue = Math.min(0, ...allValues);
@@ -284,6 +305,7 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
   const innerWidth = chartWidth - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
   const labels = series[0]?.values.map((point) => point.label) ?? [];
+  const activeLabel = activeIndex === null ? null : labels[activeIndex];
 
   function xAt(index: number, total: number) {
     return padding.left + (total <= 1 ? innerWidth / 2 : (index / (total - 1)) * innerWidth);
@@ -295,7 +317,7 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
   }
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+    <div className="min-w-0 rounded-md border border-slate-200 bg-white p-3 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm font-bold text-slate-900">{title}</p>
@@ -310,8 +332,8 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
           ))}
         </div>
       </div>
-      <div className="mt-3 overflow-x-auto">
-        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-64 min-w-[560px] w-full">
+      <div className="mt-3 max-w-full overflow-x-auto">
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="min-w-[560px] w-full touch-pan-x" style={{ height }}>
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
             const y = padding.top + ratio * innerHeight;
             const value = Math.round(maxValue - ratio * (maxValue - minValue));
@@ -342,14 +364,52 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
                 <polyline points={points} fill="none" stroke={item.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                 {item.values.map((point, index) => (
                   <g key={`${item.label}-${point.label}-${index}`}>
-                    <circle cx={xAt(index, item.values.length)} cy={yAt(point.value)} r="3.5" fill="white" stroke={item.color} strokeWidth="2" />
+                    <circle cx={xAt(index, item.values.length)} cy={yAt(point.value)} r={activeIndex === index ? "5" : "3.5"} fill="white" stroke={item.color} strokeWidth={activeIndex === index ? "2.5" : "2"} />
                     <title>{`${point.label} ${item.label}: ${point.value}`}</title>
                   </g>
                 ))}
               </g>
             );
           })}
+          {activeIndex !== null ? <line x1={xAt(activeIndex, labels.length)} x2={xAt(activeIndex, labels.length)} y1={padding.top} y2={chartHeight - padding.bottom} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth="1.5" /> : null}
+          {labels.map((label, index) => {
+            const left = index === 0 ? padding.left : (xAt(index - 1, labels.length) + xAt(index, labels.length)) / 2;
+            const right = index === labels.length - 1 ? chartWidth - padding.right : (xAt(index, labels.length) + xAt(index + 1, labels.length)) / 2;
+            return (
+              <rect
+                key={`hit-${label}-${index}`}
+                aria-label={`查看 ${label} 的统计`}
+                className="cursor-pointer focus:outline-none"
+                fill="transparent"
+                height={innerHeight}
+                role="button"
+                tabIndex={0}
+                width={Math.max(1, right - left)}
+                x={left}
+                y={padding.top}
+                onBlur={() => setActiveIndex(null)}
+                onClick={() => setActiveIndex(index)}
+                onFocus={() => setActiveIndex(index)}
+                onMouseEnter={() => setActiveIndex(index)}
+              />
+            );
+          })}
         </svg>
+      </div>
+      <div className="mt-2 flex min-h-7 flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+        {activeIndex === null || !activeLabel ? (
+          <span>悬停或点击曲线查看单日数据</span>
+        ) : (
+          <>
+            <span className="font-bold text-slate-900">{activeLabel}</span>
+            {series.map((item) => (
+              <span key={item.label} className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 ring-1 ring-slate-200">
+                <span className="size-2 rounded-full" style={{ backgroundColor: item.color }} />
+                {item.label} {item.values[activeIndex]?.value ?? 0}
+              </span>
+            ))}
+          </>
+        )}
       </div>
       {footer ? <div className="mt-3">{footer}</div> : null}
     </div>
