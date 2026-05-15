@@ -36,7 +36,7 @@ const queue = createRuntimeQueue({
   logger: app.log,
 });
 const oneBot = new OneBotRuntime(queue, app.log);
-registerPublishingWorker(queue, app.log);
+registerPublishingWorker(queue, app.log, config);
 
 await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);

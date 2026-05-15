@@ -156,6 +156,7 @@ model BotAccount {
   displayName    String
   enabled        Boolean         @default(true)
   reviewGroupId  String?
+  publishTextTemplate Json        @default("{\"includePostId\":true,\"includeAuthorMention\":false,\"includeLinks\":false,\"customText\":\"\"}")
   lastSeenAt     DateTime?
   createdAt      DateTime        @default(now())
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -193,7 +194,7 @@ model PublishTarget {
   displayName         String
   enabled             Boolean          @default(true)
   required            Boolean          @default(true)
-  publishDelaySeconds Int              @default(0)
+  publishDelaySeconds Int              @default(300)
   failurePolicy       String           @default("block_post")
   qzoneRefreshMode    String           @default("protocol")
   tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)

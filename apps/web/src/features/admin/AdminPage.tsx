@@ -6,7 +6,7 @@ import { BotIcon, CopyIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, Sh
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, PublishAttemptItem, PublishTargetItem, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,8 @@ type PublishTargetForm = {
   required: boolean;
   qzoneRefreshMode: "protocol" | "qr";
 };
+
+const DEFAULT_PUBLISH_INTERVAL_SECONDS = 300;
 
 type QZoneLoginState = {
   open: boolean;
@@ -279,6 +281,22 @@ export function AdminPage({
     }
   }
 
+  async function saveBotPublishTemplate(botId: string, publishTextTemplate: PublishTextTemplate) {
+    setBusy(true);
+    try {
+      await api(`/api/admin/bots/${botId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ publishTextTemplate }),
+      });
+      toast.success("配文模板已保存。");
+      await refreshAdminData();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "保存配文模板失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleTarget(target: PublishTargetItem) {
     await api(`/api/admin/publish-targets/${target.id}`, {
       method: "PATCH",
@@ -310,7 +328,7 @@ export function AdminPage({
           botAccountId,
           displayName: targetForm.displayName.trim(),
           required: targetForm.required,
-          publishDelaySeconds: Number(targetForm.publishDelaySeconds || 0),
+          publishDelaySeconds: Number(targetForm.publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS),
           qzoneRefreshMode: targetForm.qzoneRefreshMode,
         }),
       });
@@ -329,6 +347,11 @@ export function AdminPage({
       method: "POST",
     });
     await refreshAdminData();
+  }
+
+  async function refreshPublishLogs() {
+    await refreshAdminData();
+    toast.success("发布日志已刷新。");
   }
 
   async function refreshQZoneCookies(botId: string, mode: "protocol" | "qr") {
@@ -468,6 +491,7 @@ export function AdminPage({
                 onFormChange={setBotForm}
                 onAdd={() => void addBot()}
                 onDelete={(id) => void deleteBot(id)}
+                onSaveTemplate={(botId, template) => void saveBotPublishTemplate(botId, template)}
                 onRefresh={() => void refreshAdminData()}
                 onRefreshQZone={(botId, mode) => void refreshQZoneCookies(botId, mode)}
                 onCheckQZone={(botId) => void checkQZoneCookies(botId)}
@@ -490,6 +514,8 @@ export function AdminPage({
                 onCheckQZone={(botId) => void checkQZoneCookies(botId)}
                 onViewCookies={(botId) => void viewQZoneCookies(botId)}
                 onRetry={(id) => void retryAttempt(id)}
+                onRefreshLogs={() => void refreshPublishLogs()}
+                onSaveTemplate={(botId, template) => void saveBotPublishTemplate(botId, template)}
               />
             </TabsContent>
       </Tabs>
@@ -741,6 +767,7 @@ function BotsPanel({
   onFormChange,
   onAdd,
   onDelete,
+  onSaveTemplate,
   onRefresh,
   onRefreshQZone,
   onCheckQZone,
@@ -753,6 +780,7 @@ function BotsPanel({
   onFormChange: (form: BotForm) => void;
   onAdd: () => void;
   onDelete: (id: string) => void;
+  onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
   onRefresh: () => void;
   onRefreshQZone: (botId: string, mode: "protocol" | "qr") => void;
   onCheckQZone: (botId: string) => void;
@@ -839,6 +867,8 @@ function BotsPanel({
                     ))
                   )}
                 </div>
+
+                <BotPublishTemplateEditor bot={bot} busy={busy} onSave={(template) => onSaveTemplate(bot.id, template)} />
               </div>
             ))
           )}
@@ -862,6 +892,53 @@ function BotsPanel({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
+  const [template, setTemplate] = useState<PublishTextTemplate>(() => bot.publishTextTemplate);
+
+  useEffect(() => {
+    setTemplate(bot.publishTextTemplate);
+  }, [bot.publishTextTemplate]);
+
+  const previewParts = [];
+  if (template.customText.trim()) previewParts.push(template.customText.trim());
+  if (template.includePostId) previewParts.push("#12");
+  if (template.includeAuthorMention) previewParts.push("@{uin:10000,nick:,who:1}");
+  const preview = [previewParts.join(" ").trim(), ...(template.includeLinks ? ["https://example.com/activity"] : [])].filter(Boolean).join("\n") || "#12";
+
+  return (
+    <div className="product-subsection mt-3 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">说说配文模板</p>
+          <p className="mt-0.5 text-xs text-slate-400">正文不直接发出，正文会在渲染图里；这里只配置说说上方的短配文。</p>
+        </div>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => onSave(template)}>
+          保存模板
+        </Button>
+      </div>
+      <Input className="mt-2 bg-white" placeholder="固定前缀，可留空" value={template.customText} onChange={(event) => setTemplate({ ...template, customText: event.target.value })} />
+      <div className="mt-2 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+          <input type="checkbox" checked={template.includePostId} onChange={(event) => setTemplate({ ...template, includePostId: event.target.checked })} />
+          稿件编号
+        </label>
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+          <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => setTemplate({ ...template, includeAuthorMention: event.target.checked })} />
+          非匿名时 @ 用户
+        </label>
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+          <input type="checkbox" checked={template.includeLinks} onChange={(event) => setTemplate({ ...template, includeLinks: event.target.checked })} />
+          提取正文链接
+        </label>
+      </div>
+      <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+        <p className="text-[11px] font-bold text-slate-400">预览</p>
+        <p className="mt-1 whitespace-pre-wrap text-xs font-semibold text-slate-700">{preview}</p>
+      </div>
+    </div>
   );
 }
 
@@ -891,6 +968,8 @@ function PublishPanel({
   onCheckQZone,
   onViewCookies,
   onRetry,
+  onRefreshLogs,
+  onSaveTemplate,
 }: {
   targets: PublishTargetItem[];
   attempts: PublishAttemptItem[];
@@ -905,7 +984,11 @@ function PublishPanel({
   onCheckQZone: (botId: string) => void;
   onViewCookies: (botId: string) => void;
   onRetry: (id: string) => void;
+  onRefreshLogs: () => void;
+  onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
 }) {
+  const attemptGroups = groupPublishAttempts(attempts);
+
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
@@ -924,7 +1007,7 @@ function PublishPanel({
           <Input placeholder="目标名称，例如 1 号墙 QZone" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
           <Input
             inputMode="numeric"
-            placeholder="延迟秒"
+            placeholder="风控间隔秒"
             value={form.publishDelaySeconds}
             onChange={(event) => onFormChange({ ...form, publishDelaySeconds: event.target.value.replace(/\D/g, "") })}
           />
@@ -971,7 +1054,7 @@ function PublishPanel({
                 <div className="border-t border-slate-100 bg-slate-50/70 p-3">
                   <div className="grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-4">
                     <InfoPill label="刷新模式" value={target.qzoneRefreshMode === "qr" ? "扫码登录" : "协议获取"} />
-                    <InfoPill label="发布延迟" value={`${target.publishDelaySeconds}s`} />
+                    <InfoPill label="风控间隔" value={`${Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)}s`} />
                     <InfoPill label="最近刷新" value={target.botAccount.qzoneSession?.refreshedAt ? formatDateTime(target.botAccount.qzoneSession.refreshedAt) : "还没有 cookies"} />
                     <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
                     <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测 QZone cookies 可用性"}</p>
@@ -996,6 +1079,23 @@ function PublishPanel({
                       查看 cookies
                     </Button>
                   </div>
+                  <BotPublishTemplateEditor
+                    bot={{
+                      id: target.botAccount.id,
+                      qqUin: target.botAccount.qqUin,
+                      displayName: target.botAccount.displayName,
+                      enabled: target.botAccount.enabled,
+                      reviewGroupId: null,
+                      publishTextTemplate: target.botAccount.publishTextTemplate,
+                      lastSeenAt: null,
+                      createdAt: "",
+                      connection: { online: false, connectionCount: 0 },
+                      sessions: target.botAccount.qzoneSession ? [target.botAccount.qzoneSession] : [],
+                      publishTargets: [],
+                    }}
+                    busy={busy}
+                    onSave={(template) => onSaveTemplate(target.botAccount.id, template)}
+                  />
                 </div>
               </details>
             ))
@@ -1003,42 +1103,42 @@ function PublishPanel({
         </div>
 
         <div className="product-subsection mt-4 p-3">
-          <p className="font-semibold">最近发布详情</p>
-          {attempts.length === 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold">最近发布详情</p>
+            <Button variant="outline" size="sm" onClick={onRefreshLogs}>
+              <RotateCcwIcon data-icon="inline-start" />
+              刷新日志
+            </Button>
+          </div>
+          {attemptGroups.length === 0 ? (
             <p className="mt-2 text-sm font-bold text-slate-500">还没有发布记录。</p>
           ) : (
             <div className="mt-2 flex flex-col gap-2">
-              {attempts.map((attempt) => (
-                <details key={attempt.id} className="product-row-card group overflow-hidden p-0 text-sm">
-                  <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-2 p-3 [&::-webkit-details-marker]:hidden">
+              {attemptGroups.map((group) => (
+                <details key={group.post.id} className="product-row-card group overflow-hidden p-0 text-sm">
+                  <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-3 [&::-webkit-details-marker]:hidden">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold">稿件 #{attempt.post.displayId}</span>
-                        <Badge className={`rounded-full shadow-none ${publishAttemptBadgeClass(attempt.status)}`}>{statusLabels[attempt.status] ?? attempt.status}</Badge>
-                        <span className="text-xs font-bold text-slate-500">{attempt.publishTarget.displayName}</span>
-                        <span className="text-xs font-bold text-slate-500">第 {attempt.attempt} 次</span>
+                        <span className="font-semibold">稿件 #{group.post.displayId}</span>
+                        <Badge className={`rounded-full shadow-none ${publishAttemptBadgeClass(group.primaryStatus)}`}>{statusLabels[group.primaryStatus] ?? group.primaryStatus}</Badge>
+                        <span className="text-xs font-bold text-slate-500">{group.attempts.length} 个发布目标</span>
+                        <span className="text-xs font-bold text-slate-500">最近 {formatDateTime(group.updatedAt)}</span>
                       </div>
-                      <p className="mt-1 line-clamp-1 text-sm font-semibold text-slate-800">{attempt.post.text || "无正文"}</p>
-                      <p className="mt-1 text-xs text-slate-500">更新 {formatDateTime(attempt.updatedAt)}</p>
+                      <p className="mt-1 line-clamp-1 text-sm font-semibold text-slate-800">{group.post.text || "无正文"}</p>
                     </div>
-                    {attempt.status === "failed" ? (
-                      <Button size="sm" variant="outline" onClick={() => onRetry(attempt.id)}>
-                        <RotateCcwIcon data-icon="inline-start" />
-                        重试
-                      </Button>
-                    ) : <span className="rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500 group-open:bg-slate-100">详情</span>}
+                    <span className="rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500 group-open:bg-slate-100">详情</span>
                   </summary>
                   <div className="border-t border-slate-100 bg-slate-50/70 p-3">
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{attempt.post.text || "无正文"}</p>
-                    <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-500 md:grid-cols-2">
-                      <p>作者：{attempt.post.anonymous ? "匿名投稿" : attempt.post.author.displayName ?? `QQ ${attempt.post.author.qqUin}`}</p>
-                      <p>稿件状态：{statusLabels[attempt.post.status] ?? attempt.post.status}</p>
-                      <p>目标：{attempt.publishTarget.displayName}</p>
-                      <p>Bot：{attempt.publishTarget.botAccount.displayName} · QQ {attempt.publishTarget.botAccount.qqUin}</p>
-                      {attempt.externalId ? <p className="break-all md:col-span-2">外部 ID：{attempt.externalId}</p> : null}
-                      {attempt.nextRunAt ? <p className="font-bold text-amber-700 md:col-span-2">下次执行：{formatDateTime(attempt.nextRunAt)}</p> : null}
+                    <div className="grid gap-1 text-xs font-semibold text-slate-500 md:grid-cols-2">
+                      <p>作者：{group.post.anonymous ? "匿名投稿" : group.post.author.displayName ?? `QQ ${group.post.author.qqUin}`}</p>
+                      <p>稿件状态：{statusLabels[group.post.status] ?? group.post.status}</p>
                     </div>
-                    {attempt.lastError ? <p className="mt-2 break-all rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{attempt.lastError}</p> : null}
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{group.post.text || "无正文"}</p>
+                    <div className="mt-3 flex flex-col gap-2">
+                      {group.attempts.map((attempt) => (
+                        <PublishAttemptDetail key={attempt.id} attempt={attempt} onRetry={onRetry} />
+                      ))}
+                    </div>
                   </div>
                 </details>
               ))}
@@ -1047,6 +1147,103 @@ function PublishPanel({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PublishAttemptDetail({ attempt, onRetry }: { attempt: PublishAttemptItem; onRetry: (id: string) => void }) {
+  return (
+    <details className="rounded-md border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className={`rounded-full shadow-none ${publishAttemptBadgeClass(attempt.status)}`}>{statusLabels[attempt.status] ?? attempt.status}</Badge>
+          <span className="font-semibold text-slate-700">{attempt.publishTarget.displayName}</span>
+          <span className="text-xs font-bold text-slate-500">第 {attempt.attempt} 次</span>
+          <span className="text-xs font-bold text-slate-500">更新 {formatDateTime(attempt.updatedAt)}</span>
+        </div>
+        {attempt.status === "failed" ? (
+          <Button size="sm" variant="outline" onClick={(event) => {
+            event.preventDefault();
+            onRetry(attempt.id);
+          }}>
+            <RotateCcwIcon data-icon="inline-start" />
+            重试
+          </Button>
+        ) : <span className="text-xs font-bold text-slate-400">日志</span>}
+      </summary>
+      <div className="border-t border-slate-100 p-3">
+        <div className="grid gap-1 text-xs font-semibold text-slate-500 md:grid-cols-2">
+          <p>目标：{attempt.publishTarget.displayName}</p>
+          <p>Bot：{attempt.publishTarget.botAccount.displayName} · QQ {attempt.publishTarget.botAccount.qqUin}</p>
+          {attempt.externalId ? <p className="break-all md:col-span-2">外部 ID：{attempt.externalId}</p> : null}
+          {attempt.nextRunAt ? <p className="font-bold text-amber-700 md:col-span-2">下次执行：{formatDateTime(attempt.nextRunAt)}</p> : null}
+        </div>
+        {attempt.lastError ? <p className="mt-2 break-all rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{attempt.lastError}</p> : null}
+        {attempt.verbose ? <PublishVerboseLog verbose={attempt.verbose} /> : null}
+      </div>
+    </details>
+  );
+}
+
+function PublishVerboseLog({ verbose }: { verbose: NonNullable<PublishAttemptItem["verbose"]> }) {
+  const httpLogs = Array.isArray(verbose.http) ? verbose.http : [];
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className="rounded-full bg-slate-100 text-slate-700 shadow-none">模式 {String(verbose.mode ?? "unknown")}</Badge>
+        <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none ring-1 ring-blue-200">cookies {String(verbose.cookieStatus ?? "unknown")}</Badge>
+        <span className="text-xs font-bold text-slate-500">
+          渲染图 {formatBytes(verbose.renderedBytes)} · 图片 {typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张
+        </span>
+        {verbose.publishedAt ? <span className="text-xs font-bold text-slate-500">发布 {formatDateTime(verbose.publishedAt)}</span> : null}
+      </div>
+      {verbose.note ? <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">{verbose.note}</p> : null}
+      <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-500 md:grid-cols-2">
+        <p>QQ：{verbose.uin ?? "未知"}</p>
+        <p className="break-all">Cookie：{verbose.cookieNames?.length ? verbose.cookieNames.join(", ") : "无"}</p>
+      </div>
+
+      {httpLogs.length === 0 ? (
+        <p className="mt-3 text-xs font-bold text-slate-500">这条记录没有 HTTP 明细。</p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2">
+          {httpLogs.map((entry, index) => (
+            <details key={`${entry.label}-${index}`} className="rounded-md border border-slate-200 bg-slate-50">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
+                <span className="font-bold text-slate-700">{entry.label}</span>
+                <span className="text-xs font-bold text-slate-500">
+                  {entry.response ? `HTTP ${entry.response.status}` : entry.error ? "请求失败" : "无响应"}{entry.durationMs ? ` · ${entry.durationMs}ms` : ""}
+                </span>
+              </summary>
+              <div className="border-t border-slate-200 p-3">
+                <p className="break-all text-xs font-bold text-slate-600">
+                  {entry.request.method} {entry.request.url}
+                </p>
+                <LogBlock title="请求头" value={entry.request.headers} />
+                {entry.request.body ? <LogBlock title="请求参数" value={entry.request.body} /> : null}
+                {entry.response ? (
+                  <>
+                    <LogBlock title="响应头" value={entry.response.headers ?? {}} />
+                    {entry.response.parsed ? <LogBlock title="解析结果" value={entry.response.parsed} /> : null}
+                    <LogBlock title="响应体" value={entry.response.body} />
+                  </>
+                ) : null}
+                {entry.error ? <p className="mt-2 break-all rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{entry.error}</p> : null}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LogBlock({ title, value }: { title: string; value: unknown }) {
+  return (
+    <div className="mt-2">
+      <p className="text-[11px] font-bold text-slate-400">{title}</p>
+      <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-[11px] leading-5 text-slate-700">{formatLogValue(value)}</pre>
+    </div>
   );
 }
 
@@ -1074,6 +1271,43 @@ function InfoPill({ label, value }: { label: string; value: string }) {
       <p className="mt-0.5 truncate text-xs font-bold text-slate-700">{value}</p>
     </div>
   );
+}
+
+function groupPublishAttempts(attempts: PublishAttemptItem[]) {
+  const groups = new Map<string, { post: PublishAttemptItem["post"]; attempts: PublishAttemptItem[]; updatedAt: string; primaryStatus: string }>();
+  for (const attempt of attempts) {
+    const current = groups.get(attempt.post.id);
+    if (!current) {
+      groups.set(attempt.post.id, {
+        post: attempt.post,
+        attempts: [attempt],
+        updatedAt: attempt.updatedAt,
+        primaryStatus: attempt.status,
+      });
+      continue;
+    }
+    current.attempts.push(attempt);
+    if (new Date(attempt.updatedAt).getTime() > new Date(current.updatedAt).getTime()) {
+      current.updatedAt = attempt.updatedAt;
+    }
+    current.primaryStatus = summarizePublishAttemptStatus(current.attempts);
+  }
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      attempts: group.attempts.sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()),
+      primaryStatus: summarizePublishAttemptStatus(group.attempts),
+    }))
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+}
+
+function summarizePublishAttemptStatus(attempts: PublishAttemptItem[]) {
+  if (attempts.some((attempt) => attempt.status === "failed")) return "failed";
+  if (attempts.some((attempt) => attempt.status === "running")) return "running";
+  if (attempts.some((attempt) => attempt.status === "queued")) return "queued";
+  if (attempts.every((attempt) => attempt.status === "succeeded")) return "succeeded";
+  if (attempts.every((attempt) => attempt.status === "skipped")) return "skipped";
+  return attempts[0]?.status ?? "queued";
 }
 
 function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): TenantSettingsForm {
@@ -1110,7 +1344,7 @@ function defaultPublishTargetForm(): PublishTargetForm {
   return {
     botAccountId: "",
     displayName: "",
-    publishDelaySeconds: "0",
+    publishDelaySeconds: String(DEFAULT_PUBLISH_INTERVAL_SECONDS),
     required: true,
     qzoneRefreshMode: "protocol",
   };
@@ -1133,6 +1367,30 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatBytes(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatLogValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function formatBotEventAction(action: string) {

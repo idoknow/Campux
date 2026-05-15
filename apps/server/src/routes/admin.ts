@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { TenantRole } from "@campux/db";
+import { Prisma, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
-import { enqueueAttempt } from "../runtime/publishing";
+import { defaultPublishIntervalSeconds, enqueueAttempt, resolveNextPublishRunAt } from "../runtime/publishing";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
 import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
@@ -40,7 +40,7 @@ const targetCreateSchema = z.object({
   displayName: z.string().min(1).max(80),
   enabled: z.boolean().default(true),
   required: z.boolean().default(true),
-  publishDelaySeconds: z.number().int().min(0).max(86_400).default(0),
+  publishDelaySeconds: z.number().int().min(0).max(86_400).default(defaultPublishIntervalSeconds),
   qzoneRefreshMode: z.enum(["protocol", "qr"]).default("protocol"),
 });
 
@@ -50,6 +50,20 @@ const botCreateSchema = z.object({
   reviewGroupId: z.string().trim().max(40).optional(),
   enabled: z.boolean().default(true),
   createPublishTarget: z.boolean().default(true),
+});
+
+const publishTextTemplateSchema = z.object({
+  customText: z.string().max(160).default(""),
+  includePostId: z.boolean().default(true),
+  includeAuthorMention: z.boolean().default(false),
+  includeLinks: z.boolean().default(false),
+});
+
+const botPatchSchema = z.object({
+  displayName: z.string().min(1).max(80).optional(),
+  enabled: z.boolean().optional(),
+  reviewGroupId: z.string().trim().max(40).nullable().optional(),
+  publishTextTemplate: publishTextTemplateSchema.optional(),
 });
 
 const botParamsSchema = z.object({
@@ -376,6 +390,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
                   displayName: body.displayName,
                   enabled: true,
                   required: false,
+                  publishDelaySeconds: defaultPublishIntervalSeconds,
                 },
               },
             }
@@ -402,6 +417,50 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
 
     return {
       bot: toBotAccount(bot, oneBot?.getBotConnectionStatus(bot.qqUin.toString())),
+    };
+  });
+
+  app.patch("/api/admin/bots/:id", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsSchema.parse(request.params);
+    const body = botPatchSchema.parse(request.body);
+    const bot = await prisma.botAccount.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+    if (!bot) {
+      return reply.code(404).send({ message: "Bot 账号不存在" });
+    }
+
+    const updated = await prisma.botAccount.update({
+      where: {
+        id: bot.id,
+      },
+      data: {
+        ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
+        ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+        ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
+        ...(body.publishTextTemplate === undefined ? {} : { publishTextTemplate: body.publishTextTemplate }),
+      },
+      include: {
+        sessions: true,
+        publishTargets: true,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "bot_account.update",
+      targetType: "bot_account",
+      targetId: bot.id,
+      detail: body,
+    });
+
+    return {
+      bot: toBotAccount(updated, oneBot?.getBotConnectionStatus(updated.qqUin.toString())),
     };
   });
 
@@ -616,7 +675,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         displayName: body.displayName,
         enabled: body.enabled,
         required: body.required,
-        publishDelaySeconds: body.publishDelaySeconds,
+        publishDelaySeconds: Math.max(body.publishDelaySeconds, defaultPublishIntervalSeconds),
         qzoneRefreshMode: body.qzoneRefreshMode,
       },
       include: {
@@ -699,7 +758,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
       ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
       ...(body.required === undefined ? {} : { required: body.required }),
-      ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
+      ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: Math.max(body.publishDelaySeconds, defaultPublishIntervalSeconds) }),
       ...(body.failurePolicy === undefined ? {} : { failurePolicy: body.failurePolicy }),
       ...(body.qzoneRefreshMode === undefined ? {} : { qzoneRefreshMode: body.qzoneRefreshMode }),
     };
@@ -778,12 +837,21 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         id: params.id,
         tenantId: context.selectedTenant.id,
       },
+      include: {
+        publishTarget: true,
+      },
     });
 
     if (!attempt) {
       return reply.code(404).send({ message: "发布记录不存在" });
     }
 
+    const nextRunAt = await resolveNextPublishRunAt({
+      tenantId: context.selectedTenant.id,
+      botAccountId: attempt.publishTarget.botAccountId,
+      intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+      excludeAttemptId: attempt.id,
+    });
     const updated = await prisma.publishAttempt.update({
       where: {
         id: attempt.id,
@@ -792,10 +860,12 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         status: "queued",
         attempt: 0,
         lastError: null,
-        nextRunAt: new Date(),
+        externalId: null,
+        verbose: Prisma.JsonNull,
+        nextRunAt,
       },
     });
-    enqueueAttempt(queue, updated.tenantId, updated.id);
+    enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
 
     await writeAuditLog({
       tenantId: context.selectedTenant.id,
@@ -849,6 +919,7 @@ function toPublishTarget(target: {
     qqUin: bigint;
     displayName: string;
     enabled: boolean;
+    publishTextTemplate: Prisma.JsonValue;
     sessions: Array<{
       id: string;
       type: string;
@@ -876,6 +947,7 @@ function toPublishTarget(target: {
       qqUin: target.botAccount.qqUin.toString(),
       displayName: target.botAccount.displayName,
       enabled: target.botAccount.enabled,
+      publishTextTemplate: normalizePublishTextTemplate(target.botAccount.publishTextTemplate),
       qzoneSession: session ? toBotSession(session) : null,
     },
   };
@@ -888,6 +960,7 @@ function toBotAccount(
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
+    publishTextTemplate: Prisma.JsonValue;
     lastSeenAt: Date | null;
     createdAt: Date;
     sessions: Array<{
@@ -916,6 +989,7 @@ function toBotAccount(
     displayName: bot.displayName,
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
+    publishTextTemplate: normalizePublishTextTemplate(bot.publishTextTemplate),
     lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
     createdAt: bot.createdAt.toISOString(),
     connection: connection ?? {
@@ -930,6 +1004,28 @@ function toBotAccount(
       enabled: target.enabled,
       required: target.required,
     })),
+  };
+}
+
+function normalizePublishTextTemplate(value: Prisma.JsonValue) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return defaultPublishTextTemplate();
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    customText: typeof record.customText === "string" ? record.customText : "",
+    includePostId: typeof record.includePostId === "boolean" ? record.includePostId : true,
+    includeAuthorMention: typeof record.includeAuthorMention === "boolean" ? record.includeAuthorMention : false,
+    includeLinks: typeof record.includeLinks === "boolean" ? record.includeLinks : false,
+  };
+}
+
+function defaultPublishTextTemplate() {
+  return {
+    customText: "",
+    includePostId: true,
+    includeAuthorMention: false,
+    includeLinks: false,
   };
 }
 
@@ -1019,6 +1115,7 @@ function toPublishAttempt(attempt: {
   lastError: string | null;
   nextRunAt: Date | null;
   externalId: string | null;
+  verbose: Prisma.JsonValue | null;
   updatedAt: Date;
   post: {
     id: string;
@@ -1048,6 +1145,7 @@ function toPublishAttempt(attempt: {
     lastError: attempt.lastError,
     nextRunAt: attempt.nextRunAt?.toISOString() ?? null,
     externalId: attempt.externalId,
+    verbose: attempt.verbose,
     updatedAt: attempt.updatedAt.toISOString(),
     publishTarget: {
       id: attempt.publishTarget.id,
