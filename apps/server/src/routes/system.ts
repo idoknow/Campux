@@ -129,6 +129,25 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         },
       });
 
+      const systemOperators = await tx.user.findMany({
+        where: {
+          systemRole: "system_operator",
+        },
+        select: {
+          id: true,
+        },
+      });
+      if (systemOperators.length > 0) {
+        await tx.tenantMembership.createMany({
+          data: systemOperators.map((user) => ({
+            tenantId: created.id,
+            userId: user.id,
+            role: "admin",
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       if (body.botQqUin) {
         const bot = await tx.botAccount.create({
           data: {
