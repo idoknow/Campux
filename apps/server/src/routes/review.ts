@@ -19,6 +19,8 @@ const reviewBodySchema = z.object({
 const reviewQuerySchema = z.object({
   status: z.enum(["all", "pending_approval", "approved", "rejected", "publishing", "partially_failed", "failed", "published"]).default("pending_approval"),
   q: z.string().max(80).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
 export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -27,41 +29,46 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     const query = reviewQuerySchema.parse(request.query);
     const displayId = query.q && !Number.isNaN(Number(query.q)) ? Number(query.q) : null;
     const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
-    const posts = await prisma.post.findMany({
-      where: {
-        tenantId: context.selectedTenant.id,
-        ...(query.status === "all" ? {} : { status: query.status }),
-        ...(query.q
-          ? {
-              OR: [
-                {
-                  text: {
+    const where = {
+      tenantId: context.selectedTenant.id,
+      ...(query.status === "all" ? {} : { status: query.status }),
+      ...(query.q
+        ? {
+            OR: [
+              {
+                text: {
+                  contains: query.q,
+                  mode: "insensitive" as const,
+                },
+              },
+              ...(displayId === null ? [] : [{ displayId }]),
+              ...(qqUin === null ? [] : [{ author: { qqUin } }]),
+              {
+                author: {
+                  displayName: {
                     contains: query.q,
-                    mode: "insensitive",
+                    mode: "insensitive" as const,
                   },
                 },
-                ...(displayId === null ? [] : [{ displayId }]),
-                ...(qqUin === null ? [] : [{ author: { qqUin } }]),
-                {
-                  author: {
-                    displayName: {
-                      contains: query.q,
-                      mode: "insensitive",
-                    },
-                  },
-                },
-              ],
-            }
-          : {}),
-      },
-      include: {
-        author: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 100,
-    });
+              },
+            ],
+          }
+        : {}),
+    };
+    const [total, posts] = await Promise.all([
+      prisma.post.count({ where }),
+      prisma.post.findMany({
+        where,
+        include: {
+          author: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
 
     return {
       posts: posts.map((post) => ({
@@ -72,6 +79,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           displayName: post.author.displayName,
         },
       })),
+      pagination: toPagination(query.page, query.limit, total),
     };
   });
 
@@ -185,4 +193,13 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       ok: true,
     };
   });
+}
+
+function toPagination(page: number, limit: number, total: number) {
+  return {
+    page,
+    limit,
+    total,
+    pageCount: Math.max(1, Math.ceil(total / limit)),
+  };
 }

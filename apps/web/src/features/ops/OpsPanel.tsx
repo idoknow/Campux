@@ -30,6 +30,7 @@ export function OpsPanel() {
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
+  const [userTotal, setUserTotal] = useState(0);
   const [bots, setBots] = useState<SystemBot[]>([]);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
@@ -62,13 +63,14 @@ export function OpsPanel() {
   async function refreshTenants(nextSelectedId?: string) {
     const [data, userData, botData, queueData, auditData] = await Promise.all([
       api<{ tenants: SystemTenant[] }>("/api/system/tenants"),
-      api<{ users: SystemUser[] }>("/api/system/users"),
+      api<{ total: number; users: SystemUser[] }>("/api/system/users"),
       api<{ bots: SystemBot[] }>("/api/system/bots"),
       api<SystemQueueSnapshot>("/api/system/queue"),
       api<{ logs: AuditLogItem[] }>("/api/system/audit-logs"),
     ]);
     setTenants(data.tenants);
     setUsers(userData.users);
+    setUserTotal(userData.total);
     setBots(botData.bots);
     setQueue(queueData);
     setAuditLogs(auditData.logs);
@@ -169,7 +171,7 @@ export function OpsPanel() {
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <MetricCard title="全局用户" value={users.length} icon={UsersRoundIcon} accent="blue" />
+        <MetricCard title="全局用户" value={userTotal} icon={UsersRoundIcon} accent="blue" />
         <MetricCard title="Bot 账号" value={bots.length} icon={BotIcon} accent="violet" />
         <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} accent="amber" />
         <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
@@ -299,6 +301,7 @@ export function OpsPanel() {
             <div className="mb-3 flex items-center gap-2 font-semibold">
               <UsersRoundIcon className="size-4" />
               全局用户
+              <span className="ml-auto text-xs font-bold text-slate-400">最近 {users.length} 条</span>
             </div>
             <div className="flex max-h-80 flex-col gap-2 overflow-auto">
               {users.slice(0, 12).map((user) => (

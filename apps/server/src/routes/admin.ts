@@ -94,6 +94,16 @@ const attemptQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
+const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
+const memberQuerySchema = paginationQuerySchema.extend({
+  q: z.string().max(80).optional(),
+  role: z.enum(["all", "submitter", "reviewer", "admin"]).default("all"),
+});
+
 const postParamsSchema = z.object({
   id: z.string().min(1),
 });
@@ -101,6 +111,8 @@ const postParamsSchema = z.object({
 const banQuerySchema = z.object({
   onlyActive: z.coerce.boolean().default(true),
   q: z.string().max(80).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
 const banCreateSchema = z.object({
@@ -119,20 +131,51 @@ const banParamsSchema = z.object({
 export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/admin/members", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
-    const members = await prisma.tenantMembership.findMany({
-      where: {
-        tenantId: context.selectedTenant.id,
-      },
-      include: {
-        user: true,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-    });
+    const query = memberQuerySchema.parse(request.query);
+    const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
+    const where: Prisma.TenantMembershipWhereInput = {
+      tenantId: context.selectedTenant.id,
+      ...(query.role === "all" ? {} : { role: query.role }),
+      ...(query.q
+        ? {
+            user: {
+              OR: [
+                ...(qqUin === null ? [] : [{ qqUin }]),
+                {
+                  displayName: {
+                    contains: query.q,
+                    mode: "insensitive",
+                  },
+                },
+              ],
+            },
+          }
+        : {}),
+    };
+    const [total, tenantMemberTotal, members] = await Promise.all([
+      prisma.tenantMembership.count({ where }),
+      prisma.tenantMembership.count({
+        where: {
+          tenantId: context.selectedTenant.id,
+        },
+      }),
+      prisma.tenantMembership.findMany({
+        where,
+        include: {
+          user: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
 
     return {
       members: members.map((member) => toMember(member)),
+      pagination: toPagination(query.page, query.limit, total),
+      tenantMemberTotal,
     };
   });
 
@@ -252,20 +295,26 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           take: 50,
         })
       : [];
-    const bans = await prisma.banRecord.findMany({
-      where: {
-        tenantId: context.selectedTenant.id,
-        ...(query.onlyActive ? { endsAt: { gt: now } } : {}),
-        ...(query.q ? { userId: { in: matchedUsers.map((user) => user.id) } } : {}),
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 100,
-    });
+    const where: Prisma.BanRecordWhereInput = {
+      tenantId: context.selectedTenant.id,
+      ...(query.onlyActive ? { endsAt: { gt: now } } : {}),
+      ...(query.q ? { userId: { in: matchedUsers.map((user) => user.id) } } : {}),
+    };
+    const [total, bans] = await Promise.all([
+      prisma.banRecord.count({ where }),
+      prisma.banRecord.findMany({
+        where,
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
 
     return {
       bans: await toBanRecords(bans),
+      pagination: toPagination(query.page, query.limit, total),
     };
   });
 
@@ -957,6 +1006,15 @@ function toMember(member: {
       displayName: member.user.displayName,
       systemRole: member.user.systemRole,
     },
+  };
+}
+
+function toPagination(page: number, limit: number, total: number) {
+  return {
+    page,
+    limit,
+    total,
+    pageCount: Math.max(1, Math.ceil(total / limit)),
   };
 }
 

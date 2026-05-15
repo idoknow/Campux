@@ -24,6 +24,11 @@ const postParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+const listQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
 const createPostSchema = z.object({
   text: z.string().trim().min(1).max(1000),
   anonymous: z.boolean().default(false),
@@ -174,29 +179,45 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
 
   app.get("/api/posts/mine", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
-    const posts = await prisma.post.findMany({
-      where: {
-        tenantId: context.selectedTenant.id,
-        authorId: context.user.id,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 50,
-    });
+    const query = listQuerySchema.parse(request.query);
+    const where = {
+      tenantId: context.selectedTenant.id,
+      authorId: context.user.id,
+    };
+    const [total, posts] = await Promise.all([
+      prisma.post.count({ where }),
+      prisma.post.findMany({
+        where,
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
 
     return {
       posts: posts.map(toPostListItem),
+      pagination: toPagination(query.page, query.limit, total),
     };
   });
+
+  function toPagination(page: number, limit: number, total: number) {
+    return {
+      page,
+      limit,
+      total,
+      pageCount: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
 
   app.get("/api/posts/:id/render-preview", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
-        id: params.id,
         tenantId: context.selectedTenant.id,
+        id: params.id,
       },
       include: {
         author: true,

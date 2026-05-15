@@ -3,7 +3,7 @@ import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
 import { api, fileToBase64 } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
-import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { BannedScreen } from "@/features/auth/BannedScreen";
@@ -45,6 +45,9 @@ export function App() {
   });
   const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
   const [posts, setPosts] = useState<PostItem[]>([]);
+  const [postsPagination, setPostsPagination] = useState<Pagination>(() => defaultPagination());
+  const [postsPage, setPostsPage] = useState(1);
+  const [tenantDataLoading, setTenantDataLoading] = useState(false);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
@@ -88,17 +91,24 @@ export function App() {
     navigate({ kind: "tenant", tab: "admin", subTab: tab });
   }
 
-  async function refreshTenantData() {
+  async function refreshTenantData(page = postsPage) {
     if (!me?.authenticated || !me.currentTenant || me.activeBan) {
       return;
     }
 
-    const [metadataData, postsData] = await Promise.all([
-      api<TenantMetadata>("/api/tenant/metadata"),
-      api<{ posts: PostItem[] }>("/api/posts/mine"),
-    ]);
-    setMetadata(metadataData);
-    setPosts(postsData.posts);
+    setTenantDataLoading(true);
+    try {
+      const [metadataData, postsData] = await Promise.all([
+        api<TenantMetadata>("/api/tenant/metadata"),
+        api<{ posts: PostItem[]; pagination: Pagination }>(`/api/posts/mine?page=${page}&limit=${postsPagination.limit}`),
+      ]);
+      setMetadata(metadataData);
+      setPosts(postsData.posts);
+      setPostsPagination(postsData.pagination);
+      setPostsPage(postsData.pagination.page);
+    } finally {
+      setTenantDataLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -144,6 +154,15 @@ export function App() {
       toast.error(caught instanceof Error ? caught.message : "无法读取校园墙数据");
     });
   }, [me]);
+
+  useEffect(() => {
+    if (!me?.authenticated || !me.currentTenant || me.activeBan) {
+      return;
+    }
+    void refreshTenantData(postsPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取稿件列表");
+    });
+  }, [postsPage]);
 
   useEffect(() => {
     if (!me?.authenticated || !me.currentMembership) {
@@ -260,8 +279,10 @@ export function App() {
       setUploadedImages([]);
       setAnonymous(false);
       toast.success("投稿已提交，等待审核。");
-      const data = await api<{ posts: PostItem[] }>("/api/posts/mine");
+      const data = await api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10");
       setPosts(data.posts);
+      setPostsPagination(data.pagination);
+      setPostsPage(1);
       setActiveTab("posts");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "投稿失败");
@@ -321,8 +342,10 @@ export function App() {
       metadata={metadata}
       posts={posts}
       busy={busy}
+      dataLoading={tenantDataLoading}
       postText={postText}
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? "mine" : "mine"}
+      postsPagination={postsPagination}
       anonymous={anonymous}
       uploadedImages={uploadedImages}
       onActiveTabChange={setActiveTab}
@@ -334,11 +357,21 @@ export function App() {
       onPostTextChange={setPostText}
       onPostsTabChange={setPostsSubTab}
       onRefreshMe={refreshMe}
-      onRefreshTenantData={refreshTenantData}
+      onPostsPageChange={setPostsPage}
+      onRefreshTenantData={() => refreshTenantData(postsPage)}
       onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
       onSubmitPost={submitPost}
     />
   );
+}
+
+function defaultPagination(): Pagination {
+  return {
+    page: 1,
+    limit: 10,
+    total: 0,
+    pageCount: 1,
+  };
 }
 
 function routeFromPath(pathname: string): AppRoute {

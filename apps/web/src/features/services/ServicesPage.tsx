@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import type { TenantMetadata } from "@/types/app";
+import { LoadingBlock } from "@/components/app/utility";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -32,7 +33,7 @@ const defaultServicePalette = {
   icon: "product-accent-blue",
 };
 
-export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
+export function ServicesPage({ metadata, loading }: { metadata: TenantMetadata; loading: boolean }) {
   const entries = metadata.services.length > 0 ? metadata.services : defaultMetadata.services;
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
@@ -57,6 +58,7 @@ export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+        {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
         <div className="product-surface p-3">
           <div className="grid gap-2 sm:grid-cols-2">
             {entries.map((service, index) => (

@@ -5,6 +5,13 @@ export type PostsTab = "mine" | "review";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 
+export type Pagination = {
+  page: number;
+  limit: number;
+  total: number;
+  pageCount: number;
+};
+
 export type Membership = {
   id: string;
   role: TenantRole;

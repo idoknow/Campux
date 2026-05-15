@@ -16,9 +16,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
+import type { Pagination, PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
-import { EmptyCard } from "@/components/app/utility";
+import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -70,19 +70,28 @@ export function PostsPage({
   posts,
   currentRole,
   activeTab,
+  minePagination,
+  mineLoading,
+  onMinePageChange,
   onTabChange,
   onRefresh,
 }: {
   posts: PostItem[];
   currentRole: TenantRole;
   activeTab: PostsTab;
+  minePagination: Pagination;
+  mineLoading: boolean;
+  onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
 }) {
   const canReview = canAccess(currentRole, "reviewer");
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
+  const [reviewPagination, setReviewPagination] = useState<Pagination>(() => defaultPagination());
+  const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewStatus, setReviewStatus] = useState("pending_approval");
   const [reviewKeyword, setReviewKeyword] = useState("");
+  const [reviewPage, setReviewPage] = useState(1);
   const [busyPostId, setBusyPostId] = useState("");
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
@@ -119,28 +128,36 @@ export function PostsPage({
       return;
     }
 
-    void refreshReviewPosts().catch((caught) => {
+    void refreshReviewPosts(reviewPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
-  }, [canReview, reviewStatus]);
+  }, [canReview, reviewStatus, reviewPage]);
 
   async function refreshAll() {
     await onRefresh();
     if (canReview) {
-      await refreshReviewPosts();
+      await refreshReviewPosts(reviewPage);
     }
   }
 
-  async function refreshReviewPosts() {
+  async function refreshReviewPosts(page = reviewPage) {
     const params = new URLSearchParams({
       status: reviewStatus,
+      page: String(page),
+      limit: String(reviewPagination.limit),
     });
     const keyword = reviewKeyword.trim();
     if (keyword.length > 0) {
       params.set("q", keyword);
     }
-    const data = await api<{ posts: ReviewPostItem[] }>(`/api/review/posts?${params}`);
-    setReviewPosts(data.posts);
+    setReviewLoading(true);
+    try {
+      const data = await api<{ posts: ReviewPostItem[]; pagination: Pagination }>(`/api/review/posts?${params}`);
+      setReviewPosts(data.posts);
+      setReviewPagination(data.pagination);
+    } finally {
+      setReviewLoading(false);
+    }
   }
 
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
@@ -243,17 +260,27 @@ export function PostsPage({
               </TabsTrigger>
             ) : null}
           </TabsList>
-          <Button variant="outline" size="sm" onClick={() => void refreshAll()}>
+          <Button variant="outline" size="sm" disabled={mineLoading || reviewLoading} onClick={() => void refreshAll()}>
             刷新
           </Button>
         </div>
         <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-          <PostList posts={posts} busyCancelPostId={busyCancelPostId} onPreview={(post) => void openRenderPreview(post)} onCancel={(post) => void cancelPost(post.id)} />
+          {mineLoading ? (
+            <LoadingBlock title="正在加载你的稿件..." />
+          ) : (
+            <>
+              <PostList posts={posts} busyCancelPostId={busyCancelPostId} onPreview={(post) => void openRenderPreview(post)} onCancel={(post) => void cancelPost(post.id)} />
+              <PaginationControls pagination={minePagination} busy={mineLoading} onPageChange={onMinePageChange} />
+            </>
+          )}
         </TabsContent>
         {canReview ? (
           <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
             <div className="product-subsection mb-3 grid gap-2 p-3 sm:grid-cols-[160px_minmax(0,1fr)_auto]">
-              <Select value={reviewStatus} onValueChange={setReviewStatus}>
+              <Select value={reviewStatus} onValueChange={(value) => {
+                setReviewStatus(value);
+                setReviewPage(1);
+              }}>
                 <SelectTrigger className="h-10 w-full bg-white font-bold">
                   <SelectValue />
                 </SelectTrigger>
@@ -274,22 +301,33 @@ export function PostsPage({
                 onChange={(event) => setReviewKeyword(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
-                    void refreshReviewPosts();
+                    setReviewPage(1);
+                    void refreshReviewPosts(1);
                   }
                 }}
               />
-              <Button variant="outline" className="h-10 font-bold" onClick={() => void refreshReviewPosts()}>
+              <Button variant="outline" className="h-10 font-bold" disabled={reviewLoading} onClick={() => {
+                setReviewPage(1);
+                void refreshReviewPosts(1);
+              }}>
                 筛选
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-              <ReviewList
-                posts={reviewPosts}
-                busyPostId={busyPostId}
-                onPreview={(post) => void openRenderPreview(post)}
-                onApprove={(id) => void reviewPost(id, "approve")}
-                onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
-              />
+              {reviewLoading ? (
+                <LoadingBlock title="正在加载审核稿件..." />
+              ) : (
+                <>
+                  <ReviewList
+                    posts={reviewPosts}
+                    busyPostId={busyPostId}
+                    onPreview={(post) => void openRenderPreview(post)}
+                    onApprove={(id) => void reviewPost(id, "approve")}
+                    onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
+                  />
+                  <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPage} />
+                </>
+              )}
             </div>
           </TabsContent>
         ) : null}
@@ -336,6 +374,15 @@ export function PostsPage({
       </Dialog>
     </div>
   );
+}
+
+function defaultPagination(): Pagination {
+  return {
+    page: 1,
+    limit: 10,
+    total: 0,
+    pageCount: 1,
+  };
 }
 
 function ReviewList({
