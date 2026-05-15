@@ -12,9 +12,6 @@ jobs:
   build:
     name: Build and Push
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-      tag: ${{ steps.meta.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,12 +64,9 @@ jobs:
           PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
           PORTAINER_REPOSITORY_USERNAME: ${{ secrets.PORTAINER_REPOSITORY_USERNAME }}
           PORTAINER_REPOSITORY_PASSWORD: ${{ secrets.PORTAINER_REPOSITORY_PASSWORD }}
-          DEPLOY_IMAGE: ${{ needs.build.outputs.image }}
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Deploying $DEPLOY_IMAGE"
 
           : "${PORTAINER_URL:?PORTAINER_URL secret is required}"
           : "${PORTAINER_USERNAME:?PORTAINER_USERNAME secret is required}"
