@@ -50,7 +50,7 @@ registerMetadataRoutes(app);
 registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
 registerPostRoutes(app, config, oneBot);
-registerReviewRoutes(app, queue);
+registerReviewRoutes(app, queue, oneBot);
 registerSystemRoutes(app, queue);
 
 const webDistDir = resolve(process.cwd(), config.webDistDir);

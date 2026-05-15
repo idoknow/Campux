@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { CampuxConfig } from "@campux/config";
 import { Prisma } from "@campux/db";
+import type { PostStatus } from "@campux/db";
 import { createS3Client, publishToQZone, QZonePublishError } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
@@ -65,7 +66,22 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
     enqueueAttempt(queue, attempt.tenantId, attempt.id, attempt.nextRunAt ?? new Date());
   }
 
-  logger.info({ count: attempts.length }, "publish attempts recovered");
+  const posts = await prisma.post.findMany({
+    where: {
+      status: {
+        in: ["publishing", "partially_failed", "failed"],
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  for (const post of posts) {
+    await refreshAggregatePostStatus(post.id);
+  }
+
+  logger.info({ count: attempts.length, postsChecked: posts.length }, "publish attempts recovered");
 }
 
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
@@ -439,11 +455,7 @@ async function refreshAggregatePostStatus(postId: string) {
       id: postId,
     },
     include: {
-      publishAttempts: {
-        include: {
-          publishTarget: true,
-        },
-      },
+      publishAttempts: true,
     },
   });
 
@@ -451,47 +463,55 @@ async function refreshAggregatePostStatus(postId: string) {
     return;
   }
 
-  const required = post.publishAttempts.filter((attempt) => attempt.publishTarget.required);
-  if (required.length > 0 && required.every((attempt) => attempt.status === "succeeded" || attempt.status === "skipped")) {
-    await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        status: "published",
-        logs: {
-          create: {
-            tenantId: post.tenantId,
-            oldStatus: post.status,
-            newStatus: "published",
-            comment: "所有必需发布目标已完成",
-          },
-        },
-      },
-    });
+  const completedAttempts = post.publishAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
+  const allAttemptsCompleted = completedAttempts.length === post.publishAttempts.length;
+  if (allAttemptsCompleted) {
+    await updatePostAggregateStatus(post.id, post.tenantId, post.status, "published", "所有发布目标已完成");
     return;
   }
 
-  const terminalFailures = required.filter((attempt) => attempt.status === "failed" && attempt.nextRunAt === null);
+  const hasPendingAttempt = post.publishAttempts.some(
+    (attempt) => attempt.status === "queued" || attempt.status === "running" || (attempt.status === "failed" && attempt.nextRunAt !== null),
+  );
+  if (hasPendingAttempt) {
+    await updatePostAggregateStatus(post.id, post.tenantId, post.status, "publishing", "发布任务仍在进行");
+    return;
+  }
+
+  const terminalFailures = post.publishAttempts.filter((attempt) => attempt.status === "failed" && attempt.nextRunAt === null);
   if (terminalFailures.length > 0) {
-    const hasSuccess = post.publishAttempts.some((attempt) => attempt.status === "succeeded");
-    await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        status: hasSuccess ? "partially_failed" : "failed",
-        logs: {
-          create: {
-            tenantId: post.tenantId,
-            oldStatus: post.status,
-            newStatus: hasSuccess ? "partially_failed" : "failed",
-            comment: "发布目标失败，请在管理页查看详情",
-          },
+    const hasCompletedAttempt = completedAttempts.length > 0;
+    await updatePostAggregateStatus(
+      post.id,
+      post.tenantId,
+      post.status,
+      hasCompletedAttempt ? "partially_failed" : "failed",
+      "发布目标失败，请在管理页查看详情",
+    );
+  }
+}
+
+async function updatePostAggregateStatus(postId: string, tenantId: string, oldStatus: PostStatus, newStatus: PostStatus, comment: string) {
+  if (oldStatus === newStatus) {
+    return;
+  }
+
+  await prisma.post.update({
+    where: {
+      id: postId,
+    },
+    data: {
+      status: newStatus,
+      logs: {
+        create: {
+          tenantId,
+          oldStatus,
+          newStatus,
+          comment,
         },
       },
-    });
-  }
+    },
+  });
 }
 
 function getImageUrls(images: unknown) {
