@@ -730,7 +730,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         displayName: body.displayName,
         enabled: body.enabled,
         required: body.required,
-        publishDelaySeconds: Math.max(body.publishDelaySeconds, defaultPublishIntervalSeconds),
+        publishDelaySeconds: body.publishDelaySeconds,
         qzoneRefreshMode: body.qzoneRefreshMode,
       },
       include: {
@@ -813,7 +813,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
       ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
       ...(body.required === undefined ? {} : { required: body.required }),
-      ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: Math.max(body.publishDelaySeconds, defaultPublishIntervalSeconds) }),
+      ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
       ...(body.failurePolicy === undefined ? {} : { failurePolicy: body.failurePolicy }),
       ...(body.qzoneRefreshMode === undefined ? {} : { qzoneRefreshMode: body.qzoneRefreshMode }),
     };

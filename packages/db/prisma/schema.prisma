@@ -200,7 +200,7 @@ model PublishTarget {
   displayName         String
   enabled             Boolean          @default(true)
   required            Boolean          @default(true)
-  publishDelaySeconds Int              @default(300)
+  publishDelaySeconds Int              @default(10)
   failurePolicy       String           @default("block_post")
   qzoneRefreshMode    String           @default("protocol")
   tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
