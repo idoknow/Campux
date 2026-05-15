@@ -143,7 +143,7 @@ export function OpsPanel() {
       if (userTenantFilterId) {
         params.set("tenantId", userTenantFilterId);
       }
-      if (userTenantFilterId && selectedUserRoleFilters.length > 0) {
+      if (selectedUserRoleFilters.length > 0) {
         params.set("roles", selectedUserRoleFilters.join(","));
       }
       if (userKeyword.trim()) {

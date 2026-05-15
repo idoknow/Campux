@@ -1202,10 +1202,32 @@ function BotConfigEditor({
 
 function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
   const [template, setTemplate] = useState<PublishTextTemplate>(() => normalizePublishTemplate(bot.publishTextTemplate));
+  const [dirty, setDirty] = useState(false);
+  const persistedTemplate = normalizePublishTemplate(bot.publishTextTemplate);
+  const persistedTemplateKey = stringifyPublishTemplate(persistedTemplate);
+  const currentTemplateKey = stringifyPublishTemplate(template);
 
   useEffect(() => {
-    setTemplate(normalizePublishTemplate(bot.publishTextTemplate));
-  }, [bot.publishTextTemplate]);
+    if (!dirty) {
+      setTemplate(persistedTemplate);
+    }
+  }, [bot.id, persistedTemplateKey, dirty]);
+
+  useEffect(() => {
+    if (dirty && currentTemplateKey === persistedTemplateKey) {
+      setDirty(false);
+    }
+  }, [dirty, currentTemplateKey, persistedTemplateKey]);
+
+  function updateTemplate(patch: Partial<PublishTextTemplate>) {
+    setDirty(true);
+    setTemplate((current) => ({ ...current, ...patch }));
+  }
+
+  function saveTemplate() {
+    setDirty(false);
+    onSave(template);
+  }
 
   const previewParts = [];
   if (template.customText.trim()) previewParts.push(template.customText.trim());
@@ -1213,8 +1235,8 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
   if (template.includeAuthorMention) previewParts.push("@{uin:10000,nick:,who:1}");
   const preview = [
     previewParts.join(" ").trim(),
-    template.suffixText.trim(),
     ...(template.includeLinks ? ["https://example.com/activity"] : []),
+    template.suffixText.trim(),
   ]
     .filter(Boolean)
     .join("\n") || "#12";
@@ -1226,7 +1248,7 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
           <p className="text-xs font-semibold text-slate-500">说说配文模板</p>
           <p className="mt-0.5 text-xs text-slate-400">正文不直接发出，正文会在渲染图里；这里只配置说说上方的短配文。</p>
         </div>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => onSave(template)}>
+        <Button variant="outline" size="sm" disabled={busy} onClick={saveTemplate}>
           保存模板
         </Button>
       </div>
@@ -1236,7 +1258,7 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
           <Textarea
             className="mt-1 min-h-20 resize-y bg-white text-sm"
             value={template.customText}
-            onChange={(event) => setTemplate({ ...template, customText: event.target.value })}
+            onChange={(event) => updateTemplate({ customText: event.target.value })}
             placeholder="会显示在稿件编号和 @ 用户之前"
           />
         </label>
@@ -1245,22 +1267,22 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
           <Textarea
             className="mt-1 min-h-20 resize-y bg-white text-sm"
             value={template.suffixText}
-            onChange={(event) => setTemplate({ ...template, suffixText: event.target.value })}
-            placeholder="会另起一行显示在编号之后"
+            onChange={(event) => updateTemplate({ suffixText: event.target.value })}
+            placeholder="会另起一行显示在正文链接之后"
           />
         </label>
       </div>
       <div className="mt-2 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
         <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={template.includePostId} onChange={(event) => setTemplate({ ...template, includePostId: event.target.checked })} />
+          <input type="checkbox" checked={template.includePostId} onChange={(event) => updateTemplate({ includePostId: event.target.checked })} />
           稿件编号
         </label>
         <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => setTemplate({ ...template, includeAuthorMention: event.target.checked })} />
+          <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => updateTemplate({ includeAuthorMention: event.target.checked })} />
           非匿名时 @ 用户
         </label>
         <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={template.includeLinks} onChange={(event) => setTemplate({ ...template, includeLinks: event.target.checked })} />
+          <input type="checkbox" checked={template.includeLinks} onChange={(event) => updateTemplate({ includeLinks: event.target.checked })} />
           提取正文链接
         </label>
       </div>
@@ -1280,6 +1302,10 @@ function normalizePublishTemplate(template: PublishTextTemplate): PublishTextTem
     includeAuthorMention: template.includeAuthorMention,
     includeLinks: template.includeLinks,
   };
+}
+
+function stringifyPublishTemplate(template: PublishTextTemplate) {
+  return JSON.stringify(normalizePublishTemplate(template));
 }
 
 function BotMetric({ label, value, icon: Icon }: { label: string; value: string; icon?: LucideIcon }) {
