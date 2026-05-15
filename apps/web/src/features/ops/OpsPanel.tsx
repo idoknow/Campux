@@ -52,9 +52,10 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
 ];
 
 type OpsTab = "users" | "audit";
-type SystemUserRoleFilter = TenantRole;
+type SystemUserRoleFilter = TenantRole | "system_operator";
 
 const userRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }> = [
+  { value: "system_operator", label: "系统运维" },
   { value: "admin", label: "管理员" },
   { value: "reviewer", label: "审核员" },
   { value: "submitter", label: "用户" },
@@ -88,7 +89,7 @@ export function OpsPanel() {
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [assigningMembership, setAssigningMembership] = useState(false);
   const [membershipDialogUser, setMembershipDialogUser] = useState<SystemUser | null>(null);
-  const [membershipForm, setMembershipForm] = useState<{ tenantId: string; role: TenantRole }>({ tenantId: "", role: "submitter" });
+  const [membershipForm, setMembershipForm] = useState<{ tenantId: string; role: TenantRole | "system_operator" }>({ tenantId: "", role: "submitter" });
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
   const [savingHost, setSavingHost] = useState(false);
@@ -283,7 +284,7 @@ export function OpsPanel() {
   }
 
   async function assignMembership() {
-    if (!membershipDialogUser || !membershipForm.tenantId) {
+    if (!membershipDialogUser || (membershipForm.role !== "system_operator" && !membershipForm.tenantId)) {
       return;
     }
 
@@ -291,9 +292,12 @@ export function OpsPanel() {
     try {
       await api(`/api/system/users/${membershipDialogUser.id}/memberships`, {
         method: "POST",
-        body: JSON.stringify(membershipForm),
+        body: JSON.stringify({
+          role: membershipForm.role,
+          ...(membershipForm.role === "system_operator" ? {} : { tenantId: membershipForm.tenantId }),
+        }),
       });
-      toast.success("用户身份已更新。");
+      toast.success(membershipForm.role === "system_operator" ? "系统运维身份已添加。" : "用户身份已更新。");
       setMembershipDialogUser(null);
       await Promise.all([refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
     } catch (caught) {
@@ -522,14 +526,14 @@ export function OpsPanel() {
           <DialogHeader>
             <DialogTitle>添加租户身份</DialogTitle>
             <DialogDescription>
-              给 {membershipDialogUser?.displayName ?? membershipDialogUser?.qqUin ?? "用户"} 添加或更新某个校园墙内的身份。
+              给 {membershipDialogUser?.displayName ?? membershipDialogUser?.qqUin ?? "用户"} 添加系统运维身份，或添加/更新某个校园墙内的身份。
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 px-5">
             <label className="text-sm font-semibold text-slate-700">
               校园墙
               <Select value={membershipForm.tenantId} onValueChange={(tenantId) => setMembershipForm({ ...membershipForm, tenantId })}>
-                <SelectTrigger className="mt-1 w-full bg-white">
+                <SelectTrigger className="mt-1 w-full bg-white" disabled={membershipForm.role === "system_operator"}>
                   <SelectValue placeholder="选择校园墙" />
                 </SelectTrigger>
                 <SelectContent>
@@ -543,11 +547,12 @@ export function OpsPanel() {
             </label>
             <label className="text-sm font-semibold text-slate-700">
               身份
-              <Select value={membershipForm.role} onValueChange={(role) => setMembershipForm({ ...membershipForm, role: role as TenantRole })}>
+              <Select value={membershipForm.role} onValueChange={(role) => setMembershipForm({ ...membershipForm, role: role as TenantRole | "system_operator" })}>
                 <SelectTrigger className="mt-1 w-full bg-white">
                   <SelectValue placeholder="选择身份" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="system_operator">系统运维（全局）</SelectItem>
                   <SelectItem value="submitter">用户</SelectItem>
                   <SelectItem value="reviewer">审核员</SelectItem>
                   <SelectItem value="admin">管理员</SelectItem>
@@ -555,14 +560,14 @@ export function OpsPanel() {
               </Select>
             </label>
             <p className="rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-              如果该用户已经在这个校园墙里，保存后会直接更新他的身份。
+              系统运维是全局身份，不需要选择校园墙；租户身份如果已存在，保存后会直接更新。
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={assigningMembership} onClick={() => setMembershipDialogUser(null)}>
               取消
             </Button>
-            <Button disabled={assigningMembership || !membershipForm.tenantId} onClick={() => void assignMembership()}>
+            <Button disabled={assigningMembership || (membershipForm.role !== "system_operator" && !membershipForm.tenantId)} onClick={() => void assignMembership()}>
               <ShieldPlusIcon data-icon="inline-start" />
               保存身份
             </Button>
@@ -682,7 +687,7 @@ function GlobalUsersTable({
             </SelectContent>
           </Select>
           <span className="text-xs font-semibold text-slate-500">
-            {selectedTenantFilterId ? "筛选该校园墙内的具体身份" : "选择校园墙后再按身份过滤"}
+            {selectedTenantFilterId ? "筛选该校园墙内的具体身份，也可叠加系统运维" : "可直接筛选系统运维；选择校园墙后可筛选租户身份"}
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -693,7 +698,7 @@ function GlobalUsersTable({
                 key={filter.value}
                 type="button"
                 variant={active ? "secondary" : "outline"}
-                disabled={!selectedTenantFilterId}
+                disabled={!selectedTenantFilterId && filter.value !== "system_operator"}
                 size="sm"
                 className={active ? "h-8 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50" : "h-8 bg-white"}
                 onClick={() => onToggleRoleFilter(filter.value)}

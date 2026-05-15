@@ -15,10 +15,11 @@ const tenantPatchSchema = z.object({
 });
 
 const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
+const systemAssignableRoleSchema = z.enum(["system_operator", "submitter", "reviewer", "admin"]);
 
 const userMembershipCreateSchema = z.object({
-  tenantId: z.string().min(1),
-  role: tenantRoleSchema,
+  tenantId: z.string().min(1).optional(),
+  role: systemAssignableRoleSchema,
 });
 
 const tenantCreateSchema = z.object({
@@ -35,7 +36,7 @@ const paginationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
-const systemUserRoleFilterSchema = z.enum(["admin", "reviewer", "submitter"]);
+const systemUserRoleFilterSchema = systemAssignableRoleSchema;
 
 const systemUsersQuerySchema = paginationQuerySchema.extend({
   q: z.string().max(80).optional(),
@@ -307,18 +308,41 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     await requireSystemOperator(request, reply);
     const query = systemUsersQuerySchema.parse(request.query);
     const roleFilters = parseSystemUserRoleFilters(query.roles);
+    const tenantRoleFilters = roleFilters.filter((role): role is z.infer<typeof tenantRoleSchema> => role !== "system_operator");
+    const includeSystemOperator = roleFilters.includes("system_operator");
     const keyword = query.q?.trim();
     const queryQqUin = keyword && /^\d+$/.test(keyword) ? BigInt(keyword) : null;
     const filters: Prisma.UserWhereInput[] = [];
     if (query.tenantId) {
-      filters.push({
-        memberships: {
-          some: {
-            tenantId: query.tenantId,
-            ...(roleFilters.length > 0 ? { role: { in: roleFilters } } : {}),
+      if (includeSystemOperator || tenantRoleFilters.length > 0) {
+        filters.push({
+          OR: [
+            ...(includeSystemOperator ? [{ systemRole: "system_operator" as const }] : []),
+            ...(tenantRoleFilters.length > 0
+              ? [
+                  {
+                    memberships: {
+                      some: {
+                        tenantId: query.tenantId,
+                        role: { in: tenantRoleFilters },
+                      },
+                    },
+                  },
+                ]
+              : []),
+          ],
+        });
+      } else {
+        filters.push({
+          memberships: {
+            some: {
+              tenantId: query.tenantId,
+            },
           },
-        },
-      });
+        });
+      }
+    } else if (includeSystemOperator) {
+      filters.push({ systemRole: "system_operator" });
     }
     if (keyword) {
       filters.push({
@@ -385,13 +409,40 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     const params = z.object({ userId: z.string().min(1) }).parse(request.params);
     const body = userMembershipCreateSchema.parse(request.body);
 
-    const [user, tenant] = await Promise.all([
-      prisma.user.findUnique({ where: { id: params.userId } }),
-      prisma.tenant.findUnique({ where: { id: body.tenantId } }),
-    ]);
+    const user = await prisma.user.findUnique({ where: { id: params.userId } });
     if (!user) {
       return reply.code(404).send({ message: "用户不存在" });
     }
+
+    if (body.role === "system_operator") {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { systemRole: "system_operator" },
+      });
+
+      await writeAuditLog({
+        tenantId: null,
+        actorId: context.user.id,
+        action: "system.user.role.assign",
+        targetType: "user",
+        targetId: user.id,
+        detail: {
+          qqUin: user.qqUin.toString(),
+          systemRole: "system_operator",
+        },
+      });
+
+      return {
+        ok: true,
+        systemRole: "system_operator",
+      };
+    }
+
+    if (!body.tenantId) {
+      return reply.code(400).send({ message: "添加租户身份时必须选择校园墙" });
+    }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: body.tenantId } });
     if (!tenant) {
       return reply.code(404).send({ message: "租户不存在" });
     }
