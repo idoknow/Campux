@@ -261,7 +261,7 @@ export function App() {
     navigate({ kind: "tenant", tab: activeTab });
   }
 
-  async function uploadFiles(files: FileList | null) {
+  async function uploadFiles(files: ArrayLike<File> | null) {
     if (!files?.length) {
       return;
     }
@@ -274,7 +274,7 @@ export function App() {
         const uploaded = await api<Omit<UploadedImage, "previewUrl">>("/api/uploads/post-images", {
           method: "POST",
           body: JSON.stringify({
-            fileName: file.name,
+            fileName: getUploadFileName(file),
             contentType: file.type || "application/octet-stream",
             base64: previewUrl,
           }),
@@ -450,6 +450,14 @@ function pathFromRoute(route: AppRoute) {
     return tabPaths[route.tab];
   }
   return `/${route.kind}`;
+}
+
+function getUploadFileName(file: File) {
+  if (file.name) {
+    return file.name;
+  }
+  const extension = file.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "png";
+  return `pasted-image.${extension}`;
 }
 
 function buildDocumentTitle(route: AppRoute, tenantName?: string) {
