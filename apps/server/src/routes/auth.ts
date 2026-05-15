@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { hashPassword, verifyPassword } from "@campux/db";
 import { z } from "zod";
-import { clearSessionCookie, createSession, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
+import { clearSessionCookie, createSession, findActiveBan, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 import { findTenantByRequestHost } from "../lib/tenant-host";
@@ -82,6 +82,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         memberships: [toMembership(hostMembership)],
         currentTenant: toTenantSummary(hostTenant),
         currentMembership: { id: hostMembership.id, role: hostMembership.role },
+        activeBan: toActiveBan(await findActiveBan(hostTenant.id, user.id)),
         needsTenantSelection: false,
       };
     }
@@ -97,6 +98,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       memberships: user.memberships.map(toMembership),
       currentTenant: onlyMembership ? toTenantSummary(onlyMembership.tenant) : null,
       currentMembership: onlyMembership ? { id: onlyMembership.id, role: onlyMembership.role } : null,
+      activeBan: onlyMembership ? toActiveBan(await findActiveBan(onlyMembership.tenantId, user.id)) : null,
       needsTenantSelection: user.memberships.length > 1,
     };
   });
@@ -156,6 +158,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       currentMembership: context.selectedMembership
         ? { id: context.selectedMembership.id, role: context.selectedMembership.role }
         : null,
+      activeBan: toActiveBan(context.activeBan),
       needsTenantSelection: context.memberships.length > 1 && !context.selectedTenant,
     };
   });
@@ -202,6 +205,21 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       ok: true,
       currentTenant: toTenantSummary(tenant),
       currentMembership: membership ? { id: membership.id, role: membership.role } : null,
+      activeBan: membership ? toActiveBan(await findActiveBan(body.tenantId, context.user.id)) : null,
     };
   });
+}
+
+function toActiveBan(ban: Awaited<ReturnType<typeof findActiveBan>>) {
+  if (!ban) {
+    return null;
+  }
+
+  return {
+    id: ban.id,
+    comment: ban.comment,
+    startsAt: ban.startsAt.toISOString(),
+    endsAt: ban.endsAt.toISOString(),
+    createdAt: ban.createdAt.toISOString(),
+  };
 }

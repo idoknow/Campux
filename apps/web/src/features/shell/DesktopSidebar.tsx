@@ -23,7 +23,12 @@ export function DesktopSidebar({
 
   return (
     <aside className="hidden h-dvh w-[190px] shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
-      <div className="border-b border-slate-200 px-4 py-4 text-base font-bold text-slate-950">Campux</div>
+      <div className="border-b border-slate-200 px-4 py-4">
+        <div className="text-xs font-semibold uppercase tracking-normal text-slate-400">Campux</div>
+        <div className="mt-1 truncate text-base font-bold text-slate-950" title={selectedTenant.name}>
+          {selectedTenant.name}
+        </div>
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col justify-between px-3 py-4">
         <TabsList className="grid h-auto w-full grid-cols-1 gap-1 bg-transparent p-0">

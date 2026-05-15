@@ -6,6 +6,7 @@ import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
 import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
+import { BannedScreen } from "@/features/auth/BannedScreen";
 import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { AppShell } from "@/features/shell/AppShell";
@@ -88,7 +89,7 @@ export function App() {
   }
 
   async function refreshTenantData() {
-    if (!me?.authenticated || !me.currentTenant) {
+    if (!me?.authenticated || !me.currentTenant || me.activeBan) {
       return;
     }
 
@@ -178,11 +179,6 @@ export function App() {
 
     if ((me.needsTenantSelection || !me.currentTenant || !me.currentMembership) && route.kind !== "tenants" && route.kind !== "ops") {
       navigate({ kind: "tenants" }, "replace");
-      return;
-    }
-
-    if (route.kind === "tenants" && !me.needsTenantSelection && me.currentTenant && me.currentMembership) {
-      navigate({ kind: "tenant", tab: activeTab }, "replace");
       return;
     }
 
@@ -280,6 +276,18 @@ export function App() {
 
   if (!me.authenticated) {
     return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} onLogin={login} />;
+  }
+
+  if (me.currentTenant && me.currentMembership && me.activeBan) {
+    return <BannedScreen ban={me.activeBan} me={me} selectedTenant={me.currentTenant} onLogout={logout} />;
+  }
+
+  if (route.kind === "tenants") {
+    if (me.user.systemRole === "system_operator") {
+      return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onOpenOps={() => navigate({ kind: "ops" })} onLogout={logout} />;
+    }
+
+    return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onLogout={logout} />;
   }
 
   if (me.user.systemRole === "system_operator" && (route.kind === "ops" || me.memberships.length === 0)) {
