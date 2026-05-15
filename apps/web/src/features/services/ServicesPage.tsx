@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import type { TenantMetadata } from "@/types/app";
-import { SectionHeader } from "@/components/app/utility";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type ServiceAction = "password" | "rules" | "notice" | "";
+type ServiceAction = "password" | "rules" | "";
 
 const servicePalettes = [
   {
@@ -36,10 +36,8 @@ export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
   const entries = metadata.services.length > 0 ? metadata.services : defaultMetadata.services;
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
-  const [notice, setNotice] = useState("");
 
   function openService(service: TenantMetadata["services"][number]) {
-    setNotice("");
     if (service.url) {
       window.open(service.url, "_blank", "noopener,noreferrer");
       return;
@@ -53,14 +51,12 @@ export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
       return;
     }
 
-    setActiveAction("notice");
-    setNotice(`${service.title} 还没有配置跳转链接。`);
+    toast.info(`${service.title} 还没有配置跳转链接。`);
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
-      <SectionHeader title="服务" subtitle="校园墙常用入口" />
-      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
         <div className="product-surface p-3">
           <div className="grid gap-2 sm:grid-cols-2">
             {entries.map((service, index) => (
@@ -69,10 +65,8 @@ export function ServicesPage({ metadata }: { metadata: TenantMetadata }) {
           </div>
         </div>
 
-        {activeAction === "password" ? <PasswordPanel onDone={(message) => setNotice(message)} /> : null}
+        {activeAction === "password" ? <PasswordPanel onDone={(message) => toast.success(message)} /> : null}
         {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
-        {activeAction === "notice" && notice ? <p className="mt-4 px-1 text-sm font-bold text-slate-500">{notice}</p> : null}
-        {notice && activeAction !== "notice" ? <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm font-bold text-green-700">{notice}</p> : null}
       </div>
     </div>
   );
@@ -99,12 +93,10 @@ function ServiceTile({ service, index, onOpen }: { service: TenantMetadata["serv
 function PasswordPanel({ onDone }: { onDone: (message: string) => void }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     setBusy(true);
-    setError("");
     try {
       await api("/api/auth/password", {
         method: "POST",
@@ -114,7 +106,7 @@ function PasswordPanel({ onDone }: { onDone: (message: string) => void }) {
       setNewPassword("");
       onDone("密码已更新。");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "修改失败");
+      toast.error(caught instanceof Error ? caught.message : "修改失败");
     } finally {
       setBusy(false);
     }
@@ -126,7 +118,6 @@ function PasswordPanel({ onDone }: { onDone: (message: string) => void }) {
         <KeyRoundIcon className="size-5 text-slate-500" />
         <p className="text-base font-semibold">修改密码</p>
       </div>
-      {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Input type="password" placeholder="当前密码" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
         <Input type="password" placeholder="新密码，至少 6 位" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />

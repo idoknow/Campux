@@ -35,6 +35,7 @@ export type PublishAttemptStatus = z.infer<typeof publishAttemptStatusSchema>;
 export const tenantSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),
+  host: z.string().nullable(),
   name: z.string(),
   status: tenantStatusSchema,
   themeColor: z.string(),

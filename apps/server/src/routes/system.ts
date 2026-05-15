@@ -3,17 +3,20 @@ import { z } from "zod";
 import { requireSystemOperator } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
+import { normalizeTenantHost } from "../lib/tenant-host";
 import type { RuntimeQueue } from "../runtime/queue";
 
 const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
 
 const tenantPatchSchema = z.object({
-  status: tenantStatusSchema,
+  status: tenantStatusSchema.optional(),
+  host: z.string().max(255).nullable().optional(),
 });
 
 const tenantCreateSchema = z.object({
   name: z.string().min(1).max(80),
   slug: z.string().min(2).max(64).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
+  host: z.string().max(255).nullable().optional(),
   themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#42a5f5"),
   banner: z.string().max(200).default(""),
   botQqUin: z.string().regex(/^\d+$/).optional(),
@@ -43,6 +46,7 @@ function toSystemTenant(
   return {
     id: tenant.id,
     slug: tenant.slug,
+    host: tenant.host,
     name: tenant.name,
     status: tenant.status,
     createdAt: tenant.createdAt.toISOString(),
@@ -82,11 +86,23 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
   app.post("/api/system/tenants", async (request, reply) => {
     const context = await requireSystemOperator(request, reply);
     const body = tenantCreateSchema.parse(request.body);
+    const normalizedHost = body.host === undefined ? null : normalizeTenantHost(body.host);
+    if (normalizedHost) {
+      const existingTenant = await prisma.tenant.findFirst({
+        where: { host: normalizedHost },
+        select: { id: true },
+      });
+      if (existingTenant) {
+        return reply.code(409).send({ message: "这个 host 已经绑定到其他校园墙" });
+      }
+    }
+
     const tenant = await prisma.$transaction(async (tx) => {
       const created = await tx.tenant.create({
         data: {
           name: body.name,
           slug: body.slug,
+          host: normalizedHost,
           themeColor: body.themeColor,
           status: "active",
           metadata: {
@@ -143,12 +159,32 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     const context = await requireSystemOperator(request, reply);
     const params = z.object({ tenantId: z.string().min(1) }).parse(request.params);
     const body = tenantPatchSchema.parse(request.body);
+    const normalizedHost = body.host === undefined ? undefined : normalizeTenantHost(body.host);
+    if (normalizedHost) {
+      const existingTenant = await prisma.tenant.findFirst({
+        where: {
+          host: normalizedHost,
+          id: {
+            not: params.tenantId,
+          },
+        },
+        select: { id: true },
+      });
+      if (existingTenant) {
+        return reply.code(409).send({ message: "这个 host 已经绑定到其他校园墙" });
+      }
+    }
+
+    const updateData: {
+      status?: z.infer<typeof tenantStatusSchema>;
+      host?: string | null;
+    } = {};
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.host !== undefined) updateData.host = normalizedHost ?? null;
 
     const tenant = await prisma.tenant.update({
       where: { id: params.tenantId },
-      data: {
-        status: body.status,
-      },
+      data: updateData,
     });
     await writeAuditLog({
       tenantId: tenant.id,
@@ -157,7 +193,8 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       targetType: "tenant",
       targetId: tenant.id,
       detail: {
-        status: body.status,
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.host !== undefined ? { host: normalizedHost } : {}),
       },
     });
 

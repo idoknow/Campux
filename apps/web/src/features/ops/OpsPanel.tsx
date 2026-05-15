@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIcon, ArchiveIcon, BotIcon, Building2Icon, ClipboardListIcon, PauseCircleIcon, PlayCircleIcon, PlusIcon, RefreshCwIcon, UsersRoundIcon } from "lucide-react";
+import { ActivityIcon, ArchiveIcon, BotIcon, Building2Icon, ClipboardListIcon, PauseCircleIcon, PlayCircleIcon, PlusIcon, UsersRoundIcon } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { AuditLogItem, SystemBot, SystemQueueSnapshot, SystemTenant, SystemUser, TenantStatus } from "@/types/app";
-import { SectionHeader } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,14 +35,15 @@ export function OpsPanel() {
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
+  const [savingHost, setSavingHost] = useState(false);
+  const [hostDraft, setHostDraft] = useState("");
   const [tenantForm, setTenantForm] = useState({
     name: "",
     slug: "",
+    host: "",
     themeColor: "#111827",
     botQqUin: "",
   });
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0],
@@ -77,9 +78,13 @@ export function OpsPanel() {
 
   useEffect(() => {
     void refreshTenants().catch((caught) => {
-      setError(caught instanceof Error ? caught.message : "无法读取租户列表");
+      toast.error(caught instanceof Error ? caught.message : "无法读取租户列表");
     });
   }, []);
+
+  useEffect(() => {
+    setHostDraft(selectedTenant?.host ?? "");
+  }, [selectedTenant?.id, selectedTenant?.host]);
 
   async function updateStatus(status: TenantStatus) {
     if (!selectedTenant || selectedTenant.status === status) {
@@ -87,17 +92,15 @@ export function OpsPanel() {
     }
 
     setBusyStatus(status);
-    setError("");
-    setNotice("");
     try {
       await api(`/api/system/tenants/${selectedTenant.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
       await refreshTenants(selectedTenant.id);
-      setNotice(`已将 ${selectedTenant.name} 调整为${statusLabels[status]}。`);
+      toast.success(`已将 ${selectedTenant.name} 调整为${statusLabels[status]}。`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "状态调整失败");
+      toast.error(caught instanceof Error ? caught.message : "状态调整失败");
     } finally {
       setBusyStatus("");
     }
@@ -105,14 +108,13 @@ export function OpsPanel() {
 
   async function createTenant() {
     setCreatingTenant(true);
-    setError("");
-    setNotice("");
     try {
       const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants", {
         method: "POST",
         body: JSON.stringify({
           name: tenantForm.name.trim(),
           slug: tenantForm.slug.trim(),
+          host: tenantForm.host.trim() || null,
           themeColor: tenantForm.themeColor,
           ...(tenantForm.botQqUin.trim().length > 0 ? { botQqUin: tenantForm.botQqUin.trim() } : {}),
         }),
@@ -120,22 +122,45 @@ export function OpsPanel() {
       setTenants(data.tenants);
       const created = data.tenants.find((tenant) => tenant.slug === tenantForm.slug.trim());
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
-      setTenantForm({ name: "", slug: "", themeColor: "#111827", botQqUin: "" });
-      setNotice("新校园墙已创建。");
+      setTenantForm({ name: "", slug: "", host: "", themeColor: "#111827", botQqUin: "" });
+      toast.success("新校园墙已创建。");
       await refreshTenants(created?.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "创建租户失败");
+      toast.error(caught instanceof Error ? caught.message : "创建租户失败");
     } finally {
       setCreatingTenant(false);
     }
   }
 
+  async function saveHost() {
+    if (!selectedTenant) {
+      return;
+    }
+
+    setSavingHost(true);
+    try {
+      await api(`/api/system/tenants/${selectedTenant.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          host: hostDraft.trim() || null,
+        }),
+      });
+      await refreshTenants(selectedTenant.id);
+      toast.success(hostDraft.trim() ? "入口 host 已更新。" : "入口 host 已清空。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "host 更新失败");
+    } finally {
+      setSavingHost(false);
+    }
+  }
+
   return (
     <div className="px-4 pb-6">
-      <SectionHeader title="系统运维" subtitle="只处理租户生命周期和全局运行状态" action="刷新" icon={RefreshCwIcon} onAction={refreshTenants} />
-
-      {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p> : null}
-      {notice ? <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm font-medium text-green-700">{notice}</p> : null}
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={() => void refreshTenants()}>
+          刷新
+        </Button>
+      </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <StatusSummary title="运行中" value={summary.active} tone="green" />
@@ -167,6 +192,7 @@ export function OpsPanel() {
               <div className="grid gap-2">
                 <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
                 <Input placeholder="slug，例如 canton-wall" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
+                <Input placeholder="专属 host，可选" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
                 <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
                   <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
                   <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
@@ -190,6 +216,7 @@ export function OpsPanel() {
                     <Badge variant={tenant.status === "active" ? "secondary" : "outline"}>{statusLabels[tenant.status]}</Badge>
                   </span>
                   <span className="mt-1 block truncate text-xs text-slate-500">{tenant.slug}</span>
+                  {tenant.host ? <span className="mt-1 block truncate text-xs font-semibold text-slate-500">{tenant.host}</span> : null}
                 </button>
               ))}
             </div>
@@ -203,6 +230,7 @@ export function OpsPanel() {
                 <div>
                   <p className="text-lg font-semibold">{selectedTenant.name}</p>
                   <p className="mt-1 text-sm text-slate-500">{selectedTenant.slug}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">{selectedTenant.host ?? "未绑定专属 host"}</p>
                 </div>
                 <Badge variant={selectedTenant.status === "active" ? "secondary" : "outline"}>{statusLabels[selectedTenant.status]}</Badge>
               </div>
@@ -237,8 +265,24 @@ export function OpsPanel() {
                 </div>
               </div>
 
+              <div className="mt-4 rounded-md bg-slate-50 p-3">
+                <div className="flex items-center gap-2 font-bold">
+                  <Building2Icon className="size-4" />
+                  专属访问 host
+                </div>
+                <p className="mt-1 text-sm text-slate-500">
+                  设置后，从这个域名进入的用户会被固定到当前校园墙，不再展示租户选择。
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <Input placeholder="wall.example.com 或 localhost:5180" value={hostDraft} onChange={(event) => setHostDraft(event.target.value)} />
+                  <Button className="shrink-0 font-medium" disabled={savingHost} onClick={() => void saveHost()}>
+                    保存 host
+                  </Button>
+                </div>
+              </div>
+
               <p className="mt-4 text-sm text-slate-500">
-                校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护。
+                校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护；专属 host 由系统运维统一管理。
               </p>
             </CardContent>
           </Card>

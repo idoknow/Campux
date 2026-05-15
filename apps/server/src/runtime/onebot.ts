@@ -10,6 +10,7 @@ import {
 } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
 import type { RuntimeQueue } from "./queue";
+import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 
 type OneBotConnection = {
   socket: WebSocketLike;
@@ -63,6 +64,7 @@ const reviewHelp = [
   "#通过 <稿件id>",
   "#拒绝 <理由> <稿件id>",
   "#登录 或 #刷新qzone cookies",
+  "#扫码登录",
 ].join("\n");
 
 export class OneBotRuntime {
@@ -161,7 +163,7 @@ export class OneBotRuntime {
     });
   }
 
-  async sendGroupMessage(botQqUin: string, groupId: string | bigint, message: string) {
+  async sendGroupMessage(botQqUin: string, groupId: string | bigint, message: unknown) {
     await this.callAction(botQqUin, "send_group_msg", {
       group_id: Number(groupId),
       message,
@@ -341,6 +343,42 @@ export class OneBotRuntime {
           rawCookies,
         });
         await this.sendGroupMessage(botQqUin, groupId, `QZone cookies 已刷新（${result.cookieNames.length} 项）。`);
+        return;
+      }
+
+      if (["扫码登录", "二维码登录", "qzone扫码登录"].includes(command.name)) {
+        const bot = await findEnabledBot(botQqUin);
+        const task = await startQZoneQrLogin({
+          botAccountId: bot.id,
+          tenantId: bot.tenantId,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, [
+          {
+            type: "text",
+            data: {
+              text: "请使用本号 QQ 手机端扫描以下二维码登录 QZone：",
+            },
+          },
+          {
+            type: "image",
+            data: {
+              file: task.qrImage,
+            },
+          },
+        ]);
+        for (let index = 0; index < 60; index += 1) {
+          await Bun.sleep(2_000);
+          const result = await pollQZoneQrLogin(task.id);
+          if (result.status === "succeeded") {
+            await this.sendGroupMessage(botQqUin, groupId, `扫码登录完成，QZone cookies 已刷新（${result.cookieNames.length} 项）。`);
+            return;
+          }
+          if (result.status === "expired" || result.status === "failed") {
+            await this.sendGroupMessage(botQqUin, groupId, result.message ?? "扫码登录失败");
+            return;
+          }
+        }
+        await this.sendGroupMessage(botQqUin, groupId, "扫码登录超时，请重新发送 #扫码登录。");
         return;
       }
 

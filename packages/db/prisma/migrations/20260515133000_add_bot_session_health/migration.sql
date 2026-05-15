@@ -1,0 +1,4 @@
+ALTER TABLE "BotSession"
+ADD COLUMN IF NOT EXISTS "healthStatus" TEXT NOT NULL DEFAULT 'unchecked',
+ADD COLUMN IF NOT EXISTS "healthCheckedAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "healthMessage" TEXT;

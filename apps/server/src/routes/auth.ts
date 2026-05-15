@@ -4,6 +4,7 @@ import { z } from "zod";
 import { clearSessionCookie, createSession, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
+import { findTenantByRequestHost } from "../lib/tenant-host";
 
 const loginSchema = z.object({
   qqUin: z.string().regex(/^\d+$/, "QQ 号格式不正确"),
@@ -60,6 +61,28 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(403).send({
         message: "测试账号只能在开发环境登录",
       });
+    }
+
+    const hostTenant = await findTenantByRequestHost(request);
+    if (hostTenant) {
+      const hostMembership = user.memberships.find((membership) => membership.tenantId === hostTenant.id);
+      if (!hostMembership) {
+        return reply.code(403).send({
+          message: "该账号没有访问当前校园墙的权限",
+        });
+      }
+
+      const token = await createSession(user.id, hostTenant.id);
+      setSessionCookie(reply, token);
+
+      return {
+        authenticated: true,
+        user: toPublicUser(user),
+        memberships: [toMembership(hostMembership)],
+        currentTenant: toTenantSummary(hostTenant),
+        currentMembership: { id: hostMembership.id, role: hostMembership.role },
+        needsTenantSelection: false,
+      };
     }
 
     const onlyMembership = user.memberships.length === 1 ? user.memberships[0] : undefined;
@@ -143,6 +166,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const body = selectTenantSchema.parse(request.body);
+    const hostTenant = await findTenantByRequestHost(request);
+    if (hostTenant && body.tenantId !== hostTenant.id) {
+      return reply.code(403).send({ message: "当前域名只能访问对应的校园墙" });
+    }
+
     const membership = context.memberships.find((item) => item.tenantId === body.tenantId);
     if (!membership && context.user.systemRole !== "system_operator") {
       return reply.code(403).send({ message: "没有访问该校园墙的权限" });

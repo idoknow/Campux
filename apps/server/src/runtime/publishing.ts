@@ -227,6 +227,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, _logger: FastifyBaseLog
       tenantName: attempt.post.tenant.name,
       authorName: attempt.post.author.displayName ?? attempt.post.author.qqUin.toString(),
       authorQq: attempt.post.author.qqUin.toString(),
+      cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
       text: attempt.post.text,
       createdAt: attempt.post.createdAt,
       anonymous: attempt.post.anonymous,

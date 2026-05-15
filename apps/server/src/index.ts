@@ -15,6 +15,7 @@ import { registerPostRoutes } from "./routes/posts";
 import { registerReviewRoutes } from "./routes/review";
 import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
+import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
 
 const config = loadConfig();
 const app = Fastify({
@@ -52,6 +53,11 @@ app.addHook("onClose", async () => {
 
 await queue.start();
 await recoverPublishAttempts(queue, app.log);
+const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log);
+
+app.addHook("onClose", async () => {
+  stopQZoneCookieHeartbeat();
+});
 
 await app.listen({
   host: config.serverHost,
