@@ -143,6 +143,12 @@ jobs:
             echo "docs=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Set up Node.js
+        if: steps.changes.outputs.docs == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Set up Bun
         if: steps.changes.outputs.docs == 'true'
         uses: oven-sh/setup-bun@v2
