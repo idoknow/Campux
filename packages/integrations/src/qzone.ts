@@ -15,6 +15,7 @@ export type QZonePublishResult = {
     mode: "mock-qzone";
     renderedBytes: number;
     imageCount: number;
+    renderedImageIncluded: true;
     cookieStatus: "available" | "missing";
     cookieNames: string[];
     publishedAt: string;
@@ -36,7 +37,8 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
     verbose: {
       mode: "mock-qzone",
       renderedBytes: input.renderedCard.byteLength,
-      imageCount: input.imageUrls.length,
+      imageCount: input.imageUrls.length + 1,
+      renderedImageIncluded: true,
       cookieStatus: input.cookies && Object.keys(input.cookies).length > 0 ? "available" : "missing",
       cookieNames: input.cookies ? Object.keys(input.cookies) : [],
       publishedAt: new Date().toISOString(),
