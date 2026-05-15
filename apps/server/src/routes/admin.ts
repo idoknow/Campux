@@ -22,6 +22,11 @@ const memberPatchSchema = z.object({
   role: roleSchema,
 });
 
+const memberCreateSchema = z.object({
+  qqUin: z.string().regex(/^\d+$/, "QQ 号必须是数字"),
+  role: roleSchema.default("submitter"),
+});
+
 const targetParamsSchema = z.object({
   id: z.string().min(1),
 });
@@ -126,6 +131,55 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
 
     return {
       members: members.map((member) => toMember(member)),
+    };
+  });
+
+  app.post("/api/admin/members", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const body = memberCreateSchema.parse(request.body);
+    const user = await prisma.user.findUnique({
+      where: {
+        qqUin: BigInt(body.qqUin),
+      },
+    });
+    if (!user) {
+      return reply.code(404).send({ message: "账号不存在，请先让该账号通过 Bot 注册或由运维创建" });
+    }
+
+    const member = await prisma.tenantMembership.upsert({
+      where: {
+        tenantId_userId: {
+          tenantId: context.selectedTenant.id,
+          userId: user.id,
+        },
+      },
+      update: {
+        role: body.role,
+      },
+      create: {
+        tenantId: context.selectedTenant.id,
+        userId: user.id,
+        role: body.role,
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "member.add",
+      targetType: "membership",
+      targetId: member.id,
+      detail: {
+        qqUin: body.qqUin,
+        role: body.role,
+      },
+    });
+
+    return {
+      member: toMember(member),
     };
   });
 

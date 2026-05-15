@@ -33,6 +33,11 @@ type BanForm = {
   endsAt: string;
 };
 
+type MemberForm = {
+  qqUin: string;
+  role: TenantRole;
+};
+
 type BotForm = {
   qqUin: string;
   displayName: string;
@@ -95,6 +100,7 @@ export function AdminPage({
   const [memberKeyword, setMemberKeyword] = useState("");
   const [banKeyword, setBanKeyword] = useState("");
   const [onlyActiveBans, setOnlyActiveBans] = useState(true);
+  const [memberForm, setMemberForm] = useState<MemberForm>(() => defaultMemberForm());
   const [banForm, setBanForm] = useState<BanForm>(() => defaultBanForm());
   const [botForm, setBotForm] = useState<BotForm>(() => defaultBotForm());
   const [targetForm, setTargetForm] = useState<PublishTargetForm>(() => defaultPublishTargetForm());
@@ -214,6 +220,31 @@ export function AdminPage({
       body: JSON.stringify({ role }),
     });
     await refreshAdminData();
+  }
+
+  async function addMember() {
+    const qqUin = memberForm.qqUin.trim();
+    if (!qqUin) {
+      toast.error("请输入 QQ 号。");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/admin/members", {
+        method: "POST",
+        body: JSON.stringify({
+          qqUin,
+          role: memberForm.role,
+        }),
+      });
+      setMemberForm(defaultMemberForm());
+      toast.success("用户已加入当前校园墙。");
+      await refreshAdminData();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "添加用户失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function banUser() {
@@ -452,7 +483,11 @@ export function AdminPage({
               <UsersPanel
                 members={filteredMembers}
                 keyword={memberKeyword}
+                form={memberForm}
+                busy={busy}
                 onKeywordChange={setMemberKeyword}
+                onFormChange={setMemberForm}
+                onAddMember={() => void addMember()}
                 onRoleChange={(id, role) => void updateMemberRole(id, role)}
                 onPrepareBan={(member) => {
                   setBanForm((current) => ({ ...current, userId: member.user.id }));
@@ -574,13 +609,21 @@ export function AdminPage({
 function UsersPanel({
   members,
   keyword,
+  form,
+  busy,
   onKeywordChange,
+  onFormChange,
+  onAddMember,
   onRoleChange,
   onPrepareBan,
 }: {
   members: AdminMember[];
   keyword: string;
+  form: MemberForm;
+  busy: boolean;
   onKeywordChange: (value: string) => void;
+  onFormChange: (form: MemberForm) => void;
+  onAddMember: () => void;
   onRoleChange: (id: string, role: TenantRole) => void;
   onPrepareBan: (member: AdminMember) => void;
 }) {
@@ -588,6 +631,28 @@ function UsersPanel({
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
         <PanelTitle icon={UserRoundIcon} title="用户管理" description="搜索用户、调整角色或准备封禁" color="product-accent-blue" />
+        <div className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">
+          <Input
+            className="bg-white"
+            inputMode="numeric"
+            placeholder="输入 QQ 号添加到当前校园墙"
+            value={form.qqUin}
+            onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })}
+          />
+          <Select value={form.role} onValueChange={(role) => onFormChange({ ...form, role: role as TenantRole })}>
+            <SelectTrigger className="bg-white font-bold">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+              <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
+              <SelectItem value="admin">{roleLabels.admin}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button disabled={busy || !form.qqUin.trim()} onClick={onAddMember}>
+            添加用户
+          </Button>
+        </div>
         <Input className="mt-3 bg-white" placeholder="输入 QQ 或昵称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
         <div className="mt-3 flex flex-col gap-2">
           {members.map((member) => (
@@ -1358,6 +1423,13 @@ function defaultBanForm(): BanForm {
     userId: "",
     comment: "",
     endsAt: toLocalDateTimeValue(endsAt),
+  };
+}
+
+function defaultMemberForm(): MemberForm {
+  return {
+    qqUin: "",
+    role: "submitter",
   };
 }
 
