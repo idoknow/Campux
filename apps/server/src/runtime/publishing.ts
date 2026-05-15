@@ -10,7 +10,7 @@ import { decryptJson } from "../lib/secret-json";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
-export const defaultPublishIntervalSeconds = 300;
+export const defaultPublishIntervalSeconds = 10;
 
 type PublishingNotifier = {
   notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
@@ -158,7 +158,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
 }
 
 export function effectivePublishIntervalSeconds(value: number | null | undefined) {
-  return Math.max(value ?? 0, defaultPublishIntervalSeconds);
+  return Math.max(value ?? defaultPublishIntervalSeconds, 0);
 }
 
 export async function resolveNextPublishRunAt(options: {

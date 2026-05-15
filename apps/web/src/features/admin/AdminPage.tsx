@@ -53,7 +53,7 @@ type PublishTargetForm = {
   qzoneRefreshMode: "protocol" | "qr";
 };
 
-const DEFAULT_PUBLISH_INTERVAL_SECONDS = 300;
+const DEFAULT_PUBLISH_INTERVAL_SECONDS = 10;
 
 type PublishTargetPatch = Partial<Pick<PublishTargetItem, "displayName" | "enabled" | "required" | "publishDelaySeconds" | "qzoneRefreshMode">>;
 
@@ -1220,7 +1220,7 @@ function PublishPanel({
                 <div className="border-t border-slate-100 bg-slate-50/70 p-3">
                   <div className="grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-4">
                     <InfoPill label="刷新模式" value={target.qzoneRefreshMode === "qr" ? "扫码登录" : "协议获取"} />
-                    <InfoPill label="风控间隔" value={`${Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)}s`} />
+                    <InfoPill label="风控间隔" value={`${target.publishDelaySeconds}s`} />
                     <InfoPill label="最近刷新" value={target.botAccount.qzoneSession?.refreshedAt ? formatDateTime(target.botAccount.qzoneSession.refreshedAt) : "还没有 cookies"} />
                     <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
                     <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测 QZone cookies 可用性"}</p>
@@ -1332,23 +1332,23 @@ function PublishTargetConfigEditor({
   const [displayName, setDisplayName] = useState(target.displayName);
   const [enabled, setEnabled] = useState(target.enabled);
   const [required, setRequired] = useState(target.required);
-  const [publishDelaySeconds, setPublishDelaySeconds] = useState(String(Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)));
+  const [publishDelaySeconds, setPublishDelaySeconds] = useState(String(target.publishDelaySeconds));
   const [qzoneRefreshMode, setQzoneRefreshMode] = useState<"protocol" | "qr">(target.qzoneRefreshMode);
 
   useEffect(() => {
     setDisplayName(target.displayName);
     setEnabled(target.enabled);
     setRequired(target.required);
-    setPublishDelaySeconds(String(Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)));
+    setPublishDelaySeconds(String(target.publishDelaySeconds));
     setQzoneRefreshMode(target.qzoneRefreshMode);
   }, [target.displayName, target.enabled, target.required, target.publishDelaySeconds, target.qzoneRefreshMode]);
 
-  const normalizedDelay = Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), DEFAULT_PUBLISH_INTERVAL_SECONDS);
+  const normalizedDelay = Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), 0);
   const normalizedName = displayName.trim();
   const changed = normalizedName !== target.displayName
     || enabled !== target.enabled
     || required !== target.required
-    || normalizedDelay !== Math.max(target.publishDelaySeconds, DEFAULT_PUBLISH_INTERVAL_SECONDS)
+    || normalizedDelay !== target.publishDelaySeconds
     || qzoneRefreshMode !== target.qzoneRefreshMode;
 
   return (

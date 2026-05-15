@@ -4,7 +4,7 @@ import type { ToasterProps } from "sonner";
 function Toaster(props: ToasterProps) {
   return (
     <Sonner
-      position="top-center"
+      position="top-right"
       richColors
       closeButton
       toastOptions={{
