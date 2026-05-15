@@ -11,6 +11,7 @@ import {
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
+  SearchIcon,
   ShieldPlusIcon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -74,6 +75,7 @@ export function OpsPanel() {
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
+  const [userKeyword, setUserKeyword] = useState("");
   const [userTenantFilterId, setUserTenantFilterId] = useState("");
   const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>([]);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
@@ -143,6 +145,9 @@ export function OpsPanel() {
       if (userTenantFilterId && selectedUserRoleFilters.length > 0) {
         params.set("roles", selectedUserRoleFilters.join(","));
       }
+      if (userKeyword.trim()) {
+        params.set("q", userKeyword.trim());
+      }
       const data = await api<{ total: number; users: SystemUser[]; pagination: Pagination }>(`/api/system/users?${params}`);
       setUsers(data.users);
       setUsersPagination(data.pagination);
@@ -178,7 +183,7 @@ export function OpsPanel() {
     void refreshUsers(userPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取全局用户");
     });
-  }, [userPage, userTenantFilterId, selectedUserRoleFilters]);
+  }, [userPage, userKeyword, userTenantFilterId, selectedUserRoleFilters]);
 
   useEffect(() => {
     void refreshAudit(auditPage).catch((caught) => {
@@ -486,9 +491,14 @@ export function OpsPanel() {
                 users={users}
                 loading={loadingUsers}
                 pagination={usersPagination}
+                keyword={userKeyword}
                 selectedRoleFilters={selectedUserRoleFilters}
                 selectedTenantFilterId={userTenantFilterId}
                 tenants={tenants}
+                onKeywordChange={(keyword) => {
+                  setUserKeyword(keyword);
+                  setUserPage(1);
+                }}
                 onClearRoleFilters={() => {
                   setSelectedUserRoleFilters([]);
                   setUserPage(1);
@@ -598,9 +608,11 @@ function GlobalUsersTable({
   users,
   loading,
   pagination,
+  keyword,
   selectedRoleFilters,
   selectedTenantFilterId,
   tenants,
+  onKeywordChange,
   onClearRoleFilters,
   onTenantFilterChange,
   onOpenAssignMembership,
@@ -610,9 +622,11 @@ function GlobalUsersTable({
   users: SystemUser[];
   loading: boolean;
   pagination: Pagination;
+  keyword: string;
   selectedRoleFilters: SystemUserRoleFilter[];
   selectedTenantFilterId: string;
   tenants: SystemTenant[];
+  onKeywordChange: (keyword: string) => void;
   onClearRoleFilters: () => void;
   onTenantFilterChange: (tenantId: string) => void;
   onOpenAssignMembership: (user: SystemUser) => void;
@@ -625,6 +639,22 @@ function GlobalUsersTable({
 
   return (
     <div>
+      <div className="mb-3 flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2">
+          <SearchIcon className="size-4 shrink-0 text-slate-400" />
+          <Input
+            className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            placeholder="按 QQ 号或昵称搜索账号"
+            value={keyword}
+            onChange={(event) => onKeywordChange(event.target.value)}
+          />
+        </div>
+        {keyword ? (
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => onKeywordChange("")}>
+            清除搜索
+          </Button>
+        ) : null}
+      </div>
       <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm font-bold text-slate-800">

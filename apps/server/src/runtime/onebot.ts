@@ -470,6 +470,7 @@ export class OneBotRuntime {
 
     const command = parseCommand(extractPlainText(event));
     if (!command) {
+      await this.replyToReviewGroupMention(event, botQqUin, groupId);
       return;
     }
 
@@ -580,6 +581,19 @@ export class OneBotRuntime {
     } catch (error) {
       await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
     }
+  }
+
+  private async replyToReviewGroupMention(event: OneBotMessageEvent, botQqUin: string, groupId: string) {
+    if (!isMentioningBot(event, botQqUin)) {
+      return;
+    }
+    const bot = await findEnabledBot(botQqUin).catch(() => null);
+    if (!bot?.reviewGroupId || bot.reviewGroupId !== groupId) {
+      return;
+    }
+    await this.sendGroupMessage(botQqUin, groupId, bot.reviewGroupMessageReply || reviewHelp).catch((error) => {
+      this.logger.warn({ error, botQqUin, groupId }, "failed to send review group auto reply");
+    });
   }
 
   private shouldSendPrivateAutoReply(botAccountId: string, userQqUin: string, cooldownSeconds: number) {
@@ -771,6 +785,23 @@ function extractPlainText(event: OneBotMessageEvent) {
       .join("");
   }
   return "";
+}
+
+function isMentioningBot(event: OneBotMessageEvent, botQqUin: string) {
+  if (typeof event.raw_message === "string" && new RegExp(`\\[CQ:at,qq=${escapeRegex(botQqUin)}\\]`).test(event.raw_message)) {
+    return true;
+  }
+  if (!Array.isArray(event.message)) {
+    return false;
+  }
+  return event.message.some((segment) => {
+    const item = segment as { type?: string; data?: { qq?: string | number } };
+    return item.type === "at" && normalizeId(item.data?.qq) === botQqUin;
+  });
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseCommand(input: string) {

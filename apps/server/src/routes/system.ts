@@ -38,6 +38,7 @@ const paginationQuerySchema = z.object({
 const systemUserRoleFilterSchema = z.enum(["admin", "reviewer", "submitter"]);
 
 const systemUsersQuerySchema = paginationQuerySchema.extend({
+  q: z.string().max(80).optional(),
   roles: z.string().optional(),
   tenantId: z.string().optional(),
 });
@@ -306,16 +307,33 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     await requireSystemOperator(request, reply);
     const query = systemUsersQuerySchema.parse(request.query);
     const roleFilters = parseSystemUserRoleFilters(query.roles);
-    const where: Prisma.UserWhereInput = query.tenantId
-      ? {
-          memberships: {
-            some: {
-              tenantId: query.tenantId,
-              ...(roleFilters.length > 0 ? { role: { in: roleFilters } } : {}),
+    const keyword = query.q?.trim();
+    const queryQqUin = keyword && /^\d+$/.test(keyword) ? BigInt(keyword) : null;
+    const filters: Prisma.UserWhereInput[] = [];
+    if (query.tenantId) {
+      filters.push({
+        memberships: {
+          some: {
+            tenantId: query.tenantId,
+            ...(roleFilters.length > 0 ? { role: { in: roleFilters } } : {}),
+          },
+        },
+      });
+    }
+    if (keyword) {
+      filters.push({
+        OR: [
+          ...(queryQqUin === null ? [] : [{ qqUin: queryQqUin }]),
+          {
+            displayName: {
+              contains: keyword,
+              mode: "insensitive",
             },
           },
-        }
-      : {};
+        ],
+      });
+    }
+    const where: Prisma.UserWhereInput = filters.length > 0 ? { AND: filters } : {};
     const [total, users] = await Promise.all([
       prisma.user.count({ where }),
       prisma.user.findMany({

@@ -363,7 +363,10 @@ export function AdminPage({
     }
   }
 
-  async function updateBotConfig(botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds">>) {
+  async function updateBotConfig(
+    botId: string,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+  ) {
     setBusy(true);
     try {
       await api(`/api/admin/bots/${botId}`, {
@@ -975,7 +978,10 @@ function BotsPanel({
   onFormChange: (form: BotForm) => void;
   onAdd: () => void;
   onDelete: (id: string) => void;
-  onUpdateConfig: (botId: string, patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds">>) => void;
+  onUpdateConfig: (
+    botId: string,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+  ) => void;
   onRefresh: () => void;
 }) {
   return (
@@ -1095,12 +1101,13 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
   const [userMessageReply, setUserMessageReply] = useState(bot.userMessageReply);
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
+  const [reviewGroupMessageReply, setReviewGroupMessageReply] = useState(bot.reviewGroupMessageReply);
   const [enabled, setEnabled] = useState(bot.enabled);
 
   useEffect(() => {
@@ -1108,17 +1115,20 @@ function BotConfigEditor({
     setReviewGroupId(bot.reviewGroupId ?? "");
     setUserMessageReply(bot.userMessageReply);
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
+    setReviewGroupMessageReply(bot.reviewGroupMessageReply);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
   const trimmedUserMessageReply = userMessageReply.trim();
+  const trimmedReviewGroupMessageReply = reviewGroupMessageReply.trim();
   const normalizedCooldownSeconds = Math.max(0, Number(userMessageReplyCooldownSeconds || 0));
   const changed = trimmedDisplayName !== bot.displayName
     || trimmedReviewGroupId !== (bot.reviewGroupId ?? "")
     || trimmedUserMessageReply !== bot.userMessageReply
     || normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds
+    || trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply
     || enabled !== bot.enabled;
 
   return (
@@ -1131,13 +1141,14 @@ function BotConfigEditor({
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || !trimmedDisplayName || !trimmedUserMessageReply || !changed}
+          disabled={busy || !trimmedDisplayName || !trimmedUserMessageReply || !trimmedReviewGroupMessageReply || !changed}
           onClick={() =>
             onSave({
               displayName: trimmedDisplayName,
               reviewGroupId: trimmedReviewGroupId || null,
               userMessageReply: trimmedUserMessageReply,
               userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
+              reviewGroupMessageReply: trimmedReviewGroupMessageReply,
               enabled,
             })
           }
@@ -1154,12 +1165,26 @@ function BotConfigEditor({
         </label>
       </div>
       <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
-        <Textarea
-          className="min-h-24 bg-white"
-          value={userMessageReply}
-          onChange={(event) => setUserMessageReply(event.target.value)}
-          placeholder="用户没有发送命令时自动回复的消息"
-        />
+        <div className="grid gap-2">
+          <label className="text-xs font-semibold text-slate-500">
+            私聊非命令自动回复
+            <Textarea
+              className="mt-1 min-h-24 bg-white"
+              value={userMessageReply}
+              onChange={(event) => setUserMessageReply(event.target.value)}
+              placeholder="用户没有发送命令时自动回复的消息"
+            />
+          </label>
+          <label className="text-xs font-semibold text-slate-500">
+            审核群 @ 非指令提示
+            <Textarea
+              className="mt-1 min-h-28 bg-white"
+              value={reviewGroupMessageReply}
+              onChange={(event) => setReviewGroupMessageReply(event.target.value)}
+              placeholder="审核群里 @ 机器人但没有发送指令时回复的提示"
+            />
+          </label>
+        </div>
         <div className="rounded-md border border-slate-200 bg-white p-2">
           <p className="text-xs font-semibold text-slate-500">自动回复限速</p>
           <Input
@@ -1406,6 +1431,7 @@ function PublishPanel({
                       publishTextTemplate: target.botAccount.publishTextTemplate,
                       userMessageReply: "",
                       userMessageReplyCooldownSeconds: 60,
+                      reviewGroupMessageReply: "",
                       lastSeenAt: null,
                       createdAt: "",
                       connection: { online: false, connectionCount: 0 },
