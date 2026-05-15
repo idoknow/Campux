@@ -8,6 +8,7 @@ const configSchema = z.object({
   CAMPUX_SERVER_HOST: z.string().default("0.0.0.0"),
   CAMPUX_SERVER_PORT: z.coerce.number().int().positive().default(8989),
   CAMPUX_WEB_ORIGIN: z.string().default("http://localhost:5180"),
+  CAMPUX_WEB_DIST_DIR: z.string().default("apps/web/dist"),
   S3_ENDPOINT: z.string().default("http://localhost:9000"),
   S3_REGION: z.string().default("auto"),
   S3_BUCKET: z.string().default("campux-next"),
@@ -63,6 +64,7 @@ export function loadConfig() {
     serverHost: env.CAMPUX_SERVER_HOST,
     serverPort: env.CAMPUX_SERVER_PORT,
     webOrigin: env.CAMPUX_WEB_ORIGIN,
+    webDistDir: env.CAMPUX_WEB_DIST_DIR,
     s3: {
       endpoint: env.S3_ENDPOINT,
       region: env.S3_REGION,

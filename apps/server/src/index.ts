@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
 import { OneBotRuntime } from "./runtime/onebot";
@@ -45,6 +48,22 @@ registerBotRoutes(app, queue);
 registerPostRoutes(app, config, oneBot);
 registerReviewRoutes(app, queue);
 registerSystemRoutes(app, queue);
+
+const webDistDir = resolve(process.cwd(), config.webDistDir);
+if (existsSync(webDistDir)) {
+  await app.register(fastifyStatic, {
+    root: webDistDir,
+    prefix: "/",
+    wildcard: false,
+  });
+
+  app.setNotFoundHandler((request, reply) => {
+    if (request.method === "GET" && !request.url.startsWith("/api") && !request.url.startsWith("/onebot")) {
+      return reply.sendFile("index.html");
+    }
+    return reply.code(404).send({ message: "Not Found" });
+  });
+}
 
 app.addHook("onClose", async () => {
   await queue.stop();
