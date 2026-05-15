@@ -1,5 +1,5 @@
 import type { TenantSummary } from "@campux/domain";
-import { LogOutIcon } from "lucide-react";
+import { CheckIcon, LogOutIcon, ShuffleIcon } from "lucide-react";
 import type { AuthenticatedMe } from "@/types/app";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -17,6 +17,7 @@ export function AccountMenu({
   roleLabel,
   onLogout,
   onOpenOps,
+  onSelectTenant,
   variant,
 }: {
   selectedTenant: TenantSummary;
@@ -24,11 +25,14 @@ export function AccountMenu({
   roleLabel: string;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
+  onSelectTenant: (tenantId: string) => Promise<void>;
   variant: "mobile" | "desktop";
 }) {
   const isDesktop = variant === "desktop";
   const displayName = me.user.displayName ?? me.user.qqUin;
   const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${me.user.qqUin}&s=100`;
+  const switchableMemberships = me.memberships.filter((membership) => membership.tenant.status === "active" || membership.tenant.id === selectedTenant.id);
+  const canSwitchTenant = !me.hostLocked && switchableMemberships.length > 1;
 
   return (
     <DropdownMenu>
@@ -61,6 +65,36 @@ export function AccountMenu({
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {me.hostLocked ? (
+          <>
+            <DropdownMenuLabel className="text-xs font-medium leading-relaxed text-slate-500">
+              当前域名已绑定到 {selectedTenant.name}，此入口不会切换到其他校园墙。
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        ) : canSwitchTenant ? (
+          <>
+            <DropdownMenuLabel className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              <ShuffleIcon className="size-3.5" />
+              切换校园墙
+            </DropdownMenuLabel>
+            {switchableMemberships.map((membership) => (
+              <DropdownMenuItem
+                key={membership.id}
+                disabled={membership.tenant.id === selectedTenant.id}
+                onSelect={() => {
+                  if (membership.tenant.id !== selectedTenant.id) {
+                    void onSelectTenant(membership.tenant.id);
+                  }
+                }}
+              >
+                {membership.tenant.id === selectedTenant.id ? <CheckIcon data-icon="inline-start" /> : <span className="w-4" />}
+                <span className="min-w-0 flex-1 truncate">{membership.tenant.name}</span>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         {onOpenOps ? (
           <>
             <DropdownMenuItem onSelect={onOpenOps}>系统运维</DropdownMenuItem>

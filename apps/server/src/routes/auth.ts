@@ -84,6 +84,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         currentMembership: { id: hostMembership.id, role: hostMembership.role },
         activeBan: toActiveBan(await findActiveBan(hostTenant.id, user.id)),
         needsTenantSelection: false,
+        hostLocked: true,
       };
     }
 
@@ -100,6 +101,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       currentMembership: onlyMembership ? { id: onlyMembership.id, role: onlyMembership.role } : null,
       activeBan: onlyMembership ? toActiveBan(await findActiveBan(onlyMembership.tenantId, user.id)) : null,
       needsTenantSelection: user.memberships.length > 1,
+      hostLocked: false,
     };
   });
 
@@ -160,6 +162,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         : null,
       activeBan: toActiveBan(context.activeBan),
       needsTenantSelection: context.memberships.length > 1 && !context.selectedTenant,
+      hostLocked: Boolean(context.hostTenant),
     };
   });
 

@@ -46,6 +46,7 @@ export type MeResponse =
       currentMembership: CurrentMembership | null;
       activeBan: ActiveBan | null;
       needsTenantSelection: boolean;
+      hostLocked: boolean;
     };
 
 export type AuthenticatedMe = Extract<MeResponse, { authenticated: true }>;
@@ -273,6 +274,20 @@ export type SystemTenant = {
   botAccountCount: number;
   postCount: number;
   memberCount: number;
+  bots: Array<{
+    id: string;
+    qqUin: string;
+    displayName: string;
+    enabled: boolean;
+    reviewGroupId: string | null;
+    lastSeenAt: string | null;
+    publishTargets: Array<{
+      id: string;
+      displayName: string;
+      enabled: boolean;
+      required: boolean;
+    }>;
+  }>;
 };
 
 export type SystemUser = {
