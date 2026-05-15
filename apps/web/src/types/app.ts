@@ -1,6 +1,6 @@
 import type { TenantSummary } from "@campux/domain";
 
-export type MainTab = "post" | "posts" | "services" | "admin";
+export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
 export type PostsTab = "mine" | "review";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
@@ -242,6 +242,89 @@ export type AdminBotEvent = {
     qqUin: string;
     displayName: string | null;
   } | null;
+};
+
+export type TenantStats = {
+  generatedAt: string;
+  overview: {
+    totalPosts: number;
+    recent7Posts: number;
+    recent30Posts: number;
+    uniqueAuthors: number;
+    activeAuthors30d: number;
+    anonymousPosts: number;
+    anonymousRate: number | null;
+    postsWithImages: number;
+    imageRate: number | null;
+    imagesTotal: number;
+    avgImagesPerPost: number | null;
+    avgReviewMinutes: number | null;
+  };
+  posts: {
+    byStatus: Record<string, number>;
+    daily: Array<{ date: string; total: number; approved: number; rejected: number; published: number }>;
+    userDaily: Array<{ date: string; newMembers: number; totalMembers: number }>;
+    hourly: Array<{ hour: number; total: number }>;
+    topAuthors30d: Array<{ authorId: string; count: number }>;
+  };
+  review: {
+    reviewed30d: number;
+    approved30d: number;
+    rejected30d: number;
+    avgReviewMinutes: number | null;
+  };
+  publishing: {
+    byStatus: Record<string, number>;
+    successRate: number | null;
+    targets: Array<{
+      id: string;
+      displayName: string;
+      enabled: boolean;
+      required: boolean;
+      delaySeconds: number;
+      bot: {
+        qqUin: string;
+        displayName: string;
+      };
+      counts: Record<string, number>;
+      successRate: number | null;
+    }>;
+    recentFailures: Array<{
+      id: string;
+      postDisplayId: number;
+      postText: string;
+      postStatus: string;
+      targetName: string;
+      botName: string;
+      botQqUin: string;
+      lastError: string | null;
+      updatedAt: string;
+    }>;
+  };
+  members: {
+    byRole: Record<string, number>;
+    total: number;
+    activeBans: number;
+    totalBans: number;
+  };
+  bots: Array<{
+    id: string;
+    qqUin: string;
+    displayName: string;
+    enabled: boolean;
+    reviewGroupId: string | null;
+    publishTargetCount: number;
+    lastSeenAt: string | null;
+    qzoneSession: {
+      status: string;
+      checkedAt: string | null;
+      message: string | null;
+      refreshedAt: string;
+    } | null;
+  }>;
+  audit: {
+    actions30d: Array<{ action: string; count: number }>;
+  };
 };
 
 export type AdminBanRecord = {

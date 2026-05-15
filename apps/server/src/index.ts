@@ -16,6 +16,7 @@ import { registerMetadataRoutes } from "./routes/metadata";
 import { registerOneBotRoutes } from "./routes/onebot";
 import { registerPostRoutes } from "./routes/posts";
 import { registerReviewRoutes } from "./routes/review";
+import { registerStatsRoutes } from "./routes/stats";
 import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
 import { runDatabaseMigrations } from "./lib/migrations";
@@ -51,6 +52,7 @@ registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
 registerPostRoutes(app, config, oneBot);
 registerReviewRoutes(app, queue, oneBot);
+registerStatsRoutes(app);
 registerSystemRoutes(app, queue);
 
 const webDistDir = resolve(process.cwd(), config.webDistDir);

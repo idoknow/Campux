@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardListIcon, HomeIcon, ShieldCheckIcon, SparklesIcon } from "lucide-react";
+import { BarChart3Icon, ClipboardListIcon, HomeIcon, ShieldCheckIcon, SparklesIcon } from "lucide-react";
 import type { MainTab, TenantMetadata, TenantRole } from "@/types/app";
 
 export type NavItem = {
@@ -30,6 +30,7 @@ export const navItems = [
   { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon, minRole: "submitter" },
   { value: "services", label: "服务", emoji: "🛠", icon: SparklesIcon, minRole: "submitter" },
   { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "admin" },
+  { value: "stats", label: "统计", emoji: "📊", icon: BarChart3Icon, minRole: "reviewer" },
 ] satisfies NavItem[];
 
 const roleRank: Record<TenantRole, number> = {
