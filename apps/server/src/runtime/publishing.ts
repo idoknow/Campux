@@ -592,11 +592,11 @@ function renderPublishCaption(value: Prisma.JsonValue | null | undefined, post: 
   }
   const firstLine = [template.customText?.trim(), ...parts].filter(Boolean).join(" ").trim();
   const lines = firstLine ? [firstLine] : [];
-  if (template.suffixText?.trim()) {
-    lines.push(template.suffixText.trim());
-  }
   if (template.includeLinks) {
     lines.push(...extractLinks(post.text));
+  }
+  if (template.suffixText?.trim()) {
+    lines.push(template.suffixText.trim());
   }
   return lines.join("\n").trim() || `#${post.postId}`;
 }
