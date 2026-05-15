@@ -35,6 +35,26 @@ const adminTabPaths: Record<AdminTab, string> = {
   publish: "/admin/publish",
 };
 
+const mainTabTitles: Record<MainTab, string> = {
+  post: "投稿",
+  posts: "稿件",
+  services: "服务",
+  admin: "管理",
+};
+
+const postsTabTitles: Record<PostsTab, string> = {
+  mine: "你的稿件",
+  review: "审核稿件",
+};
+
+const adminTabTitles: Record<AdminTab, string> = {
+  users: "用户管理",
+  bans: "封禁管理",
+  metadata: "元数据管理",
+  bots: "机器人管理",
+  publish: "发布管理",
+};
+
 export function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
@@ -56,6 +76,7 @@ export function App() {
 
   const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
+  const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
   const availableNavItems = useMemo(() => {
     if (!currentRole) {
       return navItems.filter((item) => item.value !== "admin");
@@ -206,6 +227,10 @@ export function App() {
     }
   }, [me, route.kind, route.kind === "tenant" ? route.tab : undefined, route.kind === "tenant" ? route.subTab : undefined]);
 
+  useEffect(() => {
+    document.title = buildDocumentTitle(route, documentTenantName);
+  }, [route, documentTenantName]);
+
   async function login(qqUin: string, password: string) {
     setError("");
     const data = await api<MeResponse>("/api/auth/login", {
@@ -354,6 +379,7 @@ export function App() {
       onFilesSelected={uploadFiles}
       onLogout={logout}
       onOpenOps={me.user.systemRole === "system_operator" ? () => navigate({ kind: "ops" }) : undefined}
+      onSelectTenant={selectTenant}
       onPostTextChange={setPostText}
       onPostsTabChange={setPostsSubTab}
       onRefreshMe={refreshMe}
@@ -424,4 +450,32 @@ function pathFromRoute(route: AppRoute) {
     return tabPaths[route.tab];
   }
   return `/${route.kind}`;
+}
+
+function buildDocumentTitle(route: AppRoute, tenantName?: string) {
+  const pageTitle = pageTitleFromRoute(route);
+  const titleParts = route.kind === "tenant" ? [pageTitle, tenantName, "Campux"] : [pageTitle, "Campux"];
+  return titleParts.filter(Boolean).join(" - ");
+}
+
+function pageTitleFromRoute(route: AppRoute) {
+  if (route.kind === "login") {
+    return "登录";
+  }
+  if (route.kind === "tenants") {
+    return "选择校园墙";
+  }
+  if (route.kind === "ops") {
+    return "运维面板";
+  }
+  if (route.kind !== "tenant") {
+    return "Campux";
+  }
+  if (route.tab === "posts" && route.subTab) {
+    return postsTabTitles[route.subTab as PostsTab] ?? mainTabTitles.posts;
+  }
+  if (route.tab === "admin" && route.subTab) {
+    return adminTabTitles[route.subTab as AdminTab] ?? mainTabTitles.admin;
+  }
+  return mainTabTitles[route.tab];
 }

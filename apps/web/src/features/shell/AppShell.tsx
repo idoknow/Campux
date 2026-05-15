@@ -29,6 +29,7 @@ export function AppShell({
   onFilesSelected,
   onLogout,
   onOpenOps,
+  onSelectTenant,
   onPostTextChange,
   onPostsTabChange,
   onPostsPageChange,
@@ -56,6 +57,7 @@ export function AppShell({
   onFilesSelected: (files: FileList | null) => void;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
+  onSelectTenant: (tenantId: string) => Promise<void>;
   onPostTextChange: (value: string) => void;
   onPostsTabChange: (tab: PostsTab) => void;
   onPostsPageChange: (page: number) => void;
@@ -74,10 +76,11 @@ export function AppShell({
           selectedTenant={me.currentTenant}
           onLogout={onLogout}
           onOpenOps={onOpenOps}
+          onSelectTenant={onSelectTenant}
         />
 
         <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:mx-auto md:max-w-[980px] md:border-x md:border-slate-200">
-          <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} />
+          <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} />
 
           <main className="min-h-0 flex-1 overflow-hidden">
             <TabsContent value="post" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">

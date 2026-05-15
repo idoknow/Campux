@@ -22,6 +22,11 @@ const tenantCreateSchema = z.object({
   botQqUin: z.string().regex(/^\d+$/).optional(),
 });
 
+const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
 const defaultPostRules = [
   "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
   "寻物招领请写清地点、时间和联系方式。",
@@ -34,15 +39,36 @@ const defaultServices = [
   { title: "校园服务", description: "推荐入口" },
 ];
 
-function toSystemTenant(
-  tenant: Awaited<ReturnType<typeof prisma.tenant.findMany>>[number] & {
-    _count: {
-      botAccounts: number;
-      posts: number;
-      memberships: number;
-    };
-  },
-) {
+type SystemTenantRecord = {
+  id: string;
+  slug: string;
+  host: string | null;
+  name: string;
+  status: z.infer<typeof tenantStatusSchema>;
+  createdAt: Date;
+  updatedAt: Date;
+  botAccounts?: Array<{
+    id: string;
+    qqUin: bigint;
+    displayName: string;
+    enabled: boolean;
+    reviewGroupId: string | null;
+    lastSeenAt: Date | null;
+    publishTargets: Array<{
+      id: string;
+      displayName: string;
+      enabled: boolean;
+      required: boolean;
+    }>;
+  }>;
+  _count: {
+    botAccounts: number;
+    posts: number;
+    memberships: number;
+  };
+};
+
+function toSystemTenant(tenant: SystemTenantRecord) {
   return {
     id: tenant.id,
     slug: tenant.slug,
@@ -54,12 +80,38 @@ function toSystemTenant(
     botAccountCount: tenant._count.botAccounts,
     postCount: tenant._count.posts,
     memberCount: tenant._count.memberships,
+    bots: (tenant.botAccounts ?? []).map((bot) => ({
+      id: bot.id,
+      qqUin: bot.qqUin.toString(),
+      displayName: bot.displayName,
+      enabled: bot.enabled,
+      reviewGroupId: bot.reviewGroupId,
+      lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
+      publishTargets: bot.publishTargets.map((target) => ({
+        id: target.id,
+        displayName: target.displayName,
+        enabled: target.enabled,
+        required: target.required,
+      })),
+    })),
   };
 }
 
 async function listSystemTenants() {
   const tenants = await prisma.tenant.findMany({
     include: {
+      botAccounts: {
+        include: {
+          publishTargets: {
+            orderBy: {
+              displayName: "asc",
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      },
       _count: {
         select: {
           botAccounts: true,
@@ -237,6 +289,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
 
   app.get("/api/system/users", async (request, reply) => {
     await requireSystemOperator(request, reply);
+    const query = paginationQuerySchema.parse(request.query);
     const [total, users] = await Promise.all([
       prisma.user.count(),
       prisma.user.findMany({
@@ -253,12 +306,14 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         orderBy: {
           createdAt: "desc",
         },
-        take: 100,
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
       }),
     ]);
 
     return {
       total,
+      pagination: toPagination(query.page, query.limit, total),
       users: users.map((user) => ({
         id: user.id,
         qqUin: user.qqUin.toString(),
@@ -339,18 +394,24 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
 
   app.get("/api/system/audit-logs", async (request, reply) => {
     await requireSystemOperator(request, reply);
-    const logs = await prisma.auditLog.findMany({
-      include: {
-        tenant: true,
-        actor: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 100,
-    });
+    const query = paginationQuerySchema.parse(request.query);
+    const [total, logs] = await Promise.all([
+      prisma.auditLog.count(),
+      prisma.auditLog.findMany({
+        include: {
+          tenant: true,
+          actor: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
 
     return {
+      pagination: toPagination(query.page, query.limit, total),
       logs: logs.map((log) => ({
         id: log.id,
         action: log.action,
@@ -375,4 +436,13 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       })),
     };
   });
+}
+
+function toPagination(page: number, limit: number, total: number) {
+  return {
+    page,
+    limit,
+    total,
+    pageCount: Math.max(1, Math.ceil(total / limit)),
+  };
 }

@@ -11,6 +11,7 @@ export function DesktopSidebar({
   navItems,
   onLogout,
   onOpenOps,
+  onSelectTenant,
 }: {
   selectedTenant: TenantSummary;
   activeTab: MainTab;
@@ -18,6 +19,7 @@ export function DesktopSidebar({
   navItems: NavItem[];
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
+  onSelectTenant: (tenantId: string) => Promise<void>;
 }) {
   const role = me.currentMembership?.role ?? "submitter";
 
@@ -44,7 +46,7 @@ export function DesktopSidebar({
           ))}
         </TabsList>
 
-        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} variant="desktop" />
+        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="desktop" />
       </div>
     </aside>
   );

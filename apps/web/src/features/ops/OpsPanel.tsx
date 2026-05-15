@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIcon, ArchiveIcon, BotIcon, Building2Icon, ClipboardListIcon, PauseCircleIcon, PlayCircleIcon, PlusIcon, UsersRoundIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  ArchiveIcon,
+  BotIcon,
+  Building2Icon,
+  ClipboardListIcon,
+  ClockIcon,
+  PauseCircleIcon,
+  PlayCircleIcon,
+  PlusIcon,
+  UsersRoundIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { AuditLogItem, SystemBot, SystemQueueSnapshot, SystemTenant, SystemUser, TenantStatus } from "@/types/app";
+import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
+import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const statusLabels: Record<TenantStatus, string> = {
   active: "运行中",
@@ -20,20 +33,43 @@ const statusDescriptions: Record<TenantStatus, string> = {
   archived: "归档历史租户，默认不再出现在用户入口。",
 };
 
+const roleLabels: Record<TenantRole, string> = {
+  submitter: "用户",
+  reviewer: "审核员",
+  admin: "管理员",
+};
+
 const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeof PlayCircleIcon }> = [
   { status: "active", label: "恢复运行", icon: PlayCircleIcon },
   { status: "paused", label: "暂停租户", icon: PauseCircleIcon },
   { status: "archived", label: "归档租户", icon: ArchiveIcon },
 ];
 
+type OpsTab = "users" | "audit";
+
+function defaultPagination(): Pagination {
+  return {
+    page: 1,
+    limit: 10,
+    total: 0,
+    pageCount: 1,
+  };
+}
+
 export function OpsPanel() {
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
-  const [userTotal, setUserTotal] = useState(0);
-  const [bots, setBots] = useState<SystemBot[]>([]);
+  const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
+  const [userPage, setUserPage] = useState(1);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
+  const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
+  const [auditPage, setAuditPage] = useState(1);
+  const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>("users");
+  const [loadingOverview, setLoadingOverview] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingAudit, setLoadingAudit] = useState(false);
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
   const [savingHost, setSavingHost] = useState(false);
@@ -56,33 +92,72 @@ export function OpsPanel() {
       active: tenants.filter((tenant) => tenant.status === "active").length,
       paused: tenants.filter((tenant) => tenant.status === "paused").length,
       archived: tenants.filter((tenant) => tenant.status === "archived").length,
+      bots: tenants.reduce((sum, tenant) => sum + tenant.botAccountCount, 0),
     }),
     [tenants],
   );
 
-  async function refreshTenants(nextSelectedId?: string) {
-    const [data, userData, botData, queueData, auditData] = await Promise.all([
-      api<{ tenants: SystemTenant[] }>("/api/system/tenants"),
-      api<{ total: number; users: SystemUser[] }>("/api/system/users"),
-      api<{ bots: SystemBot[] }>("/api/system/bots"),
-      api<SystemQueueSnapshot>("/api/system/queue"),
-      api<{ logs: AuditLogItem[] }>("/api/system/audit-logs"),
-    ]);
-    setTenants(data.tenants);
-    setUsers(userData.users);
-    setUserTotal(userData.total);
-    setBots(botData.bots);
-    setQueue(queueData);
-    setAuditLogs(auditData.logs);
-    const nextTenant = data.tenants.find((tenant) => tenant.id === nextSelectedId) ?? data.tenants[0];
-    setSelectedTenantId(nextTenant?.id ?? "");
+  async function refreshOverview(nextSelectedId?: string) {
+    setLoadingOverview(true);
+    try {
+      const [data, queueData] = await Promise.all([
+        api<{ tenants: SystemTenant[] }>("/api/system/tenants"),
+        api<SystemQueueSnapshot>("/api/system/queue"),
+      ]);
+      setTenants(data.tenants);
+      setQueue(queueData);
+      const nextTenant = data.tenants.find((tenant) => tenant.id === nextSelectedId) ?? data.tenants.find((tenant) => tenant.id === selectedTenantId) ?? data.tenants[0];
+      setSelectedTenantId(nextTenant?.id ?? "");
+    } finally {
+      setLoadingOverview(false);
+    }
+  }
+
+  async function refreshUsers(page = userPage) {
+    setLoadingUsers(true);
+    try {
+      const data = await api<{ total: number; users: SystemUser[]; pagination: Pagination }>(`/api/system/users?page=${page}&limit=${usersPagination.limit}`);
+      setUsers(data.users);
+      setUsersPagination(data.pagination);
+      setUserPage(data.pagination.page);
+    } finally {
+      setLoadingUsers(false);
+    }
+  }
+
+  async function refreshAudit(page = auditPage) {
+    setLoadingAudit(true);
+    try {
+      const data = await api<{ logs: AuditLogItem[]; pagination: Pagination }>(`/api/system/audit-logs?page=${page}&limit=${auditPagination.limit}`);
+      setAuditLogs(data.logs);
+      setAuditPagination(data.pagination);
+      setAuditPage(data.pagination.page);
+    } finally {
+      setLoadingAudit(false);
+    }
+  }
+
+  async function refreshAll() {
+    await Promise.all([refreshOverview(), refreshUsers(userPage), refreshAudit(auditPage)]);
   }
 
   useEffect(() => {
-    void refreshTenants().catch((caught) => {
-      toast.error(caught instanceof Error ? caught.message : "无法读取租户列表");
+    void refreshAll().catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取运维面板数据");
     });
   }, []);
+
+  useEffect(() => {
+    void refreshUsers(userPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取全局用户");
+    });
+  }, [userPage]);
+
+  useEffect(() => {
+    void refreshAudit(auditPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取审计日志");
+    });
+  }, [auditPage]);
 
   useEffect(() => {
     setHostDraft(selectedTenant?.host ?? "");
@@ -99,7 +174,8 @@ export function OpsPanel() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      await refreshTenants(selectedTenant.id);
+      await refreshOverview(selectedTenant.id);
+      await refreshAudit(1);
       toast.success(`已将 ${selectedTenant.name} 调整为${statusLabels[status]}。`);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "状态调整失败");
@@ -126,7 +202,7 @@ export function OpsPanel() {
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
       setTenantForm({ name: "", slug: "", host: "", themeColor: "#111827", botQqUin: "" });
       toast.success("新校园墙已创建。");
-      await refreshTenants(created?.id);
+      await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshAudit(1)]);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建租户失败");
     } finally {
@@ -147,7 +223,8 @@ export function OpsPanel() {
           host: hostDraft.trim() || null,
         }),
       });
-      await refreshTenants(selectedTenant.id);
+      await refreshOverview(selectedTenant.id);
+      await refreshAudit(1);
       toast.success(hostDraft.trim() ? "入口 host 已更新。" : "入口 host 已清空。");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "host 更新失败");
@@ -159,7 +236,7 @@ export function OpsPanel() {
   return (
     <div className="px-4 pb-6">
       <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={() => void refreshTenants()}>
+        <Button variant="outline" size="sm" disabled={loadingOverview || loadingUsers || loadingAudit} onClick={() => void refreshAll()}>
           刷新
         </Button>
       </div>
@@ -171,8 +248,8 @@ export function OpsPanel() {
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <MetricCard title="全局用户" value={userTotal} icon={UsersRoundIcon} accent="blue" />
-        <MetricCard title="Bot 账号" value={bots.length} icon={BotIcon} accent="violet" />
+        <MetricCard title="全局用户" value={usersPagination.total} icon={UsersRoundIcon} accent="blue" />
+        <MetricCard title="Bot 账号" value={summary.bots} icon={BotIcon} accent="violet" />
         <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} accent="amber" />
         <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
       </div>
@@ -185,6 +262,7 @@ export function OpsPanel() {
                 <Building2Icon className="size-4" />
                 租户生命周期
               </div>
+              {loadingOverview ? <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
             </div>
             <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -218,7 +296,11 @@ export function OpsPanel() {
                     <Badge variant={tenant.status === "active" ? "secondary" : "outline"}>{statusLabels[tenant.status]}</Badge>
                   </span>
                   <span className="mt-1 block truncate text-xs text-slate-500">{tenant.slug}</span>
-                  {tenant.host ? <span className="mt-1 block truncate text-xs font-semibold text-slate-500">{tenant.host}</span> : null}
+                  <span className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold text-slate-500">
+                    <span>{tenant.memberCount} 用户</span>
+                    <span>{tenant.botAccountCount} 墙号</span>
+                    <span>{tenant.postCount} 稿件</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -283,6 +365,21 @@ export function OpsPanel() {
                 </div>
               </div>
 
+              <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
+                <div className="flex items-center gap-2 font-bold">
+                  <BotIcon className="size-4" />
+                  Bot 与发布目标
+                  <span className="ml-auto text-xs font-bold text-slate-400">{selectedTenant.bots.length} 个墙号</span>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {selectedTenant.bots.length > 0 ? (
+                    selectedTenant.bots.map((bot) => <TenantBotCard key={bot.id} bot={bot} />)
+                  ) : (
+                    <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-500">当前租户还没有配置 Bot。</p>
+                  )}
+                </div>
+              </div>
+
               <p className="mt-4 text-sm text-slate-500">
                 校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护；专属 host 由系统运维统一管理。
               </p>
@@ -295,61 +392,182 @@ export function OpsPanel() {
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Card className="rounded-md">
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 font-semibold">
-              <UsersRoundIcon className="size-4" />
-              全局用户
-              <span className="ml-auto text-xs font-bold text-slate-400">最近 {users.length} 条</span>
+      <Card className="mt-4 rounded-md">
+        <CardContent className="p-4">
+          <Tabs value={activeOpsTab} onValueChange={(value) => setActiveOpsTab(value as OpsTab)}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <TabsList className="h-10">
+                <TabsTrigger value="users" className="h-8 px-3">
+                  <UsersRoundIcon className="size-4" />
+                  全局用户
+                </TabsTrigger>
+                <TabsTrigger value="audit" className="h-8 px-3">
+                  <ClipboardListIcon className="size-4" />
+                  审计日志
+                </TabsTrigger>
+              </TabsList>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={activeOpsTab === "users" ? loadingUsers : loadingAudit}
+                onClick={() => void (activeOpsTab === "users" ? refreshUsers(userPage) : refreshAudit(auditPage))}
+              >
+                刷新当前页
+              </Button>
             </div>
-            <div className="flex max-h-80 flex-col gap-2 overflow-auto">
-              {users.slice(0, 12).map((user) => (
-                <div key={user.id} className="rounded-md bg-slate-50 p-2">
-                  <p className="truncate text-sm font-semibold">{user.displayName ?? user.qqUin}</p>
-                  <p className="text-xs text-slate-500">
-                    {user.memberships.length} 个校园墙{user.systemRole ? " · 系统运维" : ""}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="rounded-md">
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 font-semibold">
-              <BotIcon className="size-4" />
-              Bot 与发布目标
-            </div>
-            <div className="flex max-h-80 flex-col gap-2 overflow-auto">
-              {bots.slice(0, 12).map((bot) => (
-                <div key={bot.id} className="rounded-md bg-slate-50 p-2">
-                  <p className="truncate text-sm font-semibold">{bot.displayName}</p>
-                  <p className="text-xs text-slate-500">{bot.tenant.name} · {bot.publishTargets.length} 个发布目标</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+            <TabsContent value="users" className="mt-4">
+              <GlobalUsersTable users={users} loading={loadingUsers} pagination={usersPagination} onPageChange={setUserPage} />
+            </TabsContent>
 
-        <Card className="rounded-md">
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 font-semibold">
-              <ActivityIcon className="size-4" />
-              审计日志
-            </div>
-            <div className="flex max-h-80 flex-col gap-2 overflow-auto">
-              {auditLogs.slice(0, 12).map((log) => (
-                <div key={log.id} className="rounded-md bg-slate-50 p-2">
-                  <p className="truncate text-sm font-semibold">{log.action}</p>
-                  <p className="text-xs text-slate-500">{log.tenant?.name ?? "全局"} · {log.actor?.displayName ?? log.actor?.qqUin ?? "系统"}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+            <TabsContent value="audit" className="mt-4">
+              <AuditLogTable logs={auditLogs} loading={loadingAudit} pagination={auditPagination} onPageChange={setAuditPage} />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function TenantBotCard({ bot }: { bot: SystemTenant["bots"][number] }) {
+  return (
+    <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{bot.displayName}</p>
+          <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {bot.qqUin}</p>
+        </div>
+        <Badge variant={bot.enabled ? "secondary" : "outline"}>{bot.enabled ? "启用" : "停用"}</Badge>
       </div>
+      <div className="mt-2 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
+        <span>审核群：{bot.reviewGroupId ?? "未配置"}</span>
+        <span>最近连接：{formatDateTime(bot.lastSeenAt)}</span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {bot.publishTargets.length > 0 ? (
+          bot.publishTargets.map((target) => (
+            <Badge key={target.id} variant={target.enabled ? "outline" : "secondary"} className="gap-1">
+              {target.displayName}
+              {target.required ? " · 必发" : ""}
+              {!target.enabled ? " · 停用" : ""}
+            </Badge>
+          ))
+        ) : (
+          <span className="text-xs font-bold text-slate-400">没有发布目标</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GlobalUsersTable({
+  users,
+  loading,
+  pagination,
+  onPageChange,
+}: {
+  users: SystemUser[];
+  loading: boolean;
+  pagination: Pagination;
+  onPageChange: (page: number) => void;
+}) {
+  if (loading && users.length === 0) {
+    return <InlineLoading title="正在加载全局用户..." />;
+  }
+
+  return (
+    <div>
+      <div className="overflow-hidden rounded-md border border-slate-200">
+        {users.map((user) => (
+          <div key={user.id} className="grid gap-3 border-b border-slate-100 bg-white p-3 last:border-b-0 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(150px,0.6fr)]">
+            <div className="flex min-w-0 items-center gap-3">
+              <img className="size-10 rounded-full border border-slate-200 bg-slate-50" src={`https://q1.qlogo.cn/g?b=qq&nk=${user.qqUin}&s=100`} alt="" loading="lazy" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-950">{user.displayName ?? "未设置昵称"}</p>
+                <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {user.qqUin}</p>
+              </div>
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap gap-1.5">
+                {user.systemRole === "system_operator" ? <Badge variant="secondary">系统运维</Badge> : null}
+                {user.isTestAccount ? <Badge variant="outline">测试账号</Badge> : null}
+                {user.memberships.length === 0 ? <Badge variant="outline">未加入租户</Badge> : null}
+                {user.memberships.slice(0, 4).map((membership) => (
+                  <Badge key={membership.id} variant="outline">
+                    {membership.tenant.name} · {roleLabels[membership.role]}
+                  </Badge>
+                ))}
+                {user.memberships.length > 4 ? <Badge variant="outline">+{user.memberships.length - 4}</Badge> : null}
+              </div>
+            </div>
+            <div className="text-xs text-slate-500">
+              <p>创建：{formatDateTime(user.createdAt)}</p>
+              <p className="mt-1">加入：{user.memberships.length} 个校园墙</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {users.length === 0 ? <p className="px-3 py-8 text-center text-sm font-bold text-slate-500">没有用户。</p> : null}
+      <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
+    </div>
+  );
+}
+
+function AuditLogTable({
+  logs,
+  loading,
+  pagination,
+  onPageChange,
+}: {
+  logs: AuditLogItem[];
+  loading: boolean;
+  pagination: Pagination;
+  onPageChange: (page: number) => void;
+}) {
+  if (loading && logs.length === 0) {
+    return <InlineLoading title="正在加载审计日志..." />;
+  }
+
+  return (
+    <div>
+      <div className="overflow-hidden rounded-md border border-slate-200">
+        {logs.map((log) => (
+          <div key={log.id} className="grid gap-3 border-b border-slate-100 bg-white p-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(160px,0.7fr)]">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-950">{log.action}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                {log.targetType}
+                {log.targetId ? ` · ${log.targetId}` : ""}
+              </p>
+            </div>
+            <div className="min-w-0 text-xs text-slate-500">
+              <p>
+                租户：<span className="font-semibold text-slate-700">{log.tenant?.name ?? "全局"}</span>
+              </p>
+              <p className="mt-1">
+                操作人：<span className="font-semibold text-slate-700">{log.actor?.displayName ?? log.actor?.qqUin ?? "系统"}</span>
+              </p>
+              <p className="mt-1 truncate">详情：{formatDetail(log.detail)}</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <ClockIcon className="size-4" />
+              {formatDateTime(log.createdAt)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {logs.length === 0 ? <p className="px-3 py-8 text-center text-sm font-bold text-slate-500">没有审计日志。</p> : null}
+      <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
+    </div>
+  );
+}
+
+function InlineLoading({ title }: { title: string }) {
+  return (
+    <div className="flex min-h-32 items-center justify-center gap-3 text-sm font-bold text-slate-500">
+      <span className="size-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" />
+      {title}
     </div>
   );
 }
@@ -395,4 +613,31 @@ function MetricCard({ title, value, icon: Icon, accent }: { title: string; value
       <p className="mt-1 text-xl font-semibold">{value}</p>
     </div>
   );
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "暂无";
+  }
+  return new Date(value).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDetail(detail: unknown) {
+  if (!detail) {
+    return "无";
+  }
+  if (typeof detail === "string") {
+    return detail;
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return "无法显示";
+  }
 }
