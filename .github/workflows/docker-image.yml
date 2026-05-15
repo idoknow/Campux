@@ -171,4 +171,4 @@ jobs:
         run: |
           bunx wrangler pages deploy docs/.vitepress/dist \
             --project-name campux \
-            --branch deploy/prod
+            --branch main
