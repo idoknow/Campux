@@ -1,3 +1,5 @@
+import { forwardRef } from "react";
+import type { ComponentPropsWithoutRef } from "react";
 import { CheckIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,15 +24,18 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer";
 
-function RuleButton() {
+const ruleButtonClassName =
+  "mt-2 block w-fit rounded-md border px-3 py-2 text-left text-sm font-medium product-accent-amber hover:bg-amber-100/60";
+
+const RuleButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(function RuleButton({ className = "", ...props }, ref) {
   return (
-    <button className="mt-2 block w-fit rounded-md border px-3 py-2 text-left text-sm font-medium product-accent-amber hover:bg-amber-100/60">
+    <button ref={ref} type="button" className={`${ruleButtonClassName} ${className}`} {...props}>
       <span>
         请务必遵守 <strong className="inline font-bold">投稿规则</strong>
       </span>
     </button>
   );
-}
+});
 
 function RuleList({ rules }: { rules: string[] }) {
   return (
