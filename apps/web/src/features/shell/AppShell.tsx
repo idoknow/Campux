@@ -3,6 +3,7 @@ import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
 import { PostsPage } from "@/features/posts/PostsPage";
+import { StatsPage } from "@/features/stats/StatsPage";
 import { ServicesPage } from "@/features/services/ServicesPage";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { DesktopSidebar } from "./DesktopSidebar";
@@ -115,6 +116,10 @@ export function AppShell({
 
             <TabsContent value="services" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <ServicesPage metadata={metadata} loading={dataLoading} />
+            </TabsContent>
+
+            <TabsContent value="stats" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+              <StatsPage loading={dataLoading} />
             </TabsContent>
 
             <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
