@@ -6,7 +6,7 @@ import { BotIcon, CopyIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, Sh
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminTab, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,12 +109,14 @@ export function AdminPage({
   activeTab,
   selectedTenant,
   metadata,
+  detailTarget,
   onTabChange,
   onSaved,
 }: {
   activeTab: AdminTab;
   selectedTenant: TenantSummary;
   metadata: TenantMetadata;
+  detailTarget?: { userId: string; nonce: number } | null;
   onTabChange: (tab: AdminTab) => void;
   onSaved: () => Promise<void>;
 }) {
@@ -154,6 +156,9 @@ export function AdminPage({
   }));
   const [busy, setBusy] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [memberDetail, setMemberDetail] = useState<AdminMemberDetail | null>(null);
+  const [memberDetailOpen, setMemberDetailOpen] = useState(false);
+  const [memberDetailLoading, setMemberDetailLoading] = useState(false);
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
@@ -186,6 +191,14 @@ export function AdminPage({
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [activeTab, selectedTenant.id]);
+
+  useEffect(() => {
+    if (!detailTarget?.userId) {
+      return;
+    }
+    onTabChange("users");
+    void openMemberDetail(detailTarget.userId);
+  }, [detailTarget?.nonce, detailTarget?.userId]);
 
   useEffect(() => {
     if (!qzoneLogin.open || qzoneLogin.status !== "pending" || !qzoneLogin.botId || !qzoneLogin.loginId) {
@@ -662,6 +675,20 @@ export function AdminPage({
     }
   }
 
+  async function openMemberDetail(userId: string) {
+    setMemberDetailOpen(true);
+    setMemberDetailLoading(true);
+    try {
+      const data = await api<AdminMemberDetail>(`/api/admin/members/users/${userId}`);
+      setMemberDetail(data);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "无法读取用户详情");
+      setMemberDetailOpen(false);
+    } finally {
+      setMemberDetailLoading(false);
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="min-h-0 flex-1">
@@ -711,6 +738,7 @@ export function AdminPage({
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
                 onRoleChange={(id, role) => void updateMemberRole(id, role)}
+                onViewMember={(member) => void openMemberDetail(member.user.id)}
                 onPrepareBan={(member) => {
                   setBanForm((current) => ({ ...current, qqUin: member.user.qqUin }));
                   onTabChange("bans");
@@ -794,6 +822,17 @@ export function AdminPage({
               />
             </TabsContent>
       </Tabs>
+      <MemberDetailDialog
+        open={memberDetailOpen}
+        loading={memberDetailLoading}
+        detail={memberDetail}
+        onOpenChange={(open) => {
+          setMemberDetailOpen(open);
+          if (!open) {
+            setMemberDetail(null);
+          }
+        }}
+      />
       <Dialog open={qzoneLogin.open} onOpenChange={(open) => setQzoneLogin((current) => ({ ...current, open }))}>
         <DialogContent>
           <DialogHeader>
@@ -861,6 +900,7 @@ function UsersPanel({
   onFormChange,
   onAddMember,
   onRoleChange,
+  onViewMember,
   onPrepareBan,
 }: {
   members: AdminMember[];
@@ -877,6 +917,7 @@ function UsersPanel({
   onFormChange: (form: MemberForm) => void;
   onAddMember: () => void;
   onRoleChange: (id: string, role: TenantRole) => void;
+  onViewMember: (member: AdminMember) => void;
   onPrepareBan: (member: AdminMember) => void;
 }) {
   return (
@@ -926,7 +967,19 @@ function UsersPanel({
           {loading ? <LoadingBlock title="正在加载用户列表..." /> : null}
           {!loading && members.length === 0 ? <EmptyCard title="暂无用户" /> : null}
           {!loading && members.map((member) => (
-            <div key={member.id} className="product-row-card flex flex-wrap items-center justify-between gap-2 p-3">
+            <div
+              key={member.id}
+              role="button"
+              tabIndex={0}
+              className="product-row-card flex w-full flex-wrap items-center justify-between gap-2 p-3 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+              onClick={() => onViewMember(member)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onViewMember(member);
+                }
+              }}
+            >
               <div className="flex min-w-0 items-center gap-3">
                 <QqAvatar qqUin={member.user.qqUin} name={member.user.displayName ?? member.user.qqUin} />
                 <div className="min-w-0">
@@ -935,17 +988,22 @@ function UsersPanel({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Select value={member.role} onValueChange={(role) => onRoleChange(member.id, role as TenantRole)}>
-                  <SelectTrigger className="bg-white font-bold">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
-                    <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
-                    <SelectItem value="admin">{roleLabels.admin}</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" onClick={() => onPrepareBan(member)}>
+                <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                  <Select value={member.role} onValueChange={(role) => onRoleChange(member.id, role as TenantRole)}>
+                    <SelectTrigger className="bg-white font-bold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                      <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
+                      <SelectItem value="admin">{roleLabels.admin}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button variant="outline" size="sm" onClick={(event) => {
+                  event.stopPropagation();
+                  onPrepareBan(member);
+                }}>
                   封禁
                 </Button>
               </div>
@@ -955,6 +1013,121 @@ function UsersPanel({
         <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
       </CardContent>
     </Card>
+  );
+}
+
+function MemberDetailDialog({
+  open,
+  loading,
+  detail,
+  onOpenChange,
+}: {
+  open: boolean;
+  loading: boolean;
+  detail: AdminMemberDetail | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const user = detail?.member.user;
+  const title = user ? `${user.displayName ?? user.qqUin} 的用户详情` : "用户详情";
+  const postStatusEntries = Object.entries(detail?.stats.postsByStatus ?? {}).filter(([, count]) => count > 0);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>仅展示当前校园墙内的身份、投稿和封禁记录。</DialogDescription>
+        </DialogHeader>
+
+        {loading ? <LoadingBlock title="正在加载用户详情..." /> : null}
+
+        {!loading && detail ? (
+          <div className="grid gap-4">
+            <div className="product-row-card flex flex-wrap items-center justify-between gap-3 p-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <QqAvatar qqUin={detail.member.user.qqUin} name={detail.member.user.displayName ?? detail.member.user.qqUin} />
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-slate-950">{detail.member.user.displayName ?? detail.member.user.qqUin}</p>
+                  <p className="text-xs font-semibold text-slate-500">QQ {detail.member.user.qqUin} · 用户 ID {detail.member.user.id}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">{roleLabels[detail.member.role]}</Badge>
+                {detail.member.user.systemRole ? <Badge variant="outline">平台身份：{detail.member.user.systemRole}</Badge> : null}
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <MiniStat label="投稿总数" value={detail.stats.postsTotal} />
+              <MiniStat label="生效封禁" value={detail.stats.activeBanCount} />
+              <MiniStat label="加入时间" value={formatDateTime(detail.member.createdAt)} />
+            </div>
+
+            <section className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-sm font-bold text-slate-900">投稿状态</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {postStatusEntries.length === 0 ? <Badge variant="outline">暂无投稿</Badge> : null}
+                {postStatusEntries.map(([status, count]) => (
+                  <Badge key={status} variant="outline">
+                    {statusLabels[status] ?? status} · {count}
+                  </Badge>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-sm font-bold text-slate-900">最近投稿</p>
+              <div className="mt-2 grid gap-2">
+                {detail.posts.length === 0 ? <EmptyCard title="暂无投稿记录" /> : null}
+                {detail.posts.map((post) => (
+                  <div key={post.id} className="rounded-md border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">#{post.displayId}</Badge>
+                        <Badge variant="secondary">{statusLabels[post.status] ?? post.status}</Badge>
+                        {post.anonymous ? <Badge variant="outline">匿名</Badge> : null}
+                        {post.imageCount > 0 ? <Badge variant="outline">{post.imageCount} 张图</Badge> : null}
+                      </div>
+                      <span className="text-xs font-bold text-slate-400">{formatDateTime(post.createdAt)}</span>
+                    </div>
+                    <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm font-semibold text-slate-700">{post.text}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-sm font-bold text-slate-900">封禁记录</p>
+              <div className="mt-2 grid gap-2">
+                {detail.bans.length === 0 ? <EmptyCard title="暂无封禁记录" /> : null}
+                {detail.bans.map((ban) => (
+                  <div key={ban.id} className="rounded-md border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Badge variant={ban.active ? "destructive" : "outline"}>{ban.active ? "生效中" : "已结束"}</Badge>
+                      <span className="text-xs font-bold text-slate-400">{formatDateTime(ban.createdAt)}</span>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-700">{ban.comment}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      {formatDateTime(ban.startsAt)} 至 {formatDateTime(ban.endsAt)}
+                      {ban.operator ? ` · 操作人 ${ban.operator.displayName ?? ban.operator.qqUin}` : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-bold text-slate-500">{label}</p>
+      <p className="mt-1 text-lg font-black text-slate-950">{value}</p>
+    </div>
   );
 }
 

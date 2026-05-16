@@ -238,6 +238,24 @@ export function registerStatsRoutes(app: FastifyInstance) {
       roleCounts[group.role] = group._count._all;
     }
 
+    const topAuthorIds = [...new Set(rangePosts.map((post) => post.authorId))];
+    const topAuthorUsers = await prisma.user.findMany({
+      where: {
+        id: { in: topAuthorIds },
+        memberships: {
+          some: {
+            tenantId,
+          },
+        },
+      },
+      select: {
+        id: true,
+        qqUin: true,
+        displayName: true,
+      },
+    });
+    const topAuthorUserById = new Map(topAuthorUsers.map((user) => [user.id, user]));
+
     return {
       generatedAt: now.toISOString(),
       range: {
@@ -264,7 +282,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
         daily: buildDailySeries(rangePosts, sinceRange, now),
         userDaily: buildUserDailySeries(memberships, sinceRange, now),
         hourly: buildHourlySeries(rangePosts),
-        topAuthors30d: buildTopAuthors(rangePosts),
+        topAuthors30d: buildTopAuthors(rangePosts, topAuthorUserById),
       },
       review: {
         reviewed30d: reviewedLogs.length,
@@ -393,13 +411,29 @@ function buildHourlySeries(posts: Array<{ createdAt: Date }>) {
   return hours;
 }
 
-function buildTopAuthors(posts: Array<{ authorId: string }>) {
+function buildTopAuthors(
+  posts: Array<{ authorId: string }>,
+  usersById: Map<string, { id: string; qqUin: bigint; displayName: string | null }>,
+) {
   const counts = new Map<string, number>();
   for (const post of posts) {
     counts.set(post.authorId, (counts.get(post.authorId) ?? 0) + 1);
   }
   return [...counts.entries()]
-    .map(([authorId, count]) => ({ authorId, count }))
+    .map(([authorId, count]) => {
+      const user = usersById.get(authorId);
+      return {
+        authorId,
+        count,
+        user: user
+          ? {
+              id: user.id,
+              qqUin: user.qqUin.toString(),
+              displayName: user.displayName,
+            }
+          : null,
+      };
+    })
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 }

@@ -19,6 +19,10 @@ const memberParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+const memberUserParamsSchema = z.object({
+  userId: z.string().min(1),
+});
+
 const memberPatchSchema = z.object({
   role: roleSchema,
 });
@@ -165,6 +169,100 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       members: members.map((member) => toMember(member)),
       pagination: toPagination(query.page, query.limit, total),
       tenantMemberTotal,
+    };
+  });
+
+  app.get("/api/admin/members/users/:userId", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = memberUserParamsSchema.parse(request.params);
+
+    const membership = await prisma.tenantMembership.findUnique({
+      where: {
+        tenantId_userId: {
+          tenantId: context.selectedTenant.id,
+          userId: params.userId,
+        },
+      },
+      include: {
+        user: true,
+      },
+    });
+    if (!membership) {
+      return reply.code(404).send({ message: "该用户不属于当前校园墙" });
+    }
+
+    const now = new Date();
+    const [postStatusGroups, postsTotal, recentPosts, banRecords] = await Promise.all([
+      prisma.post.groupBy({
+        by: ["status"],
+        where: {
+          tenantId: context.selectedTenant.id,
+          authorId: params.userId,
+        },
+        _count: { _all: true },
+      }),
+      prisma.post.count({
+        where: {
+          tenantId: context.selectedTenant.id,
+          authorId: params.userId,
+        },
+      }),
+      prisma.post.findMany({
+        where: {
+          tenantId: context.selectedTenant.id,
+          authorId: params.userId,
+        },
+        select: {
+          id: true,
+          displayId: true,
+          text: true,
+          anonymous: true,
+          status: true,
+          images: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      prisma.banRecord.findMany({
+        where: {
+          tenantId: context.selectedTenant.id,
+          userId: params.userId,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      }),
+    ]);
+
+    const postsByStatus = Object.fromEntries(postStatusGroups.map((group) => [group.status, group._count._all]));
+
+    return {
+      member: toMember(membership),
+      stats: {
+        postsTotal,
+        postsByStatus,
+        activeBanCount: banRecords.filter((ban) => ban.endsAt > now).length,
+      },
+      posts: recentPosts.map((post) => ({
+        id: post.id,
+        displayId: post.displayId,
+        text: post.text,
+        anonymous: post.anonymous,
+        status: post.status,
+        imageCount: getJsonArrayLength(post.images),
+        createdAt: post.createdAt.toISOString(),
+        updatedAt: post.updatedAt.toISOString(),
+      })),
+      bans: (await toBanRecords(banRecords)).map((ban) => ({
+        id: ban.id,
+        comment: ban.comment,
+        startsAt: ban.startsAt,
+        endsAt: ban.endsAt,
+        createdAt: ban.createdAt,
+        active: ban.active,
+        operator: ban.operator,
+      })),
     };
   });
 
@@ -978,6 +1076,10 @@ function toPagination(page: number, limit: number, total: number) {
     total,
     pageCount: Math.max(1, Math.ceil(total / limit)),
   };
+}
+
+function getJsonArrayLength(value: Prisma.JsonValue) {
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function toPublishTarget(target: {
