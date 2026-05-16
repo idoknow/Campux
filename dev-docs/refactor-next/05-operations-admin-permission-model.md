@@ -16,6 +16,8 @@
 | `TenantMembership.reviewer` 审核员 | 单个校园墙 | 审核稿件和查看统计 |
 | `TenantMembership.submitter` 用户 | 单个校园墙 | 投稿、查看自己的稿件、取消待审核投稿 |
 
+`system_operator` 是最高平台身份，覆盖 `operations_admin` 的平台运营能力。系统运维面板给账户添加平台身份时，不能用 `operations_admin` 覆盖或降级已有的 `system_operator`。
+
 ## 入口规则
 
 登录后：
