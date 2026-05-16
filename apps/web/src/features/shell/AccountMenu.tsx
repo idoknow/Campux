@@ -33,6 +33,7 @@ export function AccountMenu({
   const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${me.user.qqUin}&s=100`;
   const switchableMemberships = me.memberships.filter((membership) => membership.tenant.status === "active" || membership.tenant.id === selectedTenant.id);
   const canSwitchTenant = !me.hostLocked && switchableMemberships.length > 1;
+  const opsMenuLabel = me.user.systemRole === "operations_admin" ? "运营管理" : "系统运维";
 
   return (
     <DropdownMenu>
@@ -97,7 +98,7 @@ export function AccountMenu({
         ) : null}
         {onOpenOps ? (
           <>
-            <DropdownMenuItem onSelect={onOpenOps}>系统运维</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onOpenOps}>{opsMenuLabel}</DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
         ) : null}

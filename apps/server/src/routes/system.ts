@@ -1,7 +1,7 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { Prisma } from "@campux/db";
 import { z } from "zod";
-import { requireSystemOperator } from "../lib/auth";
+import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { normalizeTenantHost } from "../lib/tenant-host";
@@ -15,11 +15,11 @@ const tenantPatchSchema = z.object({
 });
 
 const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
-const systemAssignableRoleSchema = z.enum(["system_operator", "submitter", "reviewer", "admin"]);
+const platformAssignableRoleSchema = z.enum(["operations_admin", "system_operator", "submitter", "reviewer", "admin"]);
 
 const userMembershipCreateSchema = z.object({
   tenantId: z.string().min(1).optional(),
-  role: systemAssignableRoleSchema,
+  role: platformAssignableRoleSchema,
 });
 
 const tenantCreateSchema = z.object({
@@ -36,7 +36,7 @@ const paginationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
-const systemUserRoleFilterSchema = systemAssignableRoleSchema;
+const systemUserRoleFilterSchema = platformAssignableRoleSchema;
 
 const systemUsersQuerySchema = paginationQuerySchema.extend({
   q: z.string().max(80).optional(),
@@ -114,8 +114,34 @@ function toSystemTenant(tenant: SystemTenantRecord) {
   };
 }
 
-async function listSystemTenants() {
+type PlatformContext = Awaited<ReturnType<typeof requirePlatformAdmin>>;
+
+function isSystemOperator(context: PlatformContext) {
+  return context.user.systemRole === "system_operator";
+}
+
+function manageableTenantIds(context: PlatformContext) {
+  if (isSystemOperator(context)) {
+    return null;
+  }
+
+  return context.memberships.filter((membership) => membership.role === "admin").map((membership) => membership.tenantId);
+}
+
+function assertCanManageTenant(context: PlatformContext, tenantId: string, reply: FastifyReply) {
+  const tenantIds = manageableTenantIds(context);
+  if (tenantIds === null || tenantIds.includes(tenantId)) {
+    return;
+  }
+
+  reply.code(403);
+  throw new Error("只能管理自己所属的校园墙");
+}
+
+async function listSystemTenants(context: PlatformContext) {
+  const tenantIds = manageableTenantIds(context);
   const tenants = await prisma.tenant.findMany({
+    where: tenantIds === null ? {} : { id: { in: tenantIds } },
     include: {
       botAccounts: {
         include: {
@@ -145,15 +171,15 @@ async function listSystemTenants() {
 
 export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) {
   app.get("/api/system/tenants", async (request, reply) => {
-    await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
 
     return {
-      tenants: await listSystemTenants(),
+      tenants: await listSystemTenants(context),
     };
   });
 
   app.post("/api/system/tenants", async (request, reply) => {
-    const context = await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
     const body = tenantCreateSchema.parse(request.body);
     const normalizedHost = body.host === undefined ? null : normalizeTenantHost(body.host);
     if (normalizedHost) {
@@ -198,19 +224,25 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         },
       });
 
-      const systemOperators = await tx.user.findMany({
-        where: {
-          systemRole: "system_operator",
-        },
-        select: {
-          id: true,
-        },
-      });
-      if (systemOperators.length > 0) {
+      const adminUserIds = isSystemOperator(context)
+        ? await tx.user
+            .findMany({
+              where: {
+                systemRole: "system_operator",
+              },
+              select: {
+                id: true,
+              },
+            })
+            .then((users) => users.map((user) => user.id))
+        : [context.user.id];
+
+      const uniqueAdminUserIds = [...new Set([...adminUserIds, context.user.id])];
+      if (uniqueAdminUserIds.length > 0) {
         await tx.tenantMembership.createMany({
-          data: systemOperators.map((user) => ({
+          data: uniqueAdminUserIds.map((userId) => ({
             tenantId: created.id,
-            userId: user.id,
+            userId,
             role: "admin",
           })),
           skipDuplicates: true,
@@ -252,13 +284,14 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     });
 
     return {
-      tenants: await listSystemTenants(),
+      tenants: await listSystemTenants(context),
     };
   });
 
   app.patch("/api/system/tenants/:tenantId", async (request, reply) => {
-    const context = await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
     const params = z.object({ tenantId: z.string().min(1) }).parse(request.params);
+    assertCanManageTenant(context, params.tenantId, reply);
     const body = tenantPatchSchema.parse(request.body);
     const normalizedHost = body.host === undefined ? undefined : normalizeTenantHost(body.host);
     if (normalizedHost) {
@@ -300,49 +333,66 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     });
 
     return {
-      tenants: await listSystemTenants(),
+      tenants: await listSystemTenants(context),
     };
   });
 
   app.get("/api/system/users", async (request, reply) => {
-    await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
     const query = systemUsersQuerySchema.parse(request.query);
     const roleFilters = parseSystemUserRoleFilters(query.roles);
-    const tenantRoleFilters = roleFilters.filter((role): role is z.infer<typeof tenantRoleSchema> => role !== "system_operator");
-    const includeSystemOperator = roleFilters.includes("system_operator");
+    const tenantRoleFilters = roleFilters.filter((role): role is z.infer<typeof tenantRoleSchema> => tenantRoleSchema.safeParse(role).success);
+    const includeSystemOperator = isSystemOperator(context) && roleFilters.includes("system_operator");
+    const includeOperationsAdmin = isSystemOperator(context) && roleFilters.includes("operations_admin");
     const keyword = query.q?.trim();
     const queryQqUin = keyword && /^\d+$/.test(keyword) ? BigInt(keyword) : null;
     const filters: Prisma.UserWhereInput[] = [];
-    if (query.tenantId) {
-      if (includeSystemOperator || tenantRoleFilters.length > 0) {
-        filters.push({
-          OR: [
-            ...(includeSystemOperator ? [{ systemRole: "system_operator" as const }] : []),
-            ...(tenantRoleFilters.length > 0
-              ? [
-                  {
-                    memberships: {
-                      some: {
-                        tenantId: query.tenantId,
-                        role: { in: tenantRoleFilters },
-                      },
-                    },
-                  },
-                ]
-              : []),
-          ],
-        });
-      } else {
-        filters.push({
+    const tenantIds = manageableTenantIds(context);
+    if (tenantIds !== null && tenantIds.length === 0) {
+      return {
+        total: 0,
+        pagination: toPagination(query.page, query.limit, 0),
+        users: [],
+      };
+    }
+    if (query.tenantId && tenantIds !== null && !tenantIds.includes(query.tenantId)) {
+      return reply.code(403).send({ message: "只能查看自己所属校园墙的用户" });
+    }
+    const scopedTenantIds = query.tenantId ? [query.tenantId] : tenantIds;
+
+    if (scopedTenantIds !== null && roleFilters.length === 0) {
+      filters.push({
+        memberships: {
+          some: {
+            tenantId: { in: scopedTenantIds },
+          },
+        },
+      });
+    }
+
+    if (roleFilters.length > 0) {
+      const roleFilterTenantIds = query.tenantId ? [query.tenantId] : scopedTenantIds;
+      const roleConditions: Prisma.UserWhereInput[] = [
+        ...(includeSystemOperator ? [{ systemRole: "system_operator" as const }] : []),
+        ...(includeOperationsAdmin ? [{ systemRole: "operations_admin" as const }] : []),
+      ];
+
+      if (tenantRoleFilters.length > 0) {
+        roleConditions.push({
           memberships: {
             some: {
-              tenantId: query.tenantId,
+              ...(roleFilterTenantIds === null ? {} : { tenantId: { in: roleFilterTenantIds } }),
+              role: { in: tenantRoleFilters },
             },
           },
         });
       }
-    } else if (includeSystemOperator) {
-      filters.push({ systemRole: "system_operator" });
+
+      if (roleConditions.length > 0) {
+        filters.push({ OR: roleConditions });
+      } else {
+        filters.push({ id: "__no_visible_role_match__" });
+      }
     }
     if (keyword) {
       filters.push({
@@ -387,25 +437,27 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         id: user.id,
         qqUin: user.qqUin.toString(),
         displayName: user.displayName,
-        systemRole: user.systemRole,
         isTestAccount: user.isTestAccount,
         createdAt: user.createdAt.toISOString(),
-        memberships: user.memberships.map((membership) => ({
-          id: membership.id,
-          role: membership.role,
-          tenant: {
-            id: membership.tenant.id,
-            name: membership.tenant.name,
-            slug: membership.tenant.slug,
-            status: membership.tenant.status,
-          },
-        })),
+        systemRole: isSystemOperator(context) ? user.systemRole : null,
+        memberships: user.memberships
+          .filter((membership) => tenantIds === null || tenantIds.includes(membership.tenantId))
+          .map((membership) => ({
+            id: membership.id,
+            role: membership.role,
+            tenant: {
+              id: membership.tenant.id,
+              name: membership.tenant.name,
+              slug: membership.tenant.slug,
+              status: membership.tenant.status,
+            },
+          })),
       })),
     };
   });
 
   app.post("/api/system/users/:userId/memberships", async (request, reply) => {
-    const context = await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
     const params = z.object({ userId: z.string().min(1) }).parse(request.params);
     const body = userMembershipCreateSchema.parse(request.body);
 
@@ -414,10 +466,13 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       return reply.code(404).send({ message: "用户不存在" });
     }
 
-    if (body.role === "system_operator") {
+    if (body.role === "system_operator" || body.role === "operations_admin") {
+      if (!isSystemOperator(context)) {
+        return reply.code(403).send({ message: "只有系统运维可以授予平台级身份" });
+      }
       await prisma.user.update({
         where: { id: user.id },
-        data: { systemRole: "system_operator" },
+        data: { systemRole: body.role },
       });
 
       await writeAuditLog({
@@ -428,19 +483,20 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
         targetId: user.id,
         detail: {
           qqUin: user.qqUin.toString(),
-          systemRole: "system_operator",
+          systemRole: body.role,
         },
       });
 
       return {
         ok: true,
-        systemRole: "system_operator",
+        systemRole: body.role,
       };
     }
 
     if (!body.tenantId) {
       return reply.code(400).send({ message: "添加租户身份时必须选择校园墙" });
     }
+    assertCanManageTenant(context, body.tenantId, reply);
 
     const tenant = await prisma.tenant.findUnique({ where: { id: body.tenantId } });
     if (!tenant) {
@@ -487,9 +543,54 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     };
   });
 
+  app.delete("/api/system/users/:userId/memberships/:membershipId", async (request, reply) => {
+    const context = await requirePlatformAdmin(request, reply);
+    const params = z.object({ userId: z.string().min(1), membershipId: z.string().min(1) }).parse(request.params);
+    const membership = await prisma.tenantMembership.findFirst({
+      where: {
+        id: params.membershipId,
+        userId: params.userId,
+      },
+      include: {
+        tenant: true,
+        user: true,
+      },
+    });
+    if (!membership) {
+      return reply.code(404).send({ message: "租户身份不存在" });
+    }
+    assertCanManageTenant(context, membership.tenantId, reply);
+
+    await prisma.tenantMembership.delete({
+      where: {
+        id: membership.id,
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: membership.tenantId,
+      actorId: context.user.id,
+      action: "system.member.revoke",
+      targetType: "membership",
+      targetId: membership.id,
+      detail: {
+        qqUin: membership.user.qqUin.toString(),
+        tenantId: membership.tenantId,
+        tenantName: membership.tenant.name,
+        role: membership.role,
+      },
+    });
+
+    return {
+      ok: true,
+    };
+  });
+
   app.get("/api/system/bots", async (request, reply) => {
-    await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
+    const tenantIds = manageableTenantIds(context);
     const bots = await prisma.botAccount.findMany({
+      where: tenantIds === null ? {} : { tenantId: { in: tenantIds } },
       include: {
         tenant: true,
         publishTargets: true,
@@ -525,16 +626,19 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
   });
 
   app.get("/api/system/queue", async (request, reply) => {
-    await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
+    const tenantIds = manageableTenantIds(context);
+    const attemptWhere: Prisma.PublishAttemptWhereInput = tenantIds === null ? {} : { tenantId: { in: tenantIds } };
     const [queued, running, failed, succeeded] = await Promise.all([
-      prisma.publishAttempt.count({ where: { status: "queued" } }),
-      prisma.publishAttempt.count({ where: { status: "running" } }),
-      prisma.publishAttempt.count({ where: { status: "failed" } }),
-      prisma.publishAttempt.count({ where: { status: "succeeded" } }),
+      prisma.publishAttempt.count({ where: { ...attemptWhere, status: "queued" } }),
+      prisma.publishAttempt.count({ where: { ...attemptWhere, status: "running" } }),
+      prisma.publishAttempt.count({ where: { ...attemptWhere, status: "failed" } }),
+      prisma.publishAttempt.count({ where: { ...attemptWhere, status: "succeeded" } }),
     ]);
+    const runtime = queue.snapshot();
 
     return {
-      runtime: queue.snapshot(),
+      runtime: tenantIds === null ? runtime : { ...runtime, queued, processing: running, failed, lastError: null },
       publishAttempts: {
         queued,
         running,
@@ -545,11 +649,14 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
   });
 
   app.get("/api/system/audit-logs", async (request, reply) => {
-    await requireSystemOperator(request, reply);
+    const context = await requirePlatformAdmin(request, reply);
     const query = paginationQuerySchema.parse(request.query);
+    const tenantIds = manageableTenantIds(context);
+    const where: Prisma.AuditLogWhereInput = tenantIds === null ? {} : { tenantId: { in: tenantIds } };
     const [total, logs] = await Promise.all([
-      prisma.auditLog.count(),
+      prisma.auditLog.count({ where }),
       prisma.auditLog.findMany({
+        where,
         include: {
           tenant: true,
           actor: true,

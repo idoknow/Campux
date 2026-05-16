@@ -4,6 +4,7 @@ export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
 export type PostsTab = "mine" | "review";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
+export type SystemRole = "operations_admin" | "system_operator";
 
 export type OAuthServerSettings = {
   enabled: boolean;
@@ -82,7 +83,7 @@ export type MeResponse =
         id: string;
         qqUin: string;
         displayName: string | null;
-        systemRole: "system_operator" | null;
+        systemRole: SystemRole | null;
         passwordChangeRequired: boolean;
       };
       memberships: Membership[];
@@ -428,7 +429,7 @@ export type SystemUser = {
   id: string;
   qqUin: string;
   displayName: string | null;
-  systemRole: string | null;
+  systemRole: SystemRole | null;
   isTestAccount: boolean;
   createdAt: string;
   memberships: Array<{

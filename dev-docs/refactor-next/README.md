@@ -8,6 +8,7 @@
 2. [目标单体与多租户架构](./02-monolith-multitenant-target.md)
 3. [迁移路线与风险清单](./03-migration-plan.md)
 4. [CampuxNext 推进 Phase 文档](./04-implementation-phases.md)
+5. [运营管理员权限模型](./05-operations-admin-permission-model.md)
 
 本次分析覆盖当前目录下的三个既有项目：
 

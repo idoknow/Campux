@@ -27,6 +27,13 @@ export function TenantSelectionScreen({
     }
   }
 
+  const opsTitle = me.user.systemRole === "system_operator" ? "系统运维" : "运营管理";
+  const opsDescription =
+    me.user.systemRole === "system_operator"
+      ? "不进入具体校园墙，直接管理所有租户信息。"
+      : "创建和管理你负责的校园墙，只展示你所属墙的运营信息。";
+  const opsButton = me.user.systemRole === "system_operator" ? "进入运维面板" : "进入运营面板";
+
   return (
     <main className="min-h-dvh bg-background">
       <section className="mx-auto w-full max-w-[560px] px-4 pt-3 md:px-8 md:pt-12">
@@ -69,12 +76,12 @@ export function TenantSelectionScreen({
           ))}
         </div>
 
-        {me.user.systemRole === "system_operator" && onOpenOps ? (
+        {onOpenOps ? (
           <div className="product-surface mt-5 p-4">
-            <p className="font-semibold">系统运维</p>
-            <p className="mt-1 text-sm text-slate-500">不进入具体校园墙，直接管理所有租户信息。</p>
+            <p className="font-semibold">{opsTitle}</p>
+            <p className="mt-1 text-sm text-slate-500">{opsDescription}</p>
             <Button className="mt-3 px-5 font-medium" onClick={onOpenOps}>
-              进入运维面板
+              {opsButton}
             </Button>
           </div>
         ) : null}

@@ -17,7 +17,7 @@
   - 一个全局 `User` 账户。
   - 通过 `TenantMembership` 授权进入一个或多个校园墙。
   - 租户内角色：`submitter`、`reviewer`、`admin`。
-  - 全局系统角色：`system_operator`。
+  - 平台/全局系统角色：`operations_admin`、`system_operator`。
 - Phase 1-3 最小闭环已经接入：
   - 真实账号密码登录、session cookie、退出登录。
   - `GET /api/me` 当前用户和 membership。
@@ -36,6 +36,7 @@
   - 系统运维面板已独立于普通校园墙工作台。
   - `system_operator` 可以查看所有租户生命周期状态、全局用户、Bot/发布目标、队列状态和审计日志。
   - `system_operator` 可以调整租户生命周期：运行中、暂停、归档。
+  - `operations_admin` 可以进入运营面板，创建校园墙，并且只能查看/管理自己作为租户管理员加入的校园墙、墙内用户和相关审计/队列信息。
   - 普通用户和租户内 `admin` 不能访问系统运维接口。
 
 ## 环境边界
@@ -44,7 +45,7 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 
 | 环境 | `NODE_ENV` | 账号策略 |
 | --- | --- | --- |
-| 本地开发 | `development` | 允许使用 seed 生成的测试账号登录，例如 `10000`、`20000`、`30000`、`40000`。 |
+| 本地开发 | `development` | 允许使用 seed 生成的测试账号登录，例如 `10000`、`20000`、`30000`、`40000`、`50000`。 |
 | 正式环境 | `production` | 禁止测试账号登录。所有用户必须使用真实注册账号。 |
 
 测试账号必须在数据库里标记为 `User.isTestAccount = true`。后端登录接口会以这个字段为准做强校验，非 `development` 环境即使数据库里残留测试账号，也会拒绝登录。前端只在 Vite dev 模式展示测试账号提示和默认填充，正式构建不展示测试账号入口。
@@ -67,7 +68,7 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 | Phase 5：发布队列与多墙号发布 | 已完成 | 内存队列、`PublishTarget`、`PublishAttempt`、fan-out、重试、聚合状态、重启恢复扫描、失败原因展示 | 真实平台失败分类可后续细化 |
 | Phase 6：Bot 注册、审核群与命令路由 | 已完成 | OneBot v11 反向 WS、私聊注册、私聊重置密码、审核群通知、`#通过`、`#拒绝`、租户隔离校验 | 更多群内辅助命令可后续补强 |
 | Phase 7：QZone 发布与文本转图迁移 | 已完成 | TS `renderPostCard()`、安全 XML 转义模板、QZone mock adapter、verbose 写入、发布日志、QZone cookies 协议刷新、Bot session 加密落库 | 真实 QZone 线上发布 adapter 待凭据接入 |
-| Phase 8：系统运维后台 | 已完成 | 独立入口、租户生命周期、全局用户/membership、Bot/发布目标、队列状态、审计日志 | 表单化租户开通向导可继续打磨 |
+| Phase 8：系统与运营后台 | 已完成 | 独立入口、租户生命周期、全局用户/membership、Bot/发布目标、队列状态、审计日志、运营管理员范围化管理 | 表单化租户开通向导可继续打磨 |
 | Phase 9：历史数据迁移与兼容 | 未开始 | 无 | SQLite/Mongo/S3/OAuth 迁移脚本 |
 
 ## Phase 1：真实账户与登录闭环
@@ -93,7 +94,8 @@ CampuxNext 当前用 `NODE_ENV` 明确区分开发环境和正式环境。服务
 4. 一个 membership 时直接进入该校园墙。
 5. 多个 membership 时先选择校园墙。
 6. 有 `system_operator` 时额外展示系统运维入口。
-7. 系统运维入口与普通校园墙工作台分离，不能作为某个租户里的普通 tab。
+7. 有 `operations_admin` 时额外展示运营管理入口。
+8. 系统运维/运营管理入口与普通校园墙工作台分离，不能作为某个租户里的普通 tab。
 
 建议 API：
 

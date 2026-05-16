@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { TenantRole } from "@campux/db";
+import type { SystemRole, TenantRole } from "@campux/db";
 import { prisma } from "./prisma";
 import { findTenantByRequestHost } from "./tenant-host";
 
@@ -238,6 +238,20 @@ export async function requireSystemOperator(request: FastifyRequest, reply: Fast
   if (context.user.systemRole !== "system_operator") {
     reply.code(403);
     throw new Error("没有系统运维权限");
+  }
+
+  return context;
+}
+
+export function isPlatformAdminRole(role: SystemRole | null) {
+  return role === "operations_admin" || role === "system_operator";
+}
+
+export async function requirePlatformAdmin(request: FastifyRequest, reply: FastifyReply) {
+  const context = await requireSession(request, reply);
+  if (!isPlatformAdminRole(context.user.systemRole)) {
+    reply.code(403);
+    throw new Error("没有运营管理权限");
   }
 
   return context;

@@ -21,6 +21,7 @@ enum TenantRole {
 }
 
 enum SystemRole {
+  operations_admin
   system_operator
 }
 

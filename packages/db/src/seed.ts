@@ -127,7 +127,7 @@ async function seedUser({
 }: {
   qqUin: string;
   displayName: string;
-  systemRole?: "system_operator";
+  systemRole?: "operations_admin" | "system_operator";
   memberships: Array<{ tenantId: string; role: "submitter" | "reviewer" | "admin" }>;
   isTestAccount?: boolean;
 }) {
@@ -200,6 +200,13 @@ await seedUser({
   displayName: "系统运维",
   systemRole: "system_operator",
   memberships: [{ tenantId: "tenant-canton", role: "admin" }],
+});
+
+await seedUser({
+  qqUin: "50000",
+  displayName: "运营管理员",
+  systemRole: "operations_admin",
+  memberships: [{ tenantId: "tenant-riverside", role: "admin" }],
 });
 
 console.log("Seeded CampuxNext demo tenants and accounts. Password for all accounts: campux123");
