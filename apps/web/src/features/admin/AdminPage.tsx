@@ -909,7 +909,7 @@ function UsersPanel({
           </Button>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
-          <Input className="bg-white" placeholder="输入 QQ 或昵称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
+          <Input className="bg-white" placeholder="输入用户 ID、QQ 号或名称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
           <Select value={roleFilter} onValueChange={(value) => onRoleFilterChange(value as "all" | TenantRole)}>
             <SelectTrigger className="bg-white font-bold">
               <SelectValue />
@@ -1009,7 +1009,7 @@ function BansPanel({
         </div>
 
         <div className="mt-4 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-          <Input className="bg-white" placeholder="按 QQ 或昵称筛选封禁记录" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
+          <Input className="bg-white" placeholder="按用户 ID、QQ 号或名称筛选封禁记录" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
           <label className="inline-flex items-center gap-2 rounded-md bg-white px-3 text-sm font-bold text-slate-600">
             <input type="checkbox" checked={onlyActive} onChange={(event) => onOnlyActiveChange(event.target.checked)} />
             仅生效中

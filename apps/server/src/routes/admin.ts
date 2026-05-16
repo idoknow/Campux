@@ -5,6 +5,7 @@ import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
+import { buildUserContainsSearch, findUserIdsByContainsSearch } from "../lib/user-search";
 import { defaultPublishIntervalSeconds, enqueueAttempt, schedulePublishAttempt } from "../runtime/publishing";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -134,25 +135,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
   app.get("/api/admin/members", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const query = memberQuerySchema.parse(request.query);
-    const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
+    const searchWhere = query.q ? await buildUserContainsSearch(query.q) : null;
     const where: Prisma.TenantMembershipWhereInput = {
       tenantId: context.selectedTenant.id,
       ...(query.role === "all" ? {} : { role: query.role }),
-      ...(query.q
-        ? {
-            user: {
-              OR: [
-                ...(qqUin === null ? [] : [{ qqUin }]),
-                {
-                  displayName: {
-                    contains: query.q,
-                    mode: "insensitive",
-                  },
-                },
-              ],
-            },
-          }
-        : {}),
+      ...(searchWhere ? { user: searchWhere } : {}),
     };
     const [total, tenantMemberTotal, members] = await Promise.all([
       prisma.tenantMembership.count({ where }),
@@ -278,29 +265,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     const context = await requireTenantRole(request, reply, "admin");
     const query = banQuerySchema.parse(request.query);
     const now = new Date();
-    const matchedUsers = query.q
-      ? await prisma.user.findMany({
-          where: {
-            OR: [
-              ...(Number.isNaN(Number(query.q)) ? [] : [{ qqUin: BigInt(query.q) }]),
-              {
-                displayName: {
-                  contains: query.q,
-                  mode: "insensitive",
-                },
-              },
-            ],
-          },
-          select: {
-            id: true,
-          },
-          take: 50,
-        })
-      : [];
+    const matchedUserIds = query.q ? await findUserIdsByContainsSearch(query.q) : [];
     const where: Prisma.BanRecordWhereInput = {
       tenantId: context.selectedTenant.id,
       ...(query.onlyActive ? { endsAt: { gt: now } } : {}),
-      ...(query.q ? { userId: { in: matchedUsers.map((user) => user.id) } } : {}),
+      ...(query.q ? { userId: { in: matchedUserIds } } : {}),
     };
     const [total, bans] = await Promise.all([
       prisma.banRecord.count({ where }),
