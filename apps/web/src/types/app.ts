@@ -101,6 +101,7 @@ export type TenantMetadata = {
   brand: string;
   banner: string;
   postRules: string[];
+  pendingPostLimit: number;
   services: Array<{
     title: string;
     description?: string;

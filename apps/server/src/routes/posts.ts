@@ -3,11 +3,13 @@ import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectComm
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CampuxConfig } from "@campux/config";
+import { Prisma } from "@campux/db";
 import { createS3Client } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
+import { readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import type { OneBotRuntime } from "../runtime/onebot";
 
 const uploadSchema = z.object({
@@ -41,6 +43,15 @@ const createPostSchema = z.object({
   ).max(9).default([]),
 });
 
+class PendingPostLimitError extends Error {
+  constructor(
+    readonly pendingCount: number,
+    readonly limit: number,
+  ) {
+    super("pending post limit exceeded");
+  }
+}
+
 function decodeBase64(base64: string) {
   const commaIndex = base64.indexOf(",");
   const payload = commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
@@ -56,6 +67,10 @@ async function ensureBucket(config: CampuxConfig) {
   }
 
   return s3;
+}
+
+function isTransactionSerializationFailure(value: unknown) {
+  return value instanceof Prisma.PrismaClientKnownRequestError && value.code === "P2034";
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, oneBot?: OneBotRuntime) {
@@ -131,42 +146,79 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       return reply.code(403).send({ message: `账号已被封禁：${activeBan.comment}` });
     }
 
-    const post = await prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.update({
-        where: {
-          id: context.selectedTenant.id,
-        },
-        data: {
-          nextPostDisplayId: {
-            increment: 1,
-          },
-        },
-        select: {
-          nextPostDisplayId: true,
-        },
-      });
-      const displayId = tenant.nextPostDisplayId - 1;
+    let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        post = await prisma.$transaction(
+          async (tx) => {
+            const pendingPostLimit = await readTenantPendingPostLimit(tx, context.selectedTenant.id);
+            if (pendingPostLimit > 0) {
+              const pendingCount = await tx.post.count({
+                where: {
+                  tenantId: context.selectedTenant.id,
+                  authorId: context.user.id,
+                  status: "pending_approval",
+                },
+              });
+              if (pendingCount >= pendingPostLimit) {
+                throw new PendingPostLimitError(pendingCount, pendingPostLimit);
+              }
+            }
 
-      return tx.post.create({
-        data: {
-          tenantId: context.selectedTenant.id,
-          authorId: context.user.id,
-          displayId,
-          text: body.text,
-          anonymous: body.anonymous,
-          images: body.images,
-          status: "pending_approval",
-          logs: {
-            create: {
-              tenantId: context.selectedTenant.id,
-              actorId: context.user.id,
-              newStatus: "pending_approval",
-              comment: "投稿创建",
-            },
+            const tenant = await tx.tenant.update({
+              where: {
+                id: context.selectedTenant.id,
+              },
+              data: {
+                nextPostDisplayId: {
+                  increment: 1,
+                },
+              },
+              select: {
+                nextPostDisplayId: true,
+              },
+            });
+            const displayId = tenant.nextPostDisplayId - 1;
+
+            return tx.post.create({
+              data: {
+                tenantId: context.selectedTenant.id,
+                authorId: context.user.id,
+                displayId,
+                text: body.text,
+                anonymous: body.anonymous,
+                images: body.images,
+                status: "pending_approval",
+                logs: {
+                  create: {
+                    tenantId: context.selectedTenant.id,
+                    actorId: context.user.id,
+                    newStatus: "pending_approval",
+                    comment: "投稿创建",
+                  },
+                },
+              },
+            });
           },
-        },
-      });
-    });
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+        break;
+      } catch (caught) {
+        if (caught instanceof PendingPostLimitError) {
+          return reply.code(409).send({
+            message: `你还有 ${caught.pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${caught.limit} 条待审核稿件。`,
+          });
+        }
+        if (isTransactionSerializationFailure(caught) && attempt < 2) {
+          continue;
+        }
+        throw caught;
+      }
+    }
+
+    if (!post) {
+      return reply.code(503).send({ message: "投稿人数较多，请稍后再试" });
+    }
 
     oneBot?.notifyNewPost(post.id).catch((error) => {
       app.log.warn({ error, postId: post.id }, "failed to notify review group");

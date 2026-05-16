@@ -18,6 +18,7 @@ export const defaultMetadata: TenantMetadata = {
     "寻物招领请写清地点、时间和联系方式。",
     "图片最多 9 张，审核通过后会同步到本校启用的 QQ 墙号。",
   ],
+  pendingPostLimit: 1,
   services: [
     { title: "修改名称", description: "账户资料" },
     { title: "修改密码", description: "账号服务" },

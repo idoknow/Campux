@@ -128,6 +128,9 @@ export function PostPage({
           <div>
             <p className="font-semibold text-slate-900">稿件状态</p>
             <p className="mt-1 text-sm text-slate-500">审核通过后会同步到 {selectedTenant.botAccountCount} 个墙号。</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {metadata.pendingPostLimit > 0 ? `每人最多同时保留 ${metadata.pendingPostLimit} 条待审核稿件。` : "当前不限制待审核稿件数量。"}
+            </p>
           </div>
           <Badge variant="secondary" className="rounded-md shadow-none">
             无阻塞

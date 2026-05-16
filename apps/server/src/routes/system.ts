@@ -305,6 +305,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
               { key: "brand", value: body.name },
               { key: "banner", value: body.banner },
               { key: "post_rules", value: defaultPostRules },
+              { key: "pending_post_limit", value: 1 },
               { key: "services", value: defaultServices },
             ],
           },

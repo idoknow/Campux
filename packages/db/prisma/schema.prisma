@@ -284,6 +284,8 @@ model BotSession {
   healthStatus String     @default("unchecked")
   healthCheckedAt DateTime?
   healthMessage String?
+  healthFailureCount Int   @default(0)
+  healthInvalidNotifiedAt DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   botAccount   BotAccount @relation(fields: [botAccountId], references: [id], onDelete: Cascade)

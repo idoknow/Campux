@@ -3,8 +3,9 @@ import { z } from "zod";
 import { requireTenantContext, requireTenantRole } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
+import { maxPendingPostLimit, normalizePendingPostLimit, pendingPostLimitMetadataKey } from "../lib/tenant-metadata";
 
-const publicMetadataKeys = ["brand", "banner", "post_rules", "services"] as const;
+const publicMetadataKeys = ["brand", "banner", "post_rules", "services", pendingPostLimitMetadataKey] as const;
 
 const patchMetadataSchema = z.object({
   tenantName: z.string().min(1).max(80).optional(),
@@ -13,6 +14,7 @@ const patchMetadataSchema = z.object({
   brand: z.string().min(1).optional(),
   banner: z.string().optional(),
   postRules: z.array(z.string().min(1)).optional(),
+  pendingPostLimit: z.number().int().min(0).max(maxPendingPostLimit).optional(),
   services: z.array(
     z.object({
       title: z.string().min(1),
@@ -29,6 +31,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     brand: typeof record.brand === "string" ? record.brand : "校园墙",
     banner: typeof record.banner === "string" ? record.banner : "",
     postRules: Array.isArray(record.post_rules) ? record.post_rules.filter((rule) => typeof rule === "string") : [],
+    pendingPostLimit: normalizePendingPostLimit(record[pendingPostLimitMetadataKey]),
     services: Array.isArray(record.services) ? record.services : [],
   };
 }
@@ -93,7 +96,7 @@ export function registerMetadataRoutes(app: FastifyInstance) {
       });
     }
 
-    const updates: Array<{ key: string; value: string | string[] | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
+    const updates: Array<{ key: string; value: string | number | string[] | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
     if (body.brand !== undefined) {
       updates.push({ key: "brand", value: body.brand });
     }
@@ -102,6 +105,9 @@ export function registerMetadataRoutes(app: FastifyInstance) {
     }
     if (body.postRules !== undefined) {
       updates.push({ key: "post_rules", value: body.postRules });
+    }
+    if (body.pendingPostLimit !== undefined) {
+      updates.push({ key: pendingPostLimitMetadataKey, value: body.pendingPostLimit });
     }
     if (body.services !== undefined) {
       updates.push({ key: "services", value: body.services });
