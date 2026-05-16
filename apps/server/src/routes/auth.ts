@@ -21,6 +21,10 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6).max(128),
 });
 
+const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(1, "账户名称不能为空").max(80, "账户名称最多 80 个字符"),
+});
+
 const requiredPasswordChangeSchema = z.object({
   newPassword: z.string().min(6).max(128),
 });
@@ -147,6 +151,25 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     });
 
     return { ok: true };
+  });
+
+  app.patch("/api/auth/profile", async (request, reply) => {
+    const context = await requireSession(request, reply);
+    const body = updateProfileSchema.parse(request.body);
+
+    const user = await prisma.user.update({
+      where: {
+        id: context.user.id,
+      },
+      data: {
+        displayName: body.displayName,
+      },
+    });
+
+    return {
+      ok: true,
+      user: toPublicUser(user),
+    };
   });
 
   app.post("/api/auth/password/required", async (request, reply) => {

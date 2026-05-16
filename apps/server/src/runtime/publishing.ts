@@ -13,6 +13,8 @@ import type { RuntimeJob, RuntimeQueue } from "./queue";
 const maxPublishAttempts = 3;
 export const defaultPublishIntervalSeconds = 10;
 
+type PublishScheduleClient = typeof prisma | Prisma.TransactionClient;
+
 type PublishingNotifier = {
   notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
   notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }): Promise<void>;
@@ -139,32 +141,12 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
 
   const attempts = [];
   for (const target of targets) {
-    const nextRunAt = await resolveNextPublishRunAt({
+    const { attempt, nextRunAt } = await schedulePublishAttempt({
       tenantId,
+      postId,
+      publishTargetId: target.id,
       botAccountId: target.botAccountId,
       intervalSeconds: target.publishDelaySeconds,
-    });
-    const attempt = await prisma.publishAttempt.upsert({
-      where: {
-        postId_publishTargetId: {
-          postId,
-          publishTargetId: target.id,
-        },
-      },
-      update: {
-        status: "queued",
-        lastError: null,
-        externalId: null,
-        verbose: Prisma.JsonNull,
-        nextRunAt,
-      },
-      create: {
-        tenantId,
-        postId,
-        publishTargetId: target.id,
-        status: "queued",
-        nextRunAt,
-      },
     });
     attempts.push(attempt);
     enqueueAttempt(queue, tenantId, attempt.id, nextRunAt);
@@ -182,10 +164,10 @@ export async function resolveNextPublishRunAt(options: {
   botAccountId: string;
   intervalSeconds?: number | null;
   excludeAttemptId?: string;
-}) {
+}, client: PublishScheduleClient = prisma) {
   const intervalMs = effectivePublishIntervalSeconds(options.intervalSeconds) * 1_000;
   const now = Date.now();
-  const recentAttempts = await prisma.publishAttempt.findMany({
+  const recentAttempts = await client.publishAttempt.findMany({
     where: {
       tenantId: options.tenantId,
       ...(options.excludeAttemptId ? { id: { not: options.excludeAttemptId } } : {}),
@@ -221,6 +203,55 @@ export async function resolveNextPublishRunAt(options: {
   }, 0);
 
   return new Date(Math.max(now + intervalMs, latestAnchor + intervalMs));
+}
+
+export async function schedulePublishAttempt(options: {
+  tenantId: string;
+  postId: string;
+  publishTargetId: string;
+  botAccountId: string;
+  intervalSeconds?: number | null;
+  excludeAttemptId?: string;
+  resetAttempt?: boolean;
+}) {
+  return prisma.$transaction(async (tx) => {
+    await lockPublishSchedule(tx, options.tenantId, options.botAccountId);
+    const nextRunAt = await resolveNextPublishRunAt({
+      tenantId: options.tenantId,
+      botAccountId: options.botAccountId,
+      ...(options.intervalSeconds === undefined ? {} : { intervalSeconds: options.intervalSeconds }),
+      ...(options.excludeAttemptId === undefined ? {} : { excludeAttemptId: options.excludeAttemptId }),
+    }, tx);
+    const attempt = await tx.publishAttempt.upsert({
+      where: {
+        postId_publishTargetId: {
+          postId: options.postId,
+          publishTargetId: options.publishTargetId,
+        },
+      },
+      update: {
+        status: "queued",
+        ...(options.resetAttempt ? { attempt: 0 } : {}),
+        lastError: null,
+        externalId: null,
+        verbose: Prisma.JsonNull,
+        nextRunAt,
+      },
+      create: {
+        tenantId: options.tenantId,
+        postId: options.postId,
+        publishTargetId: options.publishTargetId,
+        status: "queued",
+        nextRunAt,
+      },
+    });
+
+    return { attempt, nextRunAt };
+  });
+}
+
+async function lockPublishSchedule(tx: Prisma.TransactionClient, tenantId: string, botAccountId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:publish:${tenantId}:${botAccountId}`})::bigint)`;
 }
 
 export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId: string, runAt = new Date()) {
