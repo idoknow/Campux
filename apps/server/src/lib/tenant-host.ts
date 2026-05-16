@@ -17,7 +17,7 @@ export function normalizeTenantHost(input: string | null | undefined) {
   }
 }
 
-function requestHostCandidates(request: FastifyRequest) {
+export function requestHostCandidates(request: FastifyRequest) {
   const forwardedHost = request.headers["x-forwarded-host"];
   const rawHost = Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost ?? request.headers.host;
   const normalized = normalizeTenantHost(rawHost?.split(",")[0]);
@@ -27,6 +27,25 @@ function requestHostCandidates(request: FastifyRequest) {
 
   const withoutPort = normalized.includes(":") ? (normalized.split(":")[0] ?? normalized) : normalized;
   return Array.from(new Set([normalized, withoutPort]));
+}
+
+export async function findManagementHostByRequest(request: FastifyRequest) {
+  const candidates = requestHostCandidates(request);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const setting = await prisma.systemSetting.findUnique({
+    where: {
+      key: "management_host",
+    },
+  });
+  const value = typeof setting?.value === "string" ? normalizeTenantHost(setting.value) : null;
+  if (!value) {
+    return null;
+  }
+
+  return candidates.includes(value) ? value : null;
 }
 
 export async function findTenantByRequestHost(request: FastifyRequest) {

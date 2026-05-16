@@ -1,28 +1,35 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
+import { api } from "@/lib/api";
+import type { MeResponse } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function LoginScreen({
   selectedTenant,
   error,
+  managementHost,
   onLogin,
+  onRegistered,
 }: {
   selectedTenant: TenantSummary | undefined;
   error: string;
-  onLogin: (qqUin: string, password: string) => Promise<void>;
+  managementHost: boolean;
+  onLogin: (account: string, password: string) => Promise<void>;
+  onRegistered: (data: MeResponse) => void;
 }) {
   const allowTestAccounts = import.meta.env.DEV;
-  const [qqUin, setQqUin] = useState(allowTestAccounts ? "10000" : "");
+  const [account, setAccount] = useState(allowTestAccounts ? "10000" : "");
   const [password, setPassword] = useState(allowTestAccounts ? "campux123" : "");
   const [busy, setBusy] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     try {
-      await onLogin(qqUin, password);
+      await onLogin(account, password);
     } finally {
       setBusy(false);
     }
@@ -38,9 +45,9 @@ export function LoginScreen({
 
         <form className="product-surface px-4 py-5" onSubmit={handleSubmit}>
           <p className="text-lg font-semibold text-slate-950">登录到 Campux</p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">输入通过校园墙机器人注册的账号和密码。</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">输入 QQ 号或邮箱，以及你的账号密码。</p>
           <div className="mt-5 grid gap-3">
-            <Input value={qqUin} inputMode="numeric" placeholder="QQ 号 / UIN" onChange={(event) => setQqUin(event.target.value)} />
+            <Input value={account} placeholder="QQ 号 / 邮箱" onChange={(event) => setAccount(event.target.value)} />
             <Input value={password} type="password" placeholder="密码" onChange={(event) => setPassword(event.target.value)} />
           </div>
           {error ? <p className="mt-3 text-sm font-medium text-red-600">{error}</p> : null}
@@ -55,7 +62,77 @@ export function LoginScreen({
             </details>
           ) : null}
         </form>
+
+        {managementHost ? (
+          <div className="mt-3 product-surface px-4 py-4">
+            <button type="button" className="text-sm font-semibold text-blue-700" onClick={() => setRegisterOpen((value) => !value)}>
+              {registerOpen ? "收起注册" : "注册运营管理员账号"}
+            </button>
+            {registerOpen ? <RegisterPanel onRegistered={onRegistered} /> : null}
+          </div>
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function RegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => void }) {
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+
+  async function requestCode() {
+    setSendingCode(true);
+    setMessage("");
+    try {
+      const data = await api<{ ok: true; devCode?: string }>("/api/auth/register/request-code", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setMessage(data.devCode ? `开发环境验证码：${data.devCode}` : "验证码已发送，请检查邮箱。");
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "验证码发送失败");
+    } finally {
+      setSendingCode(false);
+    }
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    try {
+      const data = await api<MeResponse>("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email, displayName, password, code }),
+      });
+      onRegistered(data);
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "注册失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="mt-4 grid gap-3" onSubmit={submit}>
+      <Input value={email} type="email" placeholder="邮箱" onChange={(event) => setEmail(event.target.value)} />
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <Input value={code} inputMode="numeric" placeholder="邮箱验证码" onChange={(event) => setCode(event.target.value)} />
+        <Button type="button" variant="outline" disabled={sendingCode || email.trim().length === 0} onClick={() => void requestCode()}>
+          {sendingCode ? "发送中" : "获取验证码"}
+        </Button>
+      </div>
+      <Input value={displayName} placeholder="账户名称" onChange={(event) => setDisplayName(event.target.value)} />
+      <Input value={password} type="password" placeholder="密码，至少 6 位" onChange={(event) => setPassword(event.target.value)} />
+      {message ? <p className="text-sm font-medium text-slate-600">{message}</p> : null}
+      <Button className="font-medium" disabled={busy || email.trim().length === 0 || code.trim().length !== 6 || displayName.trim().length === 0 || password.length < 6} type="submit">
+        {busy ? "注册中" : "注册并进入运营管理"}
+      </Button>
+    </form>
   );
 }

@@ -29,6 +29,7 @@ const postRules = [
 ];
 
 const services = [
+  { title: "修改名称", description: "账户资料" },
   { title: "修改密码", description: "账号服务" },
   { title: "投稿规则", description: "查看本墙规范" },
   { title: "校园服务", description: "推荐入口" },
@@ -120,12 +121,14 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
 
 async function seedUser({
   qqUin,
+  email,
   displayName,
   systemRole,
   memberships,
   isTestAccount = true,
 }: {
   qqUin: string;
+  email: string;
   displayName: string;
   systemRole?: "operations_admin" | "system_operator";
   memberships: Array<{ tenantId: string; role: "submitter" | "reviewer" | "admin" }>;
@@ -135,6 +138,7 @@ async function seedUser({
     where: { qqUin: BigInt(qqUin) },
     update: {
       displayName,
+      email,
       passwordHash,
       passwordChangeRequired: false,
       isTestAccount,
@@ -142,6 +146,7 @@ async function seedUser({
     },
     create: {
       qqUin: BigInt(qqUin),
+      email,
       displayName,
       passwordHash,
       passwordChangeRequired: false,
@@ -176,18 +181,21 @@ for (const tenant of tenants) {
 
 await seedUser({
   qqUin: "10000",
+  email: "submitter@example.com",
   displayName: "投稿测试号",
   memberships: [{ tenantId: "tenant-canton", role: "submitter" }],
 });
 
 await seedUser({
   qqUin: "20000",
+  email: "reviewer@example.com",
   displayName: "审核测试号",
   memberships: [{ tenantId: "tenant-canton", role: "reviewer" }],
 });
 
 await seedUser({
   qqUin: "30000",
+  email: "admin@example.com",
   displayName: "多墙管理员",
   memberships: [
     { tenantId: "tenant-canton", role: "admin" },
@@ -197,6 +205,7 @@ await seedUser({
 
 await seedUser({
   qqUin: "40000",
+  email: "operator@example.com",
   displayName: "系统运维",
   systemRole: "system_operator",
   memberships: [{ tenantId: "tenant-canton", role: "admin" }],
@@ -204,6 +213,7 @@ await seedUser({
 
 await seedUser({
   qqUin: "50000",
+  email: "operations@example.com",
   displayName: "运营管理员",
   systemRole: "operations_admin",
   memberships: [{ tenantId: "tenant-riverside", role: "admin" }],

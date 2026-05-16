@@ -14,6 +14,10 @@ const tenantPatchSchema = z.object({
   host: z.string().max(255).nullable().optional(),
 });
 
+const systemSettingsPatchSchema = z.object({
+  managementHost: z.string().max(255).nullable().optional(),
+});
+
 const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
 const platformAssignableRoleSchema = z.enum(["operations_admin", "system_operator", "submitter", "reviewer", "admin"]);
 
@@ -139,6 +143,39 @@ function assertCanManageTenant(context: PlatformContext, tenantId: string, reply
   throw new Error("只能管理自己所属的校园墙");
 }
 
+async function getManagementHost() {
+  const setting = await prisma.systemSetting.findUnique({
+    where: {
+      key: "management_host",
+    },
+  });
+  return typeof setting?.value === "string" ? normalizeTenantHost(setting.value) : null;
+}
+
+async function assertHostNotReserved(host: string | null, reply: FastifyReply, options: { tenantId?: string; setting?: "management_host" } = {}) {
+  if (!host) {
+    return;
+  }
+
+  if (options.setting !== "management_host") {
+    const managementHost = await getManagementHost();
+    if (managementHost === host) {
+      return reply.code(409).send({ message: "这个 host 已经被设置为管理端 host" });
+    }
+  }
+
+  const existingTenant = await prisma.tenant.findFirst({
+    where: {
+      host,
+      ...(options.tenantId ? { id: { not: options.tenantId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (existingTenant) {
+    return reply.code(409).send({ message: "这个 host 已经绑定到其他校园墙" });
+  }
+}
+
 async function listSystemTenants(context: PlatformContext) {
   const tenantIds = manageableTenantIds(context);
   const tenants = await prisma.tenant.findMany({
@@ -171,6 +208,59 @@ async function listSystemTenants(context: PlatformContext) {
 }
 
 export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) {
+  app.get("/api/system/settings", async (request, reply) => {
+    const context = await requirePlatformAdmin(request, reply);
+    if (!isSystemOperator(context)) {
+      return reply.code(403).send({ message: "只有系统运维可以查看全局设置" });
+    }
+
+    return {
+      managementHost: await getManagementHost(),
+    };
+  });
+
+  app.patch("/api/system/settings", async (request, reply) => {
+    const context = await requirePlatformAdmin(request, reply);
+    if (!isSystemOperator(context)) {
+      return reply.code(403).send({ message: "只有系统运维可以修改全局设置" });
+    }
+    const body = systemSettingsPatchSchema.parse(request.body);
+    const normalizedManagementHost = body.managementHost === undefined ? undefined : normalizeTenantHost(body.managementHost);
+    if (normalizedManagementHost !== undefined) {
+      const conflict = await assertHostNotReserved(normalizedManagementHost, reply, { setting: "management_host" });
+      if (conflict) return conflict;
+    }
+
+    if (body.managementHost !== undefined) {
+      if (normalizedManagementHost) {
+        await prisma.systemSetting.upsert({
+          where: { key: "management_host" },
+          update: { value: normalizedManagementHost },
+          create: { key: "management_host", value: normalizedManagementHost },
+        });
+      } else {
+        await prisma.systemSetting.deleteMany({
+          where: { key: "management_host" },
+        });
+      }
+
+      await writeAuditLog({
+        tenantId: null,
+        actorId: context.user.id,
+        action: "system.settings.update",
+        targetType: "system_setting",
+        targetId: "management_host",
+        detail: {
+          managementHost: normalizedManagementHost,
+        },
+      });
+    }
+
+    return {
+      managementHost: await getManagementHost(),
+    };
+  });
+
   app.get("/api/system/tenants", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
 
@@ -184,13 +274,8 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     const body = tenantCreateSchema.parse(request.body);
     const normalizedHost = body.host === undefined ? null : normalizeTenantHost(body.host);
     if (normalizedHost) {
-      const existingTenant = await prisma.tenant.findFirst({
-        where: { host: normalizedHost },
-        select: { id: true },
-      });
-      if (existingTenant) {
-        return reply.code(409).send({ message: "这个 host 已经绑定到其他校园墙" });
-      }
+      const conflict = await assertHostNotReserved(normalizedHost, reply);
+      if (conflict) return conflict;
     }
     if (body.botQqUin) {
       const existingBot = await prisma.botAccount.findUnique({
@@ -296,18 +381,8 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     const body = tenantPatchSchema.parse(request.body);
     const normalizedHost = body.host === undefined ? undefined : normalizeTenantHost(body.host);
     if (normalizedHost) {
-      const existingTenant = await prisma.tenant.findFirst({
-        where: {
-          host: normalizedHost,
-          id: {
-            not: params.tenantId,
-          },
-        },
-        select: { id: true },
-      });
-      if (existingTenant) {
-        return reply.code(409).send({ message: "这个 host 已经绑定到其他校园墙" });
-      }
+      const conflict = await assertHostNotReserved(normalizedHost, reply, { tenantId: params.tenantId });
+      if (conflict) return conflict;
     }
 
     const updateData: {
@@ -405,6 +480,12 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
               mode: "insensitive",
             },
           },
+          {
+            email: {
+              contains: keyword,
+              mode: "insensitive",
+            },
+          },
         ],
       });
     }
@@ -437,6 +518,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       users: users.map((user) => ({
         id: user.id,
         qqUin: user.qqUin.toString(),
+        email: user.email,
         displayName: user.displayName,
         isTestAccount: user.isTestAccount,
         createdAt: user.createdAt.toISOString(),

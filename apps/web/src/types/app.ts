@@ -82,6 +82,7 @@ export type MeResponse =
       user: {
         id: string;
         qqUin: string;
+        email: string | null;
         displayName: string | null;
         systemRole: SystemRole | null;
         passwordChangeRequired: boolean;
@@ -428,6 +429,7 @@ export type SystemTenant = {
 export type SystemUser = {
   id: string;
   qqUin: string;
+  email: string | null;
   displayName: string | null;
   systemRole: SystemRole | null;
   isTestAccount: boolean;

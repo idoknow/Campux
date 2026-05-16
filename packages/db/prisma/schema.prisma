@@ -71,6 +71,7 @@ model Tenant {
 model User {
   id          String             @id @default(uuid())
   qqUin       BigInt             @unique
+  email       String?            @unique
   displayName String?
   passwordHash String
   passwordChangeRequired Boolean @default(false)
@@ -83,6 +84,27 @@ model User {
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
+}
+
+model EmailVerificationCode {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String
+  purpose    String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([email, purpose, createdAt])
+  @@index([expiresAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AccountSession {
