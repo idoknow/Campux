@@ -5,6 +5,7 @@ import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { normalizeTenantHost } from "../lib/tenant-host";
+import { buildUserContainsSearch } from "../lib/user-search";
 import type { RuntimeQueue } from "../runtime/queue";
 
 const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
@@ -421,7 +422,6 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     const includeSystemOperator = isSystemOperator(context) && roleFilters.includes("system_operator");
     const includeOperationsAdmin = isSystemOperator(context) && roleFilters.includes("operations_admin");
     const keyword = query.q?.trim();
-    const queryQqUin = keyword && /^\d+$/.test(keyword) ? BigInt(keyword) : null;
     const filters: Prisma.UserWhereInput[] = [];
     const tenantIds = manageableTenantIds(context);
     if (tenantIds !== null && tenantIds.length === 0) {
@@ -471,23 +471,8 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       }
     }
     if (keyword) {
-      filters.push({
-        OR: [
-          ...(queryQqUin === null ? [] : [{ qqUin: queryQqUin }]),
-          {
-            displayName: {
-              contains: keyword,
-              mode: "insensitive",
-            },
-          },
-          {
-            email: {
-              contains: keyword,
-              mode: "insensitive",
-            },
-          },
-        ],
-      });
+      const searchWhere = await buildUserContainsSearch(keyword);
+      if (searchWhere) filters.push(searchWhere);
     }
     const where: Prisma.UserWhereInput = filters.length > 0 ? { AND: filters } : {};
     const [total, users] = await Promise.all([

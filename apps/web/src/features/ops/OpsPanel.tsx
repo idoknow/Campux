@@ -646,7 +646,11 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
                 mode={mode}
                 selectedTenantFilterId={userTenantFilterId}
                 tenants={tenants}
-                onKeywordChange={setUserKeywordDraft}
+                onKeywordChange={(keyword) => {
+                  setUserKeywordDraft(keyword);
+                  setUserKeyword(keyword);
+                  setUserPage(1);
+                }}
                 onKeywordSearch={() => {
                   setUserKeyword(userKeywordDraft);
                   setUserPage(1);
@@ -934,7 +938,7 @@ function GlobalUsersTable({
           <SearchIcon className="size-4 shrink-0 text-slate-400" />
           <Input
             className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-            placeholder="按 QQ 号或昵称搜索账号"
+            placeholder="按用户 ID、QQ 号或名称搜索账号"
             value={keyword}
             onChange={(event) => onKeywordChange(event.target.value)}
             onKeyDown={(event) => {
