@@ -19,6 +19,7 @@ export const defaultMetadata: TenantMetadata = {
     "图片最多 9 张，审核通过后会同步到本校启用的 QQ 墙号。",
   ],
   services: [
+    { title: "修改名称", description: "账户资料" },
     { title: "修改密码", description: "账号服务" },
     { title: "投稿规则", description: "查看本墙规范" },
     { title: "校园服务", description: "推荐入口" },

@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
-import type { TenantMetadata } from "@/types/app";
+import type { AuthenticatedMe, TenantMetadata } from "@/types/app";
 import { LoadingBlock } from "@/components/app/utility";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type ServiceAction = "password" | "rules" | "";
+type ServiceAction = "profile" | "password" | "rules" | "";
 
 const servicePalettes = [
   {
@@ -33,7 +33,17 @@ const defaultServicePalette = {
   icon: "product-accent-blue",
 };
 
-export function ServicesPage({ metadata, loading }: { metadata: TenantMetadata; loading: boolean }) {
+export function ServicesPage({
+  me,
+  metadata,
+  loading,
+  onProfileSaved,
+}: {
+  me: AuthenticatedMe;
+  metadata: TenantMetadata;
+  loading: boolean;
+  onProfileSaved: () => Promise<void>;
+}) {
   const entries = buildServiceEntries(metadata.services);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
@@ -43,7 +53,11 @@ export function ServicesPage({ metadata, loading }: { metadata: TenantMetadata; 
       window.open(service.url, "_blank", "noopener,noreferrer");
       return;
     }
-    if (service.title.includes("密码") || service.title.includes("账号")) {
+    if (isProfileService(service)) {
+      setActiveAction("profile");
+      return;
+    }
+    if (isPasswordService(service)) {
       setActiveAction("password");
       return;
     }
@@ -67,6 +81,7 @@ export function ServicesPage({ metadata, loading }: { metadata: TenantMetadata; 
           </div>
         </div>
 
+        {activeAction === "profile" ? <ProfilePanel me={me} onSaved={onProfileSaved} /> : null}
         {activeAction === "password" ? <PasswordPanel onDone={(message) => toast.success(message)} /> : null}
         {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
       </div>
@@ -79,13 +94,17 @@ function buildServiceEntries(services: TenantMetadata["services"]) {
     return defaultMetadata.services;
   }
 
-  const builtInServices = defaultMetadata.services.filter((service) => isPasswordService(service) || isRulesService(service));
-  const customServices = services.filter((service) => !isPasswordService(service) && !isRulesService(service));
+  const builtInServices = defaultMetadata.services.filter((service) => isProfileService(service) || isPasswordService(service) || isRulesService(service));
+  const customServices = services.filter((service) => !isProfileService(service) && !isPasswordService(service) && !isRulesService(service));
   return [...builtInServices, ...customServices];
 }
 
+function isProfileService(service: TenantMetadata["services"][number]) {
+  return service.title.includes("名称") || service.title.includes("昵称");
+}
+
 function isPasswordService(service: TenantMetadata["services"][number]) {
-  return service.title.includes("密码") || service.title.includes("账号");
+  return service.title.includes("密码");
 }
 
 function isRulesService(service: TenantMetadata["services"][number]) {
@@ -107,6 +126,45 @@ function ServiceTile({ service, index, onOpen }: { service: TenantMetadata["serv
       </span>
       {service.url ? <ExternalLinkIcon className="size-5 shrink-0 text-slate-400" /> : <ChevronRightIcon className="size-5 shrink-0 text-slate-400" />}
     </button>
+  );
+}
+
+function ProfilePanel({ me, onSaved }: { me: AuthenticatedMe; onSaved: () => Promise<void> }) {
+  const [displayName, setDisplayName] = useState(me.user.displayName ?? "");
+  const [busy, setBusy] = useState(false);
+  const normalizedName = displayName.trim();
+
+  async function submit() {
+    setBusy(true);
+    try {
+      await api("/api/auth/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ displayName: normalizedName }),
+      });
+      await onSaved();
+      toast.success("账户名称已更新。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "修改失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="product-surface mt-4 p-4">
+      <div className="flex items-center gap-2">
+        <UserRoundIcon className="size-5 text-slate-500" />
+        <p className="text-base font-semibold">修改名称</p>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+        <Input placeholder="账户名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <Button className="font-medium" disabled={busy || normalizedName.length === 0 || normalizedName === (me.user.displayName ?? "")} onClick={() => void submit()}>
+          <CheckIcon data-icon="inline-start" />
+          保存名称
+        </Button>
+      </div>
+      <p className="mt-2 text-xs font-semibold text-slate-500">当前 QQ：{me.user.qqUin}</p>
+    </section>
   );
 }
 
@@ -169,6 +227,9 @@ function RulesPanel({ rules }: { rules: string[] }) {
 }
 
 function pickServiceIcon(title: string) {
+  if (title.includes("名称") || title.includes("昵称")) {
+    return UserRoundIcon;
+  }
   if (title.includes("密码") || title.includes("账号")) {
     return KeyRoundIcon;
   }

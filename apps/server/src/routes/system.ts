@@ -51,6 +51,7 @@ const defaultPostRules = [
 ];
 
 const defaultServices = [
+  { title: "修改名称", description: "账户资料" },
   { title: "修改密码", description: "账号服务" },
   { title: "投稿规则", description: "查看本墙规范" },
   { title: "校园服务", description: "推荐入口" },

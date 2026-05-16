@@ -5,7 +5,7 @@ import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
-import { defaultPublishIntervalSeconds, enqueueAttempt, resolveNextPublishRunAt } from "../runtime/publishing";
+import { defaultPublishIntervalSeconds, enqueueAttempt, schedulePublishAttempt } from "../runtime/publishing";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
 import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
@@ -953,24 +953,14 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       return reply.code(404).send({ message: "发布记录不存在" });
     }
 
-    const nextRunAt = await resolveNextPublishRunAt({
+    const { attempt: updated, nextRunAt } = await schedulePublishAttempt({
       tenantId: context.selectedTenant.id,
+      postId: attempt.postId,
+      publishTargetId: attempt.publishTargetId,
       botAccountId: attempt.publishTarget.botAccountId,
       intervalSeconds: attempt.publishTarget.publishDelaySeconds,
       excludeAttemptId: attempt.id,
-    });
-    const updated = await prisma.publishAttempt.update({
-      where: {
-        id: attempt.id,
-      },
-      data: {
-        status: "queued",
-        attempt: 0,
-        lastError: null,
-        externalId: null,
-        verbose: Prisma.JsonNull,
-        nextRunAt,
-      },
+      resetAttempt: true,
     });
     enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
 

@@ -115,7 +115,7 @@ export function AppShell({
             </TabsContent>
 
             <TabsContent value="services" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
-              <ServicesPage metadata={metadata} loading={dataLoading} />
+              <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
             </TabsContent>
 
             <TabsContent value="stats" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
