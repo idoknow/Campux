@@ -9,6 +9,8 @@ import {
   FileTextIcon,
   HashIcon,
   ImageIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
   SparklesIcon,
   UserIcon,
   UserRoundIcon,
@@ -72,6 +74,15 @@ const statusStyles: Record<string, string> = {
 
 const postTabsListClassName = "product-tabs-list";
 const postTabsTriggerClassName = "product-tabs-trigger after:hidden";
+const reviewStatusOptions = [
+  { value: "pending_approval", label: "待审核" },
+  { value: "approved", label: "已通过" },
+  { value: "rejected", label: "已拒绝" },
+  { value: "publishing", label: "发布中" },
+  { value: "published", label: "已发布" },
+  { value: "failed", label: "发布失败" },
+  { value: "all", label: "全部" },
+];
 
 export function PostsPage({
   posts,
@@ -99,6 +110,7 @@ export function PostsPage({
   const [reviewStatus, setReviewStatus] = useState("pending_approval");
   const [reviewKeyword, setReviewKeyword] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
+  const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
@@ -281,6 +293,12 @@ export function PostsPage({
   }
 
   const activePreviewImage = imagePreview.images[imagePreview.index] ?? null;
+  const reviewStatusLabel = reviewStatusOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
+
+  function applyReviewFilters() {
+    setReviewPage(1);
+    void refreshReviewPosts(1);
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
@@ -318,7 +336,21 @@ export function PostsPage({
         </TabsContent>
         {canReview ? (
           <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
-            <div className="product-subsection mb-3 grid gap-2 p-3 sm:grid-cols-[160px_minmax(0,1fr)_auto]">
+            <div className="mb-2 flex md:hidden">
+              <button
+                type="button"
+                className="flex min-h-9 w-full items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-800 shadow-sm"
+                onClick={() => setMobileFilterOpen(true)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <SlidersHorizontalIcon className="size-4 shrink-0 text-slate-500" />
+                  <span className="shrink-0">{reviewStatusLabel}</span>
+                  <span className="min-w-0 truncate text-xs font-medium text-slate-500">{reviewKeyword.trim() ? reviewKeyword.trim() : "全部内容"}</span>
+                </span>
+                <SearchIcon className="size-4 shrink-0 text-slate-400" />
+              </button>
+            </div>
+            <div className="product-subsection mb-3 hidden gap-2 p-3 md:grid md:grid-cols-[160px_minmax(0,1fr)_auto]">
               <Select value={reviewStatus} onValueChange={(value) => {
                 setReviewStatus(value);
                 setReviewPage(1);
@@ -327,13 +359,11 @@ export function PostsPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pending_approval">待审核</SelectItem>
-                  <SelectItem value="approved">已通过</SelectItem>
-                  <SelectItem value="rejected">已拒绝</SelectItem>
-                  <SelectItem value="publishing">发布中</SelectItem>
-                  <SelectItem value="published">已发布</SelectItem>
-                  <SelectItem value="failed">发布失败</SelectItem>
-                  <SelectItem value="all">全部</SelectItem>
+                  {reviewStatusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <input
@@ -343,14 +373,12 @@ export function PostsPage({
                 onChange={(event) => setReviewKeyword(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
-                    setReviewPage(1);
-                    void refreshReviewPosts(1);
+                    applyReviewFilters();
                   }
                 }}
               />
               <Button variant="outline" className="h-10 font-bold" disabled={reviewLoading} onClick={() => {
-                setReviewPage(1);
-                void refreshReviewPosts(1);
+                applyReviewFilters();
               }}>
                 筛选
               </Button>
@@ -385,6 +413,70 @@ export function PostsPage({
             {preview.loading ? <p className="py-12 text-center text-sm font-bold text-slate-500">正在渲染...</p> : null}
             {preview.error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{preview.error}</p> : null}
             {preview.url ? <img src={preview.url} alt={preview.title} className="mx-auto w-full max-w-[560px] rounded-md border border-slate-200 bg-white" /> : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+        <DialogContent className="w-[min(420px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>筛选审核稿件</DialogTitle>
+            <DialogDescription>选择状态，或按内容和编号搜索。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 px-5 pb-5">
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              状态
+              <Select value={reviewStatus} onValueChange={(value) => {
+                setReviewStatus(value);
+                setReviewPage(1);
+              }}>
+                <SelectTrigger className="h-10 w-full bg-white font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {reviewStatusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              搜索
+              <input
+                value={reviewKeyword}
+                className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="按内容或编号搜索"
+                onChange={(event) => setReviewKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    setMobileFilterOpen(false);
+                    applyReviewFilters();
+                  }
+                }}
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setReviewStatus("pending_approval");
+                  setReviewKeyword("");
+                  setReviewPage(1);
+                }}
+              >
+                重置
+              </Button>
+              <Button
+                disabled={reviewLoading}
+                onClick={() => {
+                  setMobileFilterOpen(false);
+                  applyReviewFilters();
+                }}
+              >
+                应用筛选
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

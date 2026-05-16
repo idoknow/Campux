@@ -23,6 +23,7 @@ type TenantSettingsForm = {
   themeColor: string;
   brand: string;
   banner: string;
+  pendingPostLimit: number;
   postRulesText: string;
   servicesText: string;
 };
@@ -162,7 +163,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.postRules, metadata.services]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.pendingPostLimit, metadata.postRules, metadata.services]);
 
   useEffect(() => {
     void refreshAdminData().catch((caught) => {
@@ -297,6 +298,7 @@ export function AdminPage({
           themeColor: form.themeColor,
           brand: form.brand,
           banner: form.banner,
+          pendingPostLimit: form.pendingPostLimit,
           postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
           services: JSON.parse(form.servicesText) as TenantMetadata["services"],
         }),
@@ -1257,6 +1259,17 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             前台公告
             <Input value={form.banner} onChange={(event) => onFormChange({ ...form, banner: event.target.value })} />
+          </label>
+          <label className="grid gap-1 text-sm font-medium">
+            每个用户同时待审核上限
+            <Input
+              type="number"
+              min={0}
+              max={50}
+              value={form.pendingPostLimit}
+              onChange={(event) => onFormChange({ ...form, pendingPostLimit: Number(event.target.value) })}
+            />
+            <span className="text-xs font-normal text-slate-500">0 表示不限制，默认建议 1 条。</span>
           </label>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
@@ -2375,6 +2388,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     themeColor: selectedTenant.themeColor,
     brand: metadata.brand,
     banner: metadata.banner,
+    pendingPostLimit: metadata.pendingPostLimit,
     postRulesText: metadata.postRules.join("\n"),
     servicesText: JSON.stringify(metadata.services, null, 2),
   };

@@ -58,6 +58,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
     { key: "brand", value: tenant.name },
     { key: "banner", value: tenant.banner },
     { key: "post_rules", value: postRules },
+    { key: "pending_post_limit", value: 1 },
     { key: "services", value: services },
   ]) {
     await prisma.tenantMetadata.upsert({

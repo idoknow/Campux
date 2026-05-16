@@ -12,7 +12,7 @@ export type QZoneCookieHealthStatus = (typeof qzoneCookieHealthStatuses)[number]
 const visitorAmountUrl =
   "https://h5.qzone.qq.com/proxy/domain/g.qzone.qq.com/cgi-bin/friendshow/cgi_get_visitor_more?uin={uin}&mask=7&g_tk={gtk}&page=1&fupdate=1&clear=1";
 const invalidCookieNotifyCooldownMs = 30 * 60 * 1000;
-const invalidCookieNotifiedAt = new Map<string, number>();
+const invalidCookieNotifyFailureThreshold = 3;
 
 export async function checkQZoneCookieHealth(cookies: Record<string, string>, fallbackUin: string) {
   const pSkey = cookies.p_skey;
@@ -94,6 +94,8 @@ export async function checkAndUpdateQZoneSession(sessionId: string) {
       healthStatus: result.status,
       healthCheckedAt: new Date(),
       healthMessage: result.message,
+      healthFailureCount: result.status === "invalid" ? { increment: 1 } : 0,
+      ...(result.status === "available" ? { healthInvalidNotifiedAt: null } : {}),
     },
   });
 }
@@ -110,6 +112,8 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
       select: {
         id: true,
         healthStatus: true,
+        healthFailureCount: true,
+        healthInvalidNotifiedAt: true,
         botAccountId: true,
       },
     });
@@ -117,13 +121,18 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
     for (const session of sessions) {
       try {
         const updated = await checkAndUpdateQZoneSession(session.id);
-        if (updated?.healthStatus === "invalid" && shouldNotifyInvalidCookies(session.id, session.healthStatus)) {
+        if (updated?.healthStatus === "invalid" && shouldNotifyInvalidCookies(updated)) {
+          await prisma.botSession.update({
+            where: {
+              id: session.id,
+            },
+            data: {
+              healthInvalidNotifiedAt: new Date(),
+            },
+          });
           await notifier?.notifyQZoneCookiesInvalid(session.botAccountId, updated.healthMessage ?? "QZone cookies 检测失败").catch((error) => {
             logger.warn({ error, sessionId: session.id }, "failed to notify qzone cookies invalid");
           });
-        }
-        if (updated?.healthStatus === "available") {
-          invalidCookieNotifiedAt.delete(session.id);
         }
       } catch (error) {
         logger.warn({ error, sessionId: session.id }, "qzone cookie heartbeat failed");
@@ -138,14 +147,13 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
   return () => clearInterval(timer);
 }
 
-function shouldNotifyInvalidCookies(sessionId: string, previousStatus: string) {
-  const now = Date.now();
-  const lastNotifiedAt = invalidCookieNotifiedAt.get(sessionId);
-  if (previousStatus !== "invalid" || !lastNotifiedAt || now - lastNotifiedAt >= invalidCookieNotifyCooldownMs) {
-    invalidCookieNotifiedAt.set(sessionId, now);
-    return true;
+function shouldNotifyInvalidCookies(session: { healthFailureCount: number; healthInvalidNotifiedAt: Date | null }) {
+  if (session.healthFailureCount < invalidCookieNotifyFailureThreshold) {
+    return false;
   }
-  return false;
+
+  const lastNotifiedAt = session.healthInvalidNotifiedAt?.getTime();
+  return !lastNotifiedAt || Date.now() - lastNotifiedAt >= invalidCookieNotifyCooldownMs;
 }
 
 export function generateGtk(skey: string) {

@@ -129,6 +129,8 @@ export async function pollQZoneQrLogin(taskId: string) {
       healthStatus: "unchecked",
       healthCheckedAt: null,
       healthMessage: "cookies 已刷新，等待可用性检测",
+      healthFailureCount: 0,
+      healthInvalidNotifiedAt: null,
     },
     create: {
       botAccountId: task.botAccountId,
