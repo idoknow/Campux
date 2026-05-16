@@ -13,11 +13,12 @@ import {
   PlusIcon,
   SearchIcon,
   ShieldPlusIcon,
+  Trash2Icon,
   UsersRoundIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
+import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,9 +53,11 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
 ];
 
 type OpsTab = "users" | "audit";
-type SystemUserRoleFilter = TenantRole | "system_operator";
+type OpsPanelMode = "system" | "operations";
+type SystemUserRoleFilter = TenantRole | SystemRole;
 
 const userRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }> = [
+  { value: "operations_admin", label: "运营管理员" },
   { value: "system_operator", label: "系统运维" },
   { value: "admin", label: "管理员" },
   { value: "reviewer", label: "审核员" },
@@ -70,10 +73,12 @@ function defaultPagination(): Pagination {
   };
 }
 
-export function OpsPanel() {
+export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
+  const isSystemMode = mode === "system";
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
+  const [operationsAdmins, setOperationsAdmins] = useState<SystemUser[]>([]);
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
   const [userKeyword, setUserKeyword] = useState("");
@@ -87,10 +92,13 @@ export function OpsPanel() {
   const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>("users");
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingOperationsAdmins, setLoadingOperationsAdmins] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [assigningMembership, setAssigningMembership] = useState(false);
+  const [accessBusyKey, setAccessBusyKey] = useState("");
+  const [grantTenantByUserId, setGrantTenantByUserId] = useState<Record<string, string>>({});
   const [membershipDialogUser, setMembershipDialogUser] = useState<SystemUser | null>(null);
-  const [membershipForm, setMembershipForm] = useState<{ tenantId: string; role: TenantRole | "system_operator" }>({ tenantId: "", role: "submitter" });
+  const [membershipForm, setMembershipForm] = useState<{ tenantId: string; role: TenantRole | SystemRole }>({ tenantId: "", role: "submitter" });
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
   const [savingHost, setSavingHost] = useState(false);
@@ -106,6 +114,11 @@ export function OpsPanel() {
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0],
     [selectedTenantId, tenants],
+  );
+
+  const availableRoleFilters = useMemo(
+    () => (isSystemMode ? userRoleFilters : userRoleFilters.filter((filter) => filter.value !== "system_operator" && filter.value !== "operations_admin")),
+    [isSystemMode],
   );
 
   const summary = useMemo(
@@ -159,6 +172,21 @@ export function OpsPanel() {
     }
   }
 
+  async function refreshOperationsAdmins() {
+    if (!isSystemMode) {
+      setOperationsAdmins([]);
+      return;
+    }
+
+    setLoadingOperationsAdmins(true);
+    try {
+      const data = await api<{ users: SystemUser[] }>("/api/system/users?roles=operations_admin&page=1&limit=50");
+      setOperationsAdmins(data.users);
+    } finally {
+      setLoadingOperationsAdmins(false);
+    }
+  }
+
   async function refreshAudit(page = auditPage) {
     setLoadingAudit(true);
     try {
@@ -172,7 +200,7 @@ export function OpsPanel() {
   }
 
   async function refreshAll() {
-    await Promise.all([refreshOverview(), refreshUsers(userPage), refreshAudit(auditPage)]);
+    await Promise.all([refreshOverview(), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(auditPage)]);
   }
 
   useEffect(() => {
@@ -236,7 +264,7 @@ export function OpsPanel() {
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
       setTenantForm({ name: "", slug: "", host: "", themeColor: "#111827", botQqUin: "" });
       toast.success("新校园墙已创建。");
-      await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshAudit(1)]);
+      await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建租户失败");
     } finally {
@@ -279,13 +307,14 @@ export function OpsPanel() {
   }
 
   function openMembershipDialog(user: SystemUser) {
-    const firstTenant = tenants.find((tenant) => tenant.status === "active") ?? tenants[0];
+    const preferredTenant = selectedTenant ?? tenants.find((tenant) => tenant.status === "active") ?? tenants[0];
     setMembershipDialogUser(user);
-    setMembershipForm({ tenantId: firstTenant?.id ?? "", role: "submitter" });
+    setMembershipForm({ tenantId: preferredTenant?.id ?? "", role: "submitter" });
   }
 
   async function assignMembership() {
-    if (!membershipDialogUser || (membershipForm.role !== "system_operator" && !membershipForm.tenantId)) {
+    const assigningGlobalRole = membershipForm.role === "system_operator" || membershipForm.role === "operations_admin";
+    if (!membershipDialogUser || (!assigningGlobalRole && !membershipForm.tenantId)) {
       return;
     }
 
@@ -295,16 +324,58 @@ export function OpsPanel() {
         method: "POST",
         body: JSON.stringify({
           role: membershipForm.role,
-          ...(membershipForm.role === "system_operator" ? {} : { tenantId: membershipForm.tenantId }),
+          ...(assigningGlobalRole ? {} : { tenantId: membershipForm.tenantId }),
         }),
       });
-      toast.success(membershipForm.role === "system_operator" ? "系统运维身份已添加。" : "用户身份已更新。");
+      toast.success(assigningGlobalRole ? "平台身份已添加。" : "用户身份已更新。");
       setMembershipDialogUser(null);
-      await Promise.all([refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
+      await Promise.all([refreshUsers(userPage), refreshOperationsAdmins(), refreshOverview(selectedTenantId), refreshAudit(1)]);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "添加身份失败");
     } finally {
       setAssigningMembership(false);
+    }
+  }
+
+  async function grantOperationsAdminTenant(user: SystemUser) {
+    const tenantId = grantTenantByUserId[user.id];
+    if (!tenantId) {
+      return;
+    }
+
+    const busyKey = `grant:${user.id}:${tenantId}`;
+    setAccessBusyKey(busyKey);
+    try {
+      await api(`/api/system/users/${user.id}/memberships`, {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId,
+          role: "admin",
+        }),
+      });
+      setGrantTenantByUserId((current) => ({ ...current, [user.id]: "" }));
+      toast.success("运营资源访问权已更新。");
+      await Promise.all([refreshOperationsAdmins(), refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "授权失败");
+    } finally {
+      setAccessBusyKey("");
+    }
+  }
+
+  async function revokeOperationsAdminTenant(user: SystemUser, membershipId: string, tenantName: string) {
+    const busyKey = `revoke:${membershipId}`;
+    setAccessBusyKey(busyKey);
+    try {
+      await api(`/api/system/users/${user.id}/memberships/${membershipId}`, {
+        method: "DELETE",
+      });
+      toast.success(`已移除 ${tenantName} 的访问权。`);
+      await Promise.all([refreshOperationsAdmins(), refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "移除访问权失败");
+    } finally {
+      setAccessBusyKey("");
     }
   }
 
@@ -323,11 +394,24 @@ export function OpsPanel() {
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <MetricCard title="全局用户" value={usersPagination.total} icon={UsersRoundIcon} accent="blue" />
+        <MetricCard title={isSystemMode ? "全局用户" : "可管理用户"} value={usersPagination.total} icon={UsersRoundIcon} accent="blue" />
         <MetricCard title="Bot 账号" value={summary.bots} icon={BotIcon} accent="violet" />
         <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} accent="amber" />
         <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
       </div>
+
+      {isSystemMode ? (
+        <OperationsAdminAccessPanel
+          users={operationsAdmins}
+          tenants={tenants}
+          loading={loadingOperationsAdmins}
+          busyKey={accessBusyKey}
+          grantTenantByUserId={grantTenantByUserId}
+          onGrantTenantChange={(userId, tenantId) => setGrantTenantByUserId((current) => ({ ...current, [userId]: tenantId }))}
+          onGrant={grantOperationsAdminTenant}
+          onRevoke={revokeOperationsAdminTenant}
+        />
+      ) : null}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         <Card className="rounded-md">
@@ -335,14 +419,14 @@ export function OpsPanel() {
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
                 <Building2Icon className="size-4" />
-                租户生命周期
+                {isSystemMode ? "租户生命周期" : "我的校园墙"}
               </div>
               {loadingOverview ? <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
             </div>
             <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <PlusIcon className="size-4" />
-                添加租户
+                添加校园墙
               </div>
               <div className="grid gap-2">
                 <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
@@ -456,7 +540,7 @@ export function OpsPanel() {
               </div>
 
               <p className="mt-4 text-sm text-slate-500">
-                校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护；专属 host 由系统运维统一管理。
+                校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护；专属 host 在这里维护。
               </p>
             </CardContent>
           </Card>
@@ -474,7 +558,7 @@ export function OpsPanel() {
               <TabsList className="h-10">
                 <TabsTrigger value="users" className="h-8 px-3">
                   <UsersRoundIcon className="size-4" />
-                  全局用户
+                  {isSystemMode ? "全局用户" : "墙内用户"}
                 </TabsTrigger>
                 <TabsTrigger value="audit" className="h-8 px-3">
                   <ClipboardListIcon className="size-4" />
@@ -498,6 +582,8 @@ export function OpsPanel() {
                 pagination={usersPagination}
                 keyword={userKeywordDraft}
                 selectedRoleFilters={selectedUserRoleFilters}
+                availableRoleFilters={availableRoleFilters}
+                mode={mode}
                 selectedTenantFilterId={userTenantFilterId}
                 tenants={tenants}
                 onKeywordChange={setUserKeywordDraft}
@@ -533,14 +619,16 @@ export function OpsPanel() {
           <DialogHeader>
             <DialogTitle>添加租户身份</DialogTitle>
             <DialogDescription>
-              给 {membershipDialogUser?.displayName ?? membershipDialogUser?.qqUin ?? "用户"} 添加系统运维身份，或添加/更新某个校园墙内的身份。
+              {isSystemMode
+                ? `给 ${membershipDialogUser?.displayName ?? membershipDialogUser?.qqUin ?? "用户"} 添加平台身份，或添加/更新某个校园墙内的身份。`
+                : `给 ${membershipDialogUser?.displayName ?? membershipDialogUser?.qqUin ?? "用户"} 添加/更新你负责校园墙内的身份。`}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 px-5">
             <label className="text-sm font-semibold text-slate-700">
               校园墙
               <Select value={membershipForm.tenantId} onValueChange={(tenantId) => setMembershipForm({ ...membershipForm, tenantId })}>
-                <SelectTrigger className="mt-1 w-full bg-white" disabled={membershipForm.role === "system_operator"}>
+                <SelectTrigger className="mt-1 w-full bg-white" disabled={membershipForm.role === "system_operator" || membershipForm.role === "operations_admin"}>
                   <SelectValue placeholder="选择校园墙" />
                 </SelectTrigger>
                 <SelectContent>
@@ -554,12 +642,17 @@ export function OpsPanel() {
             </label>
             <label className="text-sm font-semibold text-slate-700">
               身份
-              <Select value={membershipForm.role} onValueChange={(role) => setMembershipForm({ ...membershipForm, role: role as TenantRole | "system_operator" })}>
+              <Select value={membershipForm.role} onValueChange={(role) => setMembershipForm({ ...membershipForm, role: role as TenantRole | SystemRole })}>
                 <SelectTrigger className="mt-1 w-full bg-white">
                   <SelectValue placeholder="选择身份" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="system_operator">系统运维（全局）</SelectItem>
+                  {isSystemMode ? (
+                    <>
+                      <SelectItem value="operations_admin">运营管理员（平台）</SelectItem>
+                      <SelectItem value="system_operator">系统运维（全局）</SelectItem>
+                    </>
+                  ) : null}
                   <SelectItem value="submitter">用户</SelectItem>
                   <SelectItem value="reviewer">审核员</SelectItem>
                   <SelectItem value="admin">管理员</SelectItem>
@@ -567,14 +660,20 @@ export function OpsPanel() {
               </Select>
             </label>
             <p className="rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-              系统运维是全局身份，不需要选择校园墙；租户身份如果已存在，保存后会直接更新。
+              {isSystemMode ? "平台身份不需要选择校园墙；租户身份如果已存在，保存后会直接更新。" : "运营管理员只能调整自己负责校园墙内的用户身份。"}
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={assigningMembership} onClick={() => setMembershipDialogUser(null)}>
               取消
             </Button>
-            <Button disabled={assigningMembership || (membershipForm.role !== "system_operator" && !membershipForm.tenantId)} onClick={() => void assignMembership()}>
+            <Button
+              disabled={
+                assigningMembership ||
+                ((membershipForm.role !== "system_operator" && membershipForm.role !== "operations_admin") && !membershipForm.tenantId)
+              }
+              onClick={() => void assignMembership()}
+            >
               <ShieldPlusIcon data-icon="inline-start" />
               保存身份
             </Button>
@@ -616,12 +715,117 @@ function TenantBotCard({ bot }: { bot: SystemTenant["bots"][number] }) {
   );
 }
 
+function OperationsAdminAccessPanel({
+  users,
+  tenants,
+  loading,
+  busyKey,
+  grantTenantByUserId,
+  onGrantTenantChange,
+  onGrant,
+  onRevoke,
+}: {
+  users: SystemUser[];
+  tenants: SystemTenant[];
+  loading: boolean;
+  busyKey: string;
+  grantTenantByUserId: Record<string, string>;
+  onGrantTenantChange: (userId: string, tenantId: string) => void;
+  onGrant: (user: SystemUser) => void;
+  onRevoke: (user: SystemUser, membershipId: string, tenantName: string) => void;
+}) {
+  return (
+    <Card className="mt-4 rounded-md">
+      <CardContent className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 font-bold text-slate-900">
+            <ShieldPlusIcon className="size-4" />
+            运营管理员资源
+          </div>
+          {loading ? <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          系统运维在这里查看运营管理员身份，并配置他们可以管理哪些校园墙资源。
+        </p>
+        <div className="mt-4 grid gap-3">
+          {users.map((user) => {
+            const adminMemberships = user.memberships.filter((membership) => membership.role === "admin");
+            const assignedTenantIds = new Set(adminMemberships.map((membership) => membership.tenant.id));
+            const availableTenants = tenants.filter((tenant) => !assignedTenantIds.has(tenant.id));
+            const grantTenantId = grantTenantByUserId[user.id] ?? "";
+
+            return (
+              <div key={user.id} className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-slate-950">{user.displayName ?? "未设置昵称"}</p>
+                      <Badge variant="secondary">运营管理员</Badge>
+                    </div>
+                    <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {user.qqUin}</p>
+                  </div>
+                  <div className="flex min-w-[260px] flex-1 flex-col gap-2 sm:max-w-md sm:flex-row">
+                    <Select value={grantTenantId} onValueChange={(tenantId) => onGrantTenantChange(user.id, tenantId)}>
+                      <SelectTrigger className="h-9 bg-white">
+                        <SelectValue placeholder={availableTenants.length > 0 ? "选择要授权的校园墙" : "已拥有全部校园墙"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableTenants.map((tenant) => (
+                          <SelectItem key={tenant.id} value={tenant.id}>
+                            {tenant.name} · {statusLabels[tenant.status]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      className="shrink-0"
+                      disabled={!grantTenantId || busyKey === `grant:${user.id}:${grantTenantId}`}
+                      onClick={() => onGrant(user)}
+                    >
+                      授权资源
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {adminMemberships.length > 0 ? (
+                    adminMemberships.map((membership) => (
+                      <span key={membership.id} className="inline-flex items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800">
+                        {membership.tenant.name}
+                        <button
+                          type="button"
+                          className="ml-1 inline-flex size-5 items-center justify-center rounded hover:bg-blue-100 disabled:opacity-50"
+                          disabled={busyKey === `revoke:${membership.id}`}
+                          onClick={() => onRevoke(user, membership.id, membership.tenant.name)}
+                          aria-label={`移除 ${membership.tenant.name} 访问权`}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </button>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs font-semibold text-slate-500">暂未授权任何校园墙资源。</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {users.length === 0 && !loading ? <p className="mt-4 text-sm font-semibold text-slate-500">当前没有运营管理员。</p> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function GlobalUsersTable({
   users,
   loading,
   pagination,
   keyword,
   selectedRoleFilters,
+  availableRoleFilters,
+  mode,
   selectedTenantFilterId,
   tenants,
   onKeywordChange,
@@ -638,6 +842,8 @@ function GlobalUsersTable({
   pagination: Pagination;
   keyword: string;
   selectedRoleFilters: SystemUserRoleFilter[];
+  availableRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }>;
+  mode: OpsPanelMode;
   selectedTenantFilterId: string;
   tenants: SystemTenant[];
   onKeywordChange: (keyword: string) => void;
@@ -650,7 +856,7 @@ function GlobalUsersTable({
   onToggleRoleFilter: (role: SystemUserRoleFilter) => void;
 }) {
   if (loading && users.length === 0) {
-    return <InlineLoading title="正在加载全局用户..." />;
+    return <InlineLoading title={mode === "system" ? "正在加载全局用户..." : "正在加载墙内用户..."} />;
   }
 
   return (
@@ -698,7 +904,7 @@ function GlobalUsersTable({
               <SelectValue placeholder="选择校园墙" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部用户</SelectItem>
+              <SelectItem value="all">{mode === "system" ? "全部用户" : "全部可管理用户"}</SelectItem>
               {tenants.map((tenant) => (
                 <SelectItem key={tenant.id} value={tenant.id}>
                   {tenant.name}
@@ -707,18 +913,24 @@ function GlobalUsersTable({
             </SelectContent>
           </Select>
           <span className="text-xs font-semibold text-slate-500">
-            {selectedTenantFilterId ? "筛选该校园墙内的具体身份，也可叠加系统运维" : "可直接筛选系统运维；选择校园墙后可筛选租户身份"}
+            {mode === "system"
+              ? selectedTenantFilterId
+                ? "筛选该校园墙内的具体身份，也可叠加平台身份"
+                : "可直接筛选平台身份；选择校园墙后可筛选租户身份"
+              : selectedTenantFilterId
+                ? "筛选该校园墙内的具体身份"
+                : "筛选你可管理校园墙内的具体身份"}
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {userRoleFilters.map((filter) => {
+          {availableRoleFilters.map((filter) => {
             const active = selectedRoleFilters.includes(filter.value);
             return (
               <Button
                 key={filter.value}
                 type="button"
                 variant={active ? "secondary" : "outline"}
-                disabled={!selectedTenantFilterId && filter.value !== "system_operator"}
+                disabled={mode === "system" && !selectedTenantFilterId && filter.value !== "system_operator" && filter.value !== "operations_admin"}
                 size="sm"
                 className={active ? "h-8 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50" : "h-8 bg-white"}
                 onClick={() => onToggleRoleFilter(filter.value)}
@@ -742,6 +954,7 @@ function GlobalUsersTable({
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap gap-1.5">
+                {user.systemRole === "operations_admin" ? <Badge variant="secondary">运营管理员</Badge> : null}
                 {user.systemRole === "system_operator" ? <Badge variant="secondary">系统运维</Badge> : null}
                 {user.isTestAccount ? <Badge variant="outline">测试账号</Badge> : null}
                 {user.memberships.length === 0 ? <Badge variant="outline">未加入租户</Badge> : null}

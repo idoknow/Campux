@@ -12,12 +12,15 @@ export function OpsStandaloneScreen({
   onBackToTenants?: () => void;
   onLogout: () => void;
 }) {
+  const mode = me.user.systemRole === "system_operator" ? "system" : "operations";
+  const title = mode === "system" ? "系统运维" : "运营管理";
+
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background">
       <header className="shrink-0 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
         <div className="min-w-0">
           <h1 className="inline-block pr-2 text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
-          <span className="align-baseline text-sm text-slate-600">系统运维</span>
+          <span className="align-baseline text-sm text-slate-600">{title}</span>
           <p className="mt-1 truncate text-xs text-slate-500">{me.user.displayName ?? me.user.qqUin}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -34,7 +37,7 @@ export function OpsStandaloneScreen({
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mx-auto max-w-6xl">
-        <OpsPanel />
+          <OpsPanel mode={mode} />
         </div>
       </div>
     </main>

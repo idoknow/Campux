@@ -251,7 +251,7 @@ export function App() {
       return;
     }
 
-    if (route.kind === "ops" && me.user.systemRole !== "system_operator") {
+    if (route.kind === "ops" && !canOpenOps(me)) {
       navigate(me.needsTenantSelection || !me.currentTenant ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
       return;
     }
@@ -267,8 +267,8 @@ export function App() {
   }, [me, route.kind, route.kind === "tenant" ? route.tab : undefined, route.kind === "tenant" ? route.subTab : undefined]);
 
   useEffect(() => {
-    document.title = buildDocumentTitle(route, documentTenantName);
-  }, [route, documentTenantName]);
+    document.title = buildDocumentTitle(route, documentTenantName, me?.authenticated ? me.user.systemRole : null);
+  }, [route, documentTenantName, me]);
 
   async function login(qqUin: string, password: string) {
     setError("");
@@ -403,14 +403,14 @@ export function App() {
   }
 
   if (route.kind === "tenants") {
-    if (me.user.systemRole === "system_operator") {
+    if (canOpenOps(me)) {
       return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onOpenOps={() => navigate({ kind: "ops" })} onLogout={logout} />;
     }
 
     return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onLogout={logout} />;
   }
 
-  if (me.user.systemRole === "system_operator" && (route.kind === "ops" || me.memberships.length === 0)) {
+  if (canOpenOps(me) && (route.kind === "ops" || me.memberships.length === 0)) {
     if (me.memberships.length > 0) {
       return <OpsStandaloneScreen me={me} onBackToTenants={() => navigate({ kind: "tenants" })} onLogout={logout} />;
     }
@@ -419,7 +419,7 @@ export function App() {
   }
 
   if (me.needsTenantSelection || !me.currentTenant || !me.currentMembership) {
-    if (me.user.systemRole === "system_operator") {
+    if (canOpenOps(me)) {
       return <TenantSelectionScreen me={me} onSelectTenant={selectTenant} onOpenOps={() => navigate({ kind: "ops" })} onLogout={logout} />;
     }
 
@@ -464,7 +464,7 @@ export function App() {
       onAnonymousChange={setAnonymous}
       onFilesSelected={uploadFiles}
       onLogout={logout}
-      onOpenOps={me.user.systemRole === "system_operator" ? () => navigate({ kind: "ops" }) : undefined}
+      onOpenOps={canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}
       onSelectTenant={selectTenant}
       onPostTextChange={setPostText}
       onPostsTabChange={setPostsSubTab}
@@ -484,6 +484,10 @@ function defaultPagination(): Pagination {
     total: 0,
     pageCount: 1,
   };
+}
+
+function canOpenOps(me: AuthenticatedMe) {
+  return me.user.systemRole === "system_operator" || me.user.systemRole === "operations_admin";
 }
 
 function routeFromPath(pathname: string): AppRoute {
@@ -552,13 +556,13 @@ function getUploadFileName(file: File) {
   return `pasted-image.${extension}`;
 }
 
-function buildDocumentTitle(route: AppRoute, tenantName?: string) {
-  const pageTitle = pageTitleFromRoute(route);
+function buildDocumentTitle(route: AppRoute, tenantName?: string, systemRole?: AuthenticatedMe["user"]["systemRole"] | null) {
+  const pageTitle = pageTitleFromRoute(route, systemRole);
   const titleParts = route.kind === "tenant" ? [pageTitle, tenantName, "Campux"] : [pageTitle, "Campux"];
   return titleParts.filter(Boolean).join(" - ");
 }
 
-function pageTitleFromRoute(route: AppRoute) {
+function pageTitleFromRoute(route: AppRoute, systemRole?: AuthenticatedMe["user"]["systemRole"] | null) {
   if (route.kind === "login") {
     return "登录";
   }
@@ -566,7 +570,7 @@ function pageTitleFromRoute(route: AppRoute) {
     return "选择校园墙";
   }
   if (route.kind === "ops") {
-    return "运维面板";
+    return systemRole === "operations_admin" ? "运营管理" : "运维面板";
   }
   if (route.kind === "oauth") {
     return "OAuth 授权";

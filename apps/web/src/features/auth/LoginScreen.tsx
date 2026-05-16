@@ -51,7 +51,7 @@ export function LoginScreen({
             <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
               <summary className="cursor-pointer font-medium text-slate-600">开发测试账号</summary>
               <p className="mt-2">密码均为 `campux123`。</p>
-              <p>10000 用户，20000 审核员，30000 多墙管理员，40000 系统运维。</p>
+              <p>10000 用户，20000 审核员，30000 多墙管理员，40000 系统运维，50000 运营管理员。</p>
             </details>
           ) : null}
         </form>
