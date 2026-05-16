@@ -15,6 +15,8 @@ const configSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().default("campux"),
   S3_SECRET_ACCESS_KEY: z.string().default("campux-secret"),
   S3_PUBLIC_BASE_URL: z.string().default("http://localhost:9000/campux-next"),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().default("Campux <noreply@campux.top>"),
 });
 
 export type CampuxConfig = ReturnType<typeof loadConfig>;
@@ -72,6 +74,10 @@ export function loadConfig() {
       accessKeyId: env.S3_ACCESS_KEY_ID,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
       publicBaseUrl: env.S3_PUBLIC_BASE_URL,
+    },
+    resend: {
+      apiKey: env.RESEND_API_KEY,
+      fromEmail: env.RESEND_FROM_EMAIL,
     },
   };
 }

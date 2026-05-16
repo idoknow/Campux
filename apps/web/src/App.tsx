@@ -63,6 +63,7 @@ const adminTabTitles: Record<AdminTab, string> = {
 export function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [authContext, setAuthContext] = useState<{ managementHost: boolean }>({ managementHost: false });
   const [route, setRoute] = useState<AppRoute>(() => routeFromPath(window.location.pathname));
   const [activeTab, setActiveTabState] = useState<MainTab>(() => {
     const initialRoute = routeFromPath(window.location.pathname);
@@ -178,6 +179,10 @@ export function App() {
         const [meData, tenantData] = await Promise.all([
           api<MeResponse>("/api/me"),
           api<{ tenants: TenantSummary[] }>("/api/tenants"),
+          api<{ managementHost: boolean }>("/api/auth/context").then((data) => {
+            if (!ignore) setAuthContext(data);
+            return data;
+          }),
         ]);
         if (!ignore) {
           setMe(meData);
@@ -270,11 +275,11 @@ export function App() {
     document.title = buildDocumentTitle(route, documentTenantName, me?.authenticated ? me.user.systemRole : null);
   }, [route, documentTenantName, me]);
 
-  async function login(qqUin: string, password: string) {
+  async function login(account: string, password: string) {
     setError("");
     const data = await api<MeResponse>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ qqUin, password }),
+      body: JSON.stringify({ account, password }),
     });
     setMe(data);
     if (data.authenticated) {
@@ -286,6 +291,14 @@ export function App() {
         return;
       }
       navigate(data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab });
+    }
+  }
+
+  function completeRegistration(data: MeResponse) {
+    setMe(data);
+    setError("");
+    if (data.authenticated) {
+      navigate(canOpenOps(data) ? { kind: "ops" } : data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
     }
   }
 
@@ -391,7 +404,7 @@ export function App() {
   }
 
   if (!me.authenticated) {
-    return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} onLogin={login} />;
+    return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} managementHost={authContext.managementHost} onLogin={login} onRegistered={completeRegistration} />;
   }
 
   if (me.user.passwordChangeRequired) {

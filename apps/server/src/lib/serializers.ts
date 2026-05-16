@@ -20,10 +20,11 @@ export function toTenantSummary(
   };
 }
 
-export function toPublicUser(user: Pick<User, "id" | "qqUin" | "displayName" | "systemRole" | "passwordChangeRequired">) {
+export function toPublicUser(user: Pick<User, "id" | "qqUin" | "email" | "displayName" | "systemRole" | "passwordChangeRequired">) {
   return {
     id: user.id,
     qqUin: user.qqUin.toString(),
+    email: user.email,
     displayName: user.displayName,
     systemRole: user.systemRole,
     passwordChangeRequired: user.passwordChangeRequired,

@@ -8,6 +8,7 @@ import {
   ClipboardListIcon,
   ClockIcon,
   FilterIcon,
+  Globe2Icon,
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
@@ -91,6 +92,7 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
   const [auditPage, setAuditPage] = useState(1);
   const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>("users");
   const [loadingOverview, setLoadingOverview] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingOperationsAdmins, setLoadingOperationsAdmins] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
@@ -102,7 +104,9 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
   const [savingHost, setSavingHost] = useState(false);
+  const [savingManagementHost, setSavingManagementHost] = useState(false);
   const [hostDraft, setHostDraft] = useState("");
+  const [managementHostDraft, setManagementHostDraft] = useState("");
   const [tenantForm, setTenantForm] = useState({
     name: "",
     slug: "",
@@ -144,6 +148,21 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
       setSelectedTenantId(nextTenant?.id ?? "");
     } finally {
       setLoadingOverview(false);
+    }
+  }
+
+  async function refreshSettings() {
+    if (!isSystemMode) {
+      setManagementHostDraft("");
+      return;
+    }
+
+    setLoadingSettings(true);
+    try {
+      const data = await api<{ managementHost: string | null }>("/api/system/settings");
+      setManagementHostDraft(data.managementHost ?? "");
+    } finally {
+      setLoadingSettings(false);
     }
   }
 
@@ -200,7 +219,7 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
   }
 
   async function refreshAll() {
-    await Promise.all([refreshOverview(), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(auditPage)]);
+    await Promise.all([refreshOverview(), refreshSettings(), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(auditPage)]);
   }
 
   useEffect(() => {
@@ -292,6 +311,23 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
       toast.error(caught instanceof Error ? caught.message : "host 更新失败");
     } finally {
       setSavingHost(false);
+    }
+  }
+
+  async function saveManagementHost() {
+    setSavingManagementHost(true);
+    try {
+      const data = await api<{ managementHost: string | null }>("/api/system/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ managementHost: managementHostDraft.trim() || null }),
+      });
+      setManagementHostDraft(data.managementHost ?? "");
+      toast.success(data.managementHost ? "管理端 host 已更新。" : "管理端 host 已清空。");
+      await refreshAudit(1);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "管理端 host 更新失败");
+    } finally {
+      setSavingManagementHost(false);
     }
   }
 
@@ -405,16 +441,36 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
       </div>
 
       {isSystemMode ? (
-        <OperationsAdminAccessPanel
-          users={operationsAdmins}
-          tenants={tenants}
-          loading={loadingOperationsAdmins}
-          busyKey={accessBusyKey}
-          grantTenantByUserId={grantTenantByUserId}
-          onGrantTenantChange={(userId, tenantId) => setGrantTenantByUserId((current) => ({ ...current, [userId]: tenantId }))}
-          onGrant={grantOperationsAdminTenant}
-          onRevoke={revokeOperationsAdminTenant}
-        />
+        <>
+          <Card className="mt-4 rounded-md">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 font-bold">
+                <Globe2Icon className="size-4" />
+                管理端 host
+                {loadingSettings ? <span className="ml-auto size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                用户从这个域名访问时，登录页会开放邮箱注册入口。注册成功后自动获得运营管理员身份。
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <Input placeholder="app.campux.top 或 localhost:5180" value={managementHostDraft} onChange={(event) => setManagementHostDraft(event.target.value)} />
+                <Button className="shrink-0 font-medium" disabled={savingManagementHost} onClick={() => void saveManagementHost()}>
+                  保存 host
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          <OperationsAdminAccessPanel
+            users={operationsAdmins}
+            tenants={tenants}
+            loading={loadingOperationsAdmins}
+            busyKey={accessBusyKey}
+            grantTenantByUserId={grantTenantByUserId}
+            onGrantTenantChange={(userId, tenantId) => setGrantTenantByUserId((current) => ({ ...current, [userId]: tenantId }))}
+            onGrant={grantOperationsAdminTenant}
+            onRevoke={revokeOperationsAdminTenant}
+          />
+        </>
       ) : null}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -774,6 +830,7 @@ function OperationsAdminAccessPanel({
                       <Badge variant="secondary">运营管理员</Badge>
                     </div>
                     <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {user.qqUin}</p>
+                    {user.email ? <p className="mt-0.5 text-xs font-bold text-slate-500">{user.email}</p> : null}
                   </div>
                   <div className="flex min-w-[260px] flex-1 flex-col gap-2 sm:max-w-md sm:flex-row">
                     <Select value={grantTenantId} onValueChange={(tenantId) => onGrantTenantChange(user.id, tenantId)}>
@@ -961,6 +1018,7 @@ function GlobalUsersTable({
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-950">{user.displayName ?? "未设置昵称"}</p>
                 <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {user.qqUin}</p>
+                {user.email ? <p className="mt-0.5 truncate text-xs font-bold text-slate-500">{user.email}</p> : null}
               </div>
             </div>
             <div className="min-w-0">
