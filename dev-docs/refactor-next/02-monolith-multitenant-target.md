@@ -132,6 +132,8 @@ erDiagram
 
 现有 `user` 可以映射为 `submitter`，现有 `member` 可以映射为 `reviewer`，现有 `admin` 在单墙部署里可以先映射为租户内 `admin`。只有负责整个实例运维的人才应有账户级 `system_operator`；需要在官方服务里自助创建和管理校园墙的运营方使用 `operations_admin`。
 
+`system_operator` 是最高平台身份，已经包含平台运营能力。给系统运维账户授予 `operations_admin` 时必须保持原有 `system_operator`，不能把账户降级覆盖成运营管理员。
+
 租户内 `admin` 不是跨租户管理员。它只能读写自己所属校园墙下的数据。`operations_admin` 可以进入独立运营面板，但服务端必须按其租户管理员 membership 收窄可见范围。`system_operator` 才能跨校园墙查看系统级信息，但系统运维面板不应该承载租户自身展示配置的日常维护。
 
 权限边界要按信息归属划分：

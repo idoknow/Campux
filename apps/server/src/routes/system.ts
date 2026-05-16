@@ -470,6 +470,13 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       if (!isSystemOperator(context)) {
         return reply.code(403).send({ message: "只有系统运维可以授予平台级身份" });
       }
+      if (body.role === "operations_admin" && user.systemRole === "system_operator") {
+        return {
+          ok: true,
+          systemRole: user.systemRole,
+          retainedHigherRole: true,
+        };
+      }
       await prisma.user.update({
         where: { id: user.id },
         data: { systemRole: body.role },

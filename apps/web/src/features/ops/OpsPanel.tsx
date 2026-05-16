@@ -320,14 +320,18 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
 
     setAssigningMembership(true);
     try {
-      await api(`/api/system/users/${membershipDialogUser.id}/memberships`, {
+      const result = await api<{ ok: true; retainedHigherRole?: boolean }>(`/api/system/users/${membershipDialogUser.id}/memberships`, {
         method: "POST",
         body: JSON.stringify({
           role: membershipForm.role,
           ...(assigningGlobalRole ? {} : { tenantId: membershipForm.tenantId }),
         }),
       });
-      toast.success(assigningGlobalRole ? "平台身份已添加。" : "用户身份已更新。");
+      if (result.retainedHigherRole) {
+        toast.info("系统运维已经是最高平台身份，不会降级为运营管理员。");
+      } else {
+        toast.success(assigningGlobalRole ? "平台身份已添加。" : "用户身份已更新。");
+      }
       setMembershipDialogUser(null);
       await Promise.all([refreshUsers(userPage), refreshOperationsAdmins(), refreshOverview(selectedTenantId), refreshAudit(1)]);
     } catch (caught) {
@@ -649,7 +653,9 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
                 <SelectContent>
                   {isSystemMode ? (
                     <>
-                      <SelectItem value="operations_admin">运营管理员（平台）</SelectItem>
+                      <SelectItem value="operations_admin" disabled={membershipDialogUser?.systemRole === "system_operator"}>
+                        运营管理员（平台）
+                      </SelectItem>
                       <SelectItem value="system_operator">系统运维（全局）</SelectItem>
                     </>
                   ) : null}
@@ -660,7 +666,11 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
               </Select>
             </label>
             <p className="rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-              {isSystemMode ? "平台身份不需要选择校园墙；租户身份如果已存在，保存后会直接更新。" : "运营管理员只能调整自己负责校园墙内的用户身份。"}
+              {membershipDialogUser?.systemRole === "system_operator"
+                ? "系统运维已经拥有最高平台权限，不会被运营管理员身份覆盖。"
+                : isSystemMode
+                  ? "平台身份不需要选择校园墙；租户身份如果已存在，保存后会直接更新。"
+                  : "运营管理员只能调整自己负责校园墙内的用户身份。"}
             </p>
           </div>
           <DialogFooter>
@@ -670,6 +680,7 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
             <Button
               disabled={
                 assigningMembership ||
+                (membershipForm.role === "operations_admin" && membershipDialogUser?.systemRole === "system_operator") ||
                 ((membershipForm.role !== "system_operator" && membershipForm.role !== "operations_admin") && !membershipForm.tenantId)
               }
               onClick={() => void assignMembership()}
