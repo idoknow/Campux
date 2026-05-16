@@ -36,6 +36,8 @@ export function AppShell({
   onPostsPageChange,
   onRefreshTenantData,
   onRefreshMe,
+  adminUserDetailTarget,
+  onOpenAdminUserDetail,
   onRemoveImage,
   onSubmitPost,
 }: {
@@ -64,6 +66,8 @@ export function AppShell({
   onPostsPageChange: (page: number) => void;
   onRefreshTenantData: () => Promise<void>;
   onRefreshMe: () => Promise<void>;
+  adminUserDetailTarget: { userId: string; nonce: number } | null;
+  onOpenAdminUserDetail: (userId: string) => void;
   onRemoveImage: (key: string) => void;
   onSubmitPost: () => void;
 }) {
@@ -119,7 +123,7 @@ export function AppShell({
             </TabsContent>
 
             <TabsContent value="stats" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
-              <StatsPage loading={dataLoading} />
+              <StatsPage loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
             </TabsContent>
 
             <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
@@ -127,6 +131,7 @@ export function AppShell({
                 activeTab={adminTab}
                 selectedTenant={me.currentTenant}
                 metadata={metadata}
+                detailTarget={adminUserDetailTarget}
                 onTabChange={onAdminTabChange}
                 onSaved={async () => {
                   await Promise.all([onRefreshMe(), onRefreshTenantData()]);

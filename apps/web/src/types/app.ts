@@ -147,6 +147,38 @@ export type AdminMember = {
   };
 };
 
+export type AdminMemberDetail = {
+  member: AdminMember;
+  stats: {
+    postsTotal: number;
+    postsByStatus: Record<string, number>;
+    activeBanCount: number;
+  };
+  posts: Array<{
+    id: string;
+    displayId: number;
+    text: string;
+    anonymous: boolean;
+    status: string;
+    imageCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  bans: Array<{
+    id: string;
+    comment: string;
+    startsAt: string;
+    endsAt: string;
+    createdAt: string;
+    active: boolean;
+    operator: {
+      id: string;
+      qqUin: string;
+      displayName: string | null;
+    } | null;
+  }>;
+};
+
 export type PublishTargetItem = {
   id: string;
   type: string;
@@ -316,7 +348,15 @@ export type TenantStats = {
     daily: Array<{ date: string; total: number; approved: number; rejected: number; published: number }>;
     userDaily: Array<{ date: string; newMembers: number; totalMembers: number }>;
     hourly: Array<{ hour: number; total: number }>;
-    topAuthors30d: Array<{ authorId: string; count: number }>;
+    topAuthors30d: Array<{
+      authorId: string;
+      count: number;
+      user: {
+        id: string;
+        qqUin: string;
+        displayName: string | null;
+      } | null;
+    }>;
   };
   review: {
     reviewed30d: number;

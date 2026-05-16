@@ -15,7 +15,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import type { TenantStats } from "@/types/app";
+import type { TenantRole, TenantStats } from "@/types/app";
 import { EmptyCard, LoadingBlock } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,7 @@ const auditActionLabels: Record<string, string> = {
 
 const timeRanges = [7, 14, 30, 90] as const;
 
-export function StatsPage({ loading }: { loading: boolean }) {
+export function StatsPage({ loading, currentRole, onOpenUserDetail }: { loading: boolean; currentRole: TenantRole; onOpenUserDetail: (userId: string) => void }) {
   const [stats, setStats] = useState<TenantStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(14);
@@ -161,7 +161,13 @@ export function StatsPage({ loading }: { loading: boolean }) {
                 <SmallFact label={`${currentRangeLabel}审核`} value={stats.review.reviewed30d} detail={`通过 ${stats.review.approved30d} / 拒绝 ${stats.review.rejected30d}`} />
                 <SmallFact label="高频投稿账号" value={stats.posts.topAuthors30d.length} detail={stats.posts.topAuthors30d.length ? `按${currentRangeLabel}投稿量排序` : "暂无活跃投稿"} />
                 {stats.posts.topAuthors30d.map((author) => (
-                  <BarRow key={author.authorId} label={shortId(author.authorId)} value={author.count} max={Math.max(1, stats.posts.topAuthors30d[0]?.count ?? 1)} detail="条" />
+                  <TopAuthorRow
+                    key={author.authorId}
+                    author={author}
+                    max={Math.max(1, stats.posts.topAuthors30d[0]?.count ?? 1)}
+                    canOpenDetail={currentRole === "admin"}
+                    onOpenDetail={onOpenUserDetail}
+                  />
                 ))}
               </div>
             </section>
@@ -245,6 +251,42 @@ export function StatsPage({ loading }: { loading: boolean }) {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function TopAuthorRow({
+  author,
+  max,
+  canOpenDetail,
+  onOpenDetail,
+}: {
+  author: TenantStats["posts"]["topAuthors30d"][number];
+  max: number;
+  canOpenDetail: boolean;
+  onOpenDetail: (userId: string) => void;
+}) {
+  const name = author.user?.displayName || (author.user ? `QQ ${author.user.qqUin}` : shortId(author.authorId));
+  const meta = author.user ? `QQ ${author.user.qqUin}` : `用户 ID ${shortId(author.authorId)}`;
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-slate-800">{name}</p>
+          <p className="truncate text-xs font-semibold text-slate-500">{meta}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs font-black text-slate-700">{author.count} 条</span>
+          {canOpenDetail ? (
+            <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => onOpenDetail(author.authorId)}>
+              查看
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-full rounded-full bg-slate-900" style={{ width: `${Math.max(4, (author.count / max) * 100)}%` }} />
+      </div>
     </div>
   );
 }

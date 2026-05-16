@@ -78,6 +78,7 @@ export function App() {
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -118,6 +119,11 @@ export function App() {
 
   function setAdminSubTab(tab: AdminTab) {
     navigate({ kind: "tenant", tab: "admin", subTab: tab });
+  }
+
+  function openAdminUserDetail(userId: string) {
+    setAdminUserDetailTarget({ userId, nonce: Date.now() });
+    navigate({ kind: "tenant", tab: "admin", subTab: "users" });
   }
 
   useEffect(() => {
@@ -482,6 +488,8 @@ export function App() {
       onPostTextChange={setPostText}
       onPostsTabChange={setPostsSubTab}
       onRefreshMe={refreshMe}
+      adminUserDetailTarget={adminUserDetailTarget}
+      onOpenAdminUserDetail={openAdminUserDetail}
       onPostsPageChange={setPostsPage}
       onRefreshTenantData={() => refreshTenantData(postsPage)}
       onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
