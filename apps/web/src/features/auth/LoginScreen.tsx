@@ -83,9 +83,22 @@ export function LoginScreen({
 
         {managementHost ? (
           <div className="mt-3 product-surface px-4 py-4">
-            <button type="button" className="text-sm font-semibold text-blue-700" onClick={() => setRegisterOpen((value) => !value)}>
-              {registerOpen ? "收起注册" : "注册运营管理员账号"}
-            </button>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-slate-950">墙号运营者第一次使用？</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                  这个注册入口只面向要创建校园墙的运营者。普通用户请通过对应校园墙机器人注册，已有账号可直接登录。
+                </p>
+              </div>
+              <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setRegisterOpen((value) => !value)}>
+                {registerOpen ? "收起注册" : "注册"}
+              </button>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-600">
+              <p className="rounded-md bg-slate-50 px-3 py-2">运营者：邮箱验证码注册，进入运营面板创建校园墙。</p>
+              <p className="rounded-md bg-slate-50 px-3 py-2">校园墙成员：登录后只进入自己被授权的校园墙。</p>
+              <p className="rounded-md bg-slate-50 px-3 py-2">系统运维：继续使用已有运维账号进入全局运维面板。</p>
+            </div>
             {registerOpen ? <RegisterPanel logoUrl={logoUrl} selectedTenantName={registerTenantName} onRegistered={onRegistered} /> : null}
           </div>
         ) : null}

@@ -15,6 +15,18 @@
 
 创建后页面会显示连接 URL。把这个 URL 复制到 OneBot 协议端配置中即可。
 
+## NapCat 配置建议
+
+在 NapCat 中使用反向 WebSocket 客户端：
+
+1. 打开 NapCat 的网络或 WebSocket 配置。
+2. 新增反向 WebSocket 客户端。
+3. 把机器人卡片里的完整 URL 粘贴为连接地址。
+4. 确认 NapCat 登录的 QQ 等于 Campux 里的 Bot QQ。
+5. 保存并重启或重新连接协议端。
+
+URL 中已经包含 `bot_id` 和连接 token。不要手动改 URL，也不要把另一个机器人卡片的 URL 复制给当前墙号。
+
 ## 连接识别
 
 Campux 不通过 IP 或 QQ 号推测机器人归属，而是通过 URL 中的 `bot_id` 和 `token` 识别：
@@ -33,6 +45,8 @@ ws://your-domain/onebot/v11/ws?bot_id=<bot-id>&token=<connection-token>
 - 审核群非命令 at 回复：运营者 at 机器人但没有发送命令时，返回审核命令提示。
 
 自动回复支持限速，避免用户重复发送普通消息时刷屏。命令消息不受这个限速影响。
+
+审核群相关命令和审核群非命令 at 回复只在配置的审核群里生效。如果其他群出现类似命令，Campux 会静默忽略。
 
 ## 最近事件
 

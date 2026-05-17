@@ -20,6 +20,8 @@ wss://campux.example.com/onebot/v11/ws?bot_id=<bot-id>&token=<connection-token>
 
 协议端必须带上 `bot_id` 和 `token`。Campux 会用它们查找启用中的机器人，并得到对应租户。
 
+NapCat 使用反向 WebSocket 客户端时，直接粘贴完整 URL 即可。协议端登录 QQ 必须等于机器人卡片里的 Bot QQ；如果 `self_id` 不匹配，Campux 会拒绝连接，避免一个执行端误连到另一个租户或机器人。
+
 ## 支持的能力
 
 Campux 当前使用这些 OneBot 能力：
@@ -58,6 +60,8 @@ Campux 当前使用这些 OneBot 能力：
 ```
 
 可以 at 机器人再写命令。Campux 会识别 at 后的命令文本。
+
+这些审核群命令、扫码登录命令和审核群非命令 at 自动回复只在机器人配置的审核群内生效。其他群组中收到类似消息时，Campux 会完全忽略，不返回错误提示。
 
 ## 连接排查
 

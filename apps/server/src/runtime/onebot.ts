@@ -4,7 +4,6 @@ import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { createS3Client } from "@campux/integrations";
 import {
-  assertReviewGroup,
   BotWorkflowError,
   findEnabledBot,
   qzoneCookieDomain,
@@ -468,6 +467,11 @@ export class OneBotRuntime {
       return;
     }
 
+    const bot = await findEnabledBot(botQqUin).catch(() => null);
+    if (!bot || normalizeId(bot.reviewGroupId ?? undefined) !== groupId) {
+      return;
+    }
+
     const command = parseCommand(extractPlainText(event));
     if (!command) {
       await this.replyToReviewGroupMention(event, botQqUin, groupId);
@@ -527,8 +531,6 @@ export class OneBotRuntime {
       }
 
       if (["扫码登录", "二维码登录", "qzone扫码登录"].includes(command.name)) {
-        const bot = await findEnabledBot(botQqUin);
-        assertReviewGroup(bot, groupId);
         await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
         const task = await startQZoneQrLogin({
           botAccountId: bot.id,
@@ -570,8 +572,6 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
           return;
         }
-        const bot = await findEnabledBot(botQqUin);
-        assertReviewGroup(bot, groupId);
         await enqueuePublishFanoutByDisplayId(this.queue, bot.tenantId, displayId, operatorQqUin);
         await this.sendGroupMessage(botQqUin, groupId, `已重新加入发布队列：#${displayId}`);
         return;
