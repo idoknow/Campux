@@ -2,7 +2,23 @@ import { useEffect, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { BotIcon, CopyIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, Trash2Icon, UserRoundIcon, WifiIcon, WifiOffIcon } from "lucide-react";
+import {
+  BotIcon,
+  CheckCircle2Icon,
+  CopyIcon,
+  MegaphoneIcon,
+  MessageSquareTextIcon,
+  PlusIcon,
+  QrCodeIcon,
+  RadioTowerIcon,
+  RotateCcwIcon,
+  SaveIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+  UserRoundIcon,
+  WifiIcon,
+  WifiOffIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
@@ -1685,6 +1701,8 @@ function BotsPanel({
           action={<Button variant="outline" size="sm" onClick={onRefresh}>刷新</Button>}
         />
 
+        <BotSetupGuide />
+
         <div className="product-subsection mt-4 grid gap-2 p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
           <Input placeholder="Bot QQ" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value })} />
           <Input placeholder="显示名，例如 1 号墙" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
@@ -1780,6 +1798,48 @@ function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
       <p className="mt-1 text-xs font-semibold text-slate-500">
         每个机器人都有独立 token，协议端用这个地址连接后会自动归属到当前校园墙。
       </p>
+      <div className="mt-2 grid gap-1.5 text-xs font-semibold text-slate-500 sm:grid-cols-3">
+        <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">NapCat：添加反向 WebSocket 客户端。</p>
+        <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">地址：粘贴上方完整 URL。</p>
+        <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">QQ：协议端登录 QQ 必须是 {bot.qqUin}。</p>
+      </div>
+    </div>
+  );
+}
+
+function BotSetupGuide() {
+  const steps = [
+    {
+      icon: BotIcon,
+      title: "添加 Bot",
+      detail: "填写墙号 QQ、显示名和审核群号。只有这个审核群里的命令和 @ 提示会被处理，其他群会静默忽略。",
+    },
+    {
+      icon: RadioTowerIcon,
+      title: "连接 NapCat",
+      detail: "在机器人卡片复制 OneBot URL，粘贴到 NapCat 的反向 WebSocket 客户端配置里。",
+    },
+    {
+      icon: MessageSquareTextIcon,
+      title: "确认消息流",
+      detail: "新投稿会发到审核群；审核员可以在群内 #通过、#拒绝、#重发、#登录 或 #扫码登录。",
+    },
+  ];
+
+  return (
+    <div className="mt-4 grid gap-2 md:grid-cols-3">
+      {steps.map((step) => {
+        const Icon = step.icon;
+        return (
+          <div key={step.title} className="rounded-md border border-violet-100 bg-violet-50/45 p-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-950">
+              <Icon className="size-4 text-violet-600" />
+              {step.title}
+            </div>
+            <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{step.detail}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2050,6 +2110,8 @@ function PublishPanel({
       <CardContent className="p-4">
         <PanelTitle icon={ShieldCheckIcon} title="发布目标" description="管理墙号发布目标和失败重试" color="product-accent-rose" />
 
+        <PublishSetupGuide hasBots={bots.length > 0} hasTargets={targets.length > 0} />
+
         <div className="product-subsection mt-4 grid gap-2 p-3 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_110px_auto]">
           <Select value={form.botAccountId || "none"} onValueChange={(botAccountId) => onFormChange({ ...form, botAccountId: botAccountId === "none" ? "" : botAccountId })}>
             <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
@@ -2208,6 +2270,61 @@ function PublishPanel({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PublishSetupGuide({ hasBots, hasTargets }: { hasBots: boolean; hasTargets: boolean }) {
+  const steps = [
+    {
+      icon: BotIcon,
+      title: "选择执行 Bot",
+      detail: hasBots ? "选择已经接入 NapCat 的墙号机器人。" : "先到机器人页添加 Bot 并连接 NapCat。",
+      done: hasBots,
+    },
+    {
+      icon: ShieldCheckIcon,
+      title: "创建发布目标",
+      detail: "设置目标名称、必发策略和风控间隔。多个目标会按各自墙号排队发布。",
+      done: hasTargets,
+    },
+    {
+      icon: QrCodeIcon,
+      title: "登录 QZone",
+      detail: "优先使用扫码登录；协议获取 cookies 只在协议端支持时使用。登录后点击检测确认 cookies 可用。",
+      done: false,
+    },
+    {
+      icon: CheckCircle2Icon,
+      title: "观察发布日志",
+      detail: "审核通过后发布日志会按稿件分组，展开可看每个目标的 HTTP 返回和错误。",
+      done: false,
+    },
+  ];
+
+  return (
+    <div className="mt-4 rounded-md border border-rose-100 bg-rose-50/35 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-bold text-slate-950">从审核到发空间的配置顺序</p>
+          <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">新校园墙只要完成这几步，就能从网页审核或审核群命令进入自动发布队列。</p>
+        </div>
+        <Badge className="rounded-full bg-white text-rose-700 ring-1 ring-rose-200 shadow-none">建议逐项确认</Badge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-4">
+        {steps.map((step) => {
+          const Icon = step.icon;
+          return (
+            <div key={step.title} className="rounded-md bg-white p-2 ring-1 ring-rose-100">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-950">
+                <Icon className={`size-4 ${step.done ? "text-green-600" : "text-rose-500"}`} />
+                {step.title}
+              </div>
+              <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{step.detail}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

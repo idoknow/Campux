@@ -491,10 +491,10 @@ export function App() {
 
   if (canOpenOps(me) && (route.kind === "ops" || me.memberships.length === 0)) {
     if (me.memberships.length > 0) {
-      return <OpsStandaloneScreen me={me} onBackToTenants={() => navigate({ kind: "tenants" })} onLogout={logout} />;
+      return <OpsStandaloneScreen me={me} onBackToTenants={() => navigate({ kind: "tenants" })} onTenantCreated={refreshMe} onLogout={logout} />;
     }
 
-    return <OpsStandaloneScreen me={me} onLogout={logout} />;
+    return <OpsStandaloneScreen me={me} onTenantCreated={refreshMe} onLogout={logout} />;
   }
 
   if (me.needsTenantSelection || !me.currentTenant || !me.currentMembership) {

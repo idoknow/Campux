@@ -24,12 +24,14 @@ export default defineConfig({
         items: [
           { text: "项目介绍", link: "/" },
           { text: "部署与快速开始", link: "/getting-started" },
+          { text: "自助开墙流程", link: "/operator/self-service-onboarding" },
           { text: "系统模型", link: "/concepts" },
         ],
       },
       {
         text: "校园墙运营",
         items: [
+          { text: "自助开墙流程", link: "/operator/self-service-onboarding" },
           { text: "运营工作台", link: "/operator/overview" },
           { text: "审核与发布", link: "/operator/review-and-publish" },
           { text: "机器人管理", link: "/operator/bots" },

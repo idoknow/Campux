@@ -74,7 +74,7 @@ function defaultPagination(): Pagination {
   };
 }
 
-export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
+export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanelMode; onTenantCreated?: (() => Promise<void>) | undefined }) {
   const isSystemMode = mode === "system";
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
@@ -284,6 +284,7 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
       setTenantForm({ name: "", slug: "", host: "", themeColor: "#111827", botQqUin: "" });
       toast.success("新校园墙已创建。");
       await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
+      await onTenantCreated?.();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建租户失败");
     } finally {
@@ -439,6 +440,8 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
         <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} accent="amber" />
         <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
       </div>
+
+      <OnboardingGuide mode={mode} hasTenants={tenants.length > 0} selectedTenant={selectedTenant} />
 
       {isSystemMode ? (
         <>
@@ -752,6 +755,72 @@ export function OpsPanel({ mode = "system" }: { mode?: OpsPanelMode }) {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelMode; hasTenants: boolean; selectedTenant: SystemTenant | undefined }) {
+  const isSystemMode = mode === "system";
+  const botReady = Boolean(selectedTenant?.bots.length);
+  const publishReady = Boolean(selectedTenant?.bots.some((bot) => bot.publishTargets.length > 0));
+  const hostReady = Boolean(selectedTenant?.host);
+  const steps = [
+    {
+      title: isSystemMode ? "开放管理端注册" : "创建校园墙",
+      detail: isSystemMode ? "设置管理端 host，例如 app.campux.top，让墙号运营者可以用邮箱注册运营管理员账号。" : "填写校园墙名称、slug 和可选专属 host，创建后你会自动成为该墙管理员。",
+      done: isSystemMode ? true : hasTenants,
+    },
+    {
+      title: isSystemMode ? "分配运营资源" : "进入校园墙管理",
+      detail: isSystemMode ? "在运营管理员资源里给账号授权可管理的校园墙；系统运维仍保留全局能力。" : "创建完成后点击顶部“选择校园墙”，进入该墙的管理页继续配置 Bot、发布目标和规则。",
+      done: isSystemMode ? true : hasTenants,
+    },
+    {
+      title: "接入 NapCat / OneBot",
+      detail: "在租户管理页添加 Bot，复制协议端连接 URL，粘贴到 NapCat 的反向 WebSocket 配置。",
+      done: botReady,
+    },
+    {
+      title: "配置发布目标",
+      detail: "添加 QZone 发布目标，选择扫码登录或协议获取 cookies，确认 cookies 可用后即可开始审核发布。",
+      done: publishReady,
+    },
+    {
+      title: "可选：绑定专属 host",
+      detail: "绑定后用户从该域名进入会固定到当前校园墙，渲染图右下角也会显示这个 host。",
+      done: hostReady,
+    },
+  ];
+
+  return (
+    <Card className="mt-4 rounded-md border-slate-200 bg-white shadow-none">
+      <CardContent className="p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-slate-950">{isSystemMode ? "平台交付流程" : "自助开墙流程"}</p>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              目标是让运营者不看文档也能完成：注册账号、创建校园墙、接入 NapCat、登录 QZone、开始审核发布。
+            </p>
+            {!isSystemMode && hasTenants ? (
+              <p className="mt-1 text-xs font-bold text-blue-700">创建完成后，点击页面顶部“选择校园墙”，进入该墙的“管理 / 机器人”和“管理 / 发布”继续配置。</p>
+            ) : null}
+          </div>
+          {selectedTenant ? <Badge variant="secondary">{selectedTenant.name}</Badge> : null}
+        </div>
+        <div className="mt-3 grid gap-2 lg:grid-cols-5">
+          {steps.map((step, index) => (
+            <div key={step.title} className={`rounded-md border p-3 ${step.done ? "border-green-200 bg-green-50/70" : "border-slate-200 bg-slate-50"}`}>
+              <div className="flex items-center gap-2">
+                <span className={`grid size-6 place-items-center rounded-full text-xs font-black ${step.done ? "bg-green-600 text-white" : "bg-white text-slate-500 ring-1 ring-slate-200"}`}>
+                  {step.done ? <CheckIcon className="size-3.5" /> : index + 1}
+                </span>
+                <p className="text-sm font-bold text-slate-950">{step.title}</p>
+              </div>
+              <p className="mt-2 text-xs font-semibold leading-5 text-slate-500">{step.detail}</p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
