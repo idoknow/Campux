@@ -107,6 +107,7 @@ export function AppShell({
 
             <TabsContent value="posts" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <PostsPage
+                tenantId={me.currentTenant.id}
                 posts={posts}
                 currentRole={me.currentMembership.role}
                 activeTab={postsTab}
@@ -123,7 +124,7 @@ export function AppShell({
             </TabsContent>
 
             <TabsContent value="stats" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
-              <StatsPage loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
+              <StatsPage tenantId={me.currentTenant.id} loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
             </TabsContent>
 
             <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
