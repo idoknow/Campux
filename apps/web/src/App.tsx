@@ -71,7 +71,7 @@ const adminTabTitles: Record<AdminTab, string> = {
 export function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
-  const [authContext, setAuthContext] = useState<{ managementHost: boolean }>({ managementHost: false });
+  const [authContext, setAuthContext] = useState<{ managementHost: boolean; currentTenant: TenantSummary | null }>({ managementHost: false, currentTenant: null });
   const [route, setRoute] = useState<AppRoute>(() => routeFromPath(window.location.pathname));
   const [activeTab, setActiveTabState] = useState<MainTab>(() => {
     const initialRoute = routeFromPath(window.location.pathname);
@@ -90,10 +90,11 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
+  const hostTenant = authContext.currentTenant;
+  const selectedTenant = me?.authenticated ? me.currentTenant : (hostTenant ?? tenants[0]);
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
   const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
-  const activeLogoUrl = selectedTenant?.logoUrl?.trim() || "/logo.svg";
+  const activeLogoUrl = (me?.authenticated ? selectedTenant?.logoUrl : hostTenant?.logoUrl)?.trim() || "/logo.svg";
   const availableNavItems = useMemo(() => {
     if (!currentRole) {
       return navItems.filter((item) => item.value !== "admin");
@@ -226,7 +227,7 @@ export function App() {
         const [meData, tenantData] = await Promise.all([
           api<MeResponse>("/api/me"),
           api<{ tenants: TenantSummary[] }>("/api/tenants"),
-          api<{ managementHost: boolean }>("/api/auth/context").then((data) => {
+          api<{ managementHost: boolean; currentTenant: TenantSummary | null }>("/api/auth/context").then((data) => {
             if (!ignore) setAuthContext(data);
             return data;
           }),
@@ -469,7 +470,7 @@ export function App() {
   }
 
   if (!me.authenticated) {
-    return <LoginScreen selectedTenant={selectedTenant ?? undefined} logoUrl={activeLogoUrl} error={error} managementHost={authContext.managementHost} onLogin={login} onRegistered={completeRegistration} />;
+    return <LoginScreen hostTenant={hostTenant ?? undefined} logoUrl={activeLogoUrl} error={error} managementHost={authContext.managementHost} onLogin={login} onRegistered={completeRegistration} />;
   }
 
   if (me.user.passwordChangeRequired) {

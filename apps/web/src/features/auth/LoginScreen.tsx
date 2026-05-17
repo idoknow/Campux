@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function LoginScreen({
-  selectedTenant,
+  hostTenant,
   logoUrl,
   error,
   managementHost,
   onLogin,
   onRegistered,
 }: {
-  selectedTenant: TenantSummary | undefined;
+  hostTenant: TenantSummary | undefined;
   logoUrl: string;
   error: string;
   managementHost: boolean;
@@ -22,6 +22,9 @@ export function LoginScreen({
   onRegistered: (data: MeResponse) => void;
 }) {
   const allowTestAccounts = import.meta.env.DEV;
+  const title = hostTenant?.name ?? "Campux";
+  const registerTenantName = hostTenant?.name ?? "Campux";
+
   const [account, setAccount] = useState(allowTestAccounts ? "10000" : "");
   const [password, setPassword] = useState(allowTestAccounts ? "campux123" : "");
   const [busy, setBusy] = useState(false);
@@ -42,11 +45,19 @@ export function LoginScreen({
       <section className="mx-auto flex min-h-dvh w-full max-w-[420px] flex-col justify-center px-4 py-8">
         <div className="mb-5 flex items-center gap-3">
           <span className="flex size-13 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <img src={logoUrl} alt={`${selectedTenant?.name ?? "Campux"} logo`} className="h-full w-full object-contain p-2" />
+            <img src={logoUrl} alt={`${title} logo`} className="h-full w-full object-contain p-2" />
           </span>
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
-            <span className="block truncate text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
+            <h1 className="truncate text-xl font-semibold leading-tight tracking-normal text-slate-950">{title}</h1>
+            {hostTenant ? (
+              <span className="block truncate text-sm text-slate-600">
+                由
+                <a className="mx-1 font-medium text-blue-700 hover:underline" href="https://github.com/idoknow/Campux" target="_blank" rel="noreferrer">
+                  Campux
+                </a>
+                提供技术支持
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -75,7 +86,7 @@ export function LoginScreen({
             <button type="button" className="text-sm font-semibold text-blue-700" onClick={() => setRegisterOpen((value) => !value)}>
               {registerOpen ? "收起注册" : "注册运营管理员账号"}
             </button>
-            {registerOpen ? <RegisterPanel logoUrl={logoUrl} selectedTenantName={selectedTenant?.name ?? "Campux"} onRegistered={onRegistered} /> : null}
+            {registerOpen ? <RegisterPanel logoUrl={logoUrl} selectedTenantName={registerTenantName} onRegistered={onRegistered} /> : null}
           </div>
         ) : null}
       </section>
