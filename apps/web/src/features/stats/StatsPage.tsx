@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
+import { readQueryInt, writeQueryParams } from "@/lib/url-query";
 import type { TenantRole, TenantStats } from "@/types/app";
 import { EmptyCard, LoadingBlock } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +46,7 @@ const timeRanges = [7, 14, 30, 90] as const;
 export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: { tenantId: string; loading: boolean; currentRole: TenantRole; onOpenUserDetail: (userId: string) => void }) {
   const [stats, setStats] = useState<TenantStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
-  const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(14);
+  const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(() => readQueryInt("days", 14, { allowed: timeRanges }) as (typeof timeRanges)[number]);
 
   async function refreshStats(days = rangeDays) {
     setStatsLoading(true);
@@ -86,7 +87,10 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                     key={days}
                     className={`h-7 rounded-full px-3 text-xs font-bold transition ${rangeDays === days ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"}`}
                     type="button"
-                    onClick={() => setRangeDays(days)}
+                    onClick={() => {
+                      setRangeDays(days);
+                      writeQueryParams({ days: days === 14 ? null : days });
+                    }}
                   >
                     {days} 天
                   </button>

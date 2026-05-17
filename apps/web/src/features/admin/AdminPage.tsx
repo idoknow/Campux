@@ -6,6 +6,7 @@ import { BotIcon, CopyIcon, MegaphoneIcon, PlusIcon, RotateCcwIcon, SaveIcon, Sh
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
+import { readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -106,12 +107,18 @@ type CookieViewState = {
 const managementTabsListClassName = "product-tabs-list";
 const managementTabsTriggerClassName = "product-tabs-trigger after:hidden";
 
+function readMemberRoleQuery(): "all" | TenantRole {
+  const role = readQueryParam("role");
+  return role === "submitter" || role === "reviewer" || role === "admin" ? role : "all";
+}
+
 export function AdminPage({
   activeTab,
   selectedTenant,
   metadata,
   detailTarget,
   onTabChange,
+  onOpenPostDetail,
   onSaved,
 }: {
   activeTab: AdminTab;
@@ -119,6 +126,7 @@ export function AdminPage({
   metadata: TenantMetadata;
   detailTarget?: { userId: string; nonce: number } | null;
   onTabChange: (tab: AdminTab) => void;
+  onOpenPostDetail: (post: { id: string; displayId: number; status: string }) => void;
   onSaved: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TenantSettingsForm>(() => toForm(selectedTenant, metadata));
@@ -130,17 +138,17 @@ export function AdminPage({
   const [targets, setTargets] = useState<PublishTargetItem[]>([]);
   const [attempts, setAttempts] = useState<PublishAttemptItem[]>([]);
   const [bans, setBans] = useState<AdminBanRecord[]>([]);
-  const [memberKeyword, setMemberKeyword] = useState("");
-  const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>("all");
-  const [memberPage, setMemberPage] = useState(1);
+  const [memberKeyword, setMemberKeyword] = useState(() => readQueryParam("q"));
+  const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>(() => readMemberRoleQuery());
+  const [memberPage, setMemberPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [memberPagination, setMemberPagination] = useState<Pagination>(() => defaultPagination());
   const [tenantMemberTotal, setTenantMemberTotal] = useState(0);
   const [membersLoading, setMembersLoading] = useState(false);
-  const [banKeyword, setBanKeyword] = useState("");
-  const [banPage, setBanPage] = useState(1);
+  const [banKeyword, setBanKeyword] = useState(() => readQueryParam("q"));
+  const [banPage, setBanPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [banPagination, setBanPagination] = useState<Pagination>(() => defaultPagination());
   const [bansLoading, setBansLoading] = useState(false);
-  const [onlyActiveBans, setOnlyActiveBans] = useState(true);
+  const [onlyActiveBans, setOnlyActiveBans] = useState(() => readQueryParam("active", "1") !== "0");
   const [memberForm, setMemberForm] = useState<MemberForm>(() => defaultMemberForm());
   const [banForm, setBanForm] = useState<BanForm>(() => defaultBanForm());
   const [botForm, setBotForm] = useState<BotForm>(() => defaultBotForm());
@@ -164,6 +172,20 @@ export function AdminPage({
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
   }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.pendingPostLimit, metadata.postRules, metadata.services]);
+
+  useEffect(() => {
+    if (activeTab === "users") {
+      setMemberKeyword(readQueryParam("q"));
+      setMemberRoleFilter(readMemberRoleQuery());
+      setMemberPage(readQueryInt("page", 1, { min: 1 }));
+      return;
+    }
+    if (activeTab === "bans") {
+      setBanKeyword(readQueryParam("q"));
+      setOnlyActiveBans(readQueryParam("active", "1") !== "0");
+      setBanPage(readQueryInt("page", 1, { min: 1 }));
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     void refreshAdminData().catch((caught) => {
@@ -731,12 +753,17 @@ export function AdminPage({
                 onKeywordChange={(value) => {
                   setMemberKeyword(value);
                   setMemberPage(1);
+                  writeQueryParams({ q: value.trim() || null, page: null });
                 }}
                 onRoleFilterChange={(value) => {
                   setMemberRoleFilter(value);
                   setMemberPage(1);
+                  writeQueryParams({ role: value === "all" ? null : value, page: null });
                 }}
-                onPageChange={setMemberPage}
+                onPageChange={(page) => {
+                  setMemberPage(page);
+                  writeQueryParams({ page: page > 1 ? page : null });
+                }}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
                 onRoleChange={(id, role) => void updateMemberRole(id, role)}
@@ -761,12 +788,17 @@ export function AdminPage({
                 onKeywordChange={(value) => {
                   setBanKeyword(value);
                   setBanPage(1);
+                  writeQueryParams({ q: value.trim() || null, page: null });
                 }}
                 onOnlyActiveChange={(value) => {
                   setOnlyActiveBans(value);
                   setBanPage(1);
+                  writeQueryParams({ active: value ? null : "0", page: null });
                 }}
-                onPageChange={setBanPage}
+                onPageChange={(page) => {
+                  setBanPage(page);
+                  writeQueryParams({ page: page > 1 ? page : null });
+                }}
                 onRefresh={() => void refreshBans()}
                 onSubmit={() => void banUser()}
                 onUnban={(id) => void unban(id)}
@@ -828,6 +860,7 @@ export function AdminPage({
         open={memberDetailOpen}
         loading={memberDetailLoading}
         detail={memberDetail}
+        onOpenPostDetail={onOpenPostDetail}
         onOpenChange={(open) => {
           setMemberDetailOpen(open);
           if (!open) {
@@ -1022,11 +1055,13 @@ function MemberDetailDialog({
   open,
   loading,
   detail,
+  onOpenPostDetail,
   onOpenChange,
 }: {
   open: boolean;
   loading: boolean;
   detail: AdminMemberDetail | null;
+  onOpenPostDetail: (post: { id: string; displayId: number; status: string }) => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const user = detail?.member.user;
@@ -1082,7 +1117,15 @@ function MemberDetailDialog({
               <div className="mt-2 grid gap-2">
                 {detail.posts.length === 0 ? <EmptyCard title="暂无投稿记录" /> : null}
                 {detail.posts.map((post) => (
-                  <div key={post.id} className="rounded-md border border-slate-100 bg-slate-50 p-3">
+                  <button
+                    key={post.id}
+                    type="button"
+                    className="rounded-md border border-slate-100 bg-slate-50 p-3 text-left transition hover:border-slate-300 hover:bg-white"
+                    onClick={() => {
+                      onOpenChange(false);
+                      onOpenPostDetail(post);
+                    }}
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">#{post.displayId}</Badge>
@@ -1093,7 +1136,8 @@ function MemberDetailDialog({
                       <span className="text-xs font-bold text-slate-400">{formatDateTime(post.createdAt)}</span>
                     </div>
                     <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm font-semibold text-slate-700">{post.text}</p>
-                  </div>
+                    <p className="mt-2 text-xs font-bold text-blue-600">点击跳转到稿件列表并查看详情</p>
+                  </button>
                 ))}
               </div>
             </section>
