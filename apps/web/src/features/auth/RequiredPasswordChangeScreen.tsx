@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { KeyRoundIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 
 export function RequiredPasswordChangeScreen({ busy, error, onChangePassword, onLogout }: { busy: boolean; error: string; onChangePassword: (newPassword: string) => Promise<void>; onLogout: () => void }) {
   const [newPassword, setNewPassword] = useState("");
@@ -19,6 +20,9 @@ export function RequiredPasswordChangeScreen({ busy, error, onChangePassword, on
 
   return (
     <main className="min-h-dvh bg-background">
+      <div className="fixed right-4 top-4 z-10">
+        <ThemeModeButton />
+      </div>
       <section className="mx-auto flex min-h-dvh w-full max-w-[420px] flex-col justify-center px-4 py-8">
         <div className="mb-5">
           <h1 className="inline-block pr-2 text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>

@@ -1,6 +1,7 @@
 import type { TenantSummary } from "@campux/domain";
 import type { ActiveBan, AuthenticatedMe } from "@/types/app";
 import { Button } from "@/components/ui/button";
+import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 
 export function BannedScreen({
   ban,
@@ -15,6 +16,9 @@ export function BannedScreen({
 }) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+      <div className="fixed right-4 top-4 z-10">
+        <ThemeModeButton />
+      </div>
       <section className="w-full max-w-[460px] rounded-md border border-red-100 bg-white p-5 shadow-sm">
         <div className="text-xs font-semibold uppercase tracking-normal text-red-500">CAMPUX</div>
         <h1 className="mt-2 text-xl font-bold text-slate-950">账号已被封禁</h1>

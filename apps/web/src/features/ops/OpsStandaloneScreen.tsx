@@ -1,6 +1,7 @@
 import type { AuthenticatedMe } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { LogOutIcon } from "lucide-react";
+import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 import { OpsPanel } from "./OpsPanel";
 
 export function OpsStandaloneScreen({
@@ -26,6 +27,7 @@ export function OpsStandaloneScreen({
           <p className="mt-1 truncate text-xs text-slate-500">{me.user.displayName ?? me.user.qqUin}</p>
         </div>
         <div className="flex items-center gap-2">
+          <ThemeModeButton />
           {onBackToTenants ? (
             <Button variant="outline" size="sm" onClick={onBackToTenants}>
               选择校园墙

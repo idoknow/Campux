@@ -4,6 +4,7 @@ import { roleLabels } from "@/lib/app-model";
 import type { AuthenticatedMe } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 
 export function TenantSelectionScreen({
   me,
@@ -42,10 +43,13 @@ export function TenantSelectionScreen({
             <h1 className="inline-block pr-2 text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
             <span className="align-baseline text-sm text-slate-600">选择校园墙</span>
           </div>
-          <Button variant="outline" size="sm" onClick={onLogout}>
-            <LogOutIcon data-icon="inline-start" />
-            退出
-          </Button>
+          <div className="flex items-center gap-2">
+            <ThemeModeButton />
+            <Button variant="outline" size="sm" onClick={onLogout}>
+              <LogOutIcon data-icon="inline-start" />
+              退出
+            </Button>
+          </div>
         </div>
 
         <div className="mt-8">

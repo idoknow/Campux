@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ThemeMenuItems } from "@/features/theme/ThemeModeControl";
 
 export function AccountMenu({
   selectedTenant,
@@ -102,6 +103,8 @@ export function AccountMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
+        <ThemeMenuItems />
+        <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={onLogout}>
           <LogOutIcon data-icon="inline-start" />
           退出登录

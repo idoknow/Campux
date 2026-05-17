@@ -75,6 +75,9 @@
   --chart-3: oklch(0.7 0.14 145);
   --chart-4: oklch(0.68 0.18 350);
   --chart-5: oklch(0.64 0.14 285);
+  --chart-grid: oklch(0.89 0.006 255);
+  --chart-point-fill: oklch(1 0 0);
+  --chart-active-line: oklch(0.62 0.02 255);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.205 0.015 255);
   --sidebar-primary: oklch(0.235 0.015 255);
@@ -94,7 +97,7 @@
     @apply bg-background text-foreground;
     min-width: 320px;
     min-height: 100dvh;
-    background: #f6f7f9;
+    background: var(--background);
     font-family:
       "Geist Variable",
       "PingFang SC",
@@ -219,35 +222,281 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.17 0.014 255);
+  --foreground: oklch(0.94 0.01 255);
+  --card: oklch(0.215 0.018 255);
+  --card-foreground: oklch(0.94 0.01 255);
+  --popover: oklch(0.22 0.018 255);
+  --popover-foreground: oklch(0.94 0.01 255);
+  --primary: oklch(0.67 0.17 250);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.28 0.018 255);
+  --secondary-foreground: oklch(0.92 0.012 255);
+  --muted: oklch(0.28 0.018 255);
+  --muted-foreground: oklch(0.72 0.018 255);
+  --accent: oklch(0.31 0.02 255);
+  --accent-foreground: oklch(0.94 0.01 255);
+  --destructive: oklch(0.66 0.2 24);
+  --destructive-foreground: oklch(0.98 0.01 25);
+  --border: oklch(0.35 0.018 255);
+  --input: oklch(0.34 0.018 255);
+  --ring: oklch(0.68 0.12 250);
+  --chart-1: oklch(0.72 0.16 246);
+  --chart-2: oklch(0.78 0.17 70);
+  --chart-3: oklch(0.72 0.14 145);
+  --chart-4: oklch(0.72 0.17 350);
+  --chart-5: oklch(0.72 0.14 285);
+  --chart-grid: oklch(0.34 0.018 255);
+  --chart-point-fill: oklch(0.17 0.014 255);
+  --chart-active-line: oklch(0.58 0.04 255);
+  --sidebar: oklch(0.19 0.016 255);
+  --sidebar-foreground: oklch(0.94 0.01 255);
+  --sidebar-primary: oklch(0.67 0.17 250);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.28 0.018 255);
+  --sidebar-accent-foreground: oklch(0.94 0.01 255);
+  --sidebar-border: oklch(0.34 0.018 255);
+  --sidebar-ring: oklch(0.68 0.12 250);
+}
+
+.dark body {
+  background: var(--background);
+}
+
+.dark .product-surface,
+.dark .product-row-card {
+  border-color: oklch(0.35 0.018 255);
+  background: oklch(0.215 0.018 255);
+}
+
+.dark .product-subsection {
+  border-color: oklch(0.34 0.018 255);
+  background: oklch(0.245 0.018 255);
+}
+
+.dark .product-tabs-list {
+  border-color: oklch(0.35 0.018 255);
+  background: oklch(0.215 0.018 255);
+}
+
+.dark .product-tabs-trigger {
+  color: oklch(0.72 0.018 255);
+}
+
+.dark .product-tabs-trigger[data-state="active"],
+.dark .product-tabs-trigger[data-active] {
+  background: oklch(0.32 0.08 250) !important;
+  color: oklch(0.86 0.09 245) !important;
+}
+
+.dark .product-accent-blue {
+  border-color: oklch(0.45 0.12 250);
+  background: oklch(0.27 0.055 250);
+  color: oklch(0.82 0.11 245);
+}
+
+.dark .product-accent-green {
+  border-color: oklch(0.43 0.1 145);
+  background: oklch(0.27 0.05 145);
+  color: oklch(0.82 0.12 145);
+}
+
+.dark .product-accent-amber {
+  border-color: oklch(0.52 0.12 75);
+  background: oklch(0.29 0.06 75);
+  color: oklch(0.86 0.14 75);
+}
+
+.dark .product-accent-rose {
+  border-color: oklch(0.47 0.14 20);
+  background: oklch(0.28 0.06 20);
+  color: oklch(0.82 0.12 18);
+}
+
+.dark .product-accent-violet {
+  border-color: oklch(0.48 0.13 295);
+  background: oklch(0.28 0.06 295);
+  color: oklch(0.84 0.1 295);
+}
+
+.dark .bg-white,
+.dark .bg-white\/80 {
+  background-color: oklch(0.215 0.018 255) !important;
+}
+
+.dark .bg-slate-50,
+.dark .bg-slate-50\/60,
+.dark .bg-slate-50\/70,
+.dark .bg-slate-100,
+.dark .bg-slate-200 {
+  background-color: oklch(0.265 0.018 255) !important;
+}
+
+.dark .text-slate-950,
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: oklch(0.94 0.01 255) !important;
+}
+
+.dark .text-slate-700,
+.dark .text-slate-600 {
+  color: oklch(0.78 0.016 255) !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400 {
+  color: oklch(0.68 0.018 255) !important;
+}
+
+.dark .border-slate-50,
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-300,
+.dark .border-slate-400 {
+  border-color: oklch(0.35 0.018 255) !important;
+}
+
+.dark .ring-slate-100,
+.dark .ring-slate-200,
+.dark .ring-slate-300 {
+  --tw-ring-color: oklch(0.35 0.018 255) !important;
+}
+
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: oklch(0.3 0.018 255) !important;
+}
+
+.dark [data-state="active"].text-slate-500,
+.dark [data-state="active"].text-slate-600,
+.dark [data-active].text-slate-500,
+.dark [data-active].text-slate-600 {
+  color: oklch(0.82 0.11 245) !important;
+}
+
+.dark .bg-blue-50,
+.dark .bg-blue-50\/35,
+.dark .bg-blue-50\/45,
+.dark .bg-blue-100,
+.dark .bg-blue-200,
+.dark .bg-blue-300 {
+  background-color: oklch(0.29 0.065 250) !important;
+}
+
+.dark .text-blue-700,
+.dark .text-blue-800 {
+  color: oklch(0.82 0.11 245) !important;
+}
+
+.dark .border-blue-100,
+.dark .border-blue-200,
+.dark .ring-blue-200 {
+  border-color: oklch(0.45 0.12 250) !important;
+  --tw-ring-color: oklch(0.45 0.12 250) !important;
+}
+
+.dark .bg-sky-50,
+.dark .bg-sky-100 {
+  background-color: oklch(0.28 0.06 235) !important;
+}
+
+.dark .text-sky-700,
+.dark .text-sky-800 {
+  color: oklch(0.82 0.1 235) !important;
+}
+
+.dark .border-sky-200,
+.dark .ring-sky-200 {
+  border-color: oklch(0.45 0.11 235) !important;
+  --tw-ring-color: oklch(0.45 0.11 235) !important;
+}
+
+.dark .bg-green-50,
+.dark .bg-green-50\/60,
+.dark .bg-green-100 {
+  background-color: oklch(0.28 0.055 145) !important;
+}
+
+.dark .text-green-700,
+.dark .text-green-800,
+.dark .text-green-900 {
+  color: oklch(0.82 0.12 145) !important;
+}
+
+.dark .border-green-100,
+.dark .border-green-200,
+.dark .ring-green-100,
+.dark .ring-green-200 {
+  border-color: oklch(0.43 0.1 145) !important;
+  --tw-ring-color: oklch(0.43 0.1 145) !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-100,
+.dark .bg-orange-50 {
+  background-color: oklch(0.29 0.06 75) !important;
+}
+
+.dark .text-amber-700,
+.dark .text-amber-800,
+.dark .text-amber-900,
+.dark .text-orange-900 {
+  color: oklch(0.86 0.14 75) !important;
+}
+
+.dark .border-amber-200,
+.dark .ring-amber-200 {
+  border-color: oklch(0.52 0.12 75) !important;
+  --tw-ring-color: oklch(0.52 0.12 75) !important;
+}
+
+.dark .bg-red-50,
+.dark .bg-rose-50,
+.dark .bg-rose-50\/35,
+.dark .bg-rose-100 {
+  background-color: oklch(0.28 0.06 20) !important;
+}
+
+.dark .text-red-500,
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-950,
+.dark .text-rose-700 {
+  color: oklch(0.82 0.12 18) !important;
+}
+
+.dark .border-red-100,
+.dark .border-red-200,
+.dark .border-rose-100,
+.dark .border-rose-200,
+.dark .ring-red-200,
+.dark .ring-rose-200 {
+  border-color: oklch(0.47 0.14 20) !important;
+  --tw-ring-color: oklch(0.47 0.14 20) !important;
+}
+
+.dark .bg-violet-50,
+.dark .bg-violet-50\/45,
+.dark .bg-violet-100 {
+  background-color: oklch(0.28 0.06 295) !important;
+}
+
+.dark .text-violet-600,
+.dark .text-violet-700 {
+  color: oklch(0.84 0.1 295) !important;
+}
+
+.dark .border-violet-100,
+.dark .border-violet-200 {
+  border-color: oklch(0.48 0.13 295) !important;
+}
+
+.dark .fill-slate-400 {
+  fill: oklch(0.68 0.018 255) !important;
+}
+
+.dark .shadow-sm,
+.dark .shadow-lg,
+.dark .shadow-\[0_1px_0_rgba\(15\,23\,42\,0\.03\)\] {
+  box-shadow: none !important;
 }

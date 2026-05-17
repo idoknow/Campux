@@ -7,6 +7,20 @@
     <link rel="apple-touch-icon" href="/logo.svg" />
     <meta name="theme-color" content="#0190D5" />
     <title>Campux</title>
+    <script>
+      (() => {
+        try {
+          const stored = localStorage.getItem("campux.theme");
+          const mode = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+          const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#10151f" : "#0190D5");
+        } catch {
+          // Ignore theme bootstrap errors and let React apply the default mode.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
