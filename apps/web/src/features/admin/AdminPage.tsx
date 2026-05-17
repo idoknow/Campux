@@ -117,6 +117,7 @@ export function AdminPage({
   selectedTenant,
   metadata,
   detailTarget,
+  onDetailTargetConsumed,
   onTabChange,
   onOpenPostDetail,
   onSaved,
@@ -125,6 +126,7 @@ export function AdminPage({
   selectedTenant: TenantSummary;
   metadata: TenantMetadata;
   detailTarget?: { userId: string; nonce: number } | null;
+  onDetailTargetConsumed: () => void;
   onTabChange: (tab: AdminTab) => void;
   onOpenPostDetail: (post: { id: string; displayId: number; status: string }) => void;
   onSaved: () => Promise<void>;
@@ -220,8 +222,20 @@ export function AdminPage({
       return;
     }
     onTabChange("users");
+    onDetailTargetConsumed();
     void openMemberDetail(detailTarget.userId);
   }, [detailTarget?.nonce, detailTarget?.userId]);
+
+  useEffect(() => {
+    if (activeTab !== "users") {
+      return;
+    }
+    const userId = readQueryParam("user");
+    if (!userId || memberDetailOpen || memberDetailLoading || memberDetail?.member.user.id === userId) {
+      return;
+    }
+    void openMemberDetail(userId, { syncQuery: false });
+  }, [activeTab, selectedTenant.id]);
 
   useEffect(() => {
     if (!qzoneLogin.open || qzoneLogin.status !== "pending" || !qzoneLogin.botId || !qzoneLogin.loginId) {
@@ -699,7 +713,10 @@ export function AdminPage({
     }
   }
 
-  async function openMemberDetail(userId: string) {
+  async function openMemberDetail(userId: string, options: { syncQuery?: boolean } = {}) {
+    if (options.syncQuery !== false) {
+      writeQueryParams({ user: userId }, "push");
+    }
     setMemberDetailOpen(true);
     setMemberDetailLoading(true);
     try {
@@ -707,6 +724,7 @@ export function AdminPage({
       setMemberDetail(data);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "无法读取用户详情");
+      writeQueryParams({ user: null });
       setMemberDetailOpen(false);
     } finally {
       setMemberDetailLoading(false);
@@ -865,6 +883,7 @@ export function AdminPage({
           setMemberDetailOpen(open);
           if (!open) {
             setMemberDetail(null);
+            writeQueryParams({ user: null });
           }
         }}
       />
