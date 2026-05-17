@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Pagination, PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
+import { readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -82,7 +83,14 @@ const reviewStatusOptions = [
   { value: "published", label: "已发布" },
   { value: "failed", label: "发布失败" },
   { value: "all", label: "全部" },
-];
+] as const;
+
+type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"];
+
+function readReviewStatusQuery(): ReviewStatusFilter {
+  const status = readQueryParam("status");
+  return reviewStatusOptions.some((option) => option.value === status) ? (status as ReviewStatusFilter) : "pending_approval";
+}
 
 export function PostsPage({
   tenantId,
@@ -109,9 +117,10 @@ export function PostsPage({
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPagination, setReviewPagination] = useState<Pagination>(() => defaultPagination());
   const [reviewLoading, setReviewLoading] = useState(false);
-  const [reviewStatus, setReviewStatus] = useState("pending_approval");
-  const [reviewKeyword, setReviewKeyword] = useState("");
-  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewStatusQuery());
+  const [reviewKeyword, setReviewKeyword] = useState(() => readQueryParam("q"));
+  const [reviewPage, setReviewPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
+  const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
@@ -148,6 +157,16 @@ export function PostsPage({
       onTabChange("mine");
     }
   }, [activeTab, canReview, onTabChange]);
+
+  useEffect(() => {
+    if (activeTab !== "review") {
+      return;
+    }
+    setReviewStatus(readReviewStatusQuery());
+    setReviewKeyword(readQueryParam("q"));
+    setReviewPage(readQueryInt("page", 1, { min: 1 }));
+    setDetailPostId(readQueryParam("post"));
+  }, [activeTab]);
 
   useEffect(() => {
     if (!canReview) {
@@ -297,10 +316,35 @@ export function PostsPage({
 
   const activePreviewImage = imagePreview.images[imagePreview.index] ?? null;
   const reviewStatusLabel = reviewStatusOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
+  const detailPost = detailPostId ? reviewPosts.find((post) => post.id === detailPostId) ?? null : null;
+
+  function setReviewPageWithQuery(page: number) {
+    setReviewPage(page);
+    writeQueryParams({ page: page > 1 ? page : null });
+  }
+
+  function setReviewStatusWithQuery(value: ReviewStatusFilter) {
+    setReviewStatus(value);
+    setReviewPage(1);
+    writeQueryParams({ status: value === "pending_approval" ? null : value, page: null, post: null });
+    setDetailPostId("");
+  }
 
   function applyReviewFilters() {
     setReviewPage(1);
+    setDetailPostId("");
+    writeQueryParams({ q: reviewKeyword.trim() || null, status: reviewStatus === "pending_approval" ? null : reviewStatus, page: null, post: null });
     void refreshReviewPosts(1);
+  }
+
+  function openPostDetail(postId: string) {
+    setDetailPostId(postId);
+    writeQueryParams({ post: postId }, "push");
+  }
+
+  function closePostDetail() {
+    setDetailPostId("");
+    writeQueryParams({ post: null });
   }
 
   return (
@@ -354,10 +398,7 @@ export function PostsPage({
               </button>
             </div>
             <div className="product-subsection mb-3 hidden gap-2 p-3 md:grid md:grid-cols-[160px_minmax(0,1fr)_auto]">
-              <Select value={reviewStatus} onValueChange={(value) => {
-                setReviewStatus(value);
-                setReviewPage(1);
-              }}>
+              <Select value={reviewStatus} onValueChange={(value) => setReviewStatusWithQuery(value as ReviewStatusFilter)}>
                 <SelectTrigger className="h-10 w-full bg-white font-bold">
                   <SelectValue />
                 </SelectTrigger>
@@ -398,8 +439,9 @@ export function PostsPage({
                     onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                     onApprove={(id) => void reviewPost(id, "approve")}
                     onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
+                    onDetail={(post) => openPostDetail(post.id)}
                   />
-                  <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPage} />
+                  <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
                 </>
               )}
             </div>
@@ -428,10 +470,7 @@ export function PostsPage({
           <div className="grid gap-3 px-5 pb-5">
             <label className="grid gap-1 text-sm font-semibold text-slate-800">
               状态
-              <Select value={reviewStatus} onValueChange={(value) => {
-                setReviewStatus(value);
-                setReviewPage(1);
-              }}>
+              <Select value={reviewStatus} onValueChange={(value) => setReviewStatusWithQuery(value as ReviewStatusFilter)}>
                 <SelectTrigger className="h-10 w-full bg-white font-bold">
                   <SelectValue />
                 </SelectTrigger>
@@ -466,6 +505,8 @@ export function PostsPage({
                   setReviewStatus("pending_approval");
                   setReviewKeyword("");
                   setReviewPage(1);
+                  setDetailPostId("");
+                  writeQueryParams({ status: null, q: null, page: null, post: null });
                 }}
               >
                 重置
@@ -483,6 +524,17 @@ export function PostsPage({
           </div>
         </DialogContent>
       </Dialog>
+      <PostDetailDialog
+        post={detailPost}
+        open={Boolean(detailPostId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closePostDetail();
+          }
+        }}
+        onPreview={(post) => void openRenderPreview(post)}
+        onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+      />
       <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(920px,calc(100vw-32px))]">
           <DialogHeader>
@@ -559,6 +611,67 @@ function defaultPagination(): Pagination {
   };
 }
 
+function PostDetailDialog({
+  post,
+  open,
+  onOpenChange,
+  onPreview,
+  onImagePreview,
+}: {
+  post: ReviewPostItem | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onPreview: (post: ReviewPostItem) => void;
+  onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
+}) {
+  const images = post ? getPostImages(post.images) : [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{post ? `稿件 #${post.displayId}` : "稿件详情"}</DialogTitle>
+          <DialogDescription>{post ? `作者 ${post.author?.displayName ?? post.author?.qqUin ?? "未知用户"} · ${formatFullDateTime(post.createdAt)}` : "正在定位稿件..."}</DialogDescription>
+        </DialogHeader>
+        {post ? (
+          <div className="grid gap-3 px-5 pb-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">#{post.displayId}</Badge>
+              <Badge variant="secondary">{statusLabels[post.status] ?? post.status}</Badge>
+              {post.anonymous ? <Badge variant="outline">匿名展示</Badge> : <Badge variant="outline">实名展示</Badge>}
+              <Badge variant="outline">{images.length} 张图</Badge>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="whitespace-pre-wrap text-sm font-semibold text-slate-800">{post.text}</p>
+            </div>
+            <div className="grid gap-1 text-xs font-semibold text-slate-500 sm:grid-cols-2">
+              <span>稿件 ID：{post.id}</span>
+              <span>更新时间：{formatFullDateTime(post.updatedAt)}</span>
+              <span>作者 QQ：{post.author?.qqUin ?? "未知"}</span>
+              <span>作者 ID：{post.author?.id ?? "未知"}</span>
+            </div>
+            {images.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {images.map((image, index) => (
+                  <button key={`${image.key ?? image.url ?? index}`} type="button" className="size-16 overflow-hidden rounded-md border border-slate-200 bg-white" onClick={() => onImagePreview(post, images, index)}>
+                    <img src={getPostImageUrl(image)} alt={image.fileName ?? `稿件图片 ${index + 1}`} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+              <Button onClick={() => onPreview(post)}>渲染预览</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-5 pb-5"><LoadingBlock title="正在从当前筛选结果中定位稿件..." /></div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ReviewList({
   posts,
   busyPostId,
@@ -566,6 +679,7 @@ function ReviewList({
   onImagePreview,
   onApprove,
   onReject,
+  onDetail,
 }: {
   posts: ReviewPostItem[];
   busyPostId: string;
@@ -573,6 +687,7 @@ function ReviewList({
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onApprove: (id: string) => void;
   onReject: (post: ReviewPostItem) => void;
+  onDetail: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
     return <EmptyCard title="暂时没有待审核稿件" />;
@@ -590,6 +705,7 @@ function ReviewList({
           onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
           onApprove={() => onApprove(post.id)}
           onReject={() => onReject(post)}
+          onDetail={() => onDetail(post)}
         />
       ))}
     </div>
@@ -604,6 +720,7 @@ function ReviewCard({
   onImagePreview,
   onApprove,
   onReject,
+  onDetail,
 }: {
   post: ReviewPostItem;
   palette: string;
@@ -612,6 +729,7 @@ function ReviewCard({
   onImagePreview: (images: PostImage[], index: number) => void;
   onApprove: () => void;
   onReject: () => void;
+  onDetail: () => void;
 }) {
   const images = getPostImages(post.images);
   const authorName = post.author?.displayName ?? "未命名用户";
@@ -629,7 +747,12 @@ function ReviewCard({
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
-          actions={<PreviewButton onClick={onPreview} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={onDetail}>详情</Button>
+              <PreviewButton onClick={onPreview} />
+            </div>
+          }
         />
 
         <div className="product-subsection p-3">

@@ -3,6 +3,7 @@ import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
 import { api, fileToBase64 } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
+import { readQueryInt, writeQueryParams } from "@/lib/url-query";
 import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
@@ -80,7 +81,7 @@ export function App() {
   const [oauthClientResponse, setOAuthClientResponse] = useState<OAuthAuthorizeClientResponse | null>(null);
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [postsPagination, setPostsPagination] = useState<Pagination>(() => defaultPagination());
-  const [postsPage, setPostsPage] = useState(1);
+  const [postsPage, setPostsPageState] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [tenantDataLoading, setTenantDataLoading] = useState(false);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
@@ -131,6 +132,25 @@ export function App() {
   function openAdminUserDetail(userId: string) {
     setAdminUserDetailTarget({ userId, nonce: Date.now() });
     navigate({ kind: "tenant", tab: "admin", subTab: "users" });
+  }
+
+  function openPostDetailFromAdmin(post: { id: string; displayId: number; status: string }) {
+    const params = new URLSearchParams({
+      status: "all",
+      q: String(post.displayId),
+      post: post.id,
+    });
+    const path = `/posts/review?${params}`;
+    window.history.pushState(null, "", path);
+    setRoute({ kind: "tenant", tab: "posts", subTab: "review" });
+    setActiveTabState("posts");
+  }
+
+  function setPostsPage(page: number) {
+    setPostsPageState(page);
+    if (window.location.pathname === "/posts" || window.location.pathname === "/posts/mine") {
+      writeQueryParams({ page: page > 1 ? page : null });
+    }
   }
 
   useEffect(() => {
@@ -515,6 +535,7 @@ export function App() {
       onRefreshMe={refreshMe}
       adminUserDetailTarget={adminUserDetailTarget}
       onOpenAdminUserDetail={openAdminUserDetail}
+      onOpenPostDetailFromAdmin={openPostDetailFromAdmin}
       onPostsPageChange={setPostsPage}
       onRefreshTenantData={() => refreshTenantData(postsPage)}
       onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
