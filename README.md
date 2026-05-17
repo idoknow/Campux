@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/public/logo.svg" alt="Campux logo" width="160" height="160" />
+</p>
+
 # Campux
 
 Campux 是一个面向校园墙运营团队的开源管理系统。它把投稿、审核、QQ 机器人接入、QZone 发布、租户管理、封禁、统计和运维能力放在同一套 TypeScript 应用里，适合自托管给一个或多个校园墙使用。

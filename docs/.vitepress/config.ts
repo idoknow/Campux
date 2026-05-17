@@ -5,6 +5,11 @@ export default defineConfig({
   description: "Open-source campus wall operations platform",
   lang: "zh-CN",
   cleanUrls: true,
+  head: [
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["link", { rel: "apple-touch-icon", href: "/logo.svg" }],
+    ["meta", { name: "theme-color", content: "#0190D5" }],
+  ],
   themeConfig: {
     logo: "/logo.svg",
     nav: [
