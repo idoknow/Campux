@@ -22,13 +22,21 @@ export function DesktopSidebar({
   onSelectTenant: (tenantId: string) => Promise<void>;
 }) {
   const role = me.currentMembership?.role ?? "submitter";
+  const logoUrl = selectedTenant.logoUrl?.trim() || "/logo.svg";
 
   return (
     <aside className="hidden h-dvh w-[190px] shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
       <div className="border-b border-slate-200 px-4 py-4">
-        <div className="text-xs font-semibold uppercase tracking-normal text-slate-400">Campux</div>
-        <div className="mt-1 truncate text-base font-bold text-slate-950" title={selectedTenant.name}>
-          {selectedTenant.name}
+        <div className="flex items-center gap-2">
+          <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <img src={logoUrl} alt={`${selectedTenant.name} logo`} className="h-full w-full object-contain p-1.5" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-normal text-slate-400">Campux</div>
+            <div className="mt-1 truncate text-base font-bold text-slate-950" title={selectedTenant.name}>
+              {selectedTenant.name}
+            </div>
+          </div>
         </div>
       </div>
 

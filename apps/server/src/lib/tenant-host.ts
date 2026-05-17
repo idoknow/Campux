@@ -62,6 +62,11 @@ export async function findTenantByRequestHost(request: FastifyRequest) {
       status: "active",
     },
     include: {
+      metadata: {
+        where: {
+          key: "logo_url",
+        },
+      },
       _count: {
         select: {
           botAccounts: true,

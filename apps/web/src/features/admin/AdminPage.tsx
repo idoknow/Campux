@@ -24,6 +24,7 @@ type TenantSettingsForm = {
   themeColor: string;
   brand: string;
   banner: string;
+  logoUrl: string;
   pendingPostLimit: number;
   postRulesText: string;
   servicesText: string;
@@ -334,6 +335,7 @@ export function AdminPage({
           themeColor: form.themeColor,
           brand: form.brand,
           banner: form.banner,
+          logoUrl: form.logoUrl.trim(),
           pendingPostLimit: form.pendingPostLimit,
           postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
           services: JSON.parse(form.servicesText) as TenantMetadata["services"],
@@ -1322,6 +1324,16 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             前台公告
             <Input value={form.banner} onChange={(event) => onFormChange({ ...form, banner: event.target.value })} />
+          </label>
+          <label className="grid gap-1 text-sm font-medium md:col-span-2">
+            校园墙 Logo URL
+            <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+              <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                <img src={form.logoUrl.trim() || "/logo.svg"} alt="校园墙 Logo 预览" className="h-full w-full object-contain p-2" />
+              </span>
+              <Input value={form.logoUrl} placeholder="留空则使用 Campux 默认 Logo" onChange={(event) => onFormChange({ ...form, logoUrl: event.target.value })} />
+            </div>
+            <span className="text-xs font-normal text-slate-500">填写可公开访问的图片地址。访问该校园墙专属 host 时，登录页、注册页和浏览器图标会优先展示它。</span>
           </label>
           <label className="grid gap-1 text-sm font-medium">
             每个用户同时待审核上限
@@ -2451,6 +2463,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     themeColor: selectedTenant.themeColor,
     brand: metadata.brand,
     banner: metadata.banner,
+    logoUrl: metadata.logoUrl,
     pendingPostLimit: metadata.pendingPostLimit,
     postRulesText: metadata.postRules.join("\n"),
     servicesText: JSON.stringify(metadata.services, null, 2),

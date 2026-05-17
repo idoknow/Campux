@@ -6,8 +6,11 @@ export function toTenantSummary(
       botAccounts?: number;
       posts?: number;
     };
+    metadata?: Array<{ key: string; value: unknown }>;
   },
 ) {
+  const logoUrl = tenant.metadata?.find((entry) => entry.key === "logo_url" && typeof entry.value === "string")?.value;
+
   return {
     id: tenant.id,
     slug: tenant.slug,
@@ -15,6 +18,7 @@ export function toTenantSummary(
     name: tenant.name,
     status: tenant.status,
     themeColor: tenant.themeColor,
+    logoUrl: typeof logoUrl === "string" ? logoUrl : "",
     botAccountCount: tenant._count?.botAccounts ?? 0,
     pendingPostCount: tenant._count?.posts ?? 0,
   };

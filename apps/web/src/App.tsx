@@ -93,6 +93,7 @@ export function App() {
   const selectedTenant = me?.authenticated ? me.currentTenant : tenants[0];
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
   const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
+  const activeLogoUrl = selectedTenant?.logoUrl?.trim() || "/logo.svg";
   const availableNavItems = useMemo(() => {
     if (!currentRole) {
       return navItems.filter((item) => item.value !== "admin");
@@ -321,6 +322,10 @@ export function App() {
     document.title = buildDocumentTitle(route, documentTenantName, me?.authenticated ? me.user.systemRole : null);
   }, [route, documentTenantName, me]);
 
+  useEffect(() => {
+    setDocumentIcon(activeLogoUrl);
+  }, [activeLogoUrl]);
+
   async function login(account: string, password: string) {
     setError("");
     const data = await api<MeResponse>("/api/auth/login", {
@@ -464,7 +469,7 @@ export function App() {
   }
 
   if (!me.authenticated) {
-    return <LoginScreen selectedTenant={selectedTenant ?? undefined} error={error} managementHost={authContext.managementHost} onLogin={login} onRegistered={completeRegistration} />;
+    return <LoginScreen selectedTenant={selectedTenant ?? undefined} logoUrl={activeLogoUrl} error={error} managementHost={authContext.managementHost} onLogin={login} onRegistered={completeRegistration} />;
   }
 
   if (me.user.passwordChangeRequired) {
@@ -662,4 +667,20 @@ function pageTitleFromRoute(route: AppRoute, systemRole?: AuthenticatedMe["user"
     return adminTabTitles[route.subTab as AdminTab] ?? mainTabTitles.admin;
   }
   return mainTabTitles[route.tab];
+}
+
+function setDocumentIcon(href: string) {
+  const selectors = ['link[rel="icon"]', 'link[rel="apple-touch-icon"]'];
+  for (const selector of selectors) {
+    let link = document.head.querySelector<HTMLLinkElement>(selector);
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = selector.includes("apple") ? "apple-touch-icon" : "icon";
+      if (link.rel === "icon") {
+        link.type = "image/svg+xml";
+      }
+      document.head.appendChild(link);
+    }
+    link.href = href;
+  }
 }

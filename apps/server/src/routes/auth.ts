@@ -68,6 +68,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
           include: {
             tenant: {
               include: {
+                metadata: {
+                  where: {
+                    key: "logo_url",
+                  },
+                },
                 _count: {
                   select: {
                     botAccounts: true,
@@ -384,6 +389,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     const tenant = await prisma.tenant.findUniqueOrThrow({
       where: { id: body.tenantId },
       include: {
+        metadata: {
+          where: {
+            key: "logo_url",
+          },
+        },
         _count: {
           select: {
             botAccounts: true,

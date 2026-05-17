@@ -100,6 +100,7 @@ export type AuthenticatedMe = Extract<MeResponse, { authenticated: true }>;
 export type TenantMetadata = {
   brand: string;
   banner: string;
+  logoUrl: string;
   postRules: string[];
   pendingPostLimit: number;
   services: Array<{

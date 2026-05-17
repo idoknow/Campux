@@ -11,6 +11,11 @@ export type SessionContext = Awaited<ReturnType<typeof getSessionContext>>;
 export type ActiveBanContext = Awaited<ReturnType<typeof findActiveBan>>;
 
 const tenantSummaryInclude = {
+  metadata: {
+    where: {
+      key: "logo_url" as const,
+    },
+  },
   _count: {
     select: {
       botAccounts: true,

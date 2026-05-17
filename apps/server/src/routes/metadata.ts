@@ -5,7 +5,7 @@ import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { maxPendingPostLimit, normalizePendingPostLimit, pendingPostLimitMetadataKey } from "../lib/tenant-metadata";
 
-const publicMetadataKeys = ["brand", "banner", "post_rules", "services", pendingPostLimitMetadataKey] as const;
+const publicMetadataKeys = ["brand", "banner", "logo_url", "post_rules", "services", pendingPostLimitMetadataKey] as const;
 
 const patchMetadataSchema = z.object({
   tenantName: z.string().min(1).max(80).optional(),
@@ -13,6 +13,7 @@ const patchMetadataSchema = z.object({
   themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   brand: z.string().min(1).optional(),
   banner: z.string().optional(),
+  logoUrl: z.string().trim().max(1000).refine((value) => value === "" || /^https?:\/\//i.test(value) || value.startsWith("/"), "Logo URL 必须是 http(s) 或站内路径").optional(),
   postRules: z.array(z.string().min(1)).optional(),
   pendingPostLimit: z.number().int().min(0).max(maxPendingPostLimit).optional(),
   services: z.array(
@@ -30,6 +31,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
   return {
     brand: typeof record.brand === "string" ? record.brand : "校园墙",
     banner: typeof record.banner === "string" ? record.banner : "",
+    logoUrl: typeof record.logo_url === "string" ? record.logo_url : "",
     postRules: Array.isArray(record.post_rules) ? record.post_rules.filter((rule) => typeof rule === "string") : [],
     pendingPostLimit: normalizePendingPostLimit(record[pendingPostLimitMetadataKey]),
     services: Array.isArray(record.services) ? record.services : [],
@@ -102,6 +104,9 @@ export function registerMetadataRoutes(app: FastifyInstance) {
     }
     if (body.banner !== undefined) {
       updates.push({ key: "banner", value: body.banner });
+    }
+    if (body.logoUrl !== undefined) {
+      updates.push({ key: "logo_url", value: body.logoUrl });
     }
     if (body.postRules !== undefined) {
       updates.push({ key: "post_rules", value: body.postRules });
