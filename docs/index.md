@@ -5,6 +5,9 @@ hero:
   name: Campux
   text: 开源校园墙运营系统
   tagline: 面向校园墙运营者和系统维护者的一体化投稿、审核、Bot、发布与运维平台。
+  image:
+    src: /logo.svg
+    alt: Campux logo
   actions:
     - theme: brand
       text: 快速开始
