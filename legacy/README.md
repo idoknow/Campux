@@ -1,7 +1,7 @@
 
 <div align="center">
 
-<image src="https://campux.idoknow.top/logo.png" alt="logo" width="140"/>
+<img src="../docs/public/logo.svg" alt="Campux logo" width="140"/>
 
 # Campux
 
