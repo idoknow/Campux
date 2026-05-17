@@ -8,12 +8,14 @@ import { Input } from "@/components/ui/input";
 
 export function LoginScreen({
   selectedTenant,
+  logoUrl,
   error,
   managementHost,
   onLogin,
   onRegistered,
 }: {
   selectedTenant: TenantSummary | undefined;
+  logoUrl: string;
   error: string;
   managementHost: boolean;
   onLogin: (account: string, password: string) => Promise<void>;
@@ -38,9 +40,14 @@ export function LoginScreen({
   return (
     <main className="min-h-dvh bg-background">
       <section className="mx-auto flex min-h-dvh w-full max-w-[420px] flex-col justify-center px-4 py-8">
-        <div className="mb-5">
-          <h1 className="inline-block pr-2 text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
-          <span className="align-baseline text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
+        <div className="mb-5 flex items-center gap-3">
+          <span className="flex size-13 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <img src={logoUrl} alt={`${selectedTenant?.name ?? "Campux"} logo`} className="h-full w-full object-contain p-2" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
+            <span className="block truncate text-sm text-slate-600">{selectedTenant?.name ?? "校园墙"}</span>
+          </div>
         </div>
 
         <form className="product-surface px-4 py-5" onSubmit={handleSubmit}>
@@ -68,7 +75,7 @@ export function LoginScreen({
             <button type="button" className="text-sm font-semibold text-blue-700" onClick={() => setRegisterOpen((value) => !value)}>
               {registerOpen ? "收起注册" : "注册运营管理员账号"}
             </button>
-            {registerOpen ? <RegisterPanel onRegistered={onRegistered} /> : null}
+            {registerOpen ? <RegisterPanel logoUrl={logoUrl} selectedTenantName={selectedTenant?.name ?? "Campux"} onRegistered={onRegistered} /> : null}
           </div>
         ) : null}
       </section>
@@ -76,7 +83,7 @@ export function LoginScreen({
   );
 }
 
-function RegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => void }) {
+function RegisterPanel({ logoUrl, selectedTenantName, onRegistered }: { logoUrl: string; selectedTenantName: string; onRegistered: (data: MeResponse) => void }) {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -120,6 +127,15 @@ function RegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => v
 
   return (
     <form className="mt-4 grid gap-3" onSubmit={submit}>
+      <div className="mb-1 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+        <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <img src={logoUrl} alt={`${selectedTenantName} logo`} className="h-full w-full object-contain p-1.5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-950">注册运营管理员账号</p>
+          <p className="truncate text-xs text-slate-500">{selectedTenantName}</p>
+        </div>
+      </div>
       <Input value={email} type="email" placeholder="邮箱" onChange={(event) => setEmail(event.target.value)} />
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
         <Input value={code} inputMode="numeric" placeholder="邮箱验证码" onChange={(event) => setCode(event.target.value)} />

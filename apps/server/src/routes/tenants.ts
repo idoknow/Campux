@@ -18,6 +18,11 @@ export function registerTenantRoutes(app: FastifyInstance) {
         status: "active",
       },
       include: {
+        metadata: {
+          where: {
+            key: "logo_url",
+          },
+        },
         _count: {
           select: {
             botAccounts: true,

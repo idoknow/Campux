@@ -13,6 +13,7 @@ export type NavItem = {
 export const defaultMetadata: TenantMetadata = {
   brand: "校园墙",
   banner: "",
+  logoUrl: "",
   postRules: [
     "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
     "寻物招领请写清地点、时间和联系方式。",
