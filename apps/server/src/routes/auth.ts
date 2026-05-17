@@ -47,9 +47,10 @@ const requiredPasswordChangeSchema = z.object({
 
 export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
   app.get("/api/auth/context", async (request) => {
-    const managementHost = await findManagementHostByRequest(request);
+    const [managementHost, hostTenant] = await Promise.all([findManagementHostByRequest(request), findTenantByRequestHost(request)]);
     return {
       managementHost: Boolean(managementHost),
+      currentTenant: hostTenant ? toTenantSummary(hostTenant) : null,
     };
   });
 
