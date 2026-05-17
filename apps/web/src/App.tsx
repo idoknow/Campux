@@ -3,7 +3,7 @@ import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
 import { api, fileToBase64 } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
-import type { AdminTab, AuthenticatedMe, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
+import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { BannedScreen } from "@/features/auth/BannedScreen";
@@ -17,6 +17,13 @@ type AppRoute =
   | { kind: "tenant"; tab: MainTab; subTab?: AdminTab | PostsTab }
   | { kind: "login" | "tenants" | "ops" }
   | { kind: "oauth"; search: string };
+
+type SelectTenantResponse = {
+  ok: true;
+  currentTenant: TenantSummary;
+  currentMembership: CurrentMembership | null;
+  activeBan: ActiveBan | null;
+};
 
 const tabPaths: Record<MainTab, string> = {
   post: "/post",
@@ -158,11 +165,7 @@ export function App() {
     };
   }, [me, route]);
 
-  async function refreshTenantData(page = postsPage) {
-    if (!me?.authenticated || !me.currentTenant || me.activeBan) {
-      return;
-    }
-
+  async function loadTenantData(page = postsPage) {
     setTenantDataLoading(true);
     try {
       const [metadataData, postsData] = await Promise.all([
@@ -176,6 +179,14 @@ export function App() {
     } finally {
       setTenantDataLoading(false);
     }
+  }
+
+  async function refreshTenantData(page = postsPage) {
+    if (!me?.authenticated || !me.currentTenant || me.activeBan) {
+      return;
+    }
+
+    await loadTenantData(page);
   }
 
   useEffect(() => {
@@ -224,7 +235,7 @@ export function App() {
     void refreshTenantData().catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取校园墙数据");
     });
-  }, [me]);
+  }, [me?.authenticated ? me.currentTenant?.id : null, me?.authenticated ? me.activeBan?.id : null]);
 
   useEffect(() => {
     if (!me?.authenticated || !me.currentTenant || me.activeBan) {
@@ -339,15 +350,29 @@ export function App() {
   }
 
   async function selectTenant(tenantId: string) {
-    await api("/api/session/tenant", {
+    const data = await api<SelectTenantResponse>("/api/session/tenant", {
       method: "POST",
       body: JSON.stringify({ tenantId }),
     });
-    await refreshMe();
+    setMetadata(defaultMetadata);
+    setPosts([]);
+    setPostsPagination(defaultPagination());
+    setPostsPage(1);
+    setUploadedImages([]);
+    setPostText("");
+    setAnonymous(false);
+    setMe((current) => current?.authenticated ? {
+      ...current,
+      currentTenant: data.currentTenant,
+      currentMembership: data.currentMembership,
+      activeBan: data.activeBan,
+      needsTenantSelection: false,
+    } : current);
     if (route.kind === "oauth") {
       return;
     }
     navigate({ kind: "tenant", tab: activeTab });
+    await loadTenantData(1);
   }
 
   async function uploadFiles(files: ArrayLike<File> | null) {

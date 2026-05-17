@@ -85,6 +85,7 @@ const reviewStatusOptions = [
 ];
 
 export function PostsPage({
+  tenantId,
   posts,
   currentRole,
   activeTab,
@@ -94,6 +95,7 @@ export function PostsPage({
   onTabChange,
   onRefresh,
 }: {
+  tenantId: string;
   posts: PostItem[];
   currentRole: TenantRole;
   activeTab: PostsTab;
@@ -153,10 +155,11 @@ export function PostsPage({
       return;
     }
 
+    setReviewPosts([]);
     void refreshReviewPosts(reviewPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
-  }, [canReview, reviewStatus, reviewPage]);
+  }, [canReview, reviewStatus, reviewPage, tenantId]);
 
   async function refreshAll() {
     await onRefresh();
@@ -905,6 +908,7 @@ function formatPostDate(value: string): string {
   }
 
   return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -919,6 +923,7 @@ function formatFullDateTime(value: string): string {
   }
 
   return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",

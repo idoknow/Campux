@@ -42,7 +42,7 @@ const auditActionLabels: Record<string, string> = {
 
 const timeRanges = [7, 14, 30, 90] as const;
 
-export function StatsPage({ loading, currentRole, onOpenUserDetail }: { loading: boolean; currentRole: TenantRole; onOpenUserDetail: (userId: string) => void }) {
+export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: { tenantId: string; loading: boolean; currentRole: TenantRole; onOpenUserDetail: (userId: string) => void }) {
   const [stats, setStats] = useState<TenantStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(14);
@@ -60,8 +60,9 @@ export function StatsPage({ loading, currentRole, onOpenUserDetail }: { loading:
   }
 
   useEffect(() => {
+    setStats(null);
     void refreshStats(rangeDays);
-  }, [rangeDays]);
+  }, [rangeDays, tenantId]);
 
   const maxHourly = useMemo(() => Math.max(1, ...(stats?.posts.hourly.map((hour) => hour.total) ?? [1])), [stats]);
   const currentRangeLabel = stats ? `近 ${stats.range.days} 天` : `近 ${rangeDays} 天`;
@@ -525,6 +526,7 @@ function formatNullable(value: number | null) {
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -533,7 +535,7 @@ function formatDateTime(value: string) {
 }
 
 function formatDay(value: string) {
-  return value.slice(5).replace("-", "/");
+  return value.replaceAll("-", "/");
 }
 
 function sessionStatusLabel(status: string) {
