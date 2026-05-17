@@ -461,7 +461,7 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
 
 function ApprovalRateStrip({ daily }: { daily: TenantStats["posts"]["daily"] }) {
   const rates = daily.map((day) => ({
-    date: formatDay(day.date),
+    date: formatShortDay(day.date),
     total: day.total,
     rate: day.total > 0 ? Math.round(((day.approved + day.published) / day.total) * 1000) / 10 : null,
   }));
@@ -536,6 +536,10 @@ function formatDateTime(value: string) {
 
 function formatDay(value: string) {
   return value.replaceAll("-", "/");
+}
+
+function formatShortDay(value: string) {
+  return value.slice(5).replace("-", "/");
 }
 
 function sessionStatusLabel(status: string) {
