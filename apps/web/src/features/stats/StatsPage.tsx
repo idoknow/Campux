@@ -386,7 +386,7 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
             const value = Math.round(maxValue - ratio * (maxValue - minValue));
             return (
               <g key={ratio}>
-                <line x1={padding.left} x2={chartWidth - padding.right} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
+                <line x1={padding.left} x2={chartWidth - padding.right} y1={y} y2={y} stroke="var(--chart-grid)" strokeWidth="1" />
                 <text x={padding.left - 8} y={y + 4} textAnchor="end" className="fill-slate-400 text-[10px] font-bold">
                   {value}
                 </text>
@@ -411,14 +411,14 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
                 <polyline points={points} fill="none" stroke={item.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                 {item.values.map((point, index) => (
                   <g key={`${item.label}-${point.label}-${index}`}>
-                    <circle cx={xAt(index, item.values.length)} cy={yAt(point.value)} r={activeIndex === index ? "5" : "3.5"} fill="white" stroke={item.color} strokeWidth={activeIndex === index ? "2.5" : "2"} />
+                    <circle cx={xAt(index, item.values.length)} cy={yAt(point.value)} r={activeIndex === index ? "5" : "3.5"} fill="var(--chart-point-fill)" stroke={item.color} strokeWidth={activeIndex === index ? "2.5" : "2"} />
                     <title>{`${point.label} ${item.label}: ${point.value}`}</title>
                   </g>
                 ))}
               </g>
             );
           })}
-          {activeIndex !== null ? <line x1={xAt(activeIndex, labels.length)} x2={xAt(activeIndex, labels.length)} y1={padding.top} y2={chartHeight - padding.bottom} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth="1.5" /> : null}
+          {activeIndex !== null ? <line x1={xAt(activeIndex, labels.length)} x2={xAt(activeIndex, labels.length)} y1={padding.top} y2={chartHeight - padding.bottom} stroke="var(--chart-active-line)" strokeDasharray="4 4" strokeWidth="1.5" /> : null}
           {labels.map((label, index) => {
             const left = index === 0 ? padding.left : (xAt(index - 1, labels.length) + xAt(index, labels.length)) / 2;
             const right = index === labels.length - 1 ? chartWidth - padding.right : (xAt(index, labels.length) + xAt(index + 1, labels.length)) / 2;

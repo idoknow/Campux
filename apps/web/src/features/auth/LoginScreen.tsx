@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { MeResponse } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 
 export function LoginScreen({
   hostTenant,
@@ -42,6 +43,9 @@ export function LoginScreen({
 
   return (
     <main className="min-h-dvh bg-background">
+      <div className="fixed right-4 top-4 z-10">
+        <ThemeModeButton />
+      </div>
       <section className="mx-auto flex min-h-dvh w-full max-w-[420px] flex-col justify-center px-4 py-8">
         <div className="mb-5 flex items-center gap-3">
           <span className="flex size-13 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
