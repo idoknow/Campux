@@ -6,6 +6,7 @@ export type RenderPostCardInput = {
   authorName: string;
   authorQq?: string;
   cornerQq?: string | undefined;
+  displayHost?: string | null | undefined;
   text: string;
   createdAt: Date;
   anonymous: boolean;
@@ -68,6 +69,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   }).format(input.createdAt);
   const author = input.anonymous ? "匿名" : input.authorName || input.authorQq || "用户";
   const footer = input.anonymous ? `匿名用户 发表于 ${createdAt}` : `${input.authorQq ?? input.authorName} 发表于 ${createdAt}`;
+  const displayHost = normalizeDisplayHost(input.displayHost);
   const avatar = input.anonymous ? anonymousAvatarDataUrl() : await qqAvatarDataUrl(input.authorQq);
   const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
   const banner = "";
@@ -148,7 +150,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   </div>
   <div id="footer">
     <span>${escapeHtml(footer)}</span>
-    <span>https://campux.top</span>
+    <span>${escapeHtml(displayHost)}</span>
   </div>
   <img id="bg-fixed-br" src="${corner}">
 </body>
@@ -158,6 +160,14 @@ async function renderPostHtml(input: RenderPostCardInput) {
   }
 </script>
 </html>`;
+}
+
+function normalizeDisplayHost(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return "https://campux.top";
+  }
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
 async function qqAvatarDataUrl(qq: string | undefined) {
