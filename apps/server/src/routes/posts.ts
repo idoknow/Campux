@@ -296,6 +296,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
 
     const bytes = await renderPostCard({
       tenantName: post.tenant.name,
+      displayHost: post.tenant.host,
       authorName: post.author.displayName ?? post.author.qqUin.toString(),
       authorQq: post.author.qqUin.toString(),
       cornerQq: previewBot?.qqUin.toString(),

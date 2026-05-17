@@ -625,7 +625,7 @@ function ReviewCard({
         <PostMetaHeader
           displayId={`稿件 ${post.displayId}`}
           anonymous={post.anonymous}
-          anonymousLabel={post.anonymous ? "前台匿名" : "前台实名"}
+          anonymousLabel={post.anonymous ? "匿名展示" : "实名展示"}
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
@@ -733,7 +733,7 @@ function PostCard({
         <PostMetaHeader
           displayId={post.displayId}
           anonymous={post.anonymous}
-          anonymousLabel={post.anonymous ? "匿名投稿" : "实名投稿"}
+          anonymousLabel={post.anonymous ? "匿名展示" : "实名展示"}
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
@@ -789,7 +789,7 @@ function PostMetaHeader({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <InfoPill icon={HashIcon}>{displayId}</InfoPill>
-          <InfoPill icon={anonymous ? EyeOffIcon : UserIcon}>{anonymousLabel}</InfoPill>
+          <VisibilityPill anonymous={anonymous}>{anonymousLabel}</VisibilityPill>
           <InfoPill icon={ImageIcon}>{imageCount} 张图</InfoPill>
         </div>
         {title ? <h3 className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-slate-950">{title}</h3> : null}
@@ -842,6 +842,20 @@ function PostTextBlock({ text, createdAt, updatedAt }: { text: string; createdAt
 function InfoPill({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+      <Icon className="size-3.5" />
+      {children}
+    </span>
+  );
+}
+
+function VisibilityPill({ anonymous, children }: { anonymous: boolean; children: ReactNode }) {
+  const Icon = anonymous ? EyeOffIcon : UserIcon;
+  const className = anonymous
+    ? "border-amber-200 bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+    : "border-sky-200 bg-sky-50 text-sky-800 ring-1 ring-sky-200";
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-black shadow-none ${className}`}>
       <Icon className="size-3.5" />
       {children}
     </span>
