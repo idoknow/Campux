@@ -38,6 +38,7 @@ export function AppShell({
   onRefreshMe,
   adminUserDetailTarget,
   onOpenAdminUserDetail,
+  onAdminUserDetailTargetConsumed,
   onOpenPostDetailFromAdmin,
   onRemoveImage,
   onSubmitPost,
@@ -69,6 +70,7 @@ export function AppShell({
   onRefreshMe: () => Promise<void>;
   adminUserDetailTarget: { userId: string; nonce: number } | null;
   onOpenAdminUserDetail: (userId: string) => void;
+  onAdminUserDetailTargetConsumed: () => void;
   onOpenPostDetailFromAdmin: (post: { id: string; displayId: number; status: string }) => void;
   onRemoveImage: (key: string) => void;
   onSubmitPost: () => void;
@@ -135,6 +137,7 @@ export function AppShell({
                 selectedTenant={me.currentTenant}
                 metadata={metadata}
                 detailTarget={adminUserDetailTarget}
+                onDetailTargetConsumed={onAdminUserDetailTargetConsumed}
                 onTabChange={onAdminTabChange}
                 onOpenPostDetail={onOpenPostDetailFromAdmin}
                 onSaved={async () => {

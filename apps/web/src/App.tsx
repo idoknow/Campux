@@ -130,8 +130,17 @@ export function App() {
   }
 
   function openAdminUserDetail(userId: string) {
+    const params = new URLSearchParams(window.location.pathname === "/admin" ? window.location.search : "");
+    params.set("user", userId);
+    const path = `/admin?${params}`;
+    window.history.pushState(null, "", path);
+    setRoute({ kind: "tenant", tab: "admin", subTab: "users" });
+    setActiveTabState("admin");
     setAdminUserDetailTarget({ userId, nonce: Date.now() });
-    navigate({ kind: "tenant", tab: "admin", subTab: "users" });
+  }
+
+  function consumeAdminUserDetailTarget() {
+    setAdminUserDetailTarget(null);
   }
 
   function openPostDetailFromAdmin(post: { id: string; displayId: number; status: string }) {
@@ -535,6 +544,7 @@ export function App() {
       onRefreshMe={refreshMe}
       adminUserDetailTarget={adminUserDetailTarget}
       onOpenAdminUserDetail={openAdminUserDetail}
+      onAdminUserDetailTargetConsumed={consumeAdminUserDetailTarget}
       onOpenPostDetailFromAdmin={openPostDetailFromAdmin}
       onPostsPageChange={setPostsPage}
       onRefreshTenantData={() => refreshTenantData(postsPage)}
