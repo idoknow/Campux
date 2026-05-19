@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
@@ -30,12 +31,16 @@ const app = Fastify({
   logger: {
     level: config.nodeEnv === "production" ? "info" : "debug",
   },
+  bodyLimit: 15 * 1024 * 1024,
 });
 await runDatabaseMigrations(app.log);
 
 await app.register(cors, {
   origin: config.webOrigin,
   credentials: true,
+});
+await app.register(fastifyMultipart, {
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
 });
 
 const queue = createRuntimeQueue({

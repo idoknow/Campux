@@ -1,5 +1,8 @@
 import { Buffer } from "node:buffer";
-import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CampuxConfig } from "@campux/config";
@@ -11,12 +14,6 @@ import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import type { OneBotRuntime } from "../runtime/onebot";
-
-const uploadSchema = z.object({
-  fileName: z.string().min(1),
-  contentType: z.string().min(1),
-  base64: z.string().min(1),
-});
 
 const fileQuerySchema = z.object({
   key: z.string().min(1),
@@ -43,6 +40,12 @@ const createPostSchema = z.object({
   ).max(9).default([]),
 });
 
+const legacyUploadSchema = z.object({
+  fileName: z.string().min(1),
+  contentType: z.string().min(1).optional(),
+  base64: z.string().min(1),
+});
+
 class PendingPostLimitError extends Error {
   constructor(
     readonly pendingCount: number,
@@ -52,10 +55,51 @@ class PendingPostLimitError extends Error {
   }
 }
 
-function decodeBase64(base64: string) {
-  const commaIndex = base64.indexOf(",");
-  const payload = commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
+function sanitizeUploadExtension(fileName: string | undefined): string {
+  const raw = fileName?.split(".").pop();
+  if (!raw) {
+    return "bin";
+  }
+  return raw.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "bin";
+}
+
+const IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/bmp",
+  "image/tiff",
+  "image/svg+xml",
+]);
+
+function isAllowedImageType(contentType: string): boolean {
+  return IMAGE_MIME_TYPES.has(contentType);
+}
+
+function headerIncludes(value: string | string[] | undefined, expected: string): boolean {
+  return Array.isArray(value) ? value.some((item) => item.includes(expected)) : Boolean(value?.includes(expected));
+}
+
+function readLegacyUploadContentType(value: string, fallback: string | undefined): string {
+  const match = /^data:([^;,]+)[;,]/.exec(value);
+  return fallback || match?.[1] || "application/octet-stream";
+}
+
+function decodeLegacyBase64Upload(value: string): Buffer {
+  const commaIndex = value.indexOf(",");
+  const payload = commaIndex >= 0 ? value.slice(commaIndex + 1) : value;
   return Buffer.from(payload, "base64");
+}
+
+function isUploadTooLargeError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = "code" in error ? String(error.code) : "";
+  return code === "FST_REQ_FILE_TOO_LARGE" || error.message.includes("size limit exceeded") || error.message.includes("File size limit exceeded");
 }
 
 async function ensureBucket(config: CampuxConfig) {
@@ -67,6 +111,40 @@ async function ensureBucket(config: CampuxConfig) {
   }
 
   return s3;
+}
+
+async function uploadImageBytes({
+  config,
+  tenantId,
+  fileName,
+  contentType,
+  body,
+}: {
+  config: CampuxConfig;
+  tenantId: string;
+  fileName: string;
+  contentType: string;
+  body: Buffer | Transform;
+}) {
+  const extension = sanitizeUploadExtension(fileName);
+  const key = `tenants/${tenantId}/uploads/${crypto.randomUUID()}.${extension}`;
+  const s3 = await ensureBucket(config);
+
+  await new Upload({
+    client: s3,
+    params: {
+      Bucket: config.s3.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    },
+  }).done();
+
+  return {
+    key,
+    url: `/api/uploads/post-image?key=${encodeURIComponent(key)}`,
+    fileName,
+  };
 }
 
 function isTransactionSerializationFailure(value: unknown) {
@@ -102,29 +180,88 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
 
   app.post("/api/uploads/post-images", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
-    const body = uploadSchema.parse(request.body);
-    const bytes = decodeBase64(body.base64);
-    if (bytes.byteLength > 8 * 1024 * 1024) {
-      return reply.code(413).send({ message: "图片不能超过 8MB" });
+    const requestContentType = request.headers["content-type"] ?? "";
+    const maxUploadSize = 10 * 1024 * 1024;
+
+    if (headerIncludes(requestContentType, "application/json")) {
+      const body = legacyUploadSchema.parse(request.body);
+      const contentType = readLegacyUploadContentType(body.base64, body.contentType);
+      if (!isAllowedImageType(contentType)) {
+        return reply.code(400).send({ message: "仅支持图片格式（jpg/png/gif/webp）" });
+      }
+
+      const bytes = decodeLegacyBase64Upload(body.base64);
+      if (bytes.byteLength > maxUploadSize) {
+        return reply.code(413).send({ message: "图片不能超过 10MB" });
+      }
+
+      return uploadImageBytes({
+        config,
+        tenantId: context.selectedTenant.id,
+        fileName: body.fileName,
+        contentType,
+        body: bytes,
+      });
     }
 
-    const extension = body.fileName.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "bin";
-    const key = `tenants/${context.selectedTenant.id}/uploads/${crypto.randomUUID()}.${extension}`;
-    const s3 = await ensureBucket(config);
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: config.s3.bucket,
-        Key: key,
-        Body: bytes,
-        ContentType: body.contentType,
-      }),
-    );
+    let file;
+    try {
+      file = await request.file();
+    } catch (error) {
+      if (isUploadTooLargeError(error)) {
+        return reply.code(413).send({ message: "图片不能超过 10MB" });
+      }
+      throw error;
+    }
+    if (!file) {
+      return reply.code(400).send({ message: "请上传图片文件" });
+    }
 
-    return {
-      key,
-      url: `/api/uploads/post-image?key=${encodeURIComponent(key)}`,
-      fileName: body.fileName,
-    };
+    const contentType = file.mimetype || "application/octet-stream";
+    if (!isAllowedImageType(contentType)) {
+      file.file.destroy();
+      return reply.code(400).send({ message: "仅支持图片格式（jpg/png/gif/webp）" });
+    }
+
+    const sourceStream = file.file;
+    let transferredBytes = 0;
+    const limitedStream = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        transferredBytes += chunk.length;
+        if (transferredBytes > maxUploadSize) {
+          callback(new Error("size limit exceeded"));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+
+    const uploadPromise = uploadImageBytes({
+      config,
+      tenantId: context.selectedTenant.id,
+      fileName: file.filename ?? `image.${sanitizeUploadExtension(undefined)}`,
+      contentType,
+      body: limitedStream,
+    });
+
+    try {
+      const [result] = await Promise.all([
+        uploadPromise,
+        pipeline(sourceStream, limitedStream),
+      ]);
+      return result;
+    } catch (error: unknown) {
+      if (!limitedStream.destroyed) {
+        limitedStream.destroy();
+      }
+      if (!sourceStream.destroyed) {
+        sourceStream.destroy();
+      }
+      if (isUploadTooLargeError(error)) {
+        return reply.code(413).send({ message: "图片不能超过 10MB" });
+      }
+      return reply.code(500).send({ message: "图片上传失败，请重试" });
+    }
   });
 
   app.post("/api/posts", async (request, reply) => {

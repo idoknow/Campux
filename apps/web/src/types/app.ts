@@ -115,6 +115,17 @@ export type UploadedImage = {
   url: string;
   fileName: string;
   previewUrl: string;
+  sortOrder: number;
+};
+
+export type UploadingFile = {
+  id: string;
+  file: File;
+  blobUrl: string;
+  progress: number;
+  status: "uploading" | "failed";
+  sortOrder: number;
+  errorMessage?: string;
 };
 
 export type PostItem = {

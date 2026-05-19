@@ -15,11 +15,55 @@ export async function api<T>(path: string, options: RequestInit = {}) {
   return data as T;
 }
 
-export function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
+export type UploadImageResponse = {
+  key: string;
+  url: string;
+  fileName: string;
+};
+
+export function uploadWithProgress(
+  file: File,
+  onProgress: (progress: number) => void,
+): Promise<UploadImageResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/uploads/post-images");
+    xhr.withCredentials = true;
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) {
+        onProgress((event.loaded / event.total) * 100);
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      let parsed: UploadImageResponse | { message?: string };
+      try {
+        parsed = JSON.parse(xhr.responseText) as UploadImageResponse | { message?: string };
+      } catch {
+        reject(new Error(xhr.statusText || `上传失败：${xhr.status}`));
+        return;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsed as UploadImageResponse);
+        return;
+      }
+
+      const message = (parsed as { message?: string }).message || `上传失败：${xhr.status}`;
+      reject(new Error(message));
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("网络错误，图片上传失败"));
+    });
+
+    xhr.addEventListener("abort", () => {
+      reject(new Error("上传已取消"));
+    });
+
+    const formData = new FormData();
+    formData.append("file", file);
+    xhr.send(formData);
   });
 }
