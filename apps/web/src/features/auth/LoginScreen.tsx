@@ -5,7 +5,47 @@ import { api } from "@/lib/api";
 import type { MeResponse } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
+
+const CREDENTIALS_KEY = "campux.loginCredentials.v1";
+
+function readSavedCredentials(): { account: string; password: string } | null {
+  try {
+    const raw = localStorage.getItem(CREDENTIALS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "account" in parsed &&
+      "password" in parsed &&
+      typeof (parsed as { account: unknown }).account === "string" &&
+      typeof (parsed as { password: unknown }).password === "string"
+    ) {
+      return parsed as { account: string; password: string };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCredentials(account: string, password: string) {
+  try {
+    localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ account, password }));
+  } catch {
+    // Storage unavailable; login should still work.
+  }
+}
+
+function clearSavedCredentials() {
+  try {
+    localStorage.removeItem(CREDENTIALS_KEY);
+  } catch {
+    // Storage unavailable; login should still work.
+  }
+}
 
 export function LoginScreen({
   hostTenant,
@@ -19,26 +59,53 @@ export function LoginScreen({
   logoUrl: string;
   error: string;
   managementHost: boolean;
-  onLogin: (account: string, password: string) => Promise<void>;
+  onLogin: (account: string, password: string) => Promise<MeResponse>;
   onRegistered: (data: MeResponse) => void;
 }) {
   const allowTestAccounts = import.meta.env.DEV;
   const title = hostTenant?.name ?? "Campux";
   const registerTenantName = hostTenant?.name ?? "Campux";
 
-  const [account, setAccount] = useState(allowTestAccounts ? "10000" : "");
-  const [password, setPassword] = useState(allowTestAccounts ? "campux123" : "");
+  const [savedCredentials] = useState(readSavedCredentials);
+  const [account, setAccount] = useState(() => savedCredentials?.account ?? (allowTestAccounts ? "10000" : ""));
+  const [password, setPassword] = useState(() => savedCredentials?.password ?? (allowTestAccounts ? "campux123" : ""));
+  const [remember, setRemember] = useState(() => savedCredentials !== null);
   const [busy, setBusy] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const displayError = loginError || error;
+
+  function handleRememberChange(checked: boolean) {
+    setRemember(checked);
+    if (!checked) {
+      clearSavedCredentials();
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    setLoginError("");
     setBusy(true);
     try {
-      await onLogin(account, password);
+      const data = await onLogin(account, password);
+      if (data.authenticated && !data.user.passwordChangeRequired && remember) {
+        saveCredentials(account, password);
+      }
+    } catch (caught) {
+      setLoginError(caught instanceof Error ? caught.message : "登录失败，请稍后再试");
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleAccountChange(value: string) {
+    setAccount(value);
+    setLoginError("");
+  }
+
+  function handlePasswordChange(value: string) {
+    setPassword(value);
+    setLoginError("");
   }
 
   return (
@@ -69,10 +136,15 @@ export function LoginScreen({
           <p className="text-lg font-semibold text-slate-950">登录到 Campux</p>
           <p className="mt-2 text-sm leading-6 text-slate-600">输入 QQ 号或邮箱，以及你的账号密码。</p>
           <div className="mt-5 grid gap-3">
-            <Input value={account} placeholder="QQ 号 / 邮箱" onChange={(event) => setAccount(event.target.value)} />
-            <Input value={password} type="password" placeholder="密码" onChange={(event) => setPassword(event.target.value)} />
+            <Input value={account} name="username" autoComplete="username" placeholder="QQ 号 / 邮箱" onChange={(event) => handleAccountChange(event.target.value)} />
+            <Input value={password} name="password" autoComplete="current-password" type="password" placeholder="密码" onChange={(event) => handlePasswordChange(event.target.value)} />
           </div>
-          {error ? <p className="mt-3 text-sm font-medium text-red-600">{error}</p> : null}
+          <div className="mt-3 flex items-center gap-2">
+            <Switch id="remember-credentials" checked={remember} onCheckedChange={handleRememberChange} size="sm" />
+            <label htmlFor="remember-credentials" className="cursor-pointer select-none text-sm text-slate-700">记住账号和密码</label>
+            <span className="text-xs text-slate-400">仅保存在当前浏览器。</span>
+          </div>
+          {displayError ? <p className="mt-3 text-sm font-medium text-red-600">{displayError}</p> : null}
           <Button className="mt-5 w-full font-medium" disabled={busy} type="submit">
             {busy ? "登录中" : "登录"}
           </Button>

@@ -9,11 +9,13 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.812.0",
+    "@aws-sdk/lib-storage": "3.1045.0",
     "@campux/config": "workspace:*",
     "@campux/db": "workspace:*",
     "@campux/domain": "workspace:*",
     "@campux/integrations": "workspace:*",
     "@campux/render": "workspace:*",
+    "@fastify/multipart": "^9.0.0",
     "@fastify/cors": "^11.0.1",
     "@fastify/static": "^9.1.3",
     "@fastify/websocket": "^11.2.0",
