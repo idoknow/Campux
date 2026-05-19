@@ -7,15 +7,19 @@ import {
   BotWorkflowError,
   findEnabledBot,
   qzoneCookieDomain,
+  refreshQZoneCookiesForBot,
   refreshQZoneCookiesViaBot,
   registerUserViaBot,
   requireBotTenantRole,
   reviewPostViaBot,
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
+import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import type { RuntimeQueue } from "./queue";
+import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
+import { resumePublishAttemptsWaitingForCookies } from "./publishing";
 
 type OneBotConnection = {
   socket: WebSocketLike;
@@ -282,7 +286,36 @@ export class OneBotRuntime {
     await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
   }
 
-  async notifyQZoneCookiesInvalid(botAccountId: string, message: string) {
+  async notifyPublishWaitingForCookies(postId: string, targetId: string, message: string) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        tenant: true,
+      },
+    });
+    const target = await prisma.publishTarget.findUnique({
+      where: {
+        id: targetId,
+      },
+      include: {
+        botAccount: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    const lines = [
+      `发表等待：#${post.displayId}`,
+      target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
+      `原因：${message}`,
+      "系统不会继续发布这条稿件，直到 QZone cookies 检测可用；重新登录或自动刷新成功后会自动恢复队列。",
+    ].filter((line): line is string => Boolean(line));
+    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+  }
+
+  async notifyQZoneCookiesInvalid(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }) {
     const bot = await prisma.botAccount.findUnique({
       where: {
         id: botAccountId,
@@ -295,13 +328,105 @@ export class OneBotRuntime {
       bot.qqUin.toString(),
       bot.reviewGroupId,
       [
-        "QQ空间cookies已失效，请 @ 并发送 #登录 或 #扫码登录 命令进行重新登录。",
+        options?.autoRefreshError
+          ? "QQ空间cookies已失效，协议自动刷新也失败了，请 @ 并发送 #登录 或 #扫码登录 命令进行重新登录。"
+          : "QQ空间cookies已失效，请 @ 并发送 #登录 或 #扫码登录 命令进行重新登录。",
         `墙号：${bot.displayName} / QQ ${bot.qqUin.toString()}`,
         `检测结果：${message}`,
-      ].join("\n"),
+        options?.autoRefreshError ? `自动刷新失败：${options.autoRefreshError}` : null,
+      ].filter((line): line is string => Boolean(line)).join("\n"),
     ).catch((error) => {
       this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify qzone cookies invalid");
     });
+  }
+
+  async refreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid") {
+    const bot = await prisma.botAccount.findUnique({
+      where: {
+        id: botAccountId,
+      },
+    });
+    if (!bot || !bot.enabled) {
+      throw new BotWorkflowError("Bot 未绑定校园墙", 404);
+    }
+
+    try {
+      const rawCookies = await this.getQZoneCookiesFromProtocol(bot.qqUin.toString());
+      const result = await refreshQZoneCookiesForBot({
+        botQqUin: bot.qqUin.toString(),
+        rawCookies,
+        actorId: null,
+        action: "bot.qzone.cookies.auto_refresh",
+        detail: {
+          reason,
+          source: "protocol",
+          reviewGroupId: bot.reviewGroupId,
+        },
+      });
+      const checked = await checkAndUpdateQZoneSession(result.session.id);
+      if (checked?.healthStatus === "invalid") {
+        throw new BotWorkflowError(`协议自动刷新后 cookies 仍不可用：${checked.healthMessage ?? "未知错误"}`, 502);
+      }
+      await this.notifyQZoneCookiesAutoRefreshed(bot.id, reason, result.cookieNames.length, checked?.healthMessage ?? null);
+      await this.resumeWaitingPublishAttemptsForBot(bot.id);
+      return result;
+    } catch (error) {
+      await writeAuditLog({
+        tenantId: bot.tenantId,
+        actorId: null,
+        action: "bot.qzone.cookies.auto_refresh_failed",
+        targetType: "bot_account",
+        targetId: bot.id,
+        detail: {
+          reason,
+          source: "protocol",
+          error: toErrorMessage(error),
+        },
+      });
+      throw error;
+    }
+  }
+
+  private async notifyQZoneCookiesAutoRefreshed(botAccountId: string, reason: string, cookieCount: number, healthMessage: string | null) {
+    const bot = await prisma.botAccount.findUnique({
+      where: {
+        id: botAccountId,
+      },
+    });
+    if (!bot || !bot.reviewGroupId) {
+      return;
+    }
+    await this.sendGroupMessage(
+      bot.qqUin.toString(),
+      bot.reviewGroupId,
+      [
+        "QZone cookies 已通过协议自动刷新。",
+        `墙号：${bot.displayName} / QQ ${bot.qqUin.toString()}`,
+        `触发原因：${formatQZoneAutoRefreshReason(reason)}`,
+        `刷新结果：${cookieCount} 项 cookies`,
+        healthMessage ? `检测结果：${healthMessage}` : null,
+      ].filter((line): line is string => Boolean(line)).join("\n"),
+    ).catch((error) => {
+      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify qzone cookies auto refresh");
+    });
+  }
+
+  async resumeWaitingPublishAttemptsForBot(botAccountId: string) {
+    const count = await resumePublishAttemptsWaitingForCookies(this.queue, botAccountId, this.logger);
+    if (count <= 0) {
+      return count;
+    }
+    const bot = await prisma.botAccount.findUnique({
+      where: {
+        id: botAccountId,
+      },
+    });
+    if (bot?.reviewGroupId) {
+      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, `已恢复 ${count} 个因 QZone cookies 不可用而暂停的发布任务。`).catch((error) => {
+        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify waiting publish attempts resumed");
+      });
+    }
+    return count;
   }
 
   getBotConnectionStatus(botQqUin: string) {
@@ -526,6 +651,10 @@ export class OneBotRuntime {
           operatorQqUin,
           rawCookies,
         });
+        const checked = await checkAndUpdateQZoneSession(result.session.id);
+        if (checked?.healthStatus === "available") {
+          await this.resumeWaitingPublishAttemptsForBot(result.bot.id);
+        }
         await this.sendGroupMessage(botQqUin, groupId, `QZone cookies 已刷新（${result.cookieNames.length} 项）。`);
         return;
       }
@@ -554,6 +683,20 @@ export class OneBotRuntime {
           await Bun.sleep(2_000);
           const result = await pollQZoneQrLogin(task.id);
           if (result.status === "succeeded") {
+            const session = await prisma.botSession.findFirst({
+              where: {
+                botAccountId: bot.id,
+                type: "qzone",
+                domain: qzoneCookieDomain,
+              },
+              orderBy: {
+                refreshedAt: "desc",
+              },
+            });
+            const checked = session ? await checkAndUpdateQZoneSession(session.id) : null;
+            if (checked?.healthStatus === "available") {
+              await this.resumeWaitingPublishAttemptsForBot(bot.id);
+            }
             await this.sendGroupMessage(botQqUin, groupId, `扫码登录完成，QZone cookies 已刷新（${result.cookieNames.length} 项）。`);
             return;
           }
@@ -899,4 +1042,14 @@ function toErrorMessage(error: unknown) {
     return error.message;
   }
   return "Bot 命令处理失败";
+}
+
+function formatQZoneAutoRefreshReason(reason: string) {
+  if (reason === "publish_login_required") {
+    return "发布时检测到登录态失效";
+  }
+  if (reason === "publish_preflight_invalid") {
+    return "发布前发现登录态不可用";
+  }
+  return "定时检测发现登录态失效";
 }

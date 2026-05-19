@@ -2567,6 +2567,7 @@ function groupPublishAttempts(attempts: PublishAttemptItem[]) {
 function summarizePublishAttemptStatus(attempts: PublishAttemptItem[]) {
   if (attempts.some((attempt) => attempt.status === "failed")) return "failed";
   if (attempts.some((attempt) => attempt.status === "running")) return "running";
+  if (attempts.some((attempt) => attempt.status === "waiting_cookies")) return "waiting_cookies";
   if (attempts.some((attempt) => attempt.status === "queued")) return "queued";
   if (attempts.every((attempt) => attempt.status === "succeeded")) return "succeeded";
   if (attempts.every((attempt) => attempt.status === "skipped")) return "skipped";
@@ -2745,6 +2746,8 @@ function formatBotEventAction(action: string) {
     "bot.review.approve": "群内通过",
     "bot.review.reject": "群内拒绝",
     "bot.qzone.cookies.refresh": "刷新 QZone cookies",
+    "bot.qzone.cookies.auto_refresh": "自动刷新 QZone cookies",
+    "bot.qzone.cookies.auto_refresh_failed": "自动刷新 QZone cookies 失败",
     "publish_target.create": "创建发布目标",
     "publish_target.update": "更新发布目标",
     "publish_attempt.retry": "重试发布",
@@ -2756,6 +2759,7 @@ function publishAttemptBadgeClass(status: string) {
   const classes: Record<string, string> = {
     queued: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
     running: "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
+    waiting_cookies: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
     succeeded: "bg-green-50 text-green-800 ring-1 ring-green-200",
     failed: "bg-red-50 text-red-700 ring-1 ring-red-200",
     skipped: "bg-slate-100 text-slate-600",

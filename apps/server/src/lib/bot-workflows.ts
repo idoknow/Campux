@@ -266,6 +266,39 @@ export async function refreshQZoneCookiesViaBot({
   const bot = await findEnabledBot(botQqUin);
   assertReviewGroup(bot, groupId);
   const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+  const result = await refreshQZoneCookiesForBot({
+    botQqUin,
+    rawCookies,
+    actorId: operator.id,
+    action: "bot.qzone.cookies.refresh",
+    detail: {
+      groupId: groupId ?? null,
+      source: "review_group",
+    },
+  });
+
+  return {
+    bot,
+    operator: serializeUser(operator),
+    session: result.session,
+    cookieNames: result.cookieNames,
+  };
+}
+
+export async function refreshQZoneCookiesForBot({
+  botQqUin,
+  rawCookies,
+  actorId,
+  action = "bot.qzone.cookies.auto_refresh",
+  detail,
+}: {
+  botQqUin: string;
+  rawCookies: string;
+  actorId?: string | null;
+  action?: string;
+  detail?: Record<string, unknown>;
+}) {
+  const bot = await findEnabledBot(botQqUin);
   const cookies = parseCookieString(rawCookies);
 
   if (!cookies.p_skey && !cookies.skey) {
@@ -304,20 +337,19 @@ export async function refreshQZoneCookiesViaBot({
   await markBotSeen(bot.id);
   await writeAuditLog({
     tenantId: bot.tenantId,
-    actorId: operator.id,
-    action: "bot.qzone.cookies.refresh",
+    actorId: actorId ?? null,
+    action,
     targetType: "bot_session",
     targetId: session.id,
     detail: {
       botQqUin,
-      groupId: groupId ?? null,
       cookieNames: Object.keys(cookies),
+      ...detail,
     },
   });
 
   return {
     bot,
-    operator: serializeUser(operator),
     session,
     cookieNames: Object.keys(cookies),
   };

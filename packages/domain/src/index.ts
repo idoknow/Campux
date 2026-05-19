@@ -26,6 +26,7 @@ export type PostStatus = z.infer<typeof postStatusSchema>;
 export const publishAttemptStatusSchema = z.enum([
   "queued",
   "running",
+  "waiting_cookies",
   "succeeded",
   "failed",
   "skipped",

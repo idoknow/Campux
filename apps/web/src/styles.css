@@ -487,8 +487,10 @@
 }
 
 .dark .border-violet-100,
-.dark .border-violet-200 {
+.dark .border-violet-200,
+.dark .ring-violet-200 {
   border-color: oklch(0.48 0.13 295) !important;
+  --tw-ring-color: oklch(0.48 0.13 295) !important;
 }
 
 .dark .fill-slate-400 {
