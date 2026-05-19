@@ -13,7 +13,7 @@
 主要面向**校园墙运营管理员**：自助开墙、配置机器人和发布目标、审核投稿、管理成员/公告/规则/封禁、查看统计。
 
 - 审核员、投稿用户：在产品内按角色使用，无需阅读文档。
-- 自托管系统维护者：部署、多租户生命周期、全局账号、域名与安全，见[系统维护手册](./docs/admin/overview.md)。
+- 自托管系统维护者：部署、多租户生命周期、全局账号、域名与安全，见[系统维护手册](https://docs.campux.top/admin/overview)。
 
 ## 开始使用
 
@@ -24,7 +24,7 @@
 3. 配置审核群、发布目标和 QZone cookies
 4. 测试投稿 → 审核 → 发布闭环
 
-完整步骤见 [自助开墙流程](./docs/operator/self-service-onboarding.md)。普通用户通过对应校园墙机器人注册，不走此入口。
+完整步骤见 [自助开墙流程](https://docs.campux.top/operator/self-service-onboarding)。普通用户通过对应校园墙机器人注册，不走此入口。
 
 ## 功能
 
@@ -37,12 +37,10 @@
 
 ## 文档
 
-```bash
-bun run docs:dev
-```
+完整文档见 **[docs.campux.top](https://docs.campux.top)**。
 
-- 运营管理员：[自助开墙](./docs/operator/self-service-onboarding.md) · [运营手册](./docs/operator/overview.md) · [OneBot 接入](./docs/reference/onebot.md) · [配置参考](./docs/reference/configuration.md)
-- 系统维护者：[部署与快速开始](./docs/getting-started.md) · [系统维护手册](./docs/admin/overview.md) · [故障排查](./docs/admin/troubleshooting.md)
+- 运营管理员：[自助开墙](https://docs.campux.top/operator/self-service-onboarding) · [运营手册](https://docs.campux.top/operator/overview) · [OneBot 接入](https://docs.campux.top/reference/onebot) · [配置参考](https://docs.campux.top/reference/configuration)
+- 系统维护者：[部署与快速开始](https://docs.campux.top/getting-started) · [系统维护手册](https://docs.campux.top/admin/overview) · [故障排查](https://docs.campux.top/admin/troubleshooting)
 
 ## 自托管部署
 
