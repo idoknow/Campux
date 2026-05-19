@@ -2,59 +2,63 @@
   <img src="./docs/public/logo.svg" alt="Campux logo" width="160" height="160" />
 </p>
 
-# Campux
+<h1 align="center">Campux</h1>
 
-Campux 是一个面向校园墙运营团队的开源管理系统。它把投稿、审核、QQ 机器人接入、QZone 发布、租户管理、封禁、统计和运维能力放在同一套 TypeScript 应用里，适合自托管给一个或多个校园墙使用。
+<p align="center">开源校园墙运营系统 · 投稿、审核、QQ 机器人、QZone 发布、统计、多租户，一套自托管 TypeScript 应用。</p>
 
 ![Campux 统计看板](./docs/public/screenshots/stats-dashboard.png)
 
-## 适合谁使用
+## 适合谁
 
-- 校园墙运营者：管理投稿审核、墙号机器人、发布目标、公告、投稿规则、服务入口和封禁记录。
-- 系统维护者：管理多个校园墙、全局账号、租户生命周期、专属域名、审计日志和部署环境。
-- 开源自托管团队：希望用 PostgreSQL、S3/MinIO、OneBot 协议端和 Docker 运行自己的校园墙系统。
+主要面向**校园墙运营管理员**：自助开墙、配置机器人和发布目标、审核投稿、管理成员/公告/规则/封禁、查看统计。
 
-Campux 当前不把终端用户手册作为文档重点。终端用户主要通过校园墙机器人注册账号，再在网页完成投稿和查看自己的稿件状态。
+- 审核员、投稿用户：在产品内按角色使用，无需阅读文档。
+- 自托管系统维护者：部署、多租户生命周期、全局账号、域名与安全，见[系统维护手册](./docs/admin/overview.md)。
 
-## 官方服务自助开墙
+## 开始使用
 
-官方服务预期入口是 `https://app.campux.top`。墙号运营者从这个 host 访问时，可以直接用邮箱验证码注册“运营管理员”账号，然后在产品内完成：
+官方服务入口 `https://app.campux.top`。从该域名访问即可用邮箱验证码注册**运营管理员**账号，然后在产品内：
 
-1. 创建自己的校园墙。
-2. 添加墙号 Bot。
-3. 复制 OneBot URL 到 NapCat 反向 WebSocket。
-4. 配置审核群、发布目标和 QZone cookies。
-5. 测试投稿、审核、发布闭环。
+1. 创建自己的校园墙
+2. 添加墙号 Bot，复制 OneBot URL 到 NapCat 反向 WebSocket
+3. 配置审核群、发布目标和 QZone cookies
+4. 测试投稿 → 审核 → 发布闭环
 
-普通用户不走这个注册入口，仍通过具体校园墙机器人注册或由管理员添加。详细流程见 [自助开墙流程](./docs/operator/self-service-onboarding.md)。
+完整步骤见 [自助开墙流程](./docs/operator/self-service-onboarding.md)。普通用户通过对应校园墙机器人注册，不走此入口。
 
-## 功能概览
+## 功能
 
-- 多租户校园墙：一个实例管理多个校园墙，每个账号只进入被授权的校园墙。
-- 投稿与审核：支持文字、图片、匿名投稿、撤回、拒绝理由、审核群通知和网页审核。
-- 机器人管理：每个校园墙可配置多个 OneBot 机器人，查看连接 URL、连接状态和最近事件。
-- QZone 发布：支持发布目标、风控间隔、cookies 健康检查、扫码登录、协议获取、发布日志和重试。
-- 运营配置：公告、投稿规则、服务入口、品牌名、主题色、成员身份和封禁管理。
-- 系统运维：租户生命周期、专属 host、全局用户、身份授权、审计日志和健康检查。
-- 统计看板：投稿量、成员量、审核效率、发布质量、机器人状态和审计行为。
+- **投稿与审核**：文字、图片、匿名投稿，撤回、拒绝理由、审核群通知、网页审核
+- **机器人**：每墙多个 OneBot v11 机器人，连接 URL、状态和事件
+- **QZone 发布**：发布目标、风控间隔、cookies 健康检查、扫码登录、发布日志和重试
+- **运营配置**：公告、投稿规则、服务入口、品牌名、主题色、成员与封禁
+- **统计看板**：投稿量、成员量、审核效率、发布质量、机器人状态
+- **多租户运维**：一个实例管理多个校园墙，租户生命周期、全局账号、专属 host、审计日志
 
-## 快速启动
+## 文档
 
-生产或演示环境可以直接使用 Docker Compose：
+```bash
+bun run docs:dev
+```
+
+- 运营管理员：[自助开墙](./docs/operator/self-service-onboarding.md) · [运营手册](./docs/operator/overview.md) · [OneBot 接入](./docs/reference/onebot.md) · [配置参考](./docs/reference/configuration.md)
+- 系统维护者：[部署与快速开始](./docs/getting-started.md) · [系统维护手册](./docs/admin/overview.md) · [故障排查](./docs/admin/troubleshooting.md)
+
+## 自托管部署
+
+<details>
+<summary>Docker Compose 一键启动、开发模式与部署注意事项</summary>
+
+生产或演示环境直接用 Docker Compose：
 
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
 
-默认服务地址：
+默认地址：Web 与 API `:8989`、PostgreSQL `:5432`、MinIO API `:9000`、MinIO Console `:9001`。
 
-- Web 与 API：`http://localhost:8989`
-- PostgreSQL：`localhost:5432`
-- MinIO API：`http://localhost:9000`
-- MinIO Console：`http://localhost:9001`
-
-开发环境可以只启动基础设施，再分别启动前后端：
+开发模式（只起基础设施，前后端分别启动）：
 
 ```bash
 docker compose -f docker-compose.dev.yaml up -d
@@ -66,44 +70,21 @@ bun run dev:server
 bun run dev:web
 ```
 
-开发环境前端默认在 `http://localhost:5180`，后端默认在 `http://localhost:8989`。
+开发前端默认 `:5180`，后端默认 `:8989`。
 
-## 文档
-
-完整文档使用 VitePress 编写，面向校园墙运营者和系统维护者：
-
-```bash
-bun run docs:dev
-```
-
-文档入口：
-
-- [部署与快速开始](./docs/getting-started.md)
-- [自助开墙流程](./docs/operator/self-service-onboarding.md)
-- [校园墙运营手册](./docs/operator/overview.md)
-- [系统维护手册](./docs/admin/overview.md)
-- [配置参考](./docs/reference/configuration.md)
-- [OneBot 接入](./docs/reference/onebot.md)
-- [故障排查](./docs/admin/troubleshooting.md)
-
-## 技术栈
-
-- Bun workspace
-- Vite + React
-- Fastify
-- Prisma + PostgreSQL
-- S3-compatible object storage
-- OneBot v11 WebSocket
-- Docker / Docker Compose
-- VitePress documentation
-
-## 部署注意事项
+部署注意事项：
 
 - 生产环境必须设置 `CAMPUX_BOT_SESSION_SECRET`，用于加密机器人 cookies。
 - 生产环境请使用 HTTPS，session cookie 在 `NODE_ENV=production` 下会带 `Secure`。
-- 应用启动时默认执行 Prisma migration；如需跳过，可设置 `CAMPUX_SKIP_AUTO_MIGRATE=true`。
-- QZone 发布依赖有效 cookies，建议配置 cookies 健康检查和可人工介入的扫码登录流程。
+- 应用启动默认执行 Prisma migration，跳过可设 `CAMPUX_SKIP_AUTO_MIGRATE=true`。
+- QZone 发布依赖有效 cookies，建议配置 cookies 健康检查和可人工介入的扫码登录。
+
+</details>
+
+## 技术栈
+
+Bun workspace · Vite + React · Fastify · Prisma + PostgreSQL · S3 兼容存储 · OneBot v11 WebSocket · Docker · VitePress
 
 ## 许可证
 
-Campux 使用 [Apache License 2.0](./LICENSE) 开源。
+[Apache License 2.0](./LICENSE)
