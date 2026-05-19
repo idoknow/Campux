@@ -29,6 +29,17 @@ async function renderDiagram() {
 
     const { svg } = await mermaid.render(diagramId, source.value);
     container.value.innerHTML = svg;
+
+    const svgElement = container.value.querySelector("svg");
+    const viewBox = svgElement?.getAttribute("viewBox")?.split(/\s+/).map(Number);
+    const naturalWidth = viewBox && Number.isFinite(viewBox[2]) ? Math.ceil(viewBox[2]) : undefined;
+
+    if (svgElement && naturalWidth) {
+      svgElement.removeAttribute("width");
+      svgElement.style.width = `${naturalWidth}px`;
+      svgElement.style.maxWidth = "none";
+    }
+
     error.value = undefined;
   } catch (err) {
     container.value.innerHTML = "";
