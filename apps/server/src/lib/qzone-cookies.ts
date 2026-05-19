@@ -3,7 +3,9 @@ import { prisma } from "./prisma";
 import { decryptJson } from "./secret-json";
 
 type QZoneCookieNotifier = {
-  notifyQZoneCookiesInvalid(botAccountId: string, message: string): Promise<void>;
+  notifyQZoneCookiesInvalid(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }): Promise<void>;
+  refreshQZoneCookiesByProtocol?(botAccountId: string, reason: "heartbeat_invalid"): Promise<{ cookieNames: string[] }>;
+  resumeWaitingPublishAttemptsForBot?(botAccountId: string): Promise<number>;
 };
 
 export const qzoneCookieHealthStatuses = ["unchecked", "available", "invalid"] as const;
@@ -115,13 +117,49 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
         healthFailureCount: true,
         healthInvalidNotifiedAt: true,
         botAccountId: true,
+        botAccount: {
+          select: {
+            publishTargets: {
+              where: {
+                enabled: true,
+                qzoneRefreshMode: "protocol",
+              },
+              select: {
+                id: true,
+              },
+              take: 1,
+            },
+          },
+        },
       },
     });
 
     for (const session of sessions) {
       try {
         const updated = await checkAndUpdateQZoneSession(session.id);
+        if (updated?.healthStatus === "available") {
+          await notifier?.resumeWaitingPublishAttemptsForBot?.(session.botAccountId).catch((error) => {
+            logger.warn({ error, sessionId: session.id, botAccountId: session.botAccountId }, "failed to resume waiting publish attempts after qzone heartbeat");
+          });
+        }
         if (updated?.healthStatus === "invalid" && shouldNotifyInvalidCookies(updated)) {
+          const refreshByProtocol = notifier?.refreshQZoneCookiesByProtocol;
+          if (session.botAccount.publishTargets.length > 0 && refreshByProtocol) {
+            try {
+              const result = await refreshByProtocol(session.botAccountId, "heartbeat_invalid");
+              logger.info({ sessionId: session.id, botAccountId: session.botAccountId, cookieCount: result.cookieNames.length }, "qzone cookies auto refreshed after heartbeat invalid");
+              continue;
+            } catch (error) {
+              logger.warn({ error, sessionId: session.id, botAccountId: session.botAccountId }, "qzone cookies protocol auto refresh failed after heartbeat invalid");
+              await markInvalidCookiesNotified(session.id);
+              await notifier.notifyQZoneCookiesInvalid(session.botAccountId, updated.healthMessage ?? "QZone cookies 检测失败", {
+                autoRefreshError: toErrorMessage(error),
+              }).catch((notifyError) => {
+                logger.warn({ error: notifyError, sessionId: session.id }, "failed to notify qzone cookies invalid");
+              });
+              continue;
+            }
+          }
           await prisma.botSession.update({
             where: {
               id: session.id,
@@ -154,6 +192,24 @@ function shouldNotifyInvalidCookies(session: { healthFailureCount: number; healt
 
   const lastNotifiedAt = session.healthInvalidNotifiedAt?.getTime();
   return !lastNotifiedAt || Date.now() - lastNotifiedAt >= invalidCookieNotifyCooldownMs;
+}
+
+async function markInvalidCookiesNotified(sessionId: string) {
+  await prisma.botSession.update({
+    where: {
+      id: sessionId,
+    },
+    data: {
+      healthInvalidNotifiedAt: new Date(),
+    },
+  });
+}
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "协议自动刷新失败";
 }
 
 export function generateGtk(skey: string) {

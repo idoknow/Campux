@@ -56,6 +56,7 @@ export const statusLabels: Record<string, string> = {
   publishing: "发布中",
   partially_failed: "部分失败",
   failed: "发布失败",
+  waiting_cookies: "等待登录态",
   published: "已发布",
   pending_recall: "待撤回",
   recalled: "已撤回",

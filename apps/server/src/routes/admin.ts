@@ -6,7 +6,7 @@ import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
 import { buildUserContainsSearch, findUserIdsByContainsSearch } from "../lib/user-search";
-import { defaultPublishIntervalSeconds, enqueueAttempt, schedulePublishAttempt } from "../runtime/publishing";
+import { defaultPublishIntervalSeconds, enqueueAttempt, resumePublishAttemptsWaitingForCookies, schedulePublishAttempt } from "../runtime/publishing";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
 import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
@@ -663,6 +663,10 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       groupId: bot.reviewGroupId,
       rawCookies,
     });
+    const checked = await checkAndUpdateQZoneSession(result.session.id);
+    if (checked?.healthStatus === "available") {
+      await resumePublishAttemptsWaitingForCookies(queue, bot.id, app.log);
+    }
     return {
       cookieNames: result.cookieNames,
     };
@@ -689,6 +693,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     }
 
     const updated = await checkAndUpdateQZoneSession(session.id);
+    if (updated?.healthStatus === "available") {
+      await resumePublishAttemptsWaitingForCookies(queue, params.id, app.log);
+    }
     return {
       session: updated ? toBotSession(updated) : null,
     };
@@ -752,7 +759,24 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
   app.get("/api/admin/bots/:id/qzone-login/:loginId", async (request, reply) => {
     await requireTenantRole(request, reply, "admin");
     const params = botLoginParamsSchema.parse(request.params);
-    return pollQZoneQrLogin(params.loginId);
+    const result = await pollQZoneQrLogin(params.loginId);
+    if (result.status === "succeeded") {
+      const session = await prisma.botSession.findFirst({
+        where: {
+          botAccountId: params.id,
+          type: "qzone",
+          domain: qzoneCookieDomain,
+        },
+        orderBy: {
+          refreshedAt: "desc",
+        },
+      });
+      const checked = session ? await checkAndUpdateQZoneSession(session.id) : null;
+      if (checked?.healthStatus === "available") {
+        await resumePublishAttemptsWaitingForCookies(queue, params.id, app.log);
+      }
+    }
+    return result;
   });
 
   app.delete("/api/admin/bots/:id", async (request, reply) => {

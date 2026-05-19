@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 const publishStatusLabels: Record<string, string> = {
   queued: "排队中",
   running: "发布中",
+  waiting_cookies: "等待登录态",
   succeeded: "成功",
   failed: "失败",
   skipped: "跳过",
@@ -31,6 +32,8 @@ const publishStatusLabels: Record<string, string> = {
 
 const auditActionLabels: Record<string, string> = {
   "bot.qzone.cookies.refresh": "刷新 cookies",
+  "bot.qzone.cookies.auto_refresh": "自动刷新 cookies",
+  "bot.qzone.cookies.auto_refresh_failed": "自动刷新失败",
   "bot.qzone.cookies.qr_login": "扫码登录",
   "bot_account.create": "创建机器人",
   "bot_account.update": "更新机器人",

@@ -41,6 +41,7 @@ enum PostStatus {
 enum PublishAttemptStatus {
   queued
   running
+  waiting_cookies
   succeeded
   failed
   skipped

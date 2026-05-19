@@ -8,6 +8,7 @@ import { renderPostCard } from "@campux/render";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
+import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -18,6 +19,9 @@ type PublishScheduleClient = typeof prisma | Prisma.TransactionClient;
 type PublishingNotifier = {
   notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
   notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }): Promise<void>;
+  notifyPublishWaitingForCookies?(postId: string, targetId: string, message: string): Promise<void>;
+  notifyQZoneCookiesInvalid?(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }): Promise<void>;
+  refreshQZoneCookiesByProtocol?(botAccountId: string, reason: "publish_login_required" | "publish_preflight_invalid"): Promise<{ cookieNames: string[] }>;
 };
 
 type ImagePayload = {
@@ -265,6 +269,56 @@ export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId:
   });
 }
 
+export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue, botAccountId: string, logger?: FastifyBaseLogger) {
+  const attempts = await prisma.publishAttempt.findMany({
+    where: {
+      status: "waiting_cookies",
+      publishTarget: {
+        botAccountId,
+        enabled: true,
+        botAccount: {
+          enabled: true,
+        },
+      },
+      post: {
+        status: {
+          in: ["publishing", "partially_failed", "failed"],
+        },
+      },
+    },
+    include: {
+      publishTarget: true,
+    },
+    orderBy: {
+      updatedAt: "asc",
+    },
+  });
+
+  for (const attempt of attempts) {
+    const { attempt: updated, nextRunAt } = await schedulePublishAttempt({
+      tenantId: attempt.tenantId,
+      postId: attempt.postId,
+      publishTargetId: attempt.publishTargetId,
+      botAccountId: attempt.publishTarget.botAccountId,
+      intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+      excludeAttemptId: attempt.id,
+    });
+    await prisma.postLog.create({
+      data: {
+        tenantId: attempt.tenantId,
+        postId: attempt.postId,
+        newStatus: "publishing",
+        comment: `${attempt.publishTarget.displayName} QZone cookies 已恢复，发布任务重新排队`,
+      },
+    });
+    enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
+    await refreshAggregatePostStatus(attempt.postId);
+  }
+
+  logger?.info({ botAccountId, count: attempts.length }, "waiting publish attempts resumed after qzone cookies became available");
+  return attempts.length;
+}
+
 async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, job: RuntimeJob, notifier?: PublishingNotifier) {
   const attemptId = typeof job.payload.attemptId === "string" ? job.payload.attemptId : "";
   if (!attemptId) {
@@ -299,9 +353,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     },
     data: {
       status: "running",
-      attempt: {
-        increment: 1,
-      },
       lastError: null,
       verbose: Prisma.JsonNull,
       nextRunAt: null,
@@ -363,6 +414,34 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   }
 
   try {
+    const cookies = await resolveCookiesForPublish({
+      attemptId: attempt.id,
+      tenantId: attempt.tenantId,
+      postId: attempt.postId,
+      publishTargetId: attempt.publishTargetId,
+      publishTargetName: attempt.publishTarget.displayName,
+      botAccountId: attempt.publishTarget.botAccountId,
+      botQqUin: attempt.publishTarget.botAccount.qqUin.toString(),
+      qzoneRefreshMode: attempt.publishTarget.qzoneRefreshMode,
+      session: attempt.publishTarget.botAccount.sessions[0] ?? null,
+      logger,
+      notifier,
+    });
+    if (!cookies) {
+      await refreshAggregatePostStatus(attempt.postId);
+      return;
+    }
+    await prisma.publishAttempt.update({
+      where: {
+        id: attempt.id,
+      },
+      data: {
+        attempt: {
+          increment: 1,
+        },
+      },
+    });
+
     const renderedCard = await renderPostCard({
       tenantName: attempt.post.tenant.name,
       displayHost: attempt.post.tenant.host,
@@ -389,7 +468,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       renderedCard,
       imageUrls: getImageUrls(attempt.post.images),
       images: postImages,
-      cookies: toCookieRecord(attempt.publishTarget.botAccount.sessions[0]?.cookies),
+      cookies,
     });
 
     await prisma.publishAttempt.update({
@@ -423,8 +502,57 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       },
     });
     const message = caught instanceof Error ? caught.message : "发布失败";
+    const previousVerbose = caught instanceof QZonePublishError ? caught.verbose : null;
     const verbose = caught instanceof QZonePublishError ? toInputJson(caught.verbose) : Prisma.JsonNull;
     const needsLogin = isQZoneLoginRequiredError(message);
+    if (needsLogin && attempt.publishTarget.qzoneRefreshMode === "protocol" && notifier?.refreshQZoneCookiesByProtocol && currentAttempt.attempt < maxPublishAttempts) {
+      try {
+        const refreshResult = await notifier.refreshQZoneCookiesByProtocol(attempt.publishTarget.botAccountId, "publish_login_required");
+        const nextRunAt = await resolveNextPublishRunAt({
+          tenantId: attempt.tenantId,
+          botAccountId: attempt.publishTarget.botAccountId,
+          intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+          excludeAttemptId: attempt.id,
+        });
+        await prisma.publishAttempt.update({
+          where: {
+            id: attempt.id,
+          },
+          data: {
+            status: "queued",
+            lastError: `QZone cookies 已通过协议自动刷新，等待重新发布。原始错误：${message}`,
+            verbose: toInputJson({
+              autoRefresh: {
+                mode: "protocol",
+                reason: "publish_login_required",
+                cookieCount: refreshResult.cookieNames.length,
+              },
+              previousError: previousVerbose,
+            }),
+            nextRunAt,
+          },
+        });
+        await prisma.postLog.create({
+          data: {
+            tenantId: attempt.tenantId,
+            postId: attempt.postId,
+            newStatus: "publishing",
+            comment: `${attempt.publishTarget.displayName} 发布时检测到 cookies 失效，已协议自动刷新（${refreshResult.cookieNames.length} 项）并重新排队`,
+          },
+        });
+        enqueueAttempt(queue, attempt.tenantId, attempt.id, nextRunAt);
+        await notifier.notifyPublishFailed(attempt.postId, attempt.publishTargetId, `QZone cookies 已通过协议自动刷新，将自动重试发布。原始错误：${message}`, { nextRunAt }).catch((error) => {
+          logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish auto refresh retry");
+        });
+        await refreshAggregatePostStatus(attempt.postId);
+        return;
+      } catch (refreshError) {
+        const refreshMessage = refreshError instanceof Error ? refreshError.message : "协议自动刷新失败";
+        await notifier.notifyQZoneCookiesInvalid?.(attempt.publishTarget.botAccountId, message, { autoRefreshError: refreshMessage }).catch((error) => {
+          logger.warn({ error, botAccountId: attempt.publishTarget.botAccountId }, "failed to notify qzone cookies auto refresh failure");
+        });
+      }
+    }
     const shouldRetry = !needsLogin && currentAttempt.attempt < maxPublishAttempts;
     const nextRunAt = shouldRetry
       ? await resolveNextPublishRunAt({
@@ -468,6 +596,162 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   await refreshAggregatePostStatus(attempt.postId);
 }
 
+async function resolveCookiesForPublish({
+  attemptId,
+  tenantId,
+  postId,
+  publishTargetId,
+  publishTargetName,
+  botAccountId,
+  botQqUin,
+  qzoneRefreshMode,
+  session,
+  logger,
+  notifier,
+}: {
+  attemptId: string;
+  tenantId: string;
+  postId: string;
+  publishTargetId: string;
+  publishTargetName: string;
+  botAccountId: string;
+  botQqUin: string;
+  qzoneRefreshMode: string;
+  session: {
+    id: string;
+    cookies: Prisma.JsonValue;
+    healthStatus: string;
+    healthMessage: string | null;
+  } | null;
+  logger: FastifyBaseLogger;
+  notifier: PublishingNotifier | undefined;
+}) {
+  const checkedSession = await ensureSessionChecked(session);
+  const checkedCookies = getAvailableCookies(checkedSession);
+  if (checkedCookies) {
+    return checkedCookies;
+  }
+
+  let autoRefreshError: string | null = null;
+  if (qzoneRefreshMode === "protocol" && notifier?.refreshQZoneCookiesByProtocol) {
+    try {
+      await notifier.refreshQZoneCookiesByProtocol(botAccountId, "publish_preflight_invalid");
+      const refreshedSession = await findLatestQZoneSession(botAccountId);
+      const refreshedCookies = getAvailableCookies(refreshedSession);
+      if (refreshedCookies) {
+        return refreshedCookies;
+      }
+      autoRefreshError = refreshedSession?.healthMessage ? `协议自动刷新后 cookies 仍不可用：${refreshedSession.healthMessage}` : "协议自动刷新后没有拿到可用 cookies";
+    } catch (error) {
+      autoRefreshError = error instanceof Error ? error.message : "协议自动刷新失败";
+      await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
+        logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
+      });
+    }
+  }
+
+  const message = checkedSession?.healthMessage ?? "这个发布目标还没有可用的 QZone cookies";
+  await markAttemptWaitingForCookies({
+    attemptId,
+    tenantId,
+    postId,
+    publishTargetId,
+    publishTargetName,
+    message,
+    autoRefreshError,
+    notifier,
+    logger,
+  });
+  return null;
+}
+
+async function ensureSessionChecked(
+  session: {
+    id: string;
+    cookies: Prisma.JsonValue;
+    healthStatus: string;
+    healthMessage: string | null;
+  } | null,
+) {
+  if (!session) {
+    return null;
+  }
+  if (session.healthStatus === "available") {
+    return session;
+  }
+  return checkAndUpdateQZoneSession(session.id);
+}
+
+function getAvailableCookies(session: { cookies: Prisma.JsonValue; healthStatus: string } | null) {
+  if (!session || session.healthStatus !== "available") {
+    return null;
+  }
+  return toCookieRecord(session.cookies);
+}
+
+async function findLatestQZoneSession(botAccountId: string) {
+  const session = await prisma.botSession.findFirst({
+    where: {
+      botAccountId,
+      type: "qzone",
+      domain: qzoneCookieDomain,
+    },
+    orderBy: {
+      refreshedAt: "desc",
+    },
+  });
+  return ensureSessionChecked(session);
+}
+
+async function markAttemptWaitingForCookies({
+  attemptId,
+  tenantId,
+  postId,
+  publishTargetId,
+  publishTargetName,
+  message,
+  autoRefreshError,
+  notifier,
+  logger,
+}: {
+  attemptId: string;
+  tenantId: string;
+  postId: string;
+  publishTargetId: string;
+  publishTargetName: string;
+  message: string;
+  autoRefreshError: string | null;
+  notifier: PublishingNotifier | undefined;
+  logger: FastifyBaseLogger;
+}) {
+  await prisma.publishAttempt.update({
+    where: {
+      id: attemptId,
+    },
+    data: {
+      status: "waiting_cookies",
+      lastError: autoRefreshError ? `${message}；协议自动刷新失败：${autoRefreshError}` : message,
+      verbose: toInputJson({
+        waitingFor: "qzone_cookies",
+        message,
+        autoRefreshError,
+      }),
+      nextRunAt: null,
+    },
+  });
+  await prisma.postLog.create({
+    data: {
+      tenantId,
+      postId,
+      newStatus: "publishing",
+      comment: `${publishTargetName} 等待可用 QZone cookies：${autoRefreshError ?? message}`,
+    },
+  });
+  await notifier?.notifyPublishWaitingForCookies?.(postId, publishTargetId, autoRefreshError ?? message).catch((error) => {
+    logger.warn({ error, postId, publishTargetId }, "failed to notify publish waiting for cookies");
+  });
+}
+
 function isQZoneLoginRequiredError(message: string) {
   const normalized = message.toLowerCase();
   return (
@@ -503,7 +787,7 @@ async function refreshAggregatePostStatus(postId: string) {
   }
 
   const hasPendingAttempt = post.publishAttempts.some(
-    (attempt) => attempt.status === "queued" || attempt.status === "running" || (attempt.status === "failed" && attempt.nextRunAt !== null),
+    (attempt) => attempt.status === "queued" || attempt.status === "running" || attempt.status === "waiting_cookies" || (attempt.status === "failed" && attempt.nextRunAt !== null),
   );
   if (hasPendingAttempt) {
     await updatePostAggregateStatus(post.id, post.tenantId, post.status, "publishing", "发布任务仍在进行");
