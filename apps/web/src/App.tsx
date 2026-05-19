@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
-import { api, fileToBase64 } from "@/lib/api";
+import { api } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
 import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
+import { useUploadImages } from "@/hooks/useUploadImages";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { BannedScreen } from "@/features/auth/BannedScreen";
@@ -89,6 +90,7 @@ export function App() {
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const { uploadingFiles, uploadFiles, removeUploading } = useUploadImages();
 
   const hostTenant = authContext.currentTenant;
   const selectedTenant = me?.authenticated ? me.currentTenant : (hostTenant ?? tenants[0]);
@@ -411,32 +413,16 @@ export function App() {
     await loadTenantData(1);
   }
 
-  async function uploadFiles(files: ArrayLike<File> | null) {
+  async function handleUploadFiles(files: ArrayLike<File> | null) {
     if (!files?.length) {
       return;
     }
 
-    setBusy(true);
-    try {
-      const nextImages: UploadedImage[] = [];
-      for (const file of Array.from(files).slice(0, 9 - uploadedImages.length)) {
-        const previewUrl = await fileToBase64(file);
-        const uploaded = await api<Omit<UploadedImage, "previewUrl">>("/api/uploads/post-images", {
-          method: "POST",
-          body: JSON.stringify({
-            fileName: getUploadFileName(file),
-            contentType: file.type || "application/octet-stream",
-            base64: previewUrl,
-          }),
-        });
-        nextImages.push({ ...uploaded, previewUrl });
-      }
-      setUploadedImages((current) => [...current, ...nextImages]);
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "图片上传失败");
-    } finally {
-      setBusy(false);
-    }
+    await uploadFiles(files, uploadedImages, uploadingFiles, (image) => {
+      setUploadedImages((current) =>
+        [...current, image].sort((left, right) => left.sortOrder - right.sortOrder),
+      );
+    });
   }
 
   async function submitPost() {
@@ -539,10 +525,11 @@ export function App() {
       postsPagination={postsPagination}
       anonymous={anonymous}
       uploadedImages={uploadedImages}
+      uploadingFiles={uploadingFiles}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={setAnonymous}
-      onFilesSelected={uploadFiles}
+      onFilesSelected={handleUploadFiles}
       onLogout={logout}
       onOpenOps={canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}
       onSelectTenant={selectTenant}
@@ -556,6 +543,7 @@ export function App() {
       onPostsPageChange={setPostsPage}
       onRefreshTenantData={() => refreshTenantData(postsPage)}
       onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
+      onRemoveUploadingFile={removeUploading}
       onSubmitPost={submitPost}
     />
   );
@@ -630,14 +618,6 @@ function pathFromRoute(route: AppRoute) {
     return `/oauth/authorize${route.search}`;
   }
   return `/${route.kind}`;
-}
-
-function getUploadFileName(file: File) {
-  if (file.name) {
-    return file.name;
-  }
-  const extension = file.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "png";
-  return `pasted-image.${extension}`;
 }
 
 function buildDocumentTitle(route: AppRoute, tenantName?: string, systemRole?: AuthenticatedMe["user"]["systemRole"] | null) {

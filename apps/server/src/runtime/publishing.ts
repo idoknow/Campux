@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import type { CampuxConfig } from "@campux/config";
 import { Prisma } from "@campux/db";
 import type { PostStatus } from "@campux/db";
@@ -458,7 +458,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       anonymous: attempt.post.anonymous,
       authorQq: attempt.post.author.qqUin.toString(),
     });
-    const postImages = await loadPostImages(config, attempt.post.images);
+    const postImages = await loadPostImages(config, attempt.tenantId, attempt.post.images);
     const result = await publishToQZone({
       tenantId: attempt.tenantId,
       postId: attempt.postId,
@@ -841,17 +841,41 @@ function getImageUrls(images: unknown) {
   });
 }
 
-async function loadPostImages(config: CampuxConfig, images: unknown) {
+const IMAGE_READ_SIZE_LIMIT = 10 * 1024 * 1024;
+
+function assertValidImageKey(key: string, tenantId: string): void {
+  const allowedPrefixes = [
+    `tenants/${tenantId}/uploads/`,
+    `tenants/${tenantId}/legacy/`,
+  ];
+  if (!allowedPrefixes.some((prefix) => key.startsWith(prefix))) {
+    throw new Error(`图片 key 不属于当前校园墙：${key}`);
+  }
+}
+
+async function loadPostImages(config: CampuxConfig, tenantId: string, images: unknown) {
   if (!Array.isArray(images)) {
-    return [];
+    throw new Error("稿件图片数据格式错误：images 不是数组");
   }
   const s3 = createS3Client(config);
   const result = [];
   for (const image of images) {
     const candidate = image as ImagePayload;
     if (!candidate.key) {
-      continue;
+      throw new Error("稿件图片数据缺少 key 字段");
     }
+    assertValidImageKey(candidate.key, tenantId);
+
+    const head = await s3.send(
+      new HeadObjectCommand({
+        Bucket: config.s3.bucket,
+        Key: candidate.key,
+      }),
+    );
+    if (head.ContentLength !== undefined && head.ContentLength > IMAGE_READ_SIZE_LIMIT) {
+      throw new Error(`图片 ${candidate.key} 超过 10MB 限制（${Math.round(head.ContentLength / 1024 / 1024)}MB）`);
+    }
+
     const object = await s3.send(
       new GetObjectCommand({
         Bucket: config.s3.bucket,
@@ -860,9 +884,21 @@ async function loadPostImages(config: CampuxConfig, images: unknown) {
     );
     const body = object.Body;
     if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
-      continue;
+      throw new Error(`图片 ${candidate.key} 读取失败：对象 Body 不可读`);
     }
-    const bytes = await body.transformToByteArray();
+
+    let bytes: Uint8Array;
+    try {
+      bytes = await body.transformToByteArray();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "未知错误";
+      throw new Error(`图片 ${candidate.key} 读取失败：${message}`);
+    }
+
+    if (bytes.byteLength === 0) {
+      throw new Error(`图片 ${candidate.key} 读取结果为空`);
+    }
+
     result.push({
       name: candidate.fileName ?? candidate.key.split("/").pop() ?? "post-image.jpg",
       bytes,

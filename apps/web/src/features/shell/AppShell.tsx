@@ -1,4 +1,4 @@
-import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage, UploadingFile } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
@@ -24,6 +24,7 @@ export function AppShell({
   postsPagination,
   anonymous,
   uploadedImages,
+  uploadingFiles,
   onActiveTabChange,
   onAdminTabChange,
   onAnonymousChange,
@@ -41,6 +42,7 @@ export function AppShell({
   onAdminUserDetailTargetConsumed,
   onOpenPostDetailFromAdmin,
   onRemoveImage,
+  onRemoveUploadingFile,
   onSubmitPost,
 }: {
   activeTab: MainTab;
@@ -56,6 +58,7 @@ export function AppShell({
   postsPagination: Pagination;
   anonymous: boolean;
   uploadedImages: UploadedImage[];
+  uploadingFiles: UploadingFile[];
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
@@ -73,6 +76,7 @@ export function AppShell({
   onAdminUserDetailTargetConsumed: () => void;
   onOpenPostDetailFromAdmin: (post: { id: string; displayId: number; status: string }) => void;
   onRemoveImage: (key: string) => void;
+  onRemoveUploadingFile: (id: string) => void;
   onSubmitPost: () => void;
 }) {
   return (
@@ -101,11 +105,13 @@ export function AppShell({
                 anonymous={anonymous}
                 selectedTenant={me.currentTenant}
                 uploadedImages={uploadedImages}
+                uploadingFiles={uploadingFiles}
                 onAnonymousChange={onAnonymousChange}
                 onFilesSelected={onFilesSelected}
                 onPostTextChange={onPostTextChange}
                 onSubmit={onSubmitPost}
                 onRemoveImage={onRemoveImage}
+                onRemoveUploadingFile={onRemoveUploadingFile}
               />
             </TabsContent>
 
