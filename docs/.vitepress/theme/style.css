@@ -8,12 +8,14 @@
 
 .campux-mermaid__diagram {
   display: flex;
-  min-width: max-content;
-  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  justify-content: flex-start;
 }
 
 .campux-mermaid__diagram svg {
-  max-width: 100%;
+  flex: 0 0 auto;
+  max-width: none;
   height: auto;
 }
 
