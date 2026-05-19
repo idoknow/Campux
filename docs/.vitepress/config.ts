@@ -13,17 +13,16 @@ export default defineConfig({
   themeConfig: {
     logo: "/logo.svg",
     nav: [
-      { text: "开始", link: "/getting-started" },
+      { text: "开始", link: "/operator/self-service-onboarding" },
       { text: "运营", link: "/operator/overview" },
-      { text: "运维", link: "/admin/overview" },
       { text: "参考", link: "/reference/configuration" },
+      { text: "系统维护", link: "/admin/overview" },
     ],
     sidebar: [
       {
         text: "开始",
         items: [
           { text: "项目介绍", link: "/" },
-          { text: "部署与快速开始", link: "/getting-started" },
           { text: "自助开墙流程", link: "/operator/self-service-onboarding" },
           { text: "系统模型", link: "/concepts" },
         ],
@@ -31,7 +30,6 @@ export default defineConfig({
       {
         text: "校园墙运营",
         items: [
-          { text: "自助开墙流程", link: "/operator/self-service-onboarding" },
           { text: "运营工作台", link: "/operator/overview" },
           { text: "审核与发布", link: "/operator/review-and-publish" },
           { text: "机器人管理", link: "/operator/bots" },
@@ -41,23 +39,24 @@ export default defineConfig({
         ],
       },
       {
-        text: "系统维护",
-        items: [
-          { text: "运维面板", link: "/admin/overview" },
-          { text: "租户生命周期", link: "/admin/tenant-lifecycle" },
-          { text: "账号与权限", link: "/admin/accounts" },
-          { text: "部署与升级", link: "/admin/deployment" },
-          { text: "安全基线", link: "/admin/security" },
-          { text: "故障排查", link: "/admin/troubleshooting" },
-        ],
-      },
-      {
         text: "参考",
         items: [
           { text: "配置项", link: "/reference/configuration" },
           { text: "OneBot 接入", link: "/reference/onebot" },
           { text: "系统架构", link: "/reference/architecture" },
           { text: "发布状态", link: "/reference/publish-states" },
+        ],
+      },
+      {
+        text: "系统维护（自托管）",
+        items: [
+          { text: "快速开始", link: "/getting-started" },
+          { text: "运维面板", link: "/admin/overview" },
+          { text: "租户生命周期", link: "/admin/tenant-lifecycle" },
+          { text: "账号与权限", link: "/admin/accounts" },
+          { text: "部署与升级", link: "/admin/deployment" },
+          { text: "安全基线", link: "/admin/security" },
+          { text: "故障排查", link: "/admin/troubleshooting" },
         ],
       },
     ],
