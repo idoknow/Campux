@@ -143,10 +143,9 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
           });
         }
         if (updated?.healthStatus === "invalid" && shouldNotifyInvalidCookies(updated)) {
-          const refreshByProtocol = notifier?.refreshQZoneCookiesByProtocol;
-          if (session.botAccount.publishTargets.length > 0 && refreshByProtocol) {
+          if (session.botAccount.publishTargets.length > 0 && notifier?.refreshQZoneCookiesByProtocol) {
             try {
-              const result = await refreshByProtocol(session.botAccountId, "heartbeat_invalid");
+              const result = await notifier.refreshQZoneCookiesByProtocol(session.botAccountId, "heartbeat_invalid");
               logger.info({ sessionId: session.id, botAccountId: session.botAccountId, cookieCount: result.cookieNames.length }, "qzone cookies auto refreshed after heartbeat invalid");
               continue;
             } catch (error) {
