@@ -10,6 +10,22 @@ export default defineConfig({
     ["link", { rel: "apple-touch-icon", href: "/logo.svg" }],
     ["meta", { name: "theme-color", content: "#0190D5" }],
   ],
+  markdown: {
+    config(md) {
+      const defaultFence = md.renderer.rules.fence?.bind(md.renderer.rules);
+
+      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+        const token = tokens[idx];
+        const language = token.info.trim().split(/\s+/)[0];
+
+        if (language === "mermaid") {
+          return `<Mermaid code="${encodeURIComponent(token.content)}" />`;
+        }
+
+        return defaultFence?.(tokens, idx, options, env, self) ?? "";
+      };
+    },
+  },
   themeConfig: {
     logo: "/logo.svg",
     nav: [

@@ -1,0 +1,27 @@
+.campux-mermaid {
+  margin: 16px 0;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  padding: 16px;
+}
+
+.campux-mermaid__diagram {
+  display: flex;
+  min-width: max-content;
+  justify-content: center;
+}
+
+.campux-mermaid__diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.campux-mermaid.has-error {
+  border: 1px solid var(--vp-c-danger-2);
+}
+
+.campux-mermaid__error {
+  margin: 0;
+  white-space: pre-wrap;
+}
