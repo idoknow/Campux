@@ -327,7 +327,7 @@ export function App() {
     setDocumentIcon(activeLogoUrl);
   }, [activeLogoUrl]);
 
-  async function login(account: string, password: string) {
+  async function login(account: string, password: string): Promise<MeResponse> {
     setError("");
     const data = await api<MeResponse>("/api/auth/login", {
       method: "POST",
@@ -336,14 +336,15 @@ export function App() {
     setMe(data);
     if (data.authenticated) {
       if (route.kind === "oauth") {
-        return;
+        return data;
       }
       if (data.user.passwordChangeRequired) {
         navigate({ kind: "login" }, "replace");
-        return;
+        return data;
       }
       navigate(data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab });
     }
+    return data;
   }
 
   function completeRegistration(data: MeResponse) {
