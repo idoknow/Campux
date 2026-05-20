@@ -62,6 +62,16 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         where,
         include: {
           author: true,
+          logs: {
+            where: {
+              oldStatus: "published",
+              newStatus: "pending_recall",
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 1,
+          },
         },
         orderBy: {
           createdAt: "desc",

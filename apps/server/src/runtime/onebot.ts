@@ -85,6 +85,14 @@ const reviewHelp = [
   "#扫码登录",
 ].join("\n");
 
+function readRecallReason(comment: string | undefined): string | null {
+  const prefix = "用户申请撤回：";
+  if (!comment?.startsWith(prefix)) {
+    return null;
+  }
+  return comment.slice(prefix.length).trim() || null;
+}
+
 export class OneBotRuntime {
   private readonly connections = new Set<OneBotConnection>();
   private readonly pendingActions = new Map<string, PendingAction>();
@@ -210,6 +218,16 @@ export class OneBotRuntime {
       },
       include: {
         author: true,
+        logs: {
+          where: {
+            oldStatus: "published",
+            newStatus: "pending_recall",
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+        },
       },
     });
     if (!post) {
@@ -218,6 +236,7 @@ export class OneBotRuntime {
     const lines = [
       `稿件申请撤回：#${post.displayId}`,
       `申请人：${post.author.displayName ?? "未命名用户"}（QQ ${post.author.qqUin.toString()}）`,
+      `理由：${readRecallReason(post.logs[0]?.comment) ?? "未填写"}`,
       "审核员或管理员可在稿件页面同意撤回；同意后系统会把每个 QZone 发布目标设置为仅自己可见。",
     ];
     await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
