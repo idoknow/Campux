@@ -306,6 +306,51 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       ok: true,
     };
   });
+
+  app.post("/api/review/posts/:id/recall/admin", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "published") {
+      return reply.code(409).send({ message: "只有已发表稿件可以直接撤回" });
+    }
+
+    try {
+      const result = await executePostRecall({
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        actorId: context.user.id,
+        logger: app.log,
+      });
+      oneBot?.notifyPostRecalled(result.post.id, result.results.length).catch((error) => {
+        app.log.warn({ error, postId: result.post.id }, "failed to notify post recalled");
+      });
+      return {
+        ok: true,
+        results: result.results,
+      };
+    } catch (error) {
+      if (error instanceof PostRecallExecutionError) {
+        oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {
+          app.log.warn({ error: caught, postId: post.id }, "failed to notify post recall failure");
+        });
+        return reply.code(502).send({
+          message: "部分发布目标撤回失败，请检查日志后重试",
+          results: error.results,
+        });
+      }
+      throw error;
+    }
+  });
 }
 
 function toPagination(page: number, limit: number, total: number) {
