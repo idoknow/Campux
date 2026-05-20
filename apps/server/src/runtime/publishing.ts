@@ -238,6 +238,7 @@ export async function schedulePublishAttempt(options: {
         ...(options.resetAttempt ? { attempt: 0 } : {}),
         lastError: null,
         externalId: null,
+        qzoneTid: null,
         verbose: Prisma.JsonNull,
         nextRunAt,
       },
@@ -478,6 +479,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       data: {
         status: "succeeded",
         externalId: result.externalId,
+        qzoneTid: result.qzoneTid,
         verbose: toInputJson(result.verbose),
         lastError: null,
         nextRunAt: null,
@@ -771,7 +773,15 @@ async function refreshAggregatePostStatus(postId: string) {
       id: postId,
     },
     include: {
-      publishAttempts: true,
+      publishAttempts: {
+        include: {
+          publishTarget: {
+            select: {
+              required: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -779,14 +789,19 @@ async function refreshAggregatePostStatus(postId: string) {
     return;
   }
 
-  const completedAttempts = post.publishAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
+  const requiredAttempts = post.publishAttempts.filter((attempt) => attempt.publishTarget.required);
+  const optionalAttempts = post.publishAttempts.filter((attempt) => !attempt.publishTarget.required);
+  const completedRequiredAttempts = requiredAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
+  const completedOptionalAttempts = optionalAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
+  const completedAttempts = [...completedRequiredAttempts, ...completedOptionalAttempts];
+  const allRequiredAttemptsCompleted = completedRequiredAttempts.length === requiredAttempts.length;
   const allAttemptsCompleted = completedAttempts.length === post.publishAttempts.length;
-  if (allAttemptsCompleted) {
-    await updatePostAggregateStatus(post.id, post.tenantId, post.status, "published", "所有发布目标已完成");
+  if (allRequiredAttemptsCompleted && (allAttemptsCompleted || completedRequiredAttempts.length > 0)) {
+    await updatePostAggregateStatus(post.id, post.tenantId, post.status, "published", allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成");
     return;
   }
 
-  const hasPendingAttempt = post.publishAttempts.some(
+  const hasPendingAttempt = requiredAttempts.some(
     (attempt) => attempt.status === "queued" || attempt.status === "running" || attempt.status === "waiting_cookies" || (attempt.status === "failed" && attempt.nextRunAt !== null),
   );
   if (hasPendingAttempt) {
@@ -794,7 +809,7 @@ async function refreshAggregatePostStatus(postId: string) {
     return;
   }
 
-  const terminalFailures = post.publishAttempts.filter((attempt) => attempt.status === "failed" && attempt.nextRunAt === null);
+  const terminalFailures = requiredAttempts.filter((attempt) => attempt.status === "failed" && attempt.nextRunAt === null);
   if (terminalFailures.length > 0) {
     const hasCompletedAttempt = completedAttempts.length > 0;
     await updatePostAggregateStatus(

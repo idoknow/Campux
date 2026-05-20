@@ -13,6 +13,7 @@ import { hasTenantRole, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit } from "../lib/tenant-metadata";
+import { writeAuditLog } from "../lib/audit";
 import type { OneBotRuntime } from "../runtime/onebot";
 
 const fileQuerySchema = z.object({
@@ -484,6 +485,65 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
     });
     oneBot?.notifyPostCancelled(updated.id).catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify post cancellation");
+    });
+
+    return {
+      post: toPostListItem(updated),
+    };
+  });
+
+  app.post("/api/posts/:id/recall/request", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+        authorId: context.user.id,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status === "pending_recall") {
+      return {
+        post: toPostListItem(post),
+      };
+    }
+    if (post.status !== "published") {
+      return reply.code(409).send({ message: "只有已发表稿件可以申请撤回" });
+    }
+
+    const updated = await prisma.post.update({
+      where: {
+        id: post.id,
+      },
+      data: {
+        status: "pending_recall",
+        logs: {
+          create: {
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            oldStatus: post.status,
+            newStatus: "pending_recall",
+            comment: "用户申请撤回",
+          },
+        },
+      },
+    });
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "post.recall.request",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+      },
+    });
+    oneBot?.notifyPostRecallRequested(updated.id).catch((error) => {
+      app.log.warn({ error, postId: updated.id }, "failed to notify post recall request");
     });
 
     return {

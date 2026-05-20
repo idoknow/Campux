@@ -2437,6 +2437,7 @@ function PublishAttemptDetail({ attempt, onRetry }: { attempt: PublishAttemptIte
         <div className="grid gap-1 text-xs font-semibold text-slate-500 md:grid-cols-2">
           <p>目标：{attempt.publishTarget.displayName}</p>
           <p>Bot：{attempt.publishTarget.botAccount.displayName} · QQ {attempt.publishTarget.botAccount.qqUin}</p>
+          {attempt.qzoneTid ? <p className="break-all md:col-span-2">QZone TID：{attempt.qzoneTid}</p> : null}
           {attempt.externalId ? <p className="break-all md:col-span-2">外部 ID：{attempt.externalId}</p> : null}
           {attempt.nextRunAt ? <p className="font-bold text-amber-700 md:col-span-2">下次执行：{formatDateTime(attempt.nextRunAt)}</p> : null}
         </div>

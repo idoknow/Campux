@@ -203,6 +203,73 @@ export class OneBotRuntime {
     await this.broadcastReviewGroup(post.tenantId, `稿件已取消：#${post.displayId}`);
   }
 
+  async notifyPostRecallRequested(postId: string) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        author: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    const lines = [
+      `稿件申请撤回：#${post.displayId}`,
+      `申请人：${post.author.displayName ?? "未命名用户"}（QQ ${post.author.qqUin.toString()}）`,
+      "审核员或管理员可在稿件页面同意撤回；同意后系统会把每个 QZone 发布目标设置为仅自己可见。",
+    ];
+    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+  }
+
+  async notifyPostRecalled(postId: string, targetCount: number) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        author: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    await this.broadcastReviewGroup(post.tenantId, `稿件已撤回：#${post.displayId}\n已处理发布目标：${targetCount} 个`);
+
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId: post.tenantId,
+        enabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+    for (const bot of bots) {
+      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, `您的稿件 #${post.displayId} 已撤回。`).catch((error) => {
+        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify post recalled");
+      });
+    }
+  }
+
+  async notifyPostRecallFailed(postId: string, results: Array<{ targetName: string; qzoneTid: string | null; ok: boolean; message: string }>) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    const failed = results.filter((result) => !result.ok);
+    const lines = [
+      `稿件撤回失败：#${post.displayId}`,
+      ...failed.map((result) => `${result.targetName}${result.qzoneTid ? ` / ${result.qzoneTid}` : ""}：${result.message}`),
+    ];
+    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+  }
+
   async notifyReviewResult(postId: string, status: "approved" | "rejected", comment?: string | null) {
     const post = await prisma.post.findUnique({
       where: {
