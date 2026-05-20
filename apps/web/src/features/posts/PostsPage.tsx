@@ -687,6 +687,8 @@ export function PostsPage({
       <PostDetailDialog
         post={detailPost}
         open={Boolean(detailPostId)}
+        canDirectRecall={isAdmin}
+        recallBusy={detailPost ? busyPostId === detailPost.id : false}
         onOpenChange={(open) => {
           if (!open) {
             closePostDetail();
@@ -694,6 +696,10 @@ export function PostsPage({
         }}
         onPreview={(post) => void openRenderPreview(post)}
         onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+        onRecallDirect={(post) => {
+          closePostDetail();
+          setRecallConfirm({ open: true, mode: "admin", post });
+        }}
       />
       <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(920px,calc(100vw-32px))]">
@@ -848,17 +854,24 @@ function defaultPagination(): Pagination {
 function PostDetailDialog({
   post,
   open,
+  canDirectRecall = false,
+  recallBusy = false,
   onOpenChange,
   onPreview,
   onImagePreview,
+  onRecallDirect,
 }: {
   post: ReviewPostItem | null;
   open: boolean;
+  canDirectRecall?: boolean;
+  recallBusy?: boolean;
   onOpenChange: (open: boolean) => void;
   onPreview: (post: ReviewPostItem) => void;
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
+  onRecallDirect?: (post: ReviewPostItem) => void;
 }) {
   const images = post ? getPostImages(post.images) : [];
+  const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -894,9 +907,15 @@ function PostDetailDialog({
                 ))}
               </div>
             ) : null}
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
-              <Button onClick={() => onPreview(post)}>渲染预览</Button>
+              <Button variant="outline" onClick={() => onPreview(post)}>渲染预览</Button>
+              {showDirectRecall && onRecallDirect ? (
+                <Button disabled={recallBusy} onClick={() => onRecallDirect(post)}>
+                  <RotateCcwIcon data-icon="inline-start" />
+                  撤回稿件
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
