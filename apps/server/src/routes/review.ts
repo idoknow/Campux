@@ -307,9 +307,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     };
   });
 
+  const adminRecallBodySchema = z.object({
+    silent: z.boolean().optional(),
+  });
+
   app.post("/api/review/posts/:id/recall/admin", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const params = postParamsSchema.parse(request.params);
+    const body = adminRecallBodySchema.parse(request.body ?? {});
     const post = await prisma.post.findFirst({
       where: {
         id: params.id,
@@ -324,6 +329,8 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "只有已发表稿件可以直接撤回" });
     }
 
+    const silent = body.silent === true;
+
     try {
       const result = await executePostRecall({
         tenantId: context.selectedTenant.id,
@@ -331,11 +338,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         actorId: context.user.id,
         logger: app.log,
       });
-      oneBot?.notifyPostRecalled(result.post.id, result.results.length).catch((error) => {
+      oneBot?.notifyPostRecalled(result.post.id, result.results.length, { skipAuthor: silent }).catch((error) => {
         app.log.warn({ error, postId: result.post.id }, "failed to notify post recalled");
       });
       return {
         ok: true,
+        silent,
         results: result.results,
       };
     } catch (error) {
