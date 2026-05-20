@@ -41,6 +41,10 @@ const createPostSchema = z.object({
   ).max(9).default([]),
 });
 
+const recallRequestSchema = z.object({
+  reason: z.string().trim().min(1, "请填写撤回理由").max(500),
+});
+
 const legacyUploadSchema = z.object({
   fileName: z.string().min(1),
   contentType: z.string().min(1).optional(),
@@ -378,6 +382,18 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       prisma.post.count({ where }),
       prisma.post.findMany({
         where,
+        include: {
+          logs: {
+            where: {
+              oldStatus: "published",
+              newStatus: "pending_recall",
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 1,
+          },
+        },
         orderBy: {
           createdAt: "desc",
         },
@@ -514,10 +530,24 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
     if (post.status !== "published") {
       return reply.code(409).send({ message: "只有已发表稿件可以申请撤回" });
     }
+    const body = recallRequestSchema.parse(request.body ?? {});
+    const reason = body.reason.trim();
 
     const updated = await prisma.post.update({
       where: {
         id: post.id,
+      },
+      include: {
+        logs: {
+          where: {
+            oldStatus: "published",
+            newStatus: "pending_recall",
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+        },
       },
       data: {
         status: "pending_recall",
@@ -527,7 +557,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
             actorId: context.user.id,
             oldStatus: post.status,
             newStatus: "pending_recall",
-            comment: "用户申请撤回",
+            comment: `用户申请撤回：${reason}`,
           },
         },
       },
@@ -540,6 +570,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       targetId: post.id,
       detail: {
         displayId: post.displayId,
+        reason,
       },
     });
     oneBot?.notifyPostRecallRequested(updated.id).catch((error) => {

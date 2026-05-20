@@ -138,6 +138,7 @@ export type PostItem = {
   status: string;
   createdAt: string;
   updatedAt: string;
+  recallReason: string | null;
 };
 
 export type ReviewPostItem = PostItem & {

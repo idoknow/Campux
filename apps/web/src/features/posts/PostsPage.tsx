@@ -136,9 +136,11 @@ export function PostsPage({
   onRefresh: () => Promise<void>;
 }) {
   const canReview = canAccess(currentRole, "reviewer");
+  const [pendingRecallPosts, setPendingRecallPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPagination, setReviewPagination] = useState<Pagination>(() => defaultPagination());
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [pendingRecallLoading, setPendingRecallLoading] = useState(false);
   const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewStatusQuery());
   const [reviewKeyword, setReviewKeyword] = useState(() => readQueryParam("q"));
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
@@ -158,6 +160,7 @@ export function PostsPage({
     mode: null,
     post: null,
   }));
+  const [recallReason, setRecallReason] = useState("");
   const [preview, setPreview] = useState<RenderPreviewState>(() => ({
     open: false,
     loading: false,
@@ -198,12 +201,13 @@ export function PostsPage({
 
   useEffect(() => {
     if (!canReview) {
+      setPendingRecallPosts([]);
       setReviewPosts([]);
       return;
     }
 
     setReviewPosts([]);
-    void refreshReviewPosts(reviewPage).catch((caught) => {
+    void Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
   }, [canReview, reviewStatus, reviewPage, tenantId]);
@@ -211,7 +215,22 @@ export function PostsPage({
   async function refreshAll() {
     await onRefresh();
     if (canReview) {
-      await refreshReviewPosts(reviewPage);
+      await Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]);
+    }
+  }
+
+  async function refreshPendingRecallPosts() {
+    const params = new URLSearchParams({
+      status: "pending_recall",
+      page: "1",
+      limit: "50",
+    });
+    setPendingRecallLoading(true);
+    try {
+      const data = await api<{ posts: ReviewPostItem[]; pagination: Pagination }>(`/api/review/posts?${params}`);
+      setPendingRecallPosts(data.posts);
+    } finally {
+      setPendingRecallLoading(false);
     }
   }
 
@@ -266,11 +285,12 @@ export function PostsPage({
     }
   }
 
-  async function requestRecallPost(post: PostItem) {
+  async function requestRecallPost(post: PostItem, reason: string) {
     setBusyRecallPostId(post.id);
     try {
       await api(`/api/posts/${post.id}/recall/request`, {
         method: "POST",
+        body: JSON.stringify({ reason }),
       });
       toast.success("已提交撤回申请，等待审核处理。");
       await refreshAll();
@@ -302,9 +322,15 @@ export function PostsPage({
       return;
     }
     const { mode, post } = recallConfirm;
+    const reason = recallReason.trim();
+    if (mode === "request" && reason.length === 0) {
+      toast.error("请填写撤回理由。");
+      return;
+    }
     setRecallConfirm({ open: false, mode: null, post: null });
+    setRecallReason("");
     if (mode === "request") {
-      await requestRecallPost(post);
+      await requestRecallPost(post, reason);
       return;
     }
     await approveRecallPost(post);
@@ -388,7 +414,8 @@ export function PostsPage({
 
   const activePreviewImage = imagePreview.images[imagePreview.index] ?? null;
   const reviewStatusLabel = reviewStatusOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
-  const detailPost = detailPostId ? reviewPosts.find((post) => post.id === detailPostId) ?? null : null;
+  const filteredReviewPosts = reviewPosts.filter((post) => !pendingRecallPosts.some((recallPost) => recallPost.id === post.id));
+  const detailPost = detailPostId ? pendingRecallPosts.find((post) => post.id === detailPostId) ?? reviewPosts.find((post) => post.id === detailPostId) ?? null : null;
 
   function setReviewPageWithQuery(page: number) {
     setReviewPage(page);
@@ -433,7 +460,7 @@ export function PostsPage({
               </TabsTrigger>
             ) : null}
           </TabsList>
-          <Button variant="outline" size="sm" disabled={mineLoading || reviewLoading} onClick={() => void refreshAll()}>
+          <Button variant="outline" size="sm" disabled={mineLoading || reviewLoading || pendingRecallLoading} onClick={() => void refreshAll()}>
             刷新
           </Button>
         </div>
@@ -449,7 +476,10 @@ export function PostsPage({
                 onPreview={(post) => void openRenderPreview(post)}
                 onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                 onCancel={(post) => void cancelPost(post.id)}
-                onRecall={(post) => setRecallConfirm({ open: true, mode: "request", post })}
+                onRecall={(post) => {
+                  setRecallReason("");
+                  setRecallConfirm({ open: true, mode: "request", post });
+                }}
               />
               <PaginationControls pagination={minePagination} busy={mineLoading} onPageChange={onMinePageChange} />
             </>
@@ -502,12 +532,21 @@ export function PostsPage({
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+              <PendingRecallQueue
+                posts={pendingRecallPosts}
+                loading={pendingRecallLoading}
+                busyPostId={busyPostId}
+                onPreview={(post) => void openRenderPreview(post)}
+                onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+                onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
+                onDetail={(post) => openPostDetail(post.id)}
+              />
               {reviewLoading ? (
                 <LoadingBlock title="正在加载审核稿件..." />
               ) : (
                 <>
                   <ReviewList
-                    posts={reviewPosts}
+                    posts={filteredReviewPosts}
                     busyPostId={busyPostId}
                     onPreview={(post) => void openRenderPreview(post)}
                     onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
@@ -515,6 +554,7 @@ export function PostsPage({
                     onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
                     onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onDetail={(post) => openPostDetail(post.id)}
+                    emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
                   />
                   <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
                 </>
@@ -673,7 +713,15 @@ export function PostsPage({
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={recallConfirm.open} onOpenChange={(open) => !open && setRecallConfirm({ open: false, mode: null, post: null })}>
+      <Dialog
+        open={recallConfirm.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRecallConfirm({ open: false, mode: null, post: null });
+            setRecallReason("");
+          }
+        }}
+      >
         <DialogContent className="w-[min(460px,calc(100vw-32px))]">
           <DialogHeader>
             <DialogTitle>
@@ -687,15 +735,32 @@ export function PostsPage({
                   : ""}
             </DialogDescription>
           </DialogHeader>
+          {recallConfirm.open && recallConfirm.mode === "request" ? (
+            <div className="px-5 pb-2">
+              <Textarea
+                className="min-h-24 bg-white"
+                value={recallReason}
+                onChange={(event) => setRecallReason(event.target.value)}
+                placeholder="请说明为什么需要撤回，例如：内容有误、个人信息需要删除、图片传错了。"
+              />
+            </div>
+          ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRecallConfirm({ open: false, mode: null, post: null })}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRecallConfirm({ open: false, mode: null, post: null });
+                setRecallReason("");
+              }}
+            >
               取消
             </Button>
             <Button
               disabled={
                 recallConfirm.open &&
                 ((recallConfirm.mode === "request" && busyRecallPostId === recallConfirm.post.id) ||
-                  (recallConfirm.mode === "approve" && busyPostId === recallConfirm.post.id))
+                  (recallConfirm.mode === "approve" && busyPostId === recallConfirm.post.id) ||
+                  (recallConfirm.mode === "request" && recallReason.trim().length === 0))
               }
               onClick={() => void confirmRecallAction()}
             >
@@ -750,6 +815,7 @@ function PostDetailDialog({
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="whitespace-pre-wrap text-sm font-semibold text-slate-800">{post.text}</p>
             </div>
+            {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
             <div className="grid gap-1 text-xs font-semibold text-slate-500 sm:grid-cols-2">
               <span>稿件 ID：{post.id}</span>
               <span>更新时间：{formatFullDateTime(post.updatedAt)}</span>
@@ -781,6 +847,7 @@ function PostDetailDialog({
 function ReviewList({
   posts,
   busyPostId,
+  emptyTitle = "当前筛选下没有稿件",
   onPreview,
   onImagePreview,
   onApprove,
@@ -790,6 +857,7 @@ function ReviewList({
 }: {
   posts: ReviewPostItem[];
   busyPostId: string;
+  emptyTitle?: string;
   onPreview: (post: ReviewPostItem) => void;
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onApprove: (id: string) => void;
@@ -798,7 +866,7 @@ function ReviewList({
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
-    return <EmptyCard title="当前筛选下没有稿件" />;
+    return <EmptyCard title={emptyTitle} />;
   }
 
   return (
@@ -818,6 +886,64 @@ function ReviewList({
         />
       ))}
     </div>
+  );
+}
+
+function PendingRecallQueue({
+  posts,
+  loading,
+  busyPostId,
+  onPreview,
+  onImagePreview,
+  onRecallApprove,
+  onDetail,
+}: {
+  posts: ReviewPostItem[];
+  loading: boolean;
+  busyPostId: string;
+  onPreview: (post: ReviewPostItem) => void;
+  onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
+  onRecallApprove: (post: ReviewPostItem) => void;
+  onDetail: (post: ReviewPostItem) => void;
+}) {
+  if (loading && posts.length === 0) {
+    return (
+      <div className="mb-3">
+        <LoadingBlock title="正在检查撤回请求..." />
+      </div>
+    );
+  }
+
+  if (posts.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mb-4 grid gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 dark:border-violet-900/60 dark:bg-violet-950/30">
+        <div className="min-w-0">
+          <p className="text-sm font-black text-violet-900 dark:text-violet-100">待处理撤回请求</p>
+          <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">这些稿件固定显示在顶部，不受当前筛选条件影响。</p>
+        </div>
+        <Badge className="rounded-full bg-white text-violet-700 shadow-none ring-1 ring-violet-200 dark:bg-violet-950 dark:text-violet-100 dark:ring-violet-800">{posts.length} 条</Badge>
+      </div>
+      <div className="flex flex-col gap-3">
+        {posts.map((post, index) => (
+          <ReviewCard
+            key={post.id}
+            post={post}
+            palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
+            busy={busyPostId === post.id}
+            onPreview={() => onPreview(post)}
+            onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
+            onApprove={() => undefined}
+            onReject={() => undefined}
+            onRecallApprove={() => onRecallApprove(post)}
+            onDetail={() => onDetail(post)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -883,6 +1009,8 @@ function ReviewCard({
         </div>
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} />
+
+        {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
 
         {images.length > 0 ? <ImageGallery images={images} reviewMode onImageClick={onImagePreview} /> : <NoImagePill />}
 
@@ -1002,6 +1130,8 @@ function PostCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} />
 
+        {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
+
         {images.length > 0 ? <ImageGallery images={images} onImageClick={onImagePreview} /> : <NoImagePill />}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
@@ -1098,6 +1228,15 @@ function PostTextBlock({ text, createdAt, updatedAt }: { text: string; createdAt
         {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
       </div>
       <p className="whitespace-pre-wrap text-[15px] font-medium leading-7 text-slate-800">{text}</p>
+    </div>
+  );
+}
+
+function RecallReasonBlock({ reason }: { reason?: string | null }) {
+  return (
+    <div className="rounded-md border border-violet-200 bg-violet-50 p-3 dark:border-violet-900/60 dark:bg-violet-950/30">
+      <p className="text-xs font-black text-violet-900 dark:text-violet-100">撤回理由</p>
+      <p className="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 text-violet-800 dark:text-violet-200">{reason?.trim() || "未填写"}</p>
     </div>
   );
 }
