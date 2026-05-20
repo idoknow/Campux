@@ -65,7 +65,7 @@ type RecallConfirmState =
     }
   | {
       open: true;
-      mode: "approve" | "reject" | "admin";
+      mode: "approve" | "reject" | "admin" | "admin-silent";
       post: ReviewPostItem;
     };
 
@@ -334,13 +334,14 @@ export function PostsPage({
     }
   }
 
-  async function adminRecallPost(post: ReviewPostItem) {
+  async function adminRecallPost(post: ReviewPostItem, options: { silent?: boolean } = {}) {
     setBusyPostId(post.id);
     try {
       await api(`/api/review/posts/${post.id}/recall/admin`, {
         method: "POST",
+        body: JSON.stringify(options.silent ? { silent: true } : {}),
       });
-      toast.success("已撤回稿件。");
+      toast.success(options.silent ? "已静默撤回稿件，未通知作者。" : "已撤回稿件。");
       await refreshAll();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "撤回失败");
@@ -372,6 +373,10 @@ export function PostsPage({
     }
     if (mode === "admin") {
       await adminRecallPost(post);
+      return;
+    }
+    if (mode === "admin-silent") {
+      await adminRecallPost(post, { silent: true });
       return;
     }
     await approveRecallPost(post);
@@ -598,6 +603,7 @@ export function PostsPage({
                     onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
                     onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
+                    onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
                     onDetail={(post) => openPostDetail(post.id)}
                     emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
                   />
@@ -700,6 +706,10 @@ export function PostsPage({
           closePostDetail();
           setRecallConfirm({ open: true, mode: "admin", post });
         }}
+        onRecallDirectSilent={(post) => {
+          closePostDetail();
+          setRecallConfirm({ open: true, mode: "admin-silent", post });
+        }}
       />
       <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(920px,calc(100vw-32px))]">
@@ -782,7 +792,9 @@ export function PostsPage({
                   ? "拒绝撤回申请？"
                   : recallConfirm.open && recallConfirm.mode === "admin"
                     ? "直接撤回稿件？"
-                    : "申请撤回稿件？"}
+                    : recallConfirm.open && recallConfirm.mode === "admin-silent"
+                      ? "静默撤回稿件？"
+                      : "申请撤回稿件？"}
             </DialogTitle>
             <DialogDescription>
               {recallConfirm.open && recallConfirm.mode === "approve"
@@ -791,6 +803,8 @@ export function PostsPage({
                   ? `确认拒绝稿件 #${recallConfirm.post.displayId} 的撤回申请吗？拒绝后稿件状态会恢复为已发表。`
                 : recallConfirm.open && recallConfirm.mode === "admin"
                   ? `确认直接撤回稿件 #${recallConfirm.post.displayId} 吗？系统会逐个把已发表到 QQ 空间的说说设置为仅自己可见。无需作者申请。`
+                : recallConfirm.open && recallConfirm.mode === "admin-silent"
+                  ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？QQ 空间的说说会设置为仅自己可见，但不会私聊通知作者；审核群仍会收到记录。`
                 : recallConfirm.open
                   ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布到 QQ 空间的说说会被设置为仅自己可见。`
                   : ""}
@@ -823,6 +837,7 @@ export function PostsPage({
                   (recallConfirm.mode === "approve" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "reject" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin" && busyPostId === recallConfirm.post.id) ||
+                  (recallConfirm.mode === "admin-silent" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "request" && recallReason.trim().length === 0))
               }
               onClick={() => void confirmRecallAction()}
@@ -833,7 +848,9 @@ export function PostsPage({
                   ? "拒绝撤回"
                   : recallConfirm.open && recallConfirm.mode === "admin"
                     ? "确认撤回"
-                    : "提交申请"}
+                    : recallConfirm.open && recallConfirm.mode === "admin-silent"
+                      ? "确认静默撤回"
+                      : "提交申请"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -860,6 +877,7 @@ function PostDetailDialog({
   onPreview,
   onImagePreview,
   onRecallDirect,
+  onRecallDirectSilent,
 }: {
   post: ReviewPostItem | null;
   open: boolean;
@@ -869,9 +887,11 @@ function PostDetailDialog({
   onPreview: (post: ReviewPostItem) => void;
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onRecallDirect?: (post: ReviewPostItem) => void;
+  onRecallDirectSilent?: (post: ReviewPostItem) => void;
 }) {
   const images = post ? getPostImages(post.images) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
+  const showDirectRecallSilent = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirectSilent);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -910,6 +930,12 @@ function PostDetailDialog({
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
               <Button variant="outline" onClick={() => onPreview(post)}>渲染预览</Button>
+              {showDirectRecallSilent && onRecallDirectSilent ? (
+                <Button variant="outline" disabled={recallBusy} onClick={() => onRecallDirectSilent(post)}>
+                  <RotateCcwIcon data-icon="inline-start" />
+                  静默撤回
+                </Button>
+              ) : null}
               {showDirectRecall && onRecallDirect ? (
                 <Button disabled={recallBusy} onClick={() => onRecallDirect(post)}>
                   <RotateCcwIcon data-icon="inline-start" />
@@ -938,6 +964,7 @@ function ReviewList({
   onRecallApprove,
   onRecallReject,
   onRecallDirect,
+  onRecallDirectSilent,
   onDetail,
 }: {
   posts: ReviewPostItem[];
@@ -951,6 +978,7 @@ function ReviewList({
   onRecallApprove: (post: ReviewPostItem) => void;
   onRecallReject: (post: ReviewPostItem) => void;
   onRecallDirect: (post: ReviewPostItem) => void;
+  onRecallDirectSilent: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
@@ -973,6 +1001,7 @@ function ReviewList({
           onRecallApprove={() => onRecallApprove(post)}
           onRecallReject={() => onRecallReject(post)}
           onRecallDirect={() => onRecallDirect(post)}
+          onRecallDirectSilent={() => onRecallDirectSilent(post)}
           onDetail={() => onDetail(post)}
         />
       ))}
@@ -1053,6 +1082,7 @@ function ReviewCard({
   onRecallApprove,
   onRecallReject,
   onRecallDirect,
+  onRecallDirectSilent,
   onDetail,
 }: {
   post: ReviewPostItem;
@@ -1066,6 +1096,7 @@ function ReviewCard({
   onRecallApprove: () => void;
   onRecallReject: () => void;
   onRecallDirect?: () => void;
+  onRecallDirectSilent?: () => void;
   onDetail: () => void;
 }) {
   const images = getPostImages(post.images);
@@ -1144,6 +1175,12 @@ function ReviewCard({
             </div>
           ) : canDirectRecallPost ? (
             <div className="flex flex-wrap gap-2">
+              {onRecallDirectSilent ? (
+                <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallDirectSilent}>
+                  <RotateCcwIcon data-icon="inline-start" />
+                  静默撤回
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallDirect}>
                 <RotateCcwIcon data-icon="inline-start" />
                 撤回

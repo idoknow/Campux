@@ -242,7 +242,7 @@ export class OneBotRuntime {
     await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
   }
 
-  async notifyPostRecalled(postId: string, targetCount: number) {
+  async notifyPostRecalled(postId: string, targetCount: number, opts?: { skipAuthor?: boolean }) {
     const post = await prisma.post.findUnique({
       where: {
         id: postId,
@@ -254,7 +254,12 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    await this.broadcastReviewGroup(post.tenantId, `稿件已撤回：#${post.displayId}\n已处理发布目标：${targetCount} 个`);
+    const groupSuffix = opts?.skipAuthor ? "\n（静默撤回，未通知作者）" : "";
+    await this.broadcastReviewGroup(post.tenantId, `稿件已撤回：#${post.displayId}\n已处理发布目标：${targetCount} 个${groupSuffix}`);
+
+    if (opts?.skipAuthor) {
+      return;
+    }
 
     const bots = await prisma.botAccount.findMany({
       where: {
