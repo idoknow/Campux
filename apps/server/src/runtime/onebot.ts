@@ -272,6 +272,36 @@ export class OneBotRuntime {
     }
   }
 
+  async notifyPostRecallRejected(postId: string, reason: string) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        author: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    await this.broadcastReviewGroup(post.tenantId, `撤回申请已拒绝：#${post.displayId}\n状态已恢复为已发表。\n理由：${reason}`);
+
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId: post.tenantId,
+        enabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+    for (const bot of bots) {
+      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, `您的稿件 #${post.displayId} 撤回申请未通过。\n理由：${reason}`).catch((error) => {
+        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify post recall rejected");
+      });
+    }
+  }
+
   async notifyPostRecallFailed(postId: string, results: Array<{ targetName: string; qzoneTid: string | null; ok: boolean; message: string }>) {
     const post = await prisma.post.findUnique({
       where: {

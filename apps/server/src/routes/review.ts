@@ -249,6 +249,63 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       throw error;
     }
   });
+
+  app.post("/api/review/posts/:id/recall/reject", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const body = reviewBodySchema.parse(request.body ?? {});
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "pending_recall") {
+      return reply.code(409).send({ message: "只有待撤回稿件可以拒绝撤回申请" });
+    }
+
+    await prisma.post.update({
+      where: {
+        id: post.id,
+      },
+      data: {
+        status: "published",
+        logs: {
+          create: {
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            oldStatus: post.status,
+            newStatus: "published",
+            comment: body.comment?.trim() || "拒绝撤回申请",
+          },
+        },
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "post.recall.reject",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+        comment: body.comment?.trim() || null,
+      },
+    });
+
+    oneBot?.notifyPostRecallRejected(post.id, body.comment?.trim() || "撤回申请未通过").catch((error) => {
+      app.log.warn({ error, postId: post.id }, "failed to notify post recall rejection");
+    });
+
+    return {
+      ok: true,
+    };
+  });
 }
 
 function toPagination(page: number, limit: number, total: number) {
