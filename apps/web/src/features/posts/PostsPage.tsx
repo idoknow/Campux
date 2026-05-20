@@ -9,6 +9,7 @@ import {
   FileTextIcon,
   HashIcon,
   ImageIcon,
+  RotateCcwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
@@ -25,7 +26,7 @@ import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/ut
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,6 +52,23 @@ type RejectDialogState = {
   reason: string;
 };
 
+type RecallConfirmState =
+  | {
+      open: false;
+      mode: null;
+      post: null;
+    }
+  | {
+      open: true;
+      mode: "request";
+      post: PostItem;
+    }
+  | {
+      open: true;
+      mode: "approve";
+      post: ReviewPostItem;
+    };
+
 type ImagePreviewState = {
   open: boolean;
   images: PostImage[];
@@ -71,6 +89,8 @@ const statusStyles: Record<string, string> = {
   approved: "bg-green-50 text-green-800 ring-1 ring-green-200",
   rejected: "bg-red-50 text-red-700 ring-1 ring-red-200",
   published: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
+  pending_recall: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
+  recalled: "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200",
 };
 
 const postTabsListClassName = "product-tabs-list";
@@ -81,6 +101,8 @@ const reviewStatusOptions = [
   { value: "rejected", label: "已拒绝" },
   { value: "publishing", label: "发布中" },
   { value: "published", label: "已发布" },
+  { value: "pending_recall", label: "待撤回" },
+  { value: "recalled", label: "已撤回" },
   { value: "failed", label: "发布失败" },
   { value: "all", label: "全部" },
 ] as const;
@@ -124,11 +146,17 @@ export function PostsPage({
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
+  const [busyRecallPostId, setBusyRecallPostId] = useState("");
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
     open: false,
     postId: "",
     displayId: null,
     reason: "",
+  }));
+  const [recallConfirm, setRecallConfirm] = useState<RecallConfirmState>(() => ({
+    open: false,
+    mode: null,
+    post: null,
   }));
   const [preview, setPreview] = useState<RenderPreviewState>(() => ({
     open: false,
@@ -236,6 +264,50 @@ export function PostsPage({
     } finally {
       setBusyCancelPostId("");
     }
+  }
+
+  async function requestRecallPost(post: PostItem) {
+    setBusyRecallPostId(post.id);
+    try {
+      await api(`/api/posts/${post.id}/recall/request`, {
+        method: "POST",
+      });
+      toast.success("已提交撤回申请，等待审核处理。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "申请撤回失败");
+    } finally {
+      setBusyRecallPostId("");
+    }
+  }
+
+  async function approveRecallPost(post: ReviewPostItem) {
+    setBusyPostId(post.id);
+    try {
+      await api(`/api/review/posts/${post.id}/recall/approve`, {
+        method: "POST",
+      });
+      toast.success("已执行撤回。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "撤回失败");
+      await refreshAll();
+    } finally {
+      setBusyPostId("");
+    }
+  }
+
+  async function confirmRecallAction() {
+    if (!recallConfirm.open || !recallConfirm.post) {
+      return;
+    }
+    const { mode, post } = recallConfirm;
+    setRecallConfirm({ open: false, mode: null, post: null });
+    if (mode === "request") {
+      await requestRecallPost(post);
+      return;
+    }
+    await approveRecallPost(post);
   }
 
   async function submitReject() {
@@ -373,9 +445,11 @@ export function PostsPage({
               <PostList
                 posts={posts}
                 busyCancelPostId={busyCancelPostId}
+                busyRecallPostId={busyRecallPostId}
                 onPreview={(post) => void openRenderPreview(post)}
                 onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                 onCancel={(post) => void cancelPost(post.id)}
+                onRecall={(post) => setRecallConfirm({ open: true, mode: "request", post })}
               />
               <PaginationControls pagination={minePagination} busy={mineLoading} onPageChange={onMinePageChange} />
             </>
@@ -439,6 +513,7 @@ export function PostsPage({
                     onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                     onApprove={(id) => void reviewPost(id, "approve")}
                     onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
+                    onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onDetail={(post) => openPostDetail(post.id)}
                   />
                   <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
@@ -598,6 +673,37 @@ export function PostsPage({
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={recallConfirm.open} onOpenChange={(open) => !open && setRecallConfirm({ open: false, mode: null, post: null })}>
+        <DialogContent className="w-[min(460px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>
+              {recallConfirm.open && recallConfirm.mode === "approve" ? "同意撤回申请？" : "申请撤回稿件？"}
+            </DialogTitle>
+            <DialogDescription>
+              {recallConfirm.open && recallConfirm.mode === "approve"
+                ? `确认同意撤回稿件 #${recallConfirm.post.displayId} 吗？系统会逐个把已发表到 QQ 空间的说说设置为仅自己可见。`
+                : recallConfirm.open
+                  ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布到 QQ 空间的说说会被设置为仅自己可见。`
+                  : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecallConfirm({ open: false, mode: null, post: null })}>
+              取消
+            </Button>
+            <Button
+              disabled={
+                recallConfirm.open &&
+                ((recallConfirm.mode === "request" && busyRecallPostId === recallConfirm.post.id) ||
+                  (recallConfirm.mode === "approve" && busyPostId === recallConfirm.post.id))
+              }
+              onClick={() => void confirmRecallAction()}
+            >
+              {recallConfirm.open && recallConfirm.mode === "approve" ? "同意撤回" : "提交申请"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -679,6 +785,7 @@ function ReviewList({
   onImagePreview,
   onApprove,
   onReject,
+  onRecallApprove,
   onDetail,
 }: {
   posts: ReviewPostItem[];
@@ -687,10 +794,11 @@ function ReviewList({
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onApprove: (id: string) => void;
   onReject: (post: ReviewPostItem) => void;
+  onRecallApprove: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
-    return <EmptyCard title="暂时没有待审核稿件" />;
+    return <EmptyCard title="当前筛选下没有稿件" />;
   }
 
   return (
@@ -705,6 +813,7 @@ function ReviewList({
           onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
           onApprove={() => onApprove(post.id)}
           onReject={() => onReject(post)}
+          onRecallApprove={() => onRecallApprove(post)}
           onDetail={() => onDetail(post)}
         />
       ))}
@@ -720,6 +829,7 @@ function ReviewCard({
   onImagePreview,
   onApprove,
   onReject,
+  onRecallApprove,
   onDetail,
 }: {
   post: ReviewPostItem;
@@ -729,6 +839,7 @@ function ReviewCard({
   onImagePreview: (images: PostImage[], index: number) => void;
   onApprove: () => void;
   onReject: () => void;
+  onRecallApprove: () => void;
   onDetail: () => void;
 }) {
   const images = getPostImages(post.images);
@@ -736,6 +847,7 @@ function ReviewCard({
   const authorQq = post.author?.qqUin ?? "未知 QQ";
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
   const canReviewPost = post.status === "pending_approval";
+  const canApproveRecall = post.status === "pending_recall";
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
@@ -790,6 +902,13 @@ function ReviewCard({
                 拒绝
               </Button>
             </div>
+          ) : canApproveRecall ? (
+            <div className="flex gap-2">
+              <Button size="sm" className="font-medium" disabled={busy} onClick={onRecallApprove}>
+                <RotateCcwIcon data-icon="inline-start" />
+                同意撤回
+              </Button>
+            </div>
           ) : null}
         </div>
       </CardContent>
@@ -800,15 +919,19 @@ function ReviewCard({
 function PostList({
   posts,
   busyCancelPostId,
+  busyRecallPostId,
   onPreview,
   onImagePreview,
   onCancel,
+  onRecall,
 }: {
   posts: PostItem[];
   busyCancelPostId: string;
+  busyRecallPostId: string;
   onPreview: (post: PostItem) => void;
   onImagePreview: (post: PostItem, images: PostImage[], index: number) => void;
   onCancel: (post: PostItem) => void;
+  onRecall: (post: PostItem) => void;
 }) {
   if (posts.length === 0) {
     return <EmptyCard title="还没有稿件，先去投一条吧" />;
@@ -822,9 +945,11 @@ function PostList({
           post={post}
           palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
           cancelBusy={busyCancelPostId === post.id}
+          recallBusy={busyRecallPostId === post.id}
           onPreview={() => onPreview(post)}
           onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
           onCancel={() => onCancel(post)}
+          onRecall={() => onRecall(post)}
         />
       ))}
     </div>
@@ -835,20 +960,25 @@ function PostCard({
   post,
   palette,
   cancelBusy,
+  recallBusy,
   onPreview,
   onImagePreview,
   onCancel,
+  onRecall,
 }: {
   post: PostItem;
   palette: string;
   cancelBusy: boolean;
+  recallBusy: boolean;
   onPreview: () => void;
   onImagePreview: (images: PostImage[], index: number) => void;
   onCancel: () => void;
+  onRecall: () => void;
 }) {
   const images = getPostImages(post.images);
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
   const canCancel = post.status === "pending_approval";
+  const canRecall = post.status === "published";
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
@@ -865,6 +995,7 @@ function PostCard({
             <>
               <PreviewButton onClick={onPreview} />
               {canCancel ? <CancelButton busy={cancelBusy} onClick={onCancel} /> : null}
+              {canRecall ? <RecallRequestButton busy={recallBusy} onClick={onRecall} /> : null}
             </>
           }
         />
@@ -939,6 +1070,15 @@ function CancelButton({ busy, onClick }: { busy: boolean; onClick: () => void })
     <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold text-red-700 hover:text-red-700" disabled={busy} onClick={onClick}>
       <XIcon data-icon="inline-start" />
       取消
+    </Button>
+  );
+}
+
+function RecallRequestButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold text-violet-700 hover:text-violet-700" disabled={busy} onClick={onClick}>
+      <RotateCcwIcon data-icon="inline-start" />
+      申请撤回
     </Button>
   );
 }

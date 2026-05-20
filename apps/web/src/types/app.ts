@@ -219,6 +219,7 @@ export type PublishAttemptItem = {
   lastError: string | null;
   nextRunAt: string | null;
   externalId: string | null;
+  qzoneTid: string | null;
   verbose: PublishAttemptVerbose | null;
   updatedAt: string;
   post: {
@@ -252,6 +253,7 @@ export type PublishAttemptVerbose = {
   cookieStatus?: string;
   cookieNames?: string[];
   uin?: string | null;
+  qzoneTid?: string | null;
   publishedAt?: string | null;
   note?: string;
   http?: Array<{

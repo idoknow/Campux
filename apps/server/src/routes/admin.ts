@@ -1328,6 +1328,7 @@ function toPublishAttempt(attempt: {
   lastError: string | null;
   nextRunAt: Date | null;
   externalId: string | null;
+  qzoneTid: string | null;
   verbose: Prisma.JsonValue | null;
   updatedAt: Date;
   post: {
@@ -1358,6 +1359,7 @@ function toPublishAttempt(attempt: {
     lastError: attempt.lastError,
     nextRunAt: attempt.nextRunAt?.toISOString() ?? null,
     externalId: attempt.externalId,
+    qzoneTid: attempt.qzoneTid,
     verbose: attempt.verbose,
     updatedAt: attempt.updatedAt.toISOString(),
     publishTarget: {

@@ -324,6 +324,7 @@ model PublishAttempt {
   verbose         Json?
   nextRunAt       DateTime?
   externalId      String?
+  qzoneTid        String?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   post            Post                 @relation(fields: [postId], references: [id], onDelete: Cascade)

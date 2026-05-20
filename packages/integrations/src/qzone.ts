@@ -47,6 +47,7 @@ export type QZonePublishVerbose = {
   cookieStatus: "available" | "missing";
   cookieNames: string[];
   uin: string | null;
+  qzoneTid: string | null;
   publishedAt: string | null;
   http: QZoneHttpLog[];
   note?: string;
@@ -54,7 +55,31 @@ export type QZonePublishVerbose = {
 
 export type QZonePublishResult = {
   externalId: string;
+  qzoneTid: string | null;
   verbose: QZonePublishVerbose;
+};
+
+export type QZoneRecallInput = {
+  targetName: string;
+  externalId: string;
+  cookies?: Record<string, string> | null;
+};
+
+export type QZoneRecallVerbose = {
+  mode: "real-qzone-recall";
+  targetName: string;
+  externalId: string;
+  cookieStatus: "available" | "missing";
+  cookieNames: string[];
+  uin: string | null;
+  recalledAt: string | null;
+  http: QZoneHttpLog[];
+  note?: string;
+};
+
+export type QZoneRecallResult = {
+  externalId: string;
+  verbose: QZoneRecallVerbose;
 };
 
 export class QZonePublishError extends Error {
@@ -67,7 +92,19 @@ export class QZonePublishError extends Error {
   }
 }
 
+export class QZoneRecallError extends Error {
+  verbose: QZoneRecallVerbose;
+
+  constructor(message: string, verbose: QZoneRecallVerbose) {
+    super(message);
+    this.name = "QZoneRecallError";
+    this.verbose = verbose;
+  }
+}
+
 const publishEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_publish_v6";
+const emotionDetailEndpoint = "https://h5.qzone.qq.com/proxy/domain/taotao.qq.com/cgi-bin/emotion_cgi_msgdetail_v6";
+const emotionUpdateEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_update";
 const uploadImageEndpoint = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image";
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -84,6 +121,7 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
     cookieStatus: input.cookies && cookieNames.length > 0 ? "available" : "missing",
     cookieNames,
     uin,
+    qzoneTid: null,
     publishedAt: null,
     http: [],
     note: "发布正文来自机器人配文模板；稿件正文会进入渲染图，渲染图和投稿原图会作为 QZone 说说图片上传。",
@@ -161,8 +199,10 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
     }
 
     verbose.publishedAt = new Date().toISOString();
+    verbose.qzoneTid = success.qzoneTid;
     return {
       externalId: success.externalId,
+      qzoneTid: success.qzoneTid,
       verbose,
     };
   } catch (caught) {
@@ -173,6 +213,69 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
     log.error = caught instanceof Error ? caught.message : String(caught);
     throw new QZonePublishError(`QZone 发布请求失败：${log.error}`, verbose);
   }
+}
+
+export async function setQZoneEmotionPrivate(input: QZoneRecallInput): Promise<QZoneRecallResult> {
+  const cookieNames = input.cookies ? Object.keys(input.cookies).sort() : [];
+  const uin = normalizeUin(input.cookies);
+  const verbose: QZoneRecallVerbose = {
+    mode: "real-qzone-recall",
+    targetName: input.targetName,
+    externalId: input.externalId,
+    cookieStatus: input.cookies && cookieNames.length > 0 ? "available" : "missing",
+    cookieNames,
+    uin,
+    recalledAt: null,
+    http: [],
+    note: "撤回不会删除 QQ 空间说说，而是通过 QZone 访问权限把说说改为仅自己可见。",
+  };
+
+  if (!input.cookies || cookieNames.length === 0) {
+    throw new QZoneRecallError("缺少 QZone cookies，无法撤回 QQ 空间说说", verbose);
+  }
+
+  const pSkey = input.cookies.p_skey || input.cookies.skey;
+  if (!pSkey) {
+    throw new QZoneRecallError("QZone cookies 缺少 p_skey/skey，无法计算 g_tk", verbose);
+  }
+
+  if (!uin) {
+    throw new QZoneRecallError("QZone cookies 缺少 uin/ptui_loginuin，无法确定发布账号", verbose);
+  }
+
+  const gtk = generateGtk(pSkey);
+  const cookieHeader = toCookieHeader(input.cookies);
+  const requestHeaders = {
+    "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+    cookie: redactCookieHeader(cookieHeader),
+    origin: "https://user.qzone.qq.com",
+    referer: `https://user.qzone.qq.com/${uin}/main`,
+    "user-agent": userAgent,
+  };
+
+  const detail = await getQZoneEmotionDetail({
+    tid: input.externalId,
+    uin,
+    gtk,
+    cookieHeader,
+    headers: requestHeaders,
+    verbose,
+  });
+  await updateQZoneEmotionRight({
+    tid: input.externalId,
+    uin,
+    gtk,
+    cookieHeader,
+    headers: requestHeaders,
+    detail,
+    verbose,
+  });
+
+  verbose.recalledAt = new Date().toISOString();
+  return {
+    externalId: input.externalId,
+    verbose,
+  };
 }
 
 async function uploadQZoneImage({
@@ -273,6 +376,130 @@ async function uploadQZoneImage({
   }
 }
 
+async function getQZoneEmotionDetail({
+  tid,
+  uin,
+  gtk,
+  cookieHeader,
+  headers,
+  verbose,
+}: {
+  tid: string;
+  uin: string;
+  gtk: number;
+  cookieHeader: string;
+  headers: Record<string, string>;
+  verbose: QZoneRecallVerbose;
+}) {
+  const random = Math.random().toString();
+  const url = `${emotionDetailEndpoint}?r=${encodeURIComponent(random)}&not_adapt_outpic=1&random=${encodeURIComponent(random)}&tid=${encodeURIComponent(tid)}&uin=${encodeURIComponent(uin)}&t1_source=1&not_trunc_con=1&need_right=1&g_tk=${encodeURIComponent(String(gtk))}`;
+  const log: QZoneHttpLog = {
+    label: "recall_detail",
+    request: {
+      method: "GET",
+      url,
+      headers,
+    },
+  };
+  verbose.http.push(log);
+
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      headers: {
+        ...headers,
+        cookie: cookieHeader,
+      },
+    });
+    const text = await response.text();
+    const parsed = parseQZoneResponse(text);
+    log.durationMs = Date.now() - startedAt;
+    log.response = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: pickResponseHeaders(response.headers),
+      body: truncate(text, 8_000),
+      parsed,
+    };
+    if (!response.ok) {
+      throw new QZoneRecallError(`QZone 说说详情 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
+    }
+    return parseEmotionDetail(parsed, verbose);
+  } catch (caught) {
+    if (caught instanceof QZoneRecallError) {
+      throw caught;
+    }
+    log.durationMs = Date.now() - startedAt;
+    log.error = caught instanceof Error ? caught.message : String(caught);
+    throw new QZoneRecallError(`QZone 说说详情获取失败：${log.error}`, verbose);
+  }
+}
+
+async function updateQZoneEmotionRight({
+  tid,
+  uin,
+  gtk,
+  cookieHeader,
+  headers,
+  detail,
+  verbose,
+}: {
+  tid: string;
+  uin: string;
+  gtk: number;
+  cookieHeader: string;
+  headers: Record<string, string>;
+  detail: QZoneEmotionDetail;
+  verbose: QZoneRecallVerbose;
+}) {
+  const url = `${emotionUpdateEndpoint}?g_tk=${encodeURIComponent(String(gtk))}`;
+  const body = createRecallBody(tid, uin, detail);
+  const log: QZoneHttpLog = {
+    label: "recall_update_private",
+    request: {
+      method: "POST",
+      url,
+      headers,
+      body: Object.fromEntries(body.entries()),
+    },
+  };
+  verbose.http.push(log);
+
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...headers,
+        cookie: cookieHeader,
+      },
+      body,
+    });
+    const text = await response.text();
+    const parsed = parseQZoneResponse(text);
+    log.durationMs = Date.now() - startedAt;
+    log.response = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: pickResponseHeaders(response.headers),
+      body: truncate(text, 8_000),
+      parsed,
+    };
+
+    const success = isRecallSuccess(response, parsed, text);
+    if (!success.ok) {
+      throw new QZoneRecallError(success.message, verbose);
+    }
+  } catch (caught) {
+    if (caught instanceof QZoneRecallError) {
+      throw caught;
+    }
+    log.durationMs = Date.now() - startedAt;
+    log.error = caught instanceof Error ? caught.message : String(caught);
+    throw new QZoneRecallError(`QZone 撤回请求失败：${log.error}`, verbose);
+  }
+}
+
 function createPublishBody(input: QZonePublishInput, uin: string, uploadedImages: Array<{ picBo: string; richval: string }>) {
   const body = new URLSearchParams();
   body.set("syn_tweet_verson", "1");
@@ -298,6 +525,121 @@ function createPublishBody(input: QZonePublishInput, uin: string, uploadedImages
     body.set("richval", uploadedImages.map((image) => image.richval).join("\t"));
   }
   return body;
+}
+
+type QZoneEmotionDetail = {
+  content: string;
+  pictures: Array<{
+    picId: string;
+    picType: string;
+    height: string;
+    width: string;
+    smallUrl: string;
+  }>;
+};
+
+function parseEmotionDetail(parsed: unknown, verbose: QZoneRecallVerbose): QZoneEmotionDetail {
+  if (!parsed || typeof parsed !== "object") {
+    throw new QZoneRecallError("QZone 说说详情没有返回可解析的 JSON", verbose);
+  }
+  const record = parsed as Record<string, unknown>;
+  const code = toNumber(record.code ?? record.ret);
+  if (code !== null && code !== 0) {
+    throw new QZoneRecallError(`QZone 说说详情被拒绝：${String(record.message ?? record.msg ?? `返回码 ${code}`)}`, verbose);
+  }
+  const content = firstString(record.content, record.con);
+  if (content === null) {
+    throw new QZoneRecallError("QZone 说说详情缺少正文内容", verbose);
+  }
+
+  const rawPictures = Array.isArray(record.pic) ? record.pic : [];
+  const pictures = rawPictures
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const picture = item as Record<string, unknown>;
+      const picId = firstString(picture.pic_id, picture.picId);
+      const picType = firstString(picture.pictype, picture.picType, picture.type);
+      const height = firstString(picture.height);
+      const width = firstString(picture.width);
+      const smallUrl = firstString(picture.smallurl, picture.smallUrl, picture.url);
+      if (!picId || !picType || !height || !width || !smallUrl) {
+        return null;
+      }
+      return {
+        picId,
+        picType,
+        height,
+        width,
+        smallUrl,
+      };
+    })
+    .filter((item): item is QZoneEmotionDetail["pictures"][number] => item !== null);
+
+  return {
+    content,
+    pictures,
+  };
+}
+
+function createRecallBody(tid: string, uin: string, detail: QZoneEmotionDetail) {
+  const body = new URLSearchParams();
+  body.set("syn_tweet_verson", "1");
+  body.set("tid", tid);
+  body.set("paramstr", "1");
+  body.set("pic_template", "");
+  body.set("richtype", "");
+  body.set("richval", "");
+  body.set("special_url", "");
+  body.set("subrichtype", "");
+  body.set("con", detail.content);
+  body.set("feedversion", "1");
+  body.set("ver", "1");
+  body.set("ugc_right", "64");
+  body.set("to_sign", "0");
+  body.set("ugcright_id", tid);
+  body.set("hostuin", uin);
+  body.set("code_version", "1");
+  body.set("format", "fs");
+  body.set("qzreferrer", `https://user.qzone.qq.com/${uin}/main`);
+
+  const richvals: string[] = [];
+  const picBos: string[] = [];
+  for (const picture of detail.pictures) {
+    const parts = picture.picId.split(",");
+    const albumId = parts[1];
+    const lloc = parts[2];
+    if (!albumId || !lloc) {
+      continue;
+    }
+    richvals.push(`,${albumId},${lloc},${lloc},${picture.picType},${picture.height},${picture.width},,0,0`);
+    const picBo = extractPicBo(picture.smallUrl);
+    if (picBo) {
+      picBos.push(picBo);
+    }
+  }
+
+  if (richvals.length > 0 && picBos.length > 0) {
+    body.set("richtype", "1");
+    body.set("subrichtype", "1");
+    body.set("richval", richvals.join("\t"));
+    body.set("pic_bo", picBos.join("\t"));
+  }
+  return body;
+}
+
+function extractPicBo(value: string) {
+  try {
+    const parsed = new URL(value);
+    const bo = parsed.searchParams.get("bo");
+    if (bo) {
+      return bo;
+    }
+  } catch {
+    // Fall through to the historical split-based parser.
+  }
+  return value.split("bo=")[1]?.split("&")[0] ?? null;
 }
 
 function getPicBoAndRichval(parsed: unknown) {
@@ -413,7 +755,7 @@ function parseQZoneUploadResponse(text: string) {
   }
 }
 
-function isPublishSuccess(response: Response, parsed: unknown): { ok: true; externalId: string } | { ok: false; message: string } {
+function isPublishSuccess(response: Response, parsed: unknown): { ok: true; externalId: string; qzoneTid: string | null } | { ok: false; message: string } {
   if (!response.ok) {
     return {
       ok: false,
@@ -443,6 +785,7 @@ function isPublishSuccess(response: Response, parsed: unknown): { ok: true; exte
     return {
       ok: true,
       externalId: externalId ?? `qzone-${Date.now()}`,
+      qzoneTid: externalId,
     };
   }
 
@@ -462,6 +805,43 @@ function findExternalId(record: Record<string, unknown>) {
     return firstString(...Object.values(data as Record<string, unknown>));
   }
   return null;
+}
+
+function isRecallSuccess(response: Response, parsed: unknown, rawText: string): { ok: true } | { ok: false; message: string } {
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `QZone 撤回 HTTP ${response.status} ${response.statusText || ""}`.trim(),
+    };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const record = parsed as Record<string, unknown>;
+    const numericFlags = [record.code, record.ret, record.subcode].map(toNumber).filter((value): value is number => value !== null);
+    const nonZero = numericFlags.find((value) => value !== 0);
+    if (nonZero !== undefined) {
+      return {
+        ok: false,
+        message: `QZone 撤回被拒绝：${String(record.message ?? record.msg ?? `返回码 ${nonZero}`)}`,
+      };
+    }
+    if (numericFlags.includes(0)) {
+      return {
+        ok: true,
+      };
+    }
+  }
+
+  if (/"(?:code|ret|subcode)"\s*:\s*0/.test(rawText) || /callback\(\s*0\s*\)/i.test(rawText)) {
+    return {
+      ok: true,
+    };
+  }
+
+  return {
+    ok: false,
+    message: "QZone 撤回响应缺少成功标记",
+  };
 }
 
 function firstString(...values: unknown[]) {

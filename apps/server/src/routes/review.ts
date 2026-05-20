@@ -4,6 +4,7 @@ import { requireTenantRole } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
+import { executePostRecall, PostRecallExecutionError } from "../lib/post-recall";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -17,7 +18,7 @@ const reviewBodySchema = z.object({
 });
 
 const reviewQuerySchema = z.object({
-  status: z.enum(["all", "pending_approval", "approved", "rejected", "publishing", "partially_failed", "failed", "published"]).default("pending_approval"),
+  status: z.enum(["all", "pending_approval", "approved", "rejected", "publishing", "partially_failed", "failed", "published", "pending_recall", "recalled"]).default("pending_approval"),
   q: z.string().max(80).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
@@ -192,6 +193,51 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     return {
       ok: true,
     };
+  });
+
+  app.post("/api/review/posts/:id/recall/approve", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "pending_recall") {
+      return reply.code(409).send({ message: "只有待撤回稿件可以执行撤回" });
+    }
+
+    try {
+      const result = await executePostRecall({
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        actorId: context.user.id,
+        logger: app.log,
+      });
+      oneBot?.notifyPostRecalled(result.post.id, result.results.length).catch((error) => {
+        app.log.warn({ error, postId: result.post.id }, "failed to notify post recalled");
+      });
+      return {
+        ok: true,
+        results: result.results,
+      };
+    } catch (error) {
+      if (error instanceof PostRecallExecutionError) {
+        oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {
+          app.log.warn({ error: caught, postId: post.id }, "failed to notify post recall failure");
+        });
+        return reply.code(502).send({
+          message: "部分发布目标撤回失败，请检查日志后重试",
+          results: error.results,
+        });
+      }
+      throw error;
+    }
   });
 }
 
