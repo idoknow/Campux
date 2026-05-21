@@ -1,3 +1,5 @@
+import type { PostItem } from "../types/app";
+
 export async function api<T>(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
@@ -15,55 +17,72 @@ export async function api<T>(path: string, options: RequestInit = {}) {
   return data as T;
 }
 
-export type UploadImageResponse = {
-  key: string;
-  url: string;
-  fileName: string;
+export class CreatePostError extends Error {
+  fileIndex?: number;
+  status: number;
+  constructor(message: string, status: number, fileIndex?: number) {
+    super(message);
+    this.name = "CreatePostError";
+    this.status = status;
+    if (fileIndex !== undefined) {
+      this.fileIndex = fileIndex;
+    }
+  }
+}
+
+export type CreatePostResponse = {
+  post: PostItem;
 };
 
-export function uploadWithProgress(
-  file: File,
-  onProgress: (progress: number) => void,
-): Promise<UploadImageResponse> {
+export function createPostWithAttachments(
+  text: string,
+  anonymous: boolean,
+  files: File[],
+  onProgress?: (totalPercent: number) => void,
+): Promise<CreatePostResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/uploads/post-images");
+    xhr.open("POST", "/api/posts");
     xhr.withCredentials = true;
 
     xhr.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) {
+      if (event.lengthComputable && onProgress) {
         onProgress((event.loaded / event.total) * 100);
       }
     });
 
     xhr.addEventListener("load", () => {
-      let parsed: UploadImageResponse | { message?: string };
+      let parsed: CreatePostResponse | { message?: string; fileIndex?: number };
       try {
-        parsed = JSON.parse(xhr.responseText) as UploadImageResponse | { message?: string };
+        parsed = JSON.parse(xhr.responseText) as CreatePostResponse | { message?: string; fileIndex?: number };
       } catch {
-        reject(new Error(xhr.statusText || `上传失败：${xhr.status}`));
+        reject(new CreatePostError(xhr.statusText || `投稿失败：${xhr.status}`, xhr.status));
         return;
       }
 
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(parsed as UploadImageResponse);
+        resolve(parsed as CreatePostResponse);
         return;
       }
 
-      const message = (parsed as { message?: string }).message || `上传失败：${xhr.status}`;
-      reject(new Error(message));
+      const errorBody = parsed as { message?: string; fileIndex?: number };
+      reject(new CreatePostError(errorBody.message || `投稿失败：${xhr.status}`, xhr.status, errorBody.fileIndex));
     });
 
     xhr.addEventListener("error", () => {
-      reject(new Error("网络错误，图片上传失败"));
+      reject(new CreatePostError("网络错误，投稿失败", 0));
     });
 
     xhr.addEventListener("abort", () => {
-      reject(new Error("上传已取消"));
+      reject(new CreatePostError("投稿已取消", 0));
     });
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("text", text);
+    formData.append("anonymous", String(anonymous));
+    for (const file of files) {
+      formData.append("images", file, file.name);
+    }
     xhr.send(formData);
   });
 }

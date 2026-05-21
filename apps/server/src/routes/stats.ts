@@ -40,7 +40,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
           authorId: true,
           status: true,
           anonymous: true,
-          images: true,
+          attachments: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -55,7 +55,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
           authorId: true,
           status: true,
           anonymous: true,
-          images: true,
+          attachments: true,
           createdAt: true,
         },
         orderBy: { createdAt: "asc" },
@@ -70,7 +70,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
           authorId: true,
           status: true,
           anonymous: true,
-          images: true,
+          attachments: true,
           createdAt: true,
         },
         orderBy: { createdAt: "asc" },
@@ -196,8 +196,8 @@ export function registerStatsRoutes(app: FastifyInstance) {
       .filter((value): value is number => typeof value === "number" && value >= 0);
     const avgReviewMinutes = reviewDurations.length > 0 ? Math.round(reviewDurations.reduce((sum, value) => sum + value, 0) / reviewDurations.length / 60_000) : null;
 
-    const imagesTotal = posts.reduce((sum, post) => sum + getImageCount(post.images), 0);
-    const postsWithImages = posts.filter((post) => getImageCount(post.images) > 0).length;
+    const imagesTotal = posts.reduce((sum, post) => sum + getAttachmentCount(post.attachments), 0);
+    const postsWithImages = posts.filter((post) => getAttachmentCount(post.attachments) > 0).length;
     const anonymousPosts = posts.filter((post) => post.anonymous).length;
     const uniqueAuthors = new Set(posts.map((post) => post.authorId)).size;
     const activeAuthors30d = new Set(recentPosts30d.map((post) => post.authorId)).size;
@@ -344,8 +344,8 @@ export function registerStatsRoutes(app: FastifyInstance) {
   });
 }
 
-function getImageCount(images: unknown) {
-  return Array.isArray(images) ? images.length : 0;
+function getAttachmentCount(attachments: unknown) {
+  return Array.isArray(attachments) ? attachments.length : 0;
 }
 
 function parseRangeDays(query: unknown) {

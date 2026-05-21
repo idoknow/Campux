@@ -221,7 +221,7 @@ model Post {
   legacyDisplayId Int?
   legacyUuid      String?
   text            String
-  images          Json             @default("[]")
+  attachments     Json             @default("[]")
   anonymous       Boolean          @default(false)
   status          PostStatus       @default(pending_approval)
   createdAt       DateTime         @default(now())
