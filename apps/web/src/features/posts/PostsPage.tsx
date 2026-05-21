@@ -32,9 +32,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 type PostImage = {
+  kind?: "image";
   key?: string;
   url?: string;
   fileName?: string;
+  contentType?: string;
 };
 
 type RenderPreviewState = {
@@ -889,7 +891,7 @@ function PostDetailDialog({
   onRecallDirect?: (post: ReviewPostItem) => void;
   onRecallDirectSilent?: (post: ReviewPostItem) => void;
 }) {
-  const images = post ? getPostImages(post.images) : [];
+  const images = post ? getPostImages(post.attachments) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
   const showDirectRecallSilent = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirectSilent);
 
@@ -906,7 +908,7 @@ function PostDetailDialog({
               <Badge variant="outline">#{post.displayId}</Badge>
               <Badge variant="secondary">{statusLabels[post.status] ?? post.status}</Badge>
               {post.anonymous ? <Badge variant="outline">匿名展示</Badge> : <Badge variant="outline">实名展示</Badge>}
-              <Badge variant="outline">{images.length} 张图</Badge>
+              <Badge variant="outline">{images.length} 张图片</Badge>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="whitespace-pre-wrap text-sm font-semibold text-slate-800">{post.text}</p>
@@ -921,7 +923,7 @@ function PostDetailDialog({
             {images.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {images.map((image, index) => (
-                  <button key={`${image.key ?? image.url ?? index}`} type="button" className="size-16 overflow-hidden rounded-md border border-slate-200 bg-white" onClick={() => onImagePreview(post, images, index)}>
+                  <button key={`${image.key ?? image.url ?? index}`} type="button" className="relative size-16 overflow-hidden rounded-md border border-slate-200 bg-white" onClick={() => onImagePreview(post, images, index)}>
                     <img src={getPostImageUrl(image)} alt={image.fileName ?? `稿件图片 ${index + 1}`} className="h-full w-full object-cover" />
                   </button>
                 ))}
@@ -1099,7 +1101,7 @@ function ReviewCard({
   onRecallDirectSilent?: () => void;
   onDetail: () => void;
 }) {
-  const images = getPostImages(post.images);
+  const images = getPostImages(post.attachments);
   const authorName = post.author?.displayName ?? "未命名用户";
   const authorQq = post.author?.qqUin ?? "未知 QQ";
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
@@ -1252,7 +1254,7 @@ function PostCard({
   onCancel: () => void;
   onRecall: () => void;
 }) {
-  const images = getPostImages(post.images);
+  const images = getPostImages(post.attachments);
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
   const canCancel = post.status === "pending_approval";
   const canRecall = post.status === "published";
@@ -1446,12 +1448,12 @@ function ImageGallery({ images, reviewMode = false, onImageClick }: { images: Po
   );
 }
 
-function getPostImages(images: unknown): PostImage[] {
-  if (!Array.isArray(images)) {
+function getPostImages(attachments: unknown): PostImage[] {
+  if (!Array.isArray(attachments)) {
     return [];
   }
 
-  return images.filter((image): image is PostImage => typeof image === "object" && image !== null && "url" in image && typeof image.url === "string");
+  return attachments.filter((attachment): attachment is PostImage => typeof attachment === "object" && attachment !== null && "url" in attachment && typeof (attachment as { url: unknown }).url === "string");
 }
 
 function getPostImageUrl(image: PostImage) {

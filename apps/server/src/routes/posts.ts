@@ -12,8 +12,9 @@ import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
-import { readTenantPendingPostLimit } from "../lib/tenant-metadata";
+import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
+import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import type { OneBotRuntime } from "../runtime/onebot";
 
 const fileQuerySchema = z.object({
@@ -29,26 +30,8 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
-const createPostSchema = z.object({
-  text: z.string().trim().min(1).max(1000),
-  anonymous: z.boolean().default(false),
-  images: z.array(
-    z.object({
-      key: z.string().min(1),
-      url: z.string().min(1),
-      fileName: z.string().min(1),
-    }),
-  ).max(9).default([]),
-});
-
 const recallRequestSchema = z.object({
   reason: z.string().trim().min(1, "请填写撤回理由").max(500),
-});
-
-const legacyUploadSchema = z.object({
-  fileName: z.string().min(1),
-  contentType: z.string().min(1).optional(),
-  base64: z.string().min(1),
 });
 
 class PendingPostLimitError extends Error {
@@ -60,7 +43,7 @@ class PendingPostLimitError extends Error {
   }
 }
 
-function sanitizeUploadExtension(fileName: string | undefined): string {
+export function sanitizeUploadExtension(fileName: string | undefined): string {
   const raw = fileName?.split(".").pop();
   if (!raw) {
     return "bin";
@@ -86,17 +69,6 @@ function isAllowedImageType(contentType: string): boolean {
 
 function headerIncludes(value: string | string[] | undefined, expected: string): boolean {
   return Array.isArray(value) ? value.some((item) => item.includes(expected)) : Boolean(value?.includes(expected));
-}
-
-function readLegacyUploadContentType(value: string, fallback: string | undefined): string {
-  const match = /^data:([^;,]+)[;,]/.exec(value);
-  return fallback || match?.[1] || "application/octet-stream";
-}
-
-function decodeLegacyBase64Upload(value: string): Buffer {
-  const commaIndex = value.indexOf(",");
-  const payload = commaIndex >= 0 ? value.slice(commaIndex + 1) : value;
-  return Buffer.from(payload, "base64");
 }
 
 function isUploadTooLargeError(error: unknown) {
@@ -183,95 +155,11 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
     return reply.send(object.Body);
   });
 
-  app.post("/api/uploads/post-images", async (request, reply) => {
-    const context = await requireTenantContext(request, reply);
-    const requestContentType = request.headers["content-type"] ?? "";
-    const maxUploadSize = 10 * 1024 * 1024;
-
-    if (headerIncludes(requestContentType, "application/json")) {
-      const body = legacyUploadSchema.parse(request.body);
-      const contentType = readLegacyUploadContentType(body.base64, body.contentType);
-      if (!isAllowedImageType(contentType)) {
-        return reply.code(400).send({ message: "仅支持图片格式（jpg/png/gif/webp）" });
-      }
-
-      const bytes = decodeLegacyBase64Upload(body.base64);
-      if (bytes.byteLength > maxUploadSize) {
-        return reply.code(413).send({ message: "图片不能超过 10MB" });
-      }
-
-      return uploadImageBytes({
-        config,
-        tenantId: context.selectedTenant.id,
-        fileName: body.fileName,
-        contentType,
-        body: bytes,
-      });
-    }
-
-    let file;
-    try {
-      file = await request.file();
-    } catch (error) {
-      if (isUploadTooLargeError(error)) {
-        return reply.code(413).send({ message: "图片不能超过 10MB" });
-      }
-      throw error;
-    }
-    if (!file) {
-      return reply.code(400).send({ message: "请上传图片文件" });
-    }
-
-    const contentType = file.mimetype || "application/octet-stream";
-    if (!isAllowedImageType(contentType)) {
-      file.file.destroy();
-      return reply.code(400).send({ message: "仅支持图片格式（jpg/png/gif/webp）" });
-    }
-
-    const sourceStream = file.file;
-    let transferredBytes = 0;
-    const limitedStream = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        transferredBytes += chunk.length;
-        if (transferredBytes > maxUploadSize) {
-          callback(new Error("size limit exceeded"));
-          return;
-        }
-        callback(null, chunk);
-      },
-    });
-
-    const uploadPromise = uploadImageBytes({
-      config,
-      tenantId: context.selectedTenant.id,
-      fileName: file.filename ?? `image.${sanitizeUploadExtension(undefined)}`,
-      contentType,
-      body: limitedStream,
-    });
-
-    try {
-      const [result] = await Promise.all([
-        uploadPromise,
-        pipeline(sourceStream, limitedStream),
-      ]);
-      return result;
-    } catch (error: unknown) {
-      if (!limitedStream.destroyed) {
-        limitedStream.destroy();
-      }
-      if (!sourceStream.destroyed) {
-        sourceStream.destroy();
-      }
-      if (isUploadTooLargeError(error)) {
-        return reply.code(413).send({ message: "图片不能超过 10MB" });
-      }
-      return reply.code(500).send({ message: "图片上传失败，请重试" });
-    }
-  });
-
   app.post("/api/posts", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
-    const body = createPostSchema.parse(request.body);
+    const compression = await readTenantImageCompression(prisma, context.selectedTenant.id);
+
+    // Check ban first
     const activeBan = await prisma.banRecord.findFirst({
       where: {
         tenantId: context.selectedTenant.id,
@@ -288,88 +176,231 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       return reply.code(403).send({ message: `账号已被封禁：${activeBan.comment}` });
     }
 
-    let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        post = await prisma.$transaction(
-          async (tx) => {
-            const pendingPostLimit = await readTenantPendingPostLimit(tx, context.selectedTenant.id);
-            if (pendingPostLimit > 0) {
-              const pendingCount = await tx.post.count({
-                where: {
-                  tenantId: context.selectedTenant.id,
-                  authorId: context.user.id,
-                  status: "pending_approval",
-                },
-              });
-              if (pendingCount >= pendingPostLimit) {
-                throw new PendingPostLimitError(pendingCount, pendingPostLimit);
-              }
-            }
+    const uploadedKeys: string[] = [];
+    let text = "";
+    let anonymous = false;
+    const staged: PostAttachment[] = [];
 
-            const tenant = await tx.tenant.update({
-              where: {
-                id: context.selectedTenant.id,
-              },
-              data: {
-                nextPostDisplayId: {
-                  increment: 1,
-                },
-              },
-              select: {
-                nextPostDisplayId: true,
-              },
-            });
-            const displayId = tenant.nextPostDisplayId - 1;
-
-            return tx.post.create({
-              data: {
-                tenantId: context.selectedTenant.id,
-                authorId: context.user.id,
-                displayId,
-                text: body.text,
-                anonymous: body.anonymous,
-                images: body.images,
-                status: "pending_approval",
-                logs: {
-                  create: {
-                    tenantId: context.selectedTenant.id,
-                    actorId: context.user.id,
-                    newStatus: "pending_approval",
-                    comment: "投稿创建",
-                  },
-                },
-              },
-            });
-          },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-        );
-        break;
-      } catch (caught) {
-        if (caught instanceof PendingPostLimitError) {
-          return reply.code(409).send({
-            message: `你还有 ${caught.pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${caught.limit} 条待审核稿件。`,
-          });
-        }
-        if (isTransactionSerializationFailure(caught) && attempt < 2) {
+    try {
+      let fileIndex = 0;
+      for await (const part of request.parts()) {
+        if (part.type === "field") {
+          if (part.fieldname === "text") {
+            text = String(part.value ?? "");
+          } else if (part.fieldname === "anonymous") {
+            anonymous = part.value === "true" || part.value === true;
+          }
           continue;
         }
-        throw caught;
+
+        if (part.fieldname !== "images") {
+          part.file.destroy();
+          continue;
+        }
+
+        if (staged.length >= 9) {
+          part.file.destroy();
+          throw {
+            status: 400,
+            message: "最多 9 张图片",
+            fileIndex,
+          };
+        }
+
+        const mime = part.mimetype || "application/octet-stream";
+        if (!isAllowedImageType(mime)) {
+          part.file.destroy();
+          throw {
+            status: 415,
+            message: "仅支持图片格式",
+            fileIndex,
+          };
+        }
+
+        const cap = 10 * 1024 * 1024;
+
+        // Read file with size cap using Transform
+        const buf = await readPartCapped(part.file, cap, fileIndex);
+
+        const finalBuf = await compressImageBuffer(buf, mime, compression);
+
+        // Upload to S3
+        const att = await uploadAttachmentBytes({
+          config,
+          tenantId: context.selectedTenant.id,
+          kind: "image",
+          contentType: mime,
+          fileName: part.filename || "attachment.jpg",
+          body: finalBuf,
+        });
+        uploadedKeys.push(att.key);
+        staged.push(att);
+        fileIndex += 1;
       }
-    }
 
-    if (!post) {
-      return reply.code(503).send({ message: "投稿人数较多，请稍后再试" });
-    }
+      // Validate text
+      if (text.trim().length === 0) {
+        throw {
+          status: 400,
+          message: "正文不能为空",
+        };
+      }
+      if (text.length > 1000) {
+        throw {
+          status: 400,
+          message: "正文最多 1000 字",
+        };
+      }
 
-    oneBot?.notifyNewPost(post.id).catch((error) => {
-      app.log.warn({ error, postId: post.id }, "failed to notify review group");
+      // Create post in transaction with retry logic
+      let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          post = await prisma.$transaction(
+            async (tx) => {
+              const pendingPostLimit = await readTenantPendingPostLimit(tx, context.selectedTenant.id);
+              if (pendingPostLimit > 0) {
+                const pendingCount = await tx.post.count({
+                  where: {
+                    tenantId: context.selectedTenant.id,
+                    authorId: context.user.id,
+                    status: "pending_approval",
+                  },
+                });
+                if (pendingCount >= pendingPostLimit) {
+                  throw new PendingPostLimitError(pendingCount, pendingPostLimit);
+                }
+              }
+
+              const tenant = await tx.tenant.update({
+                where: {
+                  id: context.selectedTenant.id,
+                },
+                data: {
+                  nextPostDisplayId: {
+                    increment: 1,
+                  },
+                },
+                select: {
+                  nextPostDisplayId: true,
+                },
+              });
+              const displayId = tenant.nextPostDisplayId - 1;
+
+              return tx.post.create({
+                data: {
+                  tenantId: context.selectedTenant.id,
+                  authorId: context.user.id,
+                  displayId,
+                  text,
+                  anonymous,
+                  attachments: staged,
+                  status: "pending_approval",
+                  logs: {
+                    create: {
+                      tenantId: context.selectedTenant.id,
+                      actorId: context.user.id,
+                      newStatus: "pending_approval",
+                      comment: "投稿创建",
+                    },
+                  },
+                },
+              });
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          );
+          break;
+        } catch (caught) {
+          if (caught instanceof PendingPostLimitError) {
+            throw caught;
+          }
+          if (isTransactionSerializationFailure(caught) && attempt < 2) {
+            continue;
+          }
+          throw caught;
+        }
+      }
+
+      if (!post) {
+        throw {
+          status: 503,
+          message: "投稿人数较多，请稍后再试",
+        };
+      }
+
+      oneBot?.notifyNewPost(post.id).catch((error) => {
+        app.log.warn({ error, postId: post.id }, "failed to notify review group");
+      });
+
+      return {
+        post: toPostListItem(post),
+      };
+    } catch (err) {
+      // Cleanup uploaded files on error
+      await deleteAttachmentObjects(config, uploadedKeys).catch((cleanupErr) => {
+        app.log.warn({ error: cleanupErr }, "failed to cleanup uploaded attachments");
+      });
+
+      // Handle errors
+      if (err instanceof PendingPostLimitError) {
+        return reply.code(409).send({
+          message: `你还有 ${err.pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${err.limit} 条待审核稿件。`,
+        });
+      }
+
+      if (typeof err === "object" && err !== null && "status" in err && "message" in err) {
+        const errorObj = err as { status: number; message: string; fileIndex?: number };
+        return reply.code(errorObj.status).send({
+          message: errorObj.message,
+          ...(errorObj.fileIndex !== undefined ? { fileIndex: errorObj.fileIndex } : {}),
+        });
+      }
+
+      throw err;
+    }
+  });
+
+  /**
+   * Read from a readable stream with size cap enforcement.
+   */
+  async function readPartCapped(
+    sourceStream: NodeJS.ReadableStream,
+    cap: number,
+    fileIndex: number,
+  ): Promise<Buffer> {
+    let transferredBytes = 0;
+    const chunks: Buffer[] = [];
+
+    const limitedStream = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        transferredBytes += chunk.length;
+        if (transferredBytes > cap) {
+          callback(new Error("size limit exceeded"));
+          return;
+        }
+        chunks.push(chunk);
+        callback();
+      },
     });
 
-    return {
-      post: toPostListItem(post),
-    };
-  });
+    try {
+      await pipeline(sourceStream, limitedStream);
+      return Buffer.concat(chunks);
+    } catch (error) {
+      if (!limitedStream.destroyed) {
+        limitedStream.destroy();
+      }
+      if (error instanceof Error && (error.message === "size limit exceeded" || error.message.includes("size limit exceeded"))) {
+        throw {
+          status: 413,
+          message: "文件过大，请检查文件大小限制",
+          fileIndex,
+        };
+      }
+      throw error;
+    }
+  }
+
 
   app.get("/api/posts/mine", async (request, reply) => {
     const context = await requireTenantContext(request, reply);

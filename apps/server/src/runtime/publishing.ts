@@ -459,7 +459,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       anonymous: attempt.post.anonymous,
       authorQq: attempt.post.author.qqUin.toString(),
     });
-    const postImages = await loadPostImages(config, attempt.tenantId, attempt.post.images);
+    const postImages = await loadPostImages(config, attempt.tenantId, attempt.post.attachments);
     const result = await publishToQZone({
       tenantId: attempt.tenantId,
       postId: attempt.postId,
@@ -467,7 +467,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       targetName: attempt.publishTarget.displayName,
       text: captionText,
       renderedCard,
-      imageUrls: getImageUrls(attempt.post.images),
+      imageUrls: getImageUrls(attempt.post.attachments),
       images: postImages,
       cookies,
     });
@@ -845,13 +845,13 @@ async function updatePostAggregateStatus(postId: string, tenantId: string, oldSt
   });
 }
 
-function getImageUrls(images: unknown) {
-  if (!Array.isArray(images)) {
+function getImageUrls(attachments: unknown) {
+  if (!Array.isArray(attachments)) {
     return [];
   }
 
-  return images.flatMap((image) => {
-    const candidate = image as ImagePayload;
+  return attachments.flatMap((attachment) => {
+    const candidate = attachment as any;
     return typeof candidate.url === "string" ? [candidate.url] : [];
   });
 }
@@ -868,14 +868,14 @@ function assertValidImageKey(key: string, tenantId: string): void {
   }
 }
 
-async function loadPostImages(config: CampuxConfig, tenantId: string, images: unknown) {
-  if (!Array.isArray(images)) {
-    throw new Error("稿件图片数据格式错误：images 不是数组");
+async function loadPostImages(config: CampuxConfig, tenantId: string, attachments: unknown) {
+  if (!Array.isArray(attachments)) {
+    throw new Error("稿件图片数据格式错误：attachments 不是数组");
   }
   const s3 = createS3Client(config);
   const result = [];
-  for (const image of images) {
-    const candidate = image as ImagePayload;
+  for (const attachment of attachments) {
+    const candidate = attachment as any;
     if (!candidate.key) {
       throw new Error("稿件图片数据缺少 key 字段");
     }

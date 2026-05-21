@@ -31,6 +31,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -44,6 +45,9 @@ type TenantSettingsForm = {
   pendingPostLimit: number;
   postRulesText: string;
   servicesText: string;
+  imageCompressionEnabled: boolean;
+  imageCompressionQuality: number;
+  imageCompressionMaxDimension: number;
 };
 
 type BanForm = {
@@ -190,7 +194,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.pendingPostLimit, metadata.postRules, metadata.services]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -355,6 +359,9 @@ export function AdminPage({
           pendingPostLimit: form.pendingPostLimit,
           postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
           services: JSON.parse(form.servicesText) as TenantMetadata["services"],
+          imageCompressionEnabled: form.imageCompressionEnabled,
+          imageCompressionQuality: form.imageCompressionQuality,
+          imageCompressionMaxDimension: form.imageCompressionMaxDimension,
         }),
       });
       await onSaved();
@@ -1362,6 +1369,46 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
             />
             <span className="text-xs font-normal text-slate-500">0 表示不限制，默认建议 1 条。</span>
           </label>
+          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">图片压缩</p>
+                <p className="text-xs text-slate-500">投稿时服务端用 sharp 压缩，关闭后按原图存储。</p>
+              </div>
+              <Switch
+                checked={form.imageCompressionEnabled}
+                disabled={busy}
+                onCheckedChange={(value) => onFormChange({ ...form, imageCompressionEnabled: value })}
+                aria-label="启用图片压缩"
+              />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-sm font-medium">
+                压缩质量 (40-95)
+                <Input
+                  type="number"
+                  min={40}
+                  max={95}
+                  value={form.imageCompressionQuality}
+                  disabled={!form.imageCompressionEnabled}
+                  onChange={(event) => onFormChange({ ...form, imageCompressionQuality: Number(event.target.value) })}
+                />
+                <span className="text-xs font-normal text-slate-500">JPEG/WebP 质量，默认 80。</span>
+              </label>
+              <label className="grid gap-1 text-sm font-medium">
+                最大边长 (512-4096)
+                <Input
+                  type="number"
+                  min={512}
+                  max={4096}
+                  value={form.imageCompressionMaxDimension}
+                  disabled={!form.imageCompressionEnabled}
+                  onChange={(event) => onFormChange({ ...form, imageCompressionMaxDimension: Number(event.target.value) })}
+                />
+                <span className="text-xs font-normal text-slate-500">宽或高超过该值时按比例缩放，默认 2048。</span>
+              </label>
+            </div>
+          </div>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
@@ -2586,6 +2633,9 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     pendingPostLimit: metadata.pendingPostLimit,
     postRulesText: metadata.postRules.join("\n"),
     servicesText: JSON.stringify(metadata.services, null, 2),
+    imageCompressionEnabled: metadata.imageCompression.enabled,
+    imageCompressionQuality: metadata.imageCompression.quality,
+    imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
   };
 }
 

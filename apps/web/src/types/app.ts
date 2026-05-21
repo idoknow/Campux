@@ -108,23 +108,32 @@ export type TenantMetadata = {
     description?: string;
     url?: string;
   }>;
+  imageCompression: {
+    enabled: boolean;
+    quality: number;
+    maxDimension: number;
+  };
 };
 
-export type UploadedImage = {
+export type PostAttachment = {
+  kind: "image";
   key: string;
   url: string;
   fileName: string;
-  previewUrl: string;
-  sortOrder: number;
+  contentType?: string;
+  size?: number;
+  width?: number;
+  height?: number;
 };
 
-export type UploadingFile = {
+export type PendingAttachment = {
   id: string;
   file: File;
   blobUrl: string;
-  progress: number;
-  status: "uploading" | "failed";
+  kind: "image";
   sortOrder: number;
+  progress: number;
+  status: "ready" | "uploading" | "failed";
   errorMessage?: string;
 };
 
@@ -133,7 +142,7 @@ export type PostItem = {
   displayId: number;
   title: string;
   text: string;
-  images: unknown;
+  attachments: unknown;
   anonymous: boolean;
   status: string;
   createdAt: string;

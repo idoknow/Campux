@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, createPostWithAttachments, CreatePostError } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
-import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage } from "@/types/app";
-import { useUploadImages } from "@/hooks/useUploadImages";
+import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata } from "@/types/app";
+import { usePendingAttachments } from "@/hooks/useUploadImages";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { BannedScreen } from "@/features/auth/BannedScreen";
@@ -86,11 +86,10 @@ export function App() {
   const [tenantDataLoading, setTenantDataLoading] = useState(false);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const { uploadingFiles, uploadFiles, removeUploading } = useUploadImages();
+  const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments();
 
   const hostTenant = authContext.currentTenant;
   const selectedTenant = me?.authenticated ? me.currentTenant : (hostTenant ?? tenants[0]);
@@ -382,7 +381,7 @@ export function App() {
     await api<{ ok: true }>("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     setMe({ authenticated: false });
     setPostText("");
-    setUploadedImages([]);
+    clearAttachments();
     setPosts([]);
     navigate({ kind: "login" }, "replace");
   }
@@ -396,7 +395,7 @@ export function App() {
     setPosts([]);
     setPostsPagination(defaultPagination());
     setPostsPage(1);
-    setUploadedImages([]);
+    clearAttachments();
     setPostText("");
     setAnonymous(false);
     setMe((current) => current?.authenticated ? {
@@ -417,27 +416,27 @@ export function App() {
     if (!files?.length) {
       return;
     }
-
-    await uploadFiles(files, uploadedImages, uploadingFiles, (image) => {
-      setUploadedImages((current) =>
-        [...current, image].sort((left, right) => left.sortOrder - right.sortOrder),
-      );
-    });
+    addAttachments(files);
   }
 
   async function submitPost() {
+    if (pendingAttachments.some((p) => p.status === "failed")) {
+      toast.error("请移除上传失败的图片后再投稿");
+      return;
+    }
+    if (postText.trim().length === 0) {
+      toast.error("正文不能为空");
+      return;
+    }
     setBusy(true);
+    markUploading();
     try {
-      await api("/api/posts", {
-        method: "POST",
-        body: JSON.stringify({
-          text: postText,
-          anonymous,
-          images: uploadedImages.map(({ key, url, fileName }) => ({ key, url, fileName })),
-        }),
+      const files = pendingAttachments.map((p) => p.file);
+      await createPostWithAttachments(postText, anonymous, files, (totalPercent) => {
+        setProgress(totalPercent);
       });
+      clearAttachments();
       setPostText("");
-      setUploadedImages([]);
       setAnonymous(false);
       toast.success("投稿已提交，等待审核。");
       const data = await api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10");
@@ -446,7 +445,13 @@ export function App() {
       setPostsPage(1);
       setActiveTab("posts");
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "投稿失败");
+      const message = caught instanceof Error ? caught.message : "投稿失败";
+      if (caught instanceof CreatePostError) {
+        markFailed(caught.fileIndex, message);
+      } else {
+        markFailed(undefined, message);
+      }
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -524,8 +529,7 @@ export function App() {
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? "mine" : "mine"}
       postsPagination={postsPagination}
       anonymous={anonymous}
-      uploadedImages={uploadedImages}
-      uploadingFiles={uploadingFiles}
+      pendingAttachments={pendingAttachments}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={setAnonymous}
@@ -542,8 +546,7 @@ export function App() {
       onOpenPostDetailFromAdmin={openPostDetailFromAdmin}
       onPostsPageChange={setPostsPage}
       onRefreshTenantData={() => refreshTenantData(postsPage)}
-      onRemoveImage={(key) => setUploadedImages((current) => current.filter((image) => image.key !== key))}
-      onRemoveUploadingFile={removeUploading}
+      onRemoveAttachment={removeAttachment}
       onSubmitPost={submitPost}
     />
   );
