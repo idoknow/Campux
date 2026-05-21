@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { UploadedImage, UploadingFile } from "@/types/app";
-import { uploadWithProgress } from "@/lib/api";
+import type { PendingAttachment } from "@/types/app";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_FILE_SIZE_LABEL = "10MB";
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
-export function useUploadImages() {
-  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
+export function usePendingAttachments() {
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const blobUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -15,97 +13,100 @@ export function useUploadImages() {
       for (const url of blobUrlsRef.current) {
         URL.revokeObjectURL(url);
       }
+      blobUrlsRef.current = [];
     };
   }, []);
 
-  function removeUploading(id: string) {
-    setUploadingFiles((current) => {
-      const item = current.find((f) => f.id === id);
-      if (item?.blobUrl) {
-        URL.revokeObjectURL(item.blobUrl);
-        blobUrlsRef.current = blobUrlsRef.current.filter((url) => url !== item.blobUrl);
-      }
-      return current.filter((f) => f.id !== id);
-    });
-  }
-
-  const uploadFiles = useCallback(
-    async (
-      files: ArrayLike<File> | null,
-      uploadedImages: UploadedImage[],
-      existingUploadingFiles: UploadingFile[],
-      onUploaded: (image: UploadedImage) => void,
-    ) => {
-      if (!files?.length) {
-        return;
-      }
-
-      const remainingSlots = Math.max(9 - uploadedImages.length - existingUploadingFiles.length, 0);
-      const fileArray = Array.from(files).slice(0, remainingSlots);
-      if (fileArray.length === 0) {
+  const add = useCallback((files: ArrayLike<File> | null) => {
+    if (!files?.length) {
+      return;
+    }
+    setPending((current) => {
+      const remaining = Math.max(9 - current.length, 0);
+      const candidates = Array.from(files).slice(0, remaining);
+      if (Array.from(files).length > remaining) {
         toast.error("最多只能添加 9 张图片");
-        return;
       }
 
-      const oversized = fileArray.filter((f) => f.size > MAX_FILE_SIZE);
-      if (oversized.length > 0) {
-        toast.error(`${oversized.map((f) => f.name || "图片").join("、")} 超过 ${MAX_FILE_SIZE_LABEL} 限制`);
-      }
-      const validFiles = fileArray.filter((f) => f.size <= MAX_FILE_SIZE);
-      if (validFiles.length === 0) {
-        return;
-      }
-
-      const nextSortOrder =
-        Math.max(
-          -1,
-          ...uploadedImages.map((image) => image.sortOrder),
-          ...existingUploadingFiles.map((file) => file.sortOrder),
-        ) + 1;
-
-      const newEntries: UploadingFile[] = validFiles.map((file, index) => {
+      const accepted: PendingAttachment[] = [];
+      const baseSort = current.length > 0 ? Math.max(...current.map((p) => p.sortOrder)) + 1 : 0;
+      let nextIndex = 0;
+      for (const file of candidates) {
+        if (!file.type.startsWith("image/")) {
+          toast.error(`${file.name || "文件"} 不是图片格式`);
+          continue;
+        }
+        if (file.size > MAX_IMAGE_SIZE) {
+          toast.error(`${file.name || "图片"} 超过 10MB 限制`);
+          continue;
+        }
         const blobUrl = URL.createObjectURL(file);
         blobUrlsRef.current.push(blobUrl);
-        return {
+        accepted.push({
           id: crypto.randomUUID(),
           file,
           blobUrl,
+          kind: "image",
+          sortOrder: baseSort + nextIndex,
           progress: 0,
-          status: "uploading" as const,
-          sortOrder: nextSortOrder + index,
-        };
-      });
-
-      setUploadingFiles((current) => [...current, ...newEntries]);
-
-      for (const entry of newEntries) {
-        try {
-          const result = await uploadWithProgress(entry.file, (progress) => {
-            setUploadingFiles((current) =>
-              current.map((f) => (f.id === entry.id ? { ...f, progress } : f)),
-            );
-          });
-          onUploaded({ ...result, previewUrl: result.url, sortOrder: entry.sortOrder });
-          setUploadingFiles((current) => current.filter((f) => f.id !== entry.id));
-          URL.revokeObjectURL(entry.blobUrl);
-          blobUrlsRef.current = blobUrlsRef.current.filter((url) => url !== entry.blobUrl);
-        } catch (caught) {
-          const errorMessage = caught instanceof Error ? caught.message : "图片上传失败";
-          toast.error(errorMessage);
-          setUploadingFiles((current) =>
-            current.map((f) =>
-              f.id === entry.id ? { ...f, status: "failed" as const, errorMessage } : f,
-            ),
-          );
-        }
+          status: "ready",
+        });
+        nextIndex += 1;
       }
-    },
-    [],
-  );
+      return [...current, ...accepted];
+    });
+  }, []);
+
+  const remove = useCallback((id: string) => {
+    setPending((current) => {
+      const item = current.find((p) => p.id === id);
+      if (item) {
+        URL.revokeObjectURL(item.blobUrl);
+        blobUrlsRef.current = blobUrlsRef.current.filter((url) => url !== item.blobUrl);
+      }
+      return current.filter((p) => p.id !== id);
+    });
+  }, []);
+
+  const markUploading = useCallback(() => {
+    setPending((current) => current.map((p) => ({ ...p, status: "uploading" as const, progress: 0 })));
+  }, []);
+
+  const setProgress = useCallback((totalPercent: number) => {
+    setPending((current) => current.map((p) => (p.status === "uploading" ? { ...p, progress: totalPercent } : p)));
+  }, []);
+
+  const markFailed = useCallback((fileIndex: number | undefined, message: string) => {
+    setPending((current) =>
+      current.map((p, index) => {
+        if (fileIndex !== undefined && index === fileIndex) {
+          return { ...p, status: "failed" as const, errorMessage: message };
+        }
+        if (p.status === "uploading") {
+          return { ...p, status: "ready" as const, progress: 0 };
+        }
+        return p;
+      }),
+    );
+  }, []);
+
+  const clearAll = useCallback(() => {
+    setPending((current) => {
+      for (const item of current) {
+        URL.revokeObjectURL(item.blobUrl);
+      }
+      blobUrlsRef.current = [];
+      return [];
+    });
+  }, []);
 
   return {
-    uploadingFiles,
-    uploadFiles,
-    removeUploading,
+    pending,
+    add,
+    remove,
+    markUploading,
+    setProgress,
+    markFailed,
+    clearAll,
   };
 }

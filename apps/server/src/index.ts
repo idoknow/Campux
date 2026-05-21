@@ -31,7 +31,7 @@ const app = Fastify({
   logger: {
     level: config.nodeEnv === "production" ? "info" : "debug",
   },
-  bodyLimit: 15 * 1024 * 1024,
+  bodyLimit: 500 * 1024 * 1024,
 });
 await runDatabaseMigrations(app.log);
 
@@ -40,7 +40,7 @@ await app.register(cors, {
   credentials: true,
 });
 await app.register(fastifyMultipart, {
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 50 * 1024 * 1024, files: 9, fields: 10 },
 });
 
 const queue = createRuntimeQueue({

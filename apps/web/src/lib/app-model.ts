@@ -17,7 +17,7 @@ export const defaultMetadata: TenantMetadata = {
   postRules: [
     "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
     "寻物招领请写清地点、时间和联系方式。",
-    "图片最多 9 张，审核通过后会同步到本校启用的 QQ 墙号。",
+    "图片最多 9 张，单张 ≤ 10MB；审核通过后会同步到本校启用的 QQ 墙号。",
   ],
   pendingPostLimit: 1,
   services: [
@@ -26,6 +26,11 @@ export const defaultMetadata: TenantMetadata = {
     { title: "投稿规则", description: "查看本墙规范" },
     { title: "校园服务", description: "推荐入口" },
   ],
+  imageCompression: {
+    enabled: true,
+    quality: 80,
+    maxDimension: 2048,
+  },
 };
 
 export const navItems = [

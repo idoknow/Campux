@@ -1,4 +1,4 @@
-import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PostItem, PostsTab, TenantMetadata, UploadedImage, UploadingFile } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
@@ -23,8 +23,7 @@ export function AppShell({
   postsTab,
   postsPagination,
   anonymous,
-  uploadedImages,
-  uploadingFiles,
+  pendingAttachments,
   onActiveTabChange,
   onAdminTabChange,
   onAnonymousChange,
@@ -41,8 +40,7 @@ export function AppShell({
   onOpenAdminUserDetail,
   onAdminUserDetailTargetConsumed,
   onOpenPostDetailFromAdmin,
-  onRemoveImage,
-  onRemoveUploadingFile,
+  onRemoveAttachment,
   onSubmitPost,
 }: {
   activeTab: MainTab;
@@ -57,8 +55,7 @@ export function AppShell({
   postsTab: PostsTab;
   postsPagination: Pagination;
   anonymous: boolean;
-  uploadedImages: UploadedImage[];
-  uploadingFiles: UploadingFile[];
+  pendingAttachments: PendingAttachment[];
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
@@ -75,8 +72,7 @@ export function AppShell({
   onOpenAdminUserDetail: (userId: string) => void;
   onAdminUserDetailTargetConsumed: () => void;
   onOpenPostDetailFromAdmin: (post: { id: string; displayId: number; status: string }) => void;
-  onRemoveImage: (key: string) => void;
-  onRemoveUploadingFile: (id: string) => void;
+  onRemoveAttachment: (id: string) => void;
   onSubmitPost: () => void;
 }) {
   return (
@@ -104,14 +100,12 @@ export function AppShell({
                 postText={postText}
                 anonymous={anonymous}
                 selectedTenant={me.currentTenant}
-                uploadedImages={uploadedImages}
-                uploadingFiles={uploadingFiles}
+                pendingAttachments={pendingAttachments}
                 onAnonymousChange={onAnonymousChange}
                 onFilesSelected={onFilesSelected}
                 onPostTextChange={onPostTextChange}
                 onSubmit={onSubmitPost}
-                onRemoveImage={onRemoveImage}
-                onRemoveUploadingFile={onRemoveUploadingFile}
+                onRemoveAttachment={onRemoveAttachment}
               />
             </TabsContent>
 

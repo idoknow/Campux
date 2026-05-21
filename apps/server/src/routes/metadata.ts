@@ -3,9 +3,26 @@ import { z } from "zod";
 import { requireTenantContext, requireTenantRole } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
-import { maxPendingPostLimit, normalizePendingPostLimit, pendingPostLimitMetadataKey } from "../lib/tenant-metadata";
+import {
+  maxPendingPostLimit,
+  normalizePendingPostLimit,
+  pendingPostLimitMetadataKey,
+  imageCompressionEnabledKey,
+  imageCompressionQualityKey,
+  imageCompressionMaxDimensionKey,
+} from "../lib/tenant-metadata";
 
-const publicMetadataKeys = ["brand", "banner", "logo_url", "post_rules", "services", pendingPostLimitMetadataKey] as const;
+const publicMetadataKeys = [
+  "brand",
+  "banner",
+  "logo_url",
+  "post_rules",
+  "services",
+  pendingPostLimitMetadataKey,
+  imageCompressionEnabledKey,
+  imageCompressionQualityKey,
+  imageCompressionMaxDimensionKey,
+] as const;
 
 const patchMetadataSchema = z.object({
   tenantName: z.string().min(1).max(80).optional(),
@@ -23,10 +40,23 @@ const patchMetadataSchema = z.object({
       url: z.string().url().optional(),
     }),
   ).optional(),
+  imageCompressionEnabled: z.boolean().optional(),
+  imageCompressionQuality: z.number().int().min(40).max(95).optional(),
+  imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
   const record = Object.fromEntries(entries.map((entry) => [entry.key, entry.value]));
+
+  const normalizeEnabled = (v: unknown) => typeof v === "boolean" ? v : typeof v === "string" ? v === "true" || v === "1" : true;
+  const normalizeQuality = (v: unknown) => {
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : 80;
+    return Number.isFinite(n) ? Math.max(40, Math.min(95, Math.floor(n))) : 80;
+  };
+  const normalizeMaxDimension = (v: unknown) => {
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : 2048;
+    return Number.isFinite(n) ? Math.max(512, Math.min(4096, Math.floor(n))) : 2048;
+  };
 
   return {
     brand: typeof record.brand === "string" ? record.brand : "校园墙",
@@ -35,6 +65,11 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     postRules: Array.isArray(record.post_rules) ? record.post_rules.filter((rule) => typeof rule === "string") : [],
     pendingPostLimit: normalizePendingPostLimit(record[pendingPostLimitMetadataKey]),
     services: Array.isArray(record.services) ? record.services : [],
+    imageCompression: {
+      enabled: normalizeEnabled(record[imageCompressionEnabledKey]),
+      quality: normalizeQuality(record[imageCompressionQualityKey]),
+      maxDimension: normalizeMaxDimension(record[imageCompressionMaxDimensionKey]),
+    },
   };
 }
 
@@ -98,7 +133,7 @@ export function registerMetadataRoutes(app: FastifyInstance) {
       });
     }
 
-    const updates: Array<{ key: string; value: string | number | string[] | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
+    const updates: Array<{ key: string; value: string | number | string[] | boolean | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
     if (body.brand !== undefined) {
       updates.push({ key: "brand", value: body.brand });
     }
@@ -116,6 +151,15 @@ export function registerMetadataRoutes(app: FastifyInstance) {
     }
     if (body.services !== undefined) {
       updates.push({ key: "services", value: body.services });
+    }
+    if (body.imageCompressionEnabled !== undefined) {
+      updates.push({ key: imageCompressionEnabledKey, value: body.imageCompressionEnabled });
+    }
+    if (body.imageCompressionQuality !== undefined) {
+      updates.push({ key: imageCompressionQualityKey, value: body.imageCompressionQuality });
+    }
+    if (body.imageCompressionMaxDimension !== undefined) {
+      updates.push({ key: imageCompressionMaxDimensionKey, value: body.imageCompressionMaxDimension });
     }
 
     await prisma.$transaction(

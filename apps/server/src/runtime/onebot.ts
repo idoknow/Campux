@@ -159,22 +159,25 @@ export class OneBotRuntime {
       },
     });
 
-    const images = Array.isArray(post.images) ? post.images : [];
-    const imageCount = images.length;
+    const attachments = Array.isArray(post.attachments) ? post.attachments : [];
+    const imageCount = attachments.filter((a: any) => a.kind === "image").length;
+    const attachmentSummary = imageCount > 0
+      ? `图片：${imageCount} 张`
+      : "图片：0 张";
     const lines = [
       `${post.tenant.name} 新稿件`,
       `编号：#${post.displayId}`,
       `投稿人：${post.anonymous ? `匿名（QQ ${post.author.qqUin.toString()}）` : `${post.author.displayName ?? "未命名"}（QQ ${post.author.qqUin.toString()}）`}`,
-      `图片：${imageCount} 张`,
+      attachmentSummary,
       "",
       post.text,
       "",
       `通过：#通过 ${post.displayId}`,
       `拒绝：#拒绝 <理由> ${post.displayId}`,
     ];
-    const imageSegments = await this.loadPostImageSegments(post.images);
+    const attachmentSegments = await this.loadPostAttachmentSegments(post.attachments);
     const message =
-      imageSegments.length > 0
+      attachmentSegments.length > 0
         ? [
             {
               type: "text",
@@ -182,7 +185,7 @@ export class OneBotRuntime {
                 text: lines.join("\n"),
               },
             },
-            ...imageSegments,
+            ...attachmentSegments,
           ]
         : lines.join("\n");
 
@@ -949,14 +952,14 @@ export class OneBotRuntime {
     });
   }
 
-  private async loadPostImageSegments(images: unknown) {
-    if (!this.config || !Array.isArray(images)) {
+  private async loadPostAttachmentSegments(attachments: unknown) {
+    if (!this.config || !Array.isArray(attachments)) {
       return [];
     }
     const s3 = createS3Client(this.config);
     const segments = [];
-    for (const image of images) {
-      const candidate = image as ImagePayload;
+    for (const attachment of attachments) {
+      const candidate = attachment as any;
       if (!candidate.key) {
         continue;
       }
@@ -981,7 +984,7 @@ export class OneBotRuntime {
           },
         });
       } catch (error) {
-        this.logger.warn({ error, imageKey: candidate.key }, "failed to load post image for onebot notification");
+        this.logger.warn({ error, attachmentKey: candidate.key }, "failed to load post attachment for onebot notification");
       }
     }
     return segments;
