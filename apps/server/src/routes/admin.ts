@@ -58,6 +58,7 @@ const botCreateSchema = z.object({
   qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字"),
   displayName: z.string().min(1).max(80),
   reviewGroupId: z.string().trim().max(40).optional(),
+  reviewNotificationEnabled: z.boolean().default(false),
   enabled: z.boolean().default(true),
   createPublishTarget: z.boolean().default(true),
 });
@@ -74,6 +75,7 @@ const botPatchSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   enabled: z.boolean().optional(),
   reviewGroupId: z.string().trim().max(40).nullable().optional(),
+  reviewNotificationEnabled: z.boolean().optional(),
   userMessageReply: z.string().trim().min(1).max(1000).optional(),
   userMessageReplyCooldownSeconds: z.number().int().min(0).max(86_400).optional(),
   reviewGroupMessageReply: z.string().trim().min(1).max(1000).optional(),
@@ -546,31 +548,46 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
     }
 
-    const bot = await prisma.botAccount.create({
-      data: {
-        tenantId: context.selectedTenant.id,
-        qqUin: BigInt(body.qqUin),
-        displayName: body.displayName,
-        reviewGroupId: body.reviewGroupId?.trim() || null,
-        enabled: body.enabled,
-        ...(body.createPublishTarget
-          ? {
-              publishTargets: {
-                create: {
-                  tenantId: context.selectedTenant.id,
-                  displayName: body.displayName,
-                  enabled: true,
-                  required: false,
-                  publishDelaySeconds: defaultPublishIntervalSeconds,
+    const bot = await prisma.$transaction(async (tx) => {
+      if (body.reviewNotificationEnabled) {
+        await tx.botAccount.updateMany({
+          where: {
+            tenantId: context.selectedTenant.id,
+            reviewNotificationEnabled: true,
+          },
+          data: {
+            reviewNotificationEnabled: false,
+          },
+        });
+      }
+
+      return tx.botAccount.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          qqUin: BigInt(body.qqUin),
+          displayName: body.displayName,
+          reviewGroupId: body.reviewGroupId?.trim() || null,
+          reviewNotificationEnabled: body.reviewNotificationEnabled,
+          enabled: body.enabled,
+          ...(body.createPublishTarget
+            ? {
+                publishTargets: {
+                  create: {
+                    tenantId: context.selectedTenant.id,
+                    displayName: body.displayName,
+                    enabled: true,
+                    required: false,
+                    publishDelaySeconds: defaultPublishIntervalSeconds,
+                  },
                 },
-              },
-            }
-          : {}),
-      },
-      include: {
-        sessions: true,
-        publishTargets: true,
-      },
+              }
+            : {}),
+        },
+        include: {
+          sessions: true,
+          publishTargets: true,
+        },
+      });
     });
 
     await writeAuditLog({
@@ -583,6 +600,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         qqUin: body.qqUin,
         displayName: body.displayName,
         reviewGroupId: body.reviewGroupId?.trim() || null,
+        reviewNotificationEnabled: body.reviewNotificationEnabled,
       },
     });
 
@@ -605,23 +623,39 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       return reply.code(404).send({ message: "Bot 账号不存在" });
     }
 
-    const updated = await prisma.botAccount.update({
-      where: {
-        id: bot.id,
-      },
-      data: {
-        ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
-        ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
-        ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
-        ...(body.userMessageReply === undefined ? {} : { userMessageReply: body.userMessageReply }),
-        ...(body.userMessageReplyCooldownSeconds === undefined ? {} : { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds }),
-        ...(body.reviewGroupMessageReply === undefined ? {} : { reviewGroupMessageReply: body.reviewGroupMessageReply }),
-        ...(body.publishTextTemplate === undefined ? {} : { publishTextTemplate: body.publishTextTemplate }),
-      },
-      include: {
-        sessions: true,
-        publishTargets: true,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      if (body.reviewNotificationEnabled === true) {
+        await tx.botAccount.updateMany({
+          where: {
+            tenantId: context.selectedTenant.id,
+            id: { not: bot.id },
+            reviewNotificationEnabled: true,
+          },
+          data: {
+            reviewNotificationEnabled: false,
+          },
+        });
+      }
+
+      return tx.botAccount.update({
+        where: {
+          id: bot.id,
+        },
+        data: {
+          ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
+          ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+          ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
+          ...(body.reviewNotificationEnabled === undefined ? {} : { reviewNotificationEnabled: body.reviewNotificationEnabled }),
+          ...(body.userMessageReply === undefined ? {} : { userMessageReply: body.userMessageReply }),
+          ...(body.userMessageReplyCooldownSeconds === undefined ? {} : { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds }),
+          ...(body.reviewGroupMessageReply === undefined ? {} : { reviewGroupMessageReply: body.reviewGroupMessageReply }),
+          ...(body.publishTextTemplate === undefined ? {} : { publishTextTemplate: body.publishTextTemplate }),
+        },
+        include: {
+          sessions: true,
+          publishTargets: true,
+        },
+      });
     });
 
     await writeAuditLog({
@@ -1163,6 +1197,7 @@ function toBotAccount(
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
+    reviewNotificationEnabled: boolean;
     connectionToken: string;
     publishTextTemplate: Prisma.JsonValue;
     userMessageReply: string;
@@ -1196,6 +1231,7 @@ function toBotAccount(
     displayName: bot.displayName,
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
+    reviewNotificationEnabled: bot.reviewNotificationEnabled,
     connectionToken: bot.connectionToken,
     publishTextTemplate: normalizePublishTextTemplate(bot.publishTextTemplate),
     userMessageReply: bot.userMessageReply,
