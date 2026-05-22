@@ -1786,15 +1786,24 @@ function BotsPanel({
               <div key={bot.id} className="product-row-card p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold text-slate-500">显示名</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2">
                       <p className="truncate text-base font-semibold text-slate-950">{bot.displayName}</p>
                       <Badge className={`rounded-full shadow-none ${bot.connection.online ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>
                         {bot.connection.online ? "在线" : "离线"}
                       </Badge>
                       {!bot.enabled ? <Badge className="rounded-full bg-red-50 text-red-700 ring-1 ring-red-200 shadow-none">停用</Badge> : null}
                     </div>
-                    <p className="mt-1 text-sm font-bold text-slate-500">QQ {bot.qqUin}</p>
-                    <p className="text-xs text-slate-500">审核群：{bot.reviewGroupId ?? "未设置"}</p>
+                    <div className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                      <p>
+                        <span className="mr-1 text-xs font-semibold text-slate-400">Bot QQ</span>
+                        <span className="font-semibold">{bot.qqUin}</span>
+                      </p>
+                      <p>
+                        <span className="mr-1 text-xs font-semibold text-slate-400">审核群</span>
+                        <span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span>
+                      </p>
+                    </div>
                   </div>
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => onDelete(bot.id)}>
                     <Trash2Icon data-icon="inline-start" />
@@ -1971,10 +1980,15 @@ function BotConfigEditor({
           保存配置
         </Button>
       </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
         <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-          显示名
+          Bot QQ <span className="font-normal text-slate-400">只读</span>
+          <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
+        </label>
+        <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+          显示名 <span className="font-normal text-slate-400">卡片标题</span>
           <Input className="bg-white" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <span className="text-[11px] font-normal text-slate-400">建议填「1 号墙」这类名称，不要填 QQ 号。</span>
         </label>
         <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
           审核群号 <span className="font-normal text-slate-400">可留空</span>
