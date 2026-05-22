@@ -20,6 +20,7 @@ import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { resumePublishAttemptsWaitingForCookies } from "./publishing";
+import { selectReviewNotificationBot } from "./notification-routing";
 
 type OneBotConnection = {
   socket: WebSocketLike;
@@ -149,15 +150,10 @@ export class OneBotRuntime {
       return;
     }
 
-    const bots = await prisma.botAccount.findMany({
-      where: {
-        tenantId: post.tenantId,
-        enabled: true,
-        reviewGroupId: {
-          not: null,
-        },
-      },
-    });
+    const bot = await this.findTenantReviewNotificationBot(post.tenantId);
+    if (!bot?.reviewGroupId) {
+      return;
+    }
 
     const attachments = Array.isArray(post.attachments) ? post.attachments : [];
     const imageCount = attachments.filter((a: any) => a.kind === "image").length;
@@ -189,14 +185,9 @@ export class OneBotRuntime {
           ]
         : lines.join("\n");
 
-    for (const bot of bots) {
-      if (!bot.reviewGroupId) {
-        continue;
-      }
-      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
-        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify review group");
-      });
-    }
+    await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
+      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify review group");
+    });
   }
 
   async notifyPostCancelled(postId: string) {
@@ -211,7 +202,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    await this.broadcastReviewGroup(post.tenantId, `稿件已取消：#${post.displayId}`);
+    await this.sendTenantReviewNotification(post.tenantId, `稿件已取消：#${post.displayId}`);
   }
 
   async notifyPostRecallRequested(postId: string) {
@@ -242,7 +233,7 @@ export class OneBotRuntime {
       `理由：${readRecallReason(post.logs[0]?.comment) ?? "未填写"}`,
       "审核员或管理员可在稿件页面同意撤回；同意后系统会把每个 QZone 发布目标设置为仅自己可见。",
     ];
-    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+    await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
   }
 
   async notifyPostRecalled(postId: string, targetCount: number, opts?: { skipAuthor?: boolean }) {
@@ -258,7 +249,7 @@ export class OneBotRuntime {
       return;
     }
     const groupSuffix = opts?.skipAuthor ? "\n（静默撤回，未通知作者）" : "";
-    await this.broadcastReviewGroup(post.tenantId, `稿件已撤回：#${post.displayId}\n已处理发布目标：${targetCount} 个${groupSuffix}`);
+    await this.sendTenantReviewNotification(post.tenantId, `稿件已撤回：#${post.displayId}\n已处理发布目标：${targetCount} 个${groupSuffix}`);
 
     if (opts?.skipAuthor) {
       return;
@@ -292,7 +283,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    await this.broadcastReviewGroup(post.tenantId, `撤回申请已拒绝：#${post.displayId}\n状态已恢复为已发表。\n理由：${reason}`);
+    await this.sendTenantReviewNotification(post.tenantId, `撤回申请已拒绝：#${post.displayId}\n状态已恢复为已发表。\n理由：${reason}`);
 
     const bots = await prisma.botAccount.findMany({
       where: {
@@ -324,7 +315,7 @@ export class OneBotRuntime {
       `稿件撤回失败：#${post.displayId}`,
       ...failed.map((result) => `${result.targetName}${result.qzoneTid ? ` / ${result.qzoneTid}` : ""}：${result.message}`),
     ];
-    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+    await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
   }
 
   async notifyReviewResult(postId: string, status: "approved" | "rejected", comment?: string | null) {
@@ -373,11 +364,18 @@ export class OneBotRuntime {
       where: {
         id: targetId,
       },
+      include: {
+        botAccount: true,
+      },
     });
     if (!post) {
       return;
     }
-    await this.broadcastReviewGroup(post.tenantId, `已成功发表：#${post.displayId}${target ? `\n目标：${target.displayName}` : ""}\n外部 ID：${externalId}`);
+    if (!target) {
+      await this.sendTenantReviewNotification(post.tenantId, `已成功发表：#${post.displayId}\n外部 ID：${externalId}`);
+      return;
+    }
+    await this.sendBotReviewGroupMessage(target.botAccount, `已成功发表：#${post.displayId}\n目标：${target.displayName}\n外部 ID：${externalId}`, "failed to notify publish succeeded");
   }
 
   async notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }) {
@@ -407,7 +405,11 @@ export class OneBotRuntime {
       options?.needsLogin ? "请在群内发送 #登录 或 #扫码登录 重新登录后，再重试发布。" : null,
       options?.nextRunAt ? `下次重试：${formatDateTime(options.nextRunAt)}` : null,
     ].filter((line): line is string => Boolean(line));
-    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+    if (target) {
+      await this.sendBotReviewGroupMessage(target.botAccount, lines.join("\n"), "failed to notify publish failed");
+    } else {
+      await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
+    }
   }
 
   async notifyPublishWaitingForCookies(postId: string, targetId: string, message: string) {
@@ -436,7 +438,11 @@ export class OneBotRuntime {
       `原因：${message}`,
       "系统不会继续发布这条稿件，直到 QZone cookies 检测可用；重新登录或自动刷新成功后会自动恢复队列。",
     ].filter((line): line is string => Boolean(line));
-    await this.broadcastReviewGroup(post.tenantId, lines.join("\n"));
+    if (target) {
+      await this.sendBotReviewGroupMessage(target.botAccount, lines.join("\n"), "failed to notify publish waiting for cookies");
+    } else {
+      await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
+    }
   }
 
   async notifyQZoneCookiesInvalid(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }) {
@@ -575,7 +581,15 @@ export class OneBotRuntime {
     });
   }
 
-  async broadcastReviewGroup(tenantId: string, message: unknown) {
+  async sendTenantReviewNotification(tenantId: string, message: unknown) {
+    const bot = await this.findTenantReviewNotificationBot(tenantId);
+    if (!bot) {
+      return;
+    }
+    await this.sendBotReviewGroupMessage(bot, message, "failed to send tenant review notification");
+  }
+
+  private async findTenantReviewNotificationBot(tenantId: string) {
     const bots = await prisma.botAccount.findMany({
       where: {
         tenantId,
@@ -583,16 +597,26 @@ export class OneBotRuntime {
         reviewGroupId: {
           not: null,
         },
+        reviewNotificationEnabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
       },
     });
-    for (const bot of bots) {
-      if (!bot.reviewGroupId) {
-        continue;
-      }
-      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
-        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to broadcast review group message");
-      });
+    return selectReviewNotificationBot(bots);
+  }
+
+  private async sendBotReviewGroupMessage(
+    bot: { qqUin: bigint; displayName?: string; reviewGroupId: string | null },
+    message: unknown,
+    logMessage: string,
+  ) {
+    if (!bot.reviewGroupId) {
+      return;
     }
+    await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
+      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, logMessage);
+    });
   }
 
   async callAction(botQqUin: string, action: string, params: Record<string, unknown>, timeoutMs = 8_000) {

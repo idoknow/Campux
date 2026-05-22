@@ -293,6 +293,7 @@ export type AdminBotAccount = {
   displayName: string;
   enabled: boolean;
   reviewGroupId: string | null;
+  reviewNotificationEnabled: boolean;
   connectionToken: string;
   publishTextTemplate: PublishTextTemplate;
   userMessageReply: string;

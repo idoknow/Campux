@@ -571,7 +571,7 @@ export function AdminPage({
 
   async function updateBotConfig(
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) {
     setBusy(true);
     try {
@@ -1733,7 +1733,7 @@ function BotsPanel({
   onDelete: (id: string) => void;
   onUpdateConfig: (
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) => void;
   onRefresh: () => void;
 }) {
@@ -1898,13 +1898,14 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
   const [userMessageReply, setUserMessageReply] = useState(bot.userMessageReply);
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
   const [reviewGroupMessageReply, setReviewGroupMessageReply] = useState(bot.reviewGroupMessageReply);
+  const [reviewNotificationEnabled, setReviewNotificationEnabled] = useState(bot.reviewNotificationEnabled);
   const [enabled, setEnabled] = useState(bot.enabled);
 
   useEffect(() => {
@@ -1913,8 +1914,9 @@ function BotConfigEditor({
     setUserMessageReply(bot.userMessageReply);
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
     setReviewGroupMessageReply(bot.reviewGroupMessageReply);
+    setReviewNotificationEnabled(bot.reviewNotificationEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
@@ -1926,6 +1928,7 @@ function BotConfigEditor({
     || trimmedUserMessageReply !== bot.userMessageReply
     || normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds
     || trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply
+    || reviewNotificationEnabled !== bot.reviewNotificationEnabled
     || enabled !== bot.enabled;
 
   return (
@@ -1946,6 +1949,7 @@ function BotConfigEditor({
               userMessageReply: trimmedUserMessageReply,
               userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
               reviewGroupMessageReply: trimmedReviewGroupMessageReply,
+              reviewNotificationEnabled,
               enabled,
             })
           }
@@ -1956,10 +1960,19 @@ function BotConfigEditor({
       <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <Input className="bg-white" placeholder="显示名" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
         <Input className="bg-white" placeholder="审核群号，可留空" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600">
-          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-          启用
-        </label>
+        <div className="grid gap-2">
+          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600">
+            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+            启用
+          </label>
+          <label className="inline-flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600">
+            <input className="mt-1" type="checkbox" checked={reviewNotificationEnabled} onChange={(event) => setReviewNotificationEnabled(event.target.checked)} />
+            <span>
+              发送稿件审核通知
+              <span className="block text-[11px] font-semibold text-slate-400">新稿件、撤回等租户全局通知仅由打开此项的墙号发送；保存后会自动关闭其他墙号。</span>
+            </span>
+          </label>
+        </div>
       </div>
       <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
         <div className="grid gap-2">
@@ -2252,6 +2265,7 @@ function PublishPanel({
                       displayName: target.botAccount.displayName,
                       enabled: target.botAccount.enabled,
                       reviewGroupId: null,
+                      reviewNotificationEnabled: false,
                       connectionToken: target.botAccount.connectionToken,
                       publishTextTemplate: target.botAccount.publishTextTemplate,
                       userMessageReply: "",
