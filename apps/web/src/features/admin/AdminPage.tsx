@@ -61,6 +61,19 @@ type MemberForm = {
   role: TenantRole;
 };
 
+type MemberSort = "joined_asc" | "joined_desc" | "qq_asc" | "qq_desc" | "name_asc" | "name_desc" | "role_asc" | "role_desc";
+
+const memberSortLabels: Record<MemberSort, string> = {
+  joined_asc: "加入时间 · 最早优先",
+  joined_desc: "加入时间 · 最新优先",
+  qq_asc: "QQ 号 · 从小到大",
+  qq_desc: "QQ 号 · 从大到小",
+  name_asc: "显示名 · A-Z",
+  name_desc: "显示名 · Z-A",
+  role_asc: "身份 · 用户到管理员",
+  role_desc: "身份 · 管理员到用户",
+};
+
 type BotForm = {
   qqUin: string;
   displayName: string;
@@ -133,6 +146,11 @@ function readMemberRoleQuery(): "all" | TenantRole {
   return role === "submitter" || role === "reviewer" || role === "admin" ? role : "all";
 }
 
+function readMemberSortQuery(): MemberSort {
+  const sort = readQueryParam("sort");
+  return sort in memberSortLabels ? sort as MemberSort : "joined_asc";
+}
+
 export function AdminPage({
   activeTab,
   selectedTenant,
@@ -163,6 +181,7 @@ export function AdminPage({
   const [bans, setBans] = useState<AdminBanRecord[]>([]);
   const [memberKeyword, setMemberKeyword] = useState(() => readQueryParam("q"));
   const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>(() => readMemberRoleQuery());
+  const [memberSort, setMemberSort] = useState<MemberSort>(() => readMemberSortQuery());
   const [memberPage, setMemberPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [memberPagination, setMemberPagination] = useState<Pagination>(() => defaultPagination());
   const [tenantMemberTotal, setTenantMemberTotal] = useState(0);
@@ -200,6 +219,7 @@ export function AdminPage({
     if (activeTab === "users") {
       setMemberKeyword(readQueryParam("q"));
       setMemberRoleFilter(readMemberRoleQuery());
+      setMemberSort(readMemberSortQuery());
       setMemberPage(readQueryInt("page", 1, { min: 1 }));
       return;
     }
@@ -220,7 +240,7 @@ export function AdminPage({
     void refreshMembers(memberPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取用户列表");
     });
-  }, [selectedTenant.id, memberKeyword, memberRoleFilter, memberPage]);
+  }, [selectedTenant.id, memberKeyword, memberRoleFilter, memberSort, memberPage]);
 
   useEffect(() => {
     void refreshBans(banPage).catch((caught) => {
@@ -300,6 +320,7 @@ export function AdminPage({
       page: String(page),
       limit: String(memberPagination.limit),
       role: memberRoleFilter,
+      sort: memberSort,
     });
     const keyword = memberKeyword.trim();
     if (keyword.length > 0) {
@@ -790,6 +811,7 @@ export function AdminPage({
                 tenantMemberTotal={tenantMemberTotal}
                 keyword={memberKeyword}
                 roleFilter={memberRoleFilter}
+                sort={memberSort}
                 form={memberForm}
                 busy={busy}
                 loading={membersLoading || adminLoading}
@@ -802,6 +824,11 @@ export function AdminPage({
                   setMemberRoleFilter(value);
                   setMemberPage(1);
                   writeQueryParams({ role: value === "all" ? null : value, page: null });
+                }}
+                onSortChange={(value) => {
+                  setMemberSort(value);
+                  setMemberPage(1);
+                  writeQueryParams({ sort: value === "joined_asc" ? null : value, page: null });
                 }}
                 onPageChange={(page) => {
                   setMemberPage(page);
@@ -970,11 +997,13 @@ function UsersPanel({
   tenantMemberTotal,
   keyword,
   roleFilter,
+  sort,
   form,
   busy,
   loading,
   onKeywordChange,
   onRoleFilterChange,
+  onSortChange,
   onPageChange,
   onFormChange,
   onAddMember,
@@ -987,11 +1016,13 @@ function UsersPanel({
   tenantMemberTotal: number;
   keyword: string;
   roleFilter: "all" | TenantRole;
+  sort: MemberSort;
   form: MemberForm;
   busy: boolean;
   loading: boolean;
   onKeywordChange: (value: string) => void;
   onRoleFilterChange: (value: "all" | TenantRole) => void;
+  onSortChange: (value: MemberSort) => void;
   onPageChange: (page: number) => void;
   onFormChange: (form: MemberForm) => void;
   onAddMember: () => void;
@@ -1028,19 +1059,38 @@ function UsersPanel({
             添加用户
           </Button>
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
-          <Input className="bg-white" placeholder="输入用户 ID、QQ 号或名称搜索" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
-          <Select value={roleFilter} onValueChange={(value) => onRoleFilterChange(value as "all" | TenantRole)}>
-            <SelectTrigger className="bg-white font-bold">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部身份</SelectItem>
-              <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
-              <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
-              <SelectItem value="admin">{roleLabels.admin}</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_220px]">
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+            搜索
+            <Input className="bg-white" placeholder="用户 ID、QQ 号或名称" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+            身份
+            <Select value={roleFilter} onValueChange={(value) => onRoleFilterChange(value as "all" | TenantRole)}>
+              <SelectTrigger className="bg-white font-bold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部身份</SelectItem>
+                <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
+                <SelectItem value="admin">{roleLabels.admin}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+            排序
+            <Select value={sort} onValueChange={(value) => onSortChange(value as MemberSort)}>
+              <SelectTrigger className="bg-white font-bold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(memberSortLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
         </div>
         <div className="mt-3 flex flex-col gap-2">
           {loading ? <LoadingBlock title="正在加载用户列表..." /> : null}
@@ -1063,7 +1113,7 @@ function UsersPanel({
                 <QqAvatar qqUin={member.user.qqUin} name={member.user.displayName ?? member.user.qqUin} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{member.user.displayName ?? member.user.qqUin}</p>
-                  <p className="text-xs text-slate-500">QQ {member.user.qqUin}</p>
+                  <p className="text-xs text-slate-500">QQ {member.user.qqUin} · 加入 {formatDateTime(member.createdAt)}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">

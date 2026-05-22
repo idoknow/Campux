@@ -108,10 +108,44 @@ const paginationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
+const memberSortSchema = z.enum([
+  "joined_asc",
+  "joined_desc",
+  "qq_asc",
+  "qq_desc",
+  "name_asc",
+  "name_desc",
+  "role_asc",
+  "role_desc",
+]);
+
 const memberQuerySchema = paginationQuerySchema.extend({
   q: z.string().max(80).optional(),
   role: z.enum(["all", "submitter", "reviewer", "admin"]).default("all"),
+  sort: memberSortSchema.default("joined_asc"),
 });
+
+function memberOrderBy(sort: z.infer<typeof memberSortSchema>): Prisma.TenantMembershipOrderByWithRelationInput[] {
+  switch (sort) {
+    case "joined_desc":
+      return [{ createdAt: "desc" }, { id: "asc" }];
+    case "qq_asc":
+      return [{ user: { qqUin: "asc" } }, { createdAt: "asc" }, { id: "asc" }];
+    case "qq_desc":
+      return [{ user: { qqUin: "desc" } }, { createdAt: "asc" }, { id: "asc" }];
+    case "name_asc":
+      return [{ user: { displayName: "asc" } }, { user: { qqUin: "asc" } }, { createdAt: "asc" }, { id: "asc" }];
+    case "name_desc":
+      return [{ user: { displayName: "desc" } }, { user: { qqUin: "asc" } }, { createdAt: "asc" }, { id: "asc" }];
+    case "role_asc":
+      return [{ role: "asc" }, { createdAt: "asc" }, { id: "asc" }];
+    case "role_desc":
+      return [{ role: "desc" }, { createdAt: "asc" }, { id: "asc" }];
+    case "joined_asc":
+    default:
+      return [{ createdAt: "asc" }, { id: "asc" }];
+  }
+}
 
 const postParamsSchema = z.object({
   id: z.string().min(1),
@@ -159,9 +193,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         include: {
           user: true,
         },
-        orderBy: {
-          createdAt: "asc",
-        },
+        orderBy: memberOrderBy(query.sort),
         skip: (query.page - 1) * query.limit,
         take: query.limit,
       }),
