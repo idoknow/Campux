@@ -1750,17 +1750,31 @@ function BotsPanel({
 
         <BotSetupGuide />
 
-        <div className="product-subsection mt-4 grid gap-2 p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
-          <Input placeholder="Bot QQ" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value })} />
-          <Input placeholder="显示名，例如 1 号墙" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
-          <Input placeholder="审核群号，可选" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value })} />
-          <Button className="font-medium" disabled={busy || !form.qqUin.trim() || !form.displayName.trim()} onClick={onAdd}>
-            <PlusIcon data-icon="inline-start" />
-            添加
-          </Button>
-          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 md:col-span-4">
-            <input type="checkbox" checked={form.createPublishTarget} onChange={(event) => onFormChange({ ...form, createPublishTarget: event.target.checked })} />
-            同时创建一个发布目标
+        <div className="product-subsection mt-4 grid gap-3 p-3">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+              Bot QQ
+              <Input className="bg-white" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })} />
+            </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+              显示名
+              <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+            </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+              审核群号 <span className="font-normal text-slate-400">可选</span>
+              <Input className="bg-white" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value.replace(/\D/g, "") })} />
+            </label>
+            <Button className="font-medium" disabled={busy || !form.qqUin.trim() || !form.displayName.trim()} onClick={onAdd}>
+              <PlusIcon data-icon="inline-start" />
+              添加
+            </Button>
+          </div>
+          <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <span>
+              同时创建发布目标
+              <span className="block text-xs font-normal text-slate-500">添加墙号后自动创建一个对应的空间发布目标。</span>
+            </span>
+            <Switch checked={form.createPublishTarget} onCheckedChange={(checked) => onFormChange({ ...form, createPublishTarget: checked })} aria-label="同时创建发布目标" />
           </label>
         </div>
 
@@ -1957,22 +1971,31 @@ function BotConfigEditor({
           保存配置
         </Button>
       </div>
-      <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-        <Input className="bg-white" placeholder="显示名" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-        <Input className="bg-white" placeholder="审核群号，可留空" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
-        <div className="grid gap-2">
-          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600">
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-            启用
-          </label>
-          <label className="inline-flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600">
-            <input className="mt-1" type="checkbox" checked={reviewNotificationEnabled} onChange={(event) => setReviewNotificationEnabled(event.target.checked)} />
-            <span>
-              发送稿件审核通知
-              <span className="block text-[11px] font-semibold text-slate-400">新稿件、撤回等租户全局通知仅由打开此项的墙号发送；保存后会自动关闭其他墙号。</span>
-            </span>
-          </label>
-        </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+          显示名
+          <Input className="bg-white" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        </label>
+        <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+          审核群号 <span className="font-normal text-slate-400">可留空</span>
+          <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
+        </label>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <span>
+            启用机器人
+            <span className="block text-xs font-normal text-slate-500">关闭后不处理连接和消息。</span>
+          </span>
+          <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="启用机器人" />
+        </label>
+        <label className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <span>
+            发送稿件审核通知
+            <span className="block text-xs font-normal leading-5 text-slate-500">新稿件、撤回等全局通知由打开此项的墙号发送；保存后会自动关闭其他墙号。</span>
+          </span>
+          <Switch checked={reviewNotificationEnabled} onCheckedChange={setReviewNotificationEnabled} aria-label="发送稿件审核通知" />
+        </label>
       </div>
       <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
         <div className="grid gap-2">
