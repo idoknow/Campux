@@ -53,7 +53,7 @@ await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
 registerAuthRoutes(app, config);
 registerTenantRoutes(app);
-registerMetadataRoutes(app);
+registerMetadataRoutes(app, config);
 registerOAuthRoutes(app);
 registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);

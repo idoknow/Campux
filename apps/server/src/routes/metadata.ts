@@ -1,8 +1,14 @@
+import { Buffer } from "node:buffer";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { CampuxConfig } from "@campux/config";
 import { requireTenantContext, requireTenantRole } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
+import { compressImageBuffer, uploadAttachmentBytes } from "../lib/attachments";
 import { prisma } from "../lib/prisma";
+import { assertTenantLogoUpload, tenantLogoMaxBytes } from "../lib/tenant-logo-upload";
 import {
   maxPendingPostLimit,
   normalizePendingPostLimit,
@@ -10,6 +16,7 @@ import {
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  readTenantImageCompression,
 } from "../lib/tenant-metadata";
 
 const publicMetadataKeys = [
@@ -73,7 +80,54 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
   };
 }
 
-export function registerMetadataRoutes(app: FastifyInstance) {
+async function readLogoPartCapped(sourceStream: NodeJS.ReadableStream): Promise<Buffer> {
+  let transferredBytes = 0;
+  const chunks: Buffer[] = [];
+  const cap = tenantLogoMaxBytes();
+
+  const limitedStream = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      transferredBytes += chunk.length;
+      if (transferredBytes > cap) {
+        callback(new Error("tenant logo size limit exceeded"));
+        return;
+      }
+      chunks.push(chunk);
+      callback();
+    },
+  });
+
+  try {
+    await pipeline(sourceStream, limitedStream);
+    return Buffer.concat(chunks);
+  } catch (error) {
+    if (!limitedStream.destroyed) {
+      limitedStream.destroy();
+    }
+    if (error instanceof Error && error.message.includes("tenant logo size limit exceeded")) {
+      throw {
+        status: 413,
+        message: "Logo 图片不能超过 5MB",
+      };
+    }
+    throw error;
+  }
+}
+
+async function readPublicMetadata(tenantId: string) {
+  const entries = await prisma.tenantMetadata.findMany({
+    where: {
+      tenantId,
+      key: {
+        in: [...publicMetadataKeys],
+      },
+    },
+  });
+
+  return normalizeMetadata(entries);
+}
+
+export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfig) {
   app.get("/api/context", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
 
@@ -99,16 +153,94 @@ export function registerMetadataRoutes(app: FastifyInstance) {
 
   app.get("/api/tenant/metadata", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
-    const entries = await prisma.tenantMetadata.findMany({
+    return readPublicMetadata(context.selectedTenant.id);
+  });
+
+  app.post("/api/admin/tenant/logo", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    let uploadedLogoUrl = "";
+
+    try {
+      for await (const part of request.parts()) {
+        if (part.type === "field") {
+          continue;
+        }
+
+        if (part.fieldname !== "logo") {
+          part.file.destroy();
+          continue;
+        }
+
+        const mime = part.mimetype || "application/octet-stream";
+        const mimeValidation = assertTenantLogoUpload({ contentType: mime, size: 0 });
+        if (!mimeValidation.ok) {
+          part.file.destroy();
+          return reply.code(mimeValidation.status).send({ message: mimeValidation.message });
+        }
+
+        const rawBuffer = await readLogoPartCapped(part.file);
+        const sizeValidation = assertTenantLogoUpload({ contentType: mime, size: rawBuffer.length });
+        if (!sizeValidation.ok) {
+          return reply.code(sizeValidation.status).send({ message: sizeValidation.message });
+        }
+
+        const compression = await readTenantImageCompression(prisma, context.selectedTenant.id);
+        const finalBuffer = await compressImageBuffer(rawBuffer, mime, compression);
+        const attachment = await uploadAttachmentBytes({
+          config,
+          tenantId: context.selectedTenant.id,
+          kind: "image",
+          contentType: mime,
+          fileName: part.filename || "tenant-logo.png",
+          body: finalBuffer,
+        });
+        uploadedLogoUrl = attachment.url;
+        break;
+      }
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "status" in error && "message" in error) {
+        const errorObj = error as { status: number; message: string };
+        return reply.code(errorObj.status).send({ message: errorObj.message });
+      }
+      throw error;
+    }
+
+    if (!uploadedLogoUrl) {
+      return reply.code(400).send({ message: "请选择要上传的 Logo 图片" });
+    }
+
+    await prisma.tenantMetadata.upsert({
       where: {
-        tenantId: context.selectedTenant.id,
-        key: {
-          in: [...publicMetadataKeys],
+        tenantId_key: {
+          tenantId: context.selectedTenant.id,
+          key: "logo_url",
         },
+      },
+      update: {
+        value: uploadedLogoUrl,
+      },
+      create: {
+        tenantId: context.selectedTenant.id,
+        key: "logo_url",
+        value: uploadedLogoUrl,
       },
     });
 
-    return normalizeMetadata(entries);
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "tenant.logo.upload",
+      targetType: "tenant",
+      targetId: context.selectedTenant.id,
+      detail: {
+        logoUrl: uploadedLogoUrl,
+      },
+    });
+
+    return {
+      logoUrl: uploadedLogoUrl,
+      metadata: await readPublicMetadata(context.selectedTenant.id),
+    };
   });
 
   app.patch("/api/admin/tenant/metadata", async (request, reply) => {
@@ -194,15 +326,6 @@ export function registerMetadataRoutes(app: FastifyInstance) {
       },
     });
 
-    const entries = await prisma.tenantMetadata.findMany({
-      where: {
-        tenantId: context.selectedTenant.id,
-        key: {
-          in: [...publicMetadataKeys],
-        },
-      },
-    });
-
-    return normalizeMetadata(entries);
+    return readPublicMetadata(context.selectedTenant.id);
   });
 }
