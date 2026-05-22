@@ -105,6 +105,11 @@ type OAuthClientSecretModal = {
   clientSecret: string;
 };
 
+type TenantLogoUploadResponse = {
+  logoUrl: string;
+  metadata: TenantMetadata;
+};
+
 const defaultOAuthSettings: OAuthServerSettings = {
   enabled: false,
   authorizationCodeTtlMinutes: 10,
@@ -213,7 +218,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -877,7 +882,7 @@ export function AdminPage({
 
             <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <div className="flex flex-col gap-4">
-                <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} />
+                <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} onUploaded={onSaved} />
                 <OAuthPanel
                   settings={oauthSettings}
                   clients={oauthClients}
@@ -1369,7 +1374,40 @@ function BansPanel({
   );
 }
 
-function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSettingsForm; busy: boolean; onFormChange: (form: TenantSettingsForm) => void; onSave: () => void }) {
+function MetadataPanel({
+  form,
+  busy,
+  onFormChange,
+  onSave,
+  onUploaded,
+}: {
+  form: TenantSettingsForm;
+  busy: boolean;
+  onFormChange: (form: TenantSettingsForm) => void;
+  onSave: () => void;
+  onUploaded: () => Promise<void>;
+}) {
+  const [logoUploading, setLogoUploading] = useState(false);
+
+  async function uploadLogo(file: File) {
+    const formData = new FormData();
+    formData.append("logo", file, file.name);
+    setLogoUploading(true);
+    try {
+      const result = await api<TenantLogoUploadResponse>("/api/admin/tenant/logo", {
+        method: "POST",
+        body: formData,
+      });
+      onFormChange({ ...form, logoUrl: result.logoUrl });
+      await onUploaded();
+      toast.success("Logo 已上传并保存。");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Logo 上传失败");
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
@@ -1399,14 +1437,36 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
             <Input value={form.banner} onChange={(event) => onFormChange({ ...form, banner: event.target.value })} />
           </label>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
-            校园墙 Logo URL
+            校园墙 Logo
             <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
               <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
                 <img src={form.logoUrl.trim() || "/logo.svg"} alt="校园墙 Logo 预览" className="h-full w-full object-contain p-2" />
               </span>
-              <Input value={form.logoUrl} placeholder="留空则使用 Campux 默认 Logo" onChange={(event) => onFormChange({ ...form, logoUrl: event.target.value })} />
+              <div className="grid gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input value={form.logoUrl} placeholder="留空则使用 Campux 默认 Logo" onChange={(event) => onFormChange({ ...form, logoUrl: event.target.value })} />
+                  <Button asChild variant="outline" disabled={busy || logoUploading} className="shrink-0">
+                    <label>
+                      {logoUploading ? "上传中..." : "上传图片"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
+                        className="hidden"
+                        disabled={busy || logoUploading}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) {
+                            void uploadLogo(file);
+                          }
+                        }}
+                      />
+                    </label>
+                  </Button>
+                </div>
+                <span className="text-xs font-normal text-slate-500">可直接上传 5MB 内的 JPG/PNG/GIF/WebP/HEIC 图片，上传后会自动保存为当前校园墙 Logo；也可以继续手动填写 http(s) 或站内图片地址。</span>
+              </div>
             </div>
-            <span className="text-xs font-normal text-slate-500">填写可公开访问的图片地址。访问该校园墙专属 host 时，登录页、注册页和浏览器图标会优先展示它。</span>
           </label>
           <label className="grid gap-1 text-sm font-medium">
             每个用户同时待审核上限
@@ -1468,7 +1528,7 @@ function MetadataPanel({ form, busy, onFormChange, onSave }: { form: TenantSetti
             <Textarea className="min-h-36 font-mono text-xs" value={form.servicesText} onChange={(event) => onFormChange({ ...form, servicesText: event.target.value })} />
           </label>
         </div>
-        <Button className="mt-4 px-5 font-medium" disabled={busy} onClick={onSave}>
+        <Button className="mt-4 px-5 font-medium" disabled={busy || logoUploading} onClick={onSave}>
           <SaveIcon data-icon="inline-start" />
           保存元数据
         </Button>
