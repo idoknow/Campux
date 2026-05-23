@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -294,9 +295,15 @@ func (oar *OAuth2Router) GetUserInfo(c *gin.Context) {
 		}
 	}
 
+	// 兼容性：保留原有返回字段，同时新增 OIDC-like 字段以便新客户端使用
+	uinStr := fmt.Sprintf("%d", account.Uin)
 	oar.Success(c, gin.H{
 		"uin":        account.Uin,
 		"user_group": account.UserGroup,
 		"created_at": account.CreatedAt,
+		// 新增字段：sub/name/username（legacy 环境没有 displayName，均使用 uin）
+		"sub":      uinStr,
+		"name":     uinStr,
+		"username": uinStr,
 	})
 }

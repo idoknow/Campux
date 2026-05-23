@@ -108,26 +108,33 @@ Content-Type: application/json
 
 ### 4. DemoApp 使用 Access Token 请求资源
 
-目前只有一个获取用户信息的接口：
+目前提供的用户信息接口为标准 OIDC-like 的 `userinfo`：
 
 ```
-GET https://campux.com/v1/oauth2/get-user-info
-Authorization Bearer <Access Token>
+GET https://campux.com/oauth/userinfo
+Authorization: Bearer <Access Token>
 ```
 
-返回：
+返回（示例）：
 
 ```json
 {
-    "code": 0,
-    "msg": "ok",
-    "data": {
-        "created_at": "2024-04-18T00:49:37.275Z",
-        "uin": 1010553892,
-        "user_group": "admin"
-    }
+    "sub": "user-id-uuid-or-string",
+    "name": "1010553892",
+    "username": "显示名或1010553892",
+    "tenant_id": "tenant-uuid",
+    "tenant_name": "示例校园墙",
+    "tenant_slug": "example",
+    "scope": "profile",
+    "client_id": "7RYtLq8VA45Fiprc"
 }
 ```
+
+说明：
+- `name`：始终返回用户的 `qqUin`（字符串）。
+- `username`：优先返回用户 `displayName`，如缺失则返回 `qqUin`。
+- `sub`：用户 ID（内部唯一标识）。
+- 其余字段用于指示租户与授权信息。
 
 ## 用户再次访问
 
