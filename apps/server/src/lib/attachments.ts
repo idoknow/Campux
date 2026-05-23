@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import sharp from "sharp";
@@ -141,4 +142,28 @@ export async function deleteAttachmentObjects(
       console.warn("failed to delete attachment object", { error, key });
     }
   }
+}
+
+/**
+ * Read an attachment object from S3.
+ */
+export async function readAttachmentObject(config: CampuxConfig, key: string) {
+  const s3 = createS3Client(config);
+  const object = await s3.send(
+    new GetObjectCommand({
+      Bucket: config.s3.bucket,
+      Key: key,
+    }),
+  );
+
+  const body = object.Body;
+  if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
+    return null;
+  }
+
+  const bytes = Buffer.from(await body.transformToByteArray());
+  return {
+    bytes,
+    contentType: object.ContentType ?? null,
+  };
 }
