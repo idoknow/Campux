@@ -19,7 +19,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText, parsePrivatePostImageDecisionText } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
 import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
@@ -58,6 +58,12 @@ type OneBotActionResponse = {
   wording?: string;
 };
 
+// 定义 Timer 类型以兼容运行环境
+type Timer = ReturnType<typeof setTimeout>;
+
+// 在非 Bun 环境下声明 Bun 避免类型错误（运行时若不存在 Bun，应由运行环境处理）
+declare const Bun: any;
+
 type PrivatePostDraft = {
   tenantId: string;
   text: string;
@@ -65,7 +71,6 @@ type PrivatePostDraft = {
   attachments: PostAttachment[];
   uploadedKeys: string[];
   updatedAt: number;
-  awaitingImageDecision?: boolean;
 };
 
 type PrivatePostPendingMode = {
@@ -91,10 +96,9 @@ type OneBotMessageEvent = {
 };
 
 const privateHelp = [
-  "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
-  "可以发送 #重置密码，重置你的登录密码。",
-  "想投稿时先发 #投稿 正文，然后回复 #匿名 或 #实名；后面发图片，准备好了再发 #结束投稿。",
-  "不想继续投稿时发 #取消本次投稿，就能取消这次投稿。",
+  "可以发送 #注册账号 ，用当前 QQ 注册本校园墙账号。", ​
+  "可以发送 #重置密码 ，重置你的登录密码。",
+  "我未识别到投稿指令。请选择：#匿名 或 #实名；取消请回复 #取消。",
 ].join("\n");
 
 const reviewHelp = [
@@ -207,9 +211,7 @@ export class OneBotRuntime {
           ]
         : lines.join("\n");
 
-    await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
-      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify review group");
-    });
+    await this.sendBotReviewGroupMessage(bot as any, message, "failed to notify review group");
   }
 
   async notifyPostCancelled(postId: string) {
@@ -791,7 +793,7 @@ export class OneBotRuntime {
           return;
         }
 
-        await this.sendPrivateMessage(botQqUin, userQqUin, "这次投稿还在等你选匿名还是实名，回复 #匿名 或 #实名；不想继续投稿可以发 #取消本次投稿。");
+        await this.sendPrivateMessage(botQqUin, userQqUin, "我未识别到投稿指令。请选择：#匿名 或 #实名；取消请回复 #取消。");
         return;
       }
 
@@ -809,22 +811,7 @@ export class OneBotRuntime {
           const draftText = extractOneBotPlainText(event.message, event.raw_message).trim();
           const imageSegments = extractOneBotImageSegments(event.message);
 
-          if (draft.awaitingImageDecision) {
-            const decision = parsePrivatePostImageDecisionText(draftText);
-            if (!decision) {
-              await this.sendPrivateMessage(botQqUin, userQqUin, "现在请回复 #是 或 #否 选择是否添加图片；不想继续投稿可以发 #取消本次投稿。");
-              return;
-            }
-
-            draft.awaitingImageDecision = false;
-            if (!decision.addImages) {
-              await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
-              return;
-            }
-
-            await this.sendPrivateMessage(botQqUin, userQqUin, "好的，请开始发送图片，发完图片后再发 #结束投稿 提交稿件；发送 #取消本次投稿 放弃。");
-            return;
-          }
+          // 进入草稿后允许继续发送正文或图片，用户无需先确认是否添加图片。
 
           // 草稿阶段允许追加文字（每段新起一行）或继续上传图片
           if (draftText.length > 0) {
@@ -872,6 +859,10 @@ export class OneBotRuntime {
             ? "这个 QQ 已经注册过啦。如果忘记密码，可以发 #重置密码。"
             : "已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。忘记密码就发 #重置密码。";
         await this.sendPrivateMessage(botQqUin, userQqUin, message);
+        return;
+      }
+      if (command.name === "撤回") {
+        await this.revokePrivatePostLast({ bot, botQqUin, userQqUin });
         return;
       }
       if (command.name === "重置密码") {
@@ -927,8 +918,7 @@ export class OneBotRuntime {
       updatedAt: Date.now(),
     });
 
-    const summary = this.formatPrivatePostPendingSummary(text, attachments.length);
-    await this.sendPrivateMessage(botQqUin, userQqUin, summary);
+    await this.sendPrivateMessage(botQqUin, userQqUin, "已收到投稿请求。请选择投稿方式：回复 #匿名 或 #实名；要取消请输入 #取消。");
   }
 
   private async appendPrivatePostDraftImages({
@@ -948,7 +938,7 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       await this.clearPrivatePostPending(draftKey);
-      await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "已取消本次投稿，所有临时内容已删除。");
       return;
     }
 
@@ -991,7 +981,7 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       await this.clearPrivatePostPending(draftKey);
-      await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "已取消本次投稿，所有临时内容已删除。");
       return;
     }
 
@@ -1002,7 +992,7 @@ export class OneBotRuntime {
     }
 
     await this.clearPrivatePostDraft(draftKey);
-    await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
+    await this.sendPrivateMessage(botQqUin, userQqUin, "已取消本次投稿，所有临时内容已删除。");
   }
 
   private async finishPrivatePostDraft({
@@ -1025,11 +1015,11 @@ export class OneBotRuntime {
 
     const text = draft.text.trim();
     if (!text) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "正文还是空的，先发 #投稿 正文，再发 #结束投稿 吧。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "正文还是空的，先发 #投稿 正文，再发 #结束 吧。");
       return;
     }
     if (text.length > 1_000) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "正文有点长了，先精简到 1000 字以内，再发 #结束投稿 吧。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "正文有点长了，先精简到 1000 字以内，再发 #结束 吧。");
       return;
     }
 
@@ -1045,7 +1035,11 @@ export class OneBotRuntime {
     }
 
     this.privatePostDrafts.delete(draftKey);
-    await this.sendPrivateMessage(botQqUin, userQqUin, `投稿成功，稿件编号 #${post.displayId}，已提交审核。`);
+    await this.sendPrivateMessage(
+      botQqUin,
+      userQqUin,
+      `投稿成功！稿件编号：#${post.displayId}。谢谢你的投稿${post.anonymous ? "" : "（实名投稿会按实名处理）"}`,
+    );
     this.notifyNewPost(post.id).catch((error) => {
       this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
     });
@@ -1107,6 +1101,84 @@ export class OneBotRuntime {
     await deleteAttachmentObjects(this.config, uploadedKeys).catch((error) => {
       this.logger.warn({ error }, "failed to cleanup staged private post attachments");
     });
+  }
+
+  private async revokePrivatePostLast({
+    bot,
+    botQqUin,
+    userQqUin,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const pending = this.privatePostPendingModes.get(draftKey);
+    if (pending) {
+      // 撤回 pending 的上一条：优先删除图片，否则删除最后一段文字
+      if (pending.attachments.length > 0) {
+        const removed = pending.attachments.pop();
+        const key = pending.uploadedKeys.pop();
+        if (key && this.config) {
+          await deleteAttachmentObjects(this.config, [key]).catch(() => undefined);
+        }
+        pending.updatedAt = Date.now();
+        await this.sendPrivateMessage(botQqUin, userQqUin, "已撤回上一条内容。当前稿件仍在编辑中；继续发送正文或图片，或回复 #结束 发布，#取消 放弃。");
+        return;
+      }
+
+      if (pending.text) {
+        const parts = pending.text.split("\n").map((p) => p.trim()).filter(Boolean);
+        parts.pop();
+        pending.text = parts.join("\n");
+        pending.updatedAt = Date.now();
+        if (!pending.text && pending.attachments.length === 0) {
+          await this.clearPrivatePostPending(draftKey);
+          await this.sendPrivateMessage(botQqUin, userQqUin, "已撤回上一条内容。当前稿件已为空，先发 #投稿 正文 吧。");
+          return;
+        }
+        await this.sendPrivateMessage(botQqUin, userQqUin, "已撤回上一条内容。当前稿件仍在编辑中；继续发送正文或图片，或回复 #结束 发布，#取消 放弃。");
+        return;
+      }
+
+      await this.sendPrivateMessage(botQqUin, userQqUin, "当前没有可撤回的内容。请继续发送正文或图片，或回复 #取消 放弃。");
+      return;
+    }
+
+    const draft = this.privatePostDrafts.get(draftKey);
+    if (!draft) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发 #投稿 正文 吧。");
+      return;
+    }
+
+    if (draft.attachments.length > 0) {
+      const removed = draft.attachments.pop();
+      const key = draft.uploadedKeys.pop();
+      if (key && this.config) {
+        await deleteAttachmentObjects(this.config, [key]).catch(() => undefined);
+      }
+      draft.updatedAt = Date.now();
+      await this.sendPrivateMessage(botQqUin, userQqUin, "已撤回上一条内容。当前稿件仍在编辑中；继续发送正文或图片，或回复 #结束 发布，#取消 放弃。");
+      return;
+    }
+
+    if (draft.text) {
+      const parts = draft.text.split("\n").map((p) => p.trim()).filter(Boolean);
+      parts.pop();
+      draft.text = parts.join("\n");
+      draft.updatedAt = Date.now();
+      if (!draft.text && draft.attachments.length === 0) {
+        await this.clearPrivatePostDraft(draftKey);
+        await this.sendPrivateMessage(botQqUin, userQqUin, "已撤回上一条内容。当前稿件已为空，先发 #投稿 正文 吧。");
+        return;
+      }
+      await this.sendPrivateMessage(botQqUin, userQqUin, "已撤回上一条内容。当前稿件仍在编辑中；继续发送正文或图片，或回复 #结束 发布，#取消 放弃。");
+      return;
+    }
+
+    await this.sendPrivateMessage(botQqUin, userQqUin, "当前没有可撤回的内容。请继续发送正文或图片，或回复 #取消 放弃。");
   }
 
   private async stagePrivatePostAttachments(
@@ -1189,17 +1261,14 @@ export class OneBotRuntime {
 
   private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean) {
     const parts = [
-      `我先帮你记下啦：正文 ${text.length} 字${attachmentCount > 0 ? `，图片 ${attachmentCount} 张` : ""}，${anonymous ? "匿名投稿" : "实名投稿"}。`,
-      "如果都准备好了，就发 #结束投稿 提交稿件。",
+      `已收到（文本/图片）。你可以继续发送正文或图片；或使用以下命令：#撤回（删除上一条） / #结束（发布并结束） / #取消（取消投稿）`,
     ];
     return parts.join("\n");
   }
 
   private formatPrivatePostPendingSummary(text: string, attachmentCount: number) {
     const parts = [
-      `我先帮你记下啦：正文 ${text.length} 字${attachmentCount > 0 ? `，图片 ${attachmentCount} 张` : ""}。`,
-      "现在回复 #匿名 或 #实名 选择投稿方式。",
-      "如果不想继续投稿，可以发 #取消本次投稿。",
+      `已收到（文本/图片）。你可以继续发送正文或图片；或使用以下命令：#撤回 （删除上一条） / #结束 （发布并结束） / #取消 （取消投稿）`,
     ];
     return parts.join("\n");
   }
@@ -1232,14 +1301,13 @@ export class OneBotRuntime {
       attachments: pending.attachments,
       uploadedKeys: pending.uploadedKeys,
       updatedAt: Date.now(),
-      awaitingImageDecision: true,
     });
 
-    const have = pending.attachments.length > 0 ? `，已有 ${pending.attachments.length} 张图片` : "";
+    const mode = anonymous ? "匿名" : "实名";
     await this.sendPrivateMessage(
       botQqUin,
       userQqUin,
-      `我已记录正文（${pending.text.length} 字${have}）。\n现在回复 #是 或 #否 选择是否添加图片；不想继续投稿可以发 #取消本次投稿。`,
+      `已选择「${mode}」。请发送稿件正文或图片（可多次发送）。\n删除上一条：回复 #撤回\n发布并结束：回复 #结束\n取消本次投稿：回复 #取消`,
     );
   }
 
@@ -1252,17 +1320,17 @@ export class OneBotRuntime {
     const text = draft.text.trim();
 
     if (!text) {
-      throw new BotWorkflowError("正文还是空的，先发 #投稿 正文，再发 #结束投稿 吧。", 400);
+      throw new BotWorkflowError("正文还是空的，先发 #投稿 正文，再发 #结束 吧。", 400);
     }
     if (text.length > 1_000) {
-      throw new BotWorkflowError("正文有点长了，先精简到 1000 字以内，再发 #结束投稿 吧。", 400);
+      throw new BotWorkflowError("正文有点长了，先精简到 1000 字以内，再发 #结束 吧。", 400);
     }
 
     let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         post = await prisma.$transaction(
-          async (tx) => {
+          async (tx: any) => {
             const pendingPostLimit = await readTenantPendingPostLimit(tx, bot.tenantId);
             if (pendingPostLimit > 0) {
               const pendingCount = await tx.post.count({
@@ -1703,7 +1771,7 @@ function isMentioningBot(event: OneBotMessageEvent, botQqUin: string) {
   if (!Array.isArray(event.message)) {
     return false;
   }
-  return event.message.some((segment) => {
+  return event.message.some((segment: OneBotMessageSegment) => {
     const item = segment as { type?: string; data?: { qq?: string | number } };
     return item.type === "at" && normalizeId(item.data?.qq) === botQqUin;
   });

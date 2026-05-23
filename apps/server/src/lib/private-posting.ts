@@ -13,11 +13,11 @@ export function parsePrivatePostStartText(input: string) {
 }
 
 export function isPrivatePostFinishText(input: string) {
-  return /^(?:#|＃)结束投稿\s*$/.test(input.trim());
+  return /^(?:#|＃)(?:结束投稿|结束)\s*$/.test(input.trim());
 }
 
 export function isPrivatePostCancelText(input: string) {
-  return /^(?:#|＃)取消本次投稿\s*$/.test(input.trim());
+  return /^(?:#|＃)(?:取消本次投稿|取消)\s*$/.test(input.trim());
 }
 
 export function parsePrivatePostModeText(input: string) {
@@ -31,18 +31,6 @@ export function parsePrivatePostModeText(input: string) {
   };
 }
 
-export function parsePrivatePostImageDecisionText(input: string) {
-  const trimmed = input.trim();
-  const m = trimmed.match(/^(?:#|＃)(?:添加图片|要图片|添加图|要图|是)\s*$/);
-  if (m) {
-    return { addImages: true };
-  }
-  const n = trimmed.match(/^(?:#|＃)(?:不添加图片|不要图片|不添加图|不要图|否)\s*$/);
-  if (n) {
-    return { addImages: false };
-  }
-  return null;
-}
 
 export function extractOneBotImageSegments(message: unknown) {
   if (!Array.isArray(message)) {
