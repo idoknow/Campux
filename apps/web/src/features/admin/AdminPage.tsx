@@ -1434,7 +1434,12 @@ function MetadataPanel({
           </label>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             前台公告
-            <Input value={form.banner} onChange={(event) => onFormChange({ ...form, banner: event.target.value })} />
+            <Textarea
+              className="min-h-24 resize-y bg-white text-sm leading-6"
+              value={form.banner}
+              placeholder="显示在投稿页顶部的公告，可换行。"
+              onChange={(event) => onFormChange({ ...form, banner: event.target.value })}
+            />
           </label>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             校园墙 Logo
