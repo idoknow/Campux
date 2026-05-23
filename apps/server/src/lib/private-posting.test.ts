@@ -50,7 +50,7 @@ describe("onebot message helpers", () => {
         { type: "image", data: { file: "base64://abc" } },
         { type: "text", data: { text: "正文" } },
       ]),
-    ).toBe("#投稿 正文");
+    ).toBe("#投稿 \n正文");
   });
 
   test("extracts image segments only", () => {
