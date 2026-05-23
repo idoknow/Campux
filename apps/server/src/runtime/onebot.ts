@@ -3,6 +3,7 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { createS3Client } from "@campux/integrations";
+import { Prisma } from "@campux/db";
 import {
   BotWorkflowError,
   findEnabledBot,
@@ -15,7 +16,11 @@ import {
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
 import { writeAuditLog } from "../lib/audit";
+import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
+import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText, parsePrivatePostImageDecisionText } from "../lib/private-posting";
+import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
@@ -53,9 +58,22 @@ type OneBotActionResponse = {
   wording?: string;
 };
 
-type ImagePayload = {
-  key?: string;
-  fileName?: string;
+type PrivatePostDraft = {
+  tenantId: string;
+  text: string;
+  anonymous: boolean;
+  attachments: PostAttachment[];
+  uploadedKeys: string[];
+  updatedAt: number;
+  awaitingImageDecision?: boolean;
+};
+
+type PrivatePostPendingMode = {
+  tenantId: string;
+  text: string;
+  attachments: PostAttachment[];
+  uploadedKeys: string[];
+  updatedAt: number;
 };
 
 type OneBotMessageEvent = {
@@ -73,8 +91,10 @@ type OneBotMessageEvent = {
 };
 
 const privateHelp = [
-  "发送 #注册账号 可以用当前 QQ 注册本校园墙账号。",
-  "发送 #重置密码 可以重置你的登录密码。",
+  "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
+  "可以发送 #重置密码，重置你的登录密码。",
+  "想投稿时先发 #投稿 正文，然后回复 #匿名 或 #实名；后面只发图片，准备好了再发 #结束投稿。",
+  "不想继续时发 #取消投稿，就能取消这次投稿。",
 ].join("\n");
 
 const reviewHelp = [
@@ -98,6 +118,8 @@ export class OneBotRuntime {
   private readonly connections = new Set<OneBotConnection>();
   private readonly pendingActions = new Map<string, PendingAction>();
   private readonly privateAutoReplyAt = new Map<string, number>();
+  private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
+  private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
 
   constructor(
     private readonly queue: RuntimeQueue,
@@ -692,16 +714,105 @@ export class OneBotRuntime {
       return;
     }
 
-    const command = parsePrivateCommand(extractPlainText(event));
-    if (!command) {
-      const bot = await findEnabledBot(botQqUin);
-      if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp).catch(() => undefined);
-      }
-      return;
-    }
-
     try {
+      const bot = await findEnabledBot(botQqUin);
+      const plainText = extractOneBotPlainText(event.message, event.raw_message).trim();
+      const startBody = parsePrivatePostStartText(plainText);
+      if (startBody !== null) {
+        await this.startPrivatePostDraft({
+          bot,
+          botQqUin,
+          userQqUin,
+          event,
+          body: startBody,
+        });
+        return;
+      }
+
+      if (isPrivatePostCancelText(plainText)) {
+        await this.cancelPrivatePostDraft({
+          bot,
+          botQqUin,
+          userQqUin,
+        });
+        return;
+      }
+
+      const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+      const pendingMode = this.privatePostPendingModes.get(draftKey);
+      if (pendingMode) {
+        const selection = parsePrivatePostModeText(plainText);
+        if (selection) {
+          await this.selectPrivatePostMode({
+            bot,
+            botQqUin,
+            userQqUin,
+            anonymous: selection.anonymous,
+          });
+          return;
+        }
+
+        await this.sendPrivateMessage(botQqUin, userQqUin, "这次投稿还在等你选匿名还是实名，回复 #匿名 或 #实名；不想继续可以发 #取消投稿。");
+        return;
+      }
+
+      if (isPrivatePostFinishText(plainText)) {
+        await this.finishPrivatePostDraft({
+          bot,
+          botQqUin,
+          userQqUin,
+        });
+        return;
+      }
+
+      const draft = this.privatePostDrafts.get(draftKey);
+      if (draft) {
+          const draftText = extractOneBotPlainText(event.message, event.raw_message).trim();
+          const imageSegments = extractOneBotImageSegments(event.message);
+
+          if (draft.awaitingImageDecision) {
+            const decision = parsePrivatePostImageDecisionText(draftText);
+            if (!decision) {
+              await this.sendPrivateMessage(botQqUin, userQqUin, "现在请回复 #添加图片 / #是 或 #不添加图片 / #否；不想继续可以发 #取消投稿。");
+              return;
+            }
+
+            draft.awaitingImageDecision = false;
+            if (!decision.addImages) {
+              await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
+              return;
+            }
+
+            await this.sendPrivateMessage(botQqUin, userQqUin, "好的，请开始发送图片，发完图片后再发 #结束投稿 提交稿件；发送 #取消投稿 放弃。");
+            return;
+          }
+
+          if (draftText.length > 0) {
+            await this.sendPrivateMessage(botQqUin, userQqUin, "收到文字啦，但这一步只收图片。继续发图，或者直接发 #结束投稿 提交稿件。");
+            return;
+          }
+
+          if (imageSegments.length > 0) {
+            await this.appendPrivatePostDraftImages({
+              bot,
+              botQqUin,
+              userQqUin,
+              event,
+            });
+            return;
+          }
+
+          return;
+      }
+
+      const command = parsePrivateCommand(plainText);
+      if (!command) {
+        if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp).catch(() => undefined);
+        }
+        return;
+      }
+
       if (command.name === "注册账号") {
         const result = await registerUserViaBot({
           botQqUin,
@@ -711,8 +822,8 @@ export class OneBotRuntime {
         const message = result.password
           ? `注册成功，初始密码：\n${result.password}`
           : result.alreadyHadTenantAccess
-            ? "账号已经注册过了。如果忘记密码，请发送 #重置密码。"
-            : "已为你开通本校园墙访问权限，登录密码沿用原账号。忘记密码请发送 #重置密码。";
+            ? "这个 QQ 已经注册过啦。如果忘记密码，可以发 #重置密码。"
+            : "已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。忘记密码就发 #重置密码。";
         await this.sendPrivateMessage(botQqUin, userQqUin, message);
         return;
       }
@@ -721,15 +832,474 @@ export class OneBotRuntime {
           botQqUin,
           userQqUin,
         });
-        await this.sendPrivateMessage(botQqUin, userQqUin, `重置成功，新密码：\n${result.password}`);
+        await this.sendPrivateMessage(botQqUin, userQqUin, `已经重置好啦，新密码：\n${result.password}`);
         return;
       }
 
-      const bot = await findEnabledBot(botQqUin);
       await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp);
     } catch (error) {
       await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
     }
+  }
+
+  private getPrivatePostDraftKey(botQqUin: string, userQqUin: string) {
+    return `${botQqUin}:${userQqUin}`;
+  }
+
+  private async startPrivatePostDraft({
+    bot,
+    botQqUin,
+    userQqUin,
+    event,
+    body,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+    event: OneBotMessageEvent;
+    body: string;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const staged = await this.stagePrivatePostAttachments(bot, event);
+    if (staged.attachments.length > 9) {
+      await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
+      throw new BotWorkflowError("最多 9 张图片", 400);
+    }
+
+    await this.clearPrivatePostPending(draftKey);
+    await this.clearPrivatePostDraft(draftKey);
+    const text = body.trim();
+    const attachments = staged.attachments;
+    this.privatePostPendingModes.set(draftKey, {
+      tenantId: bot.tenantId,
+      text,
+      attachments,
+      uploadedKeys: staged.uploadedKeys,
+      updatedAt: Date.now(),
+    });
+
+    const summary = this.formatPrivatePostPendingSummary(text, attachments.length);
+    await this.sendPrivateMessage(botQqUin, userQqUin, summary);
+  }
+
+  private async appendPrivatePostDraftImages({
+    bot,
+    botQqUin,
+    userQqUin,
+    event,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+    event: OneBotMessageEvent;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const pending = this.privatePostPendingModes.get(draftKey);
+    if (pending) {
+      await this.clearPrivatePostPending(draftKey);
+      await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
+      return;
+    }
+
+    const draft = this.privatePostDrafts.get(draftKey);
+    if (!draft) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发 #投稿 正文 吧。");
+      return;
+    }
+
+    const staged = await this.stagePrivatePostAttachments(bot, event);
+    if (staged.attachments.length === 0) {
+      return;
+    }
+
+    if (draft.attachments.length + staged.attachments.length > 9) {
+      await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
+      await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
+      return;
+    }
+
+    draft.attachments.push(...staged.attachments);
+    draft.uploadedKeys.push(...staged.uploadedKeys);
+    draft.updatedAt = Date.now();
+
+    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
+  }
+
+  private async cancelPrivatePostDraft({
+    bot,
+    botQqUin,
+    userQqUin,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const pending = this.privatePostPendingModes.get(draftKey);
+    if (pending) {
+      await this.clearPrivatePostPending(draftKey);
+      await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
+      return;
+    }
+
+    const draft = this.privatePostDrafts.get(draftKey);
+    if (!draft) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿。");
+      return;
+    }
+
+    await this.clearPrivatePostDraft(draftKey);
+    await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
+  }
+
+  private async finishPrivatePostDraft({
+    bot,
+    botQqUin,
+    userQqUin,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const draft = this.privatePostDrafts.get(draftKey);
+    if (!draft) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发 #投稿 正文 吧。");
+      return;
+    }
+
+    const text = draft.text.trim();
+    if (!text) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "正文还是空的，先发 #投稿 正文，再发 #结束投稿 吧。");
+      return;
+    }
+    if (text.length > 1_000) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "正文有点长了，先精简到 1000 字以内，再发 #结束投稿 吧。");
+      return;
+    }
+
+    const post = await this.createPostFromPrivateDraft(bot, userQqUin, draft).catch(async (error) => {
+      if (error instanceof BotWorkflowError) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, error.message).catch(() => undefined);
+        return null;
+      }
+      throw error;
+    });
+    if (!post) {
+      return;
+    }
+
+    this.privatePostDrafts.delete(draftKey);
+    await this.sendPrivateMessage(botQqUin, userQqUin, `投稿成功，稿件编号 #${post.displayId}，已提交审核。`);
+    this.notifyNewPost(post.id).catch((error) => {
+      this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
+    });
+  }
+
+  private async ensurePrivatePostingAllowed(tenantId: string, userQqUin: string) {
+    const operator = await prisma.user.findUnique({
+      where: {
+        qqUin: BigInt(userQqUin),
+      },
+      include: {
+        memberships: true,
+      },
+    });
+    const membership = operator?.memberships.find((item) => item.tenantId === tenantId);
+    if (!operator || !membership || !hasTenantRole(membership.role, "submitter")) {
+      throw new BotWorkflowError("这个 QQ 还没有注册本校园墙，请先发 #注册账号。", 404);
+    }
+
+    const activeBan = await findActiveBan(tenantId, operator.id);
+    if (activeBan) {
+      throw new BotWorkflowError(`账号已被封禁：${activeBan.comment}`, 403);
+    }
+
+    return { operator, membership };
+  }
+
+  private async clearPrivatePostDraft(draftKey: string) {
+    const existing = this.privatePostDrafts.get(draftKey);
+    if (!existing) {
+      return;
+    }
+    this.privatePostDrafts.delete(draftKey);
+    if (this.config && existing.uploadedKeys.length > 0) {
+      await deleteAttachmentObjects(this.config, existing.uploadedKeys).catch((error) => {
+        this.logger.warn({ error, draftKey }, "failed to cleanup replaced private post draft attachments");
+      });
+    }
+  }
+
+  private async clearPrivatePostPending(draftKey: string) {
+    const existing = this.privatePostPendingModes.get(draftKey);
+    if (!existing) {
+      return;
+    }
+    this.privatePostPendingModes.delete(draftKey);
+    if (this.config && existing.uploadedKeys.length > 0) {
+      await deleteAttachmentObjects(this.config, existing.uploadedKeys).catch((error) => {
+        this.logger.warn({ error, draftKey }, "failed to cleanup pending private post attachments");
+      });
+    }
+  }
+
+  private async clearStagedPrivatePostAttachments(uploadedKeys: string[]) {
+    if (!this.config || uploadedKeys.length === 0) {
+      return;
+    }
+
+    await deleteAttachmentObjects(this.config, uploadedKeys).catch((error) => {
+      this.logger.warn({ error }, "failed to cleanup staged private post attachments");
+    });
+  }
+
+  private async stagePrivatePostAttachments(
+    bot: { qqUin: bigint; tenantId: string },
+    event: OneBotMessageEvent,
+  ): Promise<{ attachments: PostAttachment[]; uploadedKeys: string[] }> {
+    const imageSegments = extractOneBotImageSegments(event.message);
+    if (imageSegments.length === 0) {
+      return { attachments: [], uploadedKeys: [] };
+    }
+    if (imageSegments.length > 9) {
+      throw new BotWorkflowError("最多 9 张图片", 400);
+    }
+    if (!this.config) {
+      throw new BotWorkflowError("当前环境未配置附件存储，无法通过图片投稿", 503);
+    }
+
+    const compression = await readTenantImageCompression(prisma, bot.tenantId);
+    const attachments: PostAttachment[] = [];
+    const uploadedKeys: string[] = [];
+
+    try {
+      for (const segment of imageSegments) {
+        const source = await this.resolvePrivatePostImageSource(bot.qqUin.toString(), segment);
+        if (source.bytes.length > 10 * 1024 * 1024) {
+          throw new BotWorkflowError("图片最大 10MB，请重新发送更小的图片", 400);
+        }
+        const fileName = source.fileName || normalizeImageFileName(source.url) || "attachment.jpg";
+        const compressed = await compressImageBuffer(source.bytes, source.contentType, compression);
+        const attachment = await uploadAttachmentBytes({
+          config: this.config,
+          tenantId: bot.tenantId,
+          kind: "image",
+          contentType: source.contentType,
+          fileName,
+          body: compressed,
+        });
+        attachments.push(attachment);
+        uploadedKeys.push(attachment.key);
+      }
+      return { attachments, uploadedKeys };
+    } catch (error) {
+      if (this.config && uploadedKeys.length > 0) {
+        await deleteAttachmentObjects(this.config, uploadedKeys).catch((cleanupError) => {
+          this.logger.warn({ error: cleanupError }, "failed to cleanup private post attachment upload");
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async resolvePrivatePostImageSource(botQqUin: string, segment: { data?: Record<string, unknown> }) {
+    const data = segment.data ?? {};
+    const fileName = normalizeImageFileName(data.file_name ?? data.filename ?? data.name ?? data.file ?? data.url);
+    const directSource = typeof (data.url ?? data.file) === "string" ? String(data.url ?? data.file).trim() : null;
+    if (directSource?.startsWith("base64://")) {
+      return await fetchPrivatePostImage(directSource, fileName);
+    }
+
+    const directUrl = readImageUrlCandidate(data.url ?? data.file);
+    if (directUrl) {
+      return await fetchPrivatePostImage(directUrl, fileName);
+    }
+
+    const fileToken = readImageTokenCandidate(data.file);
+    if (fileToken) {
+      try {
+        const response = await this.callAction(botQqUin, "get_image", { file: fileToken });
+        const resolvedUrl = extractImageUrlFromOneBotResponse(response);
+        if (resolvedUrl) {
+          return await fetchPrivatePostImage(resolvedUrl, fileName);
+        }
+      } catch (error) {
+        this.logger.debug({ error, botQqUin }, "onebot get_image fallback failed");
+      }
+    }
+
+    throw new BotWorkflowError("无法读取图片附件，请重新发送图片", 400);
+  }
+
+  private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean) {
+    const parts = [
+      `我先帮你记下啦：正文 ${text.length} 字${attachmentCount > 0 ? `，图片 ${attachmentCount} 张` : ""}，${anonymous ? "匿名投稿" : "实名投稿"}。`,
+      "如果都准备好了，就发 #结束投稿 提交稿件。",
+    ];
+    return parts.join("\n");
+  }
+
+  private formatPrivatePostPendingSummary(text: string, attachmentCount: number) {
+    const parts = [
+      `我先帮你记下啦：正文 ${text.length} 字${attachmentCount > 0 ? `，图片 ${attachmentCount} 张` : ""}。`,
+      "现在回复 #匿名 或 #实名 选择投稿方式。",
+      "如果不想继续，可以发 #取消投稿。",
+    ];
+    return parts.join("\n");
+  }
+
+  private async selectPrivatePostMode({
+    bot,
+    botQqUin,
+    userQqUin,
+    anonymous,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+    anonymous: boolean;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const pending = this.privatePostPendingModes.get(draftKey);
+    if (!pending) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有需要选择模式的投稿，先发 #投稿 正文 吧。");
+      return;
+    }
+
+    this.privatePostPendingModes.delete(draftKey);
+    this.privatePostDrafts.set(draftKey, {
+      tenantId: pending.tenantId,
+      text: pending.text,
+      anonymous,
+      attachments: pending.attachments,
+      uploadedKeys: pending.uploadedKeys,
+      updatedAt: Date.now(),
+      awaitingImageDecision: true,
+    });
+
+    const have = pending.attachments.length > 0 ? `，已有 ${pending.attachments.length} 张图片` : "";
+    await this.sendPrivateMessage(
+      botQqUin,
+      userQqUin,
+      `我已记录正文（${pending.text.length} 字${have}）。\n现在回复 #添加图片 / #是 或 #不添加图片 / #否 选择是否添加图片；不想继续可以发 #取消投稿。`,
+    );
+  }
+
+  private async createPostFromPrivateDraft(
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null },
+    userQqUin: string,
+    draft: PrivatePostDraft,
+  ) {
+    const access = await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+    const text = draft.text.trim();
+
+    if (!text) {
+      throw new BotWorkflowError("正文还是空的，先发 #投稿 正文，再发 #结束投稿 吧。", 400);
+    }
+    if (text.length > 1_000) {
+      throw new BotWorkflowError("正文有点长了，先精简到 1000 字以内，再发 #结束投稿 吧。", 400);
+    }
+
+    let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        post = await prisma.$transaction(
+          async (tx) => {
+            const pendingPostLimit = await readTenantPendingPostLimit(tx, bot.tenantId);
+            if (pendingPostLimit > 0) {
+              const pendingCount = await tx.post.count({
+                where: {
+                  tenantId: bot.tenantId,
+                  authorId: access.operator.id,
+                  status: "pending_approval",
+                },
+              });
+              if (pendingCount >= pendingPostLimit) {
+                throw new BotWorkflowError(
+                  `你还有 ${pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${pendingPostLimit} 条待审核稿件。`,
+                  409,
+                );
+              }
+            }
+
+            const tenant = await tx.tenant.update({
+              where: {
+                id: bot.tenantId,
+              },
+              data: {
+                nextPostDisplayId: {
+                  increment: 1,
+                },
+              },
+              select: {
+                nextPostDisplayId: true,
+              },
+            });
+            const displayId = tenant.nextPostDisplayId - 1;
+
+            return tx.post.create({
+              data: {
+                tenantId: bot.tenantId,
+                authorId: access.operator.id,
+                displayId,
+                text,
+                anonymous: draft.anonymous,
+                attachments: draft.attachments,
+                status: "pending_approval",
+                logs: {
+                  create: {
+                    tenantId: bot.tenantId,
+                    actorId: access.operator.id,
+                    newStatus: "pending_approval",
+                    comment: "QQ 私聊投稿创建",
+                  },
+                },
+              },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+        break;
+      } catch (error) {
+        if (error instanceof BotWorkflowError) {
+          throw error;
+        }
+        if (isTransactionSerializationFailure(error) && attempt < 2) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!post) {
+      throw new BotWorkflowError("投稿人数较多，请稍后再试", 503);
+    }
+
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: access.operator.id,
+      action: "bot.post.create",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        botQqUin: bot.qqUin.toString(),
+        userQqUin,
+        attachmentCount: draft.attachments.length,
+      },
+    });
+
+    return post;
   }
 
   private async handleGroupMessage(event: OneBotMessageEvent) {
@@ -1200,4 +1770,111 @@ function formatQZoneAutoRefreshReason(reason: string) {
     return "发布前发现登录态不可用";
   }
   return "定时检测发现登录态失效";
+}
+
+function isTransactionSerializationFailure(value: unknown) {
+  return value instanceof Prisma.PrismaClientKnownRequestError && value.code === "P2034";
+}
+
+function normalizeImageFileName(value: unknown) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("base64://")) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const lastPathPart = url.pathname.split("/").filter(Boolean).pop();
+    return lastPathPart || undefined;
+  } catch {
+    const withoutQuery = trimmed.split("?")[0];
+    const lastPathPart = withoutQuery.split("/").filter(Boolean).pop();
+    return lastPathPart || undefined;
+  }
+}
+
+function readImageUrlCandidate(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function readImageTokenCandidate(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("base64://") || /^https?:\/\//i.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function extractImageUrlFromOneBotResponse(data: unknown) {
+  if (typeof data === "string" && /^https?:\/\//i.test(data)) {
+    return data;
+  }
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const candidate = data as { url?: unknown; file?: unknown; data?: { url?: unknown; file?: unknown } };
+  const direct = typeof candidate.url === "string" ? candidate.url : typeof candidate.file === "string" ? candidate.file : null;
+  if (typeof direct === "string" && /^https?:\/\//i.test(direct)) {
+    return direct;
+  }
+
+  const nested = candidate.data;
+  if (nested) {
+    const nestedUrl = typeof nested.url === "string" ? nested.url : typeof nested.file === "string" ? nested.file : null;
+    if (typeof nestedUrl === "string" && /^https?:\/\//i.test(nestedUrl)) {
+      return nestedUrl;
+    }
+  }
+
+  return null;
+}
+
+async function fetchPrivatePostImage(source: string, fileName?: string) {
+  if (source.startsWith("base64://")) {
+    const bytes = Buffer.from(source.slice("base64://".length), "base64");
+    return {
+      bytes,
+      contentType: inferImageContentType(fileName || "attachment.jpg"),
+      fileName,
+      url: source,
+    };
+  }
+
+  const response = await fetch(source);
+  if (!response.ok) {
+    throw new BotWorkflowError(`图片下载失败：${response.status}`, 502);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const bytes = Buffer.from(arrayBuffer);
+  const headerContentType = response.headers.get("content-type")?.split(";")[0]?.trim() || null;
+  const contentType = headerContentType && headerContentType.startsWith("image/")
+    ? headerContentType
+    : inferImageContentType(fileName || source);
+
+  return {
+    bytes,
+    contentType,
+    fileName,
+    url: source,
+  };
 }
