@@ -1791,9 +1791,9 @@ function normalizeImageFileName(value: unknown) {
     const lastPathPart = url.pathname.split("/").filter(Boolean).pop();
     return lastPathPart || undefined;
   } catch {
-    const withoutQuery = trimmed.split("?")[0];
+    const withoutQuery = (trimmed.split("?")[0] ?? "").toString();
     const lastPathPart = withoutQuery.split("/").filter(Boolean).pop();
-    return lastPathPart || undefined;
+    return lastPathPart ?? undefined;
   }
 }
 
