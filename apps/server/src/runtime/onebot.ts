@@ -752,6 +752,45 @@ export class OneBotRuntime {
           return;
         }
 
+        // 如果在 pending 状态，允许用户继续发送正文的后续段落（多段文字）或添加图片。
+        try {
+          const imageSegments = extractOneBotImageSegments(event.message);
+          if (imageSegments.length > 0) {
+            // 将新图片上载并追加到 pending
+            const staged = await this.stagePrivatePostAttachments(bot, event);
+            // 检查总数限制
+            if (pendingMode.attachments.length + staged.attachments.length > 9) {
+              await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
+              await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
+              return;
+            }
+
+            pendingMode.attachments.push(...staged.attachments);
+            pendingMode.uploadedKeys.push(...staged.uploadedKeys);
+            pendingMode.updatedAt = Date.now();
+            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pendingMode.text, pendingMode.attachments.length));
+            return;
+          }
+        } catch (error) {
+          // stagePrivatePostAttachments 会在内部进行上传回收；只需要通知用户错误
+          await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
+          return;
+        }
+
+        // 处理追加文字：合并为多段正文，限制 1000 字
+        const moreText = plainText.trim();
+        if (moreText.length > 0) {
+          const combined = (pendingMode.text ? `${pendingMode.text}\n${moreText}` : moreText).trim();
+          if (combined.length > 1_000) {
+            await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
+            return;
+          }
+          pendingMode.text = combined;
+          pendingMode.updatedAt = Date.now();
+          await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pendingMode.text, pendingMode.attachments.length));
+          return;
+        }
+
         await this.sendPrivateMessage(botQqUin, userQqUin, "这次投稿还在等你选匿名还是实名，回复 #匿名 或 #实名；不想继续可以发 #取消投稿。");
         return;
       }
@@ -787,8 +826,16 @@ export class OneBotRuntime {
             return;
           }
 
+          // 草稿阶段允许追加文字（每段新起一行）或继续上传图片
           if (draftText.length > 0) {
-            await this.sendPrivateMessage(botQqUin, userQqUin, "收到文字啦，但这一步只收图片。继续发图，或者直接发 #结束投稿 提交稿件。");
+            const combined = (draft.text ? `${draft.text}\n${draftText}` : draftText).trim();
+            if (combined.length > 1_000) {
+              await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
+              return;
+            }
+            draft.text = combined;
+            draft.updatedAt = Date.now();
+            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
             return;
           }
 

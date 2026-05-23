@@ -64,7 +64,8 @@ export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
         const item = segment as OneBotMessageSegment;
         return item.type === "text" ? String(item.data?.text ?? "") : "";
       })
-      .join("");
+      .filter(Boolean)
+      .join("\n");
   }
 
   if (typeof message === "string") {
