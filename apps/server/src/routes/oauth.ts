@@ -391,8 +391,8 @@ export function registerOAuthRoutes(app: FastifyInstance) {
 
     return {
       sub: tokenRecord.user.id,
-      name: tokenRecord.user.displayName ?? tokenRecord.user.qqUin.toString(),
-      preferred_username: tokenRecord.user.displayName ?? tokenRecord.user.qqUin.toString(),
+      name: tokenRecord.user.qqUin.toString(),
+      username: tokenRecord.user.displayName ?? tokenRecord.user.qqUin.toString(),
       tenant_id: tokenRecord.tenant.id,
       tenant_name: tokenRecord.tenant.name,
       tenant_slug: tokenRecord.tenant.slug,
