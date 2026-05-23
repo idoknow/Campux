@@ -5,6 +5,8 @@ export function toPostListItem(post: {
   attachments: unknown;
   anonymous: boolean;
   status: string;
+  recallIgnored?: boolean;
+  recallIgnoredAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
   logs?: Array<{
@@ -27,6 +29,8 @@ export function toPostListItem(post: {
     attachments: post.attachments,
     anonymous: post.anonymous,
     status: post.status,
+    recallIgnored: Boolean(post.recallIgnored),
+    recallIgnoredAt: post.recallIgnoredAt?.toISOString() ?? null,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     recallReason,

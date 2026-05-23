@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { PostStatus, Prisma } from "@campux/db";
 import { z } from "zod";
 import { requireTenantRole } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
@@ -18,7 +19,7 @@ const reviewBodySchema = z.object({
 });
 
 const reviewQuerySchema = z.object({
-  status: z.enum(["all", "pending_approval", "approved", "rejected", "publishing", "partially_failed", "failed", "published", "pending_recall", "recalled"]).default("pending_approval"),
+  status: z.enum(["all", "pending_approval", "approved", "rejected", "publishing", "partially_failed", "failed", "published", "pending_recall", "pending_recall_ignored", "recalled"]).default("pending_approval"),
   q: z.string().max(80).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
@@ -30,9 +31,18 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     const query = reviewQuerySchema.parse(request.query);
     const displayId = query.q && !Number.isNaN(Number(query.q)) ? Number(query.q) : null;
     const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
-    const where = {
+    const concreteStatus = query.status === "pending_recall_ignored" ? "pending_recall" : query.status;
+    const statusWhere: Prisma.PostWhereInput =
+      query.status === "all"
+        ? {}
+        : query.status === "pending_recall"
+          ? { status: "pending_recall", recallIgnored: false }
+          : query.status === "pending_recall_ignored"
+            ? { status: "pending_recall", recallIgnored: true }
+            : { status: concreteStatus as PostStatus };
+    const where: Prisma.PostWhereInput = {
       tenantId: context.selectedTenant.id,
-      ...(query.status === "all" ? {} : { status: query.status }),
+      ...statusWhere,
       ...(query.q
         ? {
             OR: [
@@ -274,6 +284,8 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       },
       data: {
         status: "published",
+        recallIgnored: false,
+        recallIgnoredAt: null,
         logs: {
           create: {
             tenantId: context.selectedTenant.id,
@@ -300,6 +312,61 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     oneBot?.notifyPostRecallRejected(post.id, body.comment?.trim() || "撤回申请未通过").catch((error) => {
       app.log.warn({ error, postId: post.id }, "failed to notify post recall rejection");
+    });
+
+    return {
+      ok: true,
+    };
+  });
+
+  app.post("/api/review/posts/:id/recall/ignore", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "pending_recall") {
+      return reply.code(409).send({ message: "只有待撤回稿件可以忽略" });
+    }
+    if (post.recallIgnored) {
+      return { ok: true };
+    }
+
+    await prisma.post.update({
+      where: {
+        id: post.id,
+      },
+      data: {
+        recallIgnored: true,
+        recallIgnoredAt: new Date(),
+        logs: {
+          create: {
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            oldStatus: post.status,
+            newStatus: post.status,
+            comment: "忽略撤回申请",
+          },
+        },
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "post.recall.ignore",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+      },
     });
 
     return {

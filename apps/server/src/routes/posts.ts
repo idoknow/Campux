@@ -582,6 +582,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       },
       data: {
         status: "pending_recall",
+        recallIgnored: false,
+        recallIgnoredAt: null,
         logs: {
           create: {
             tenantId: context.selectedTenant.id,

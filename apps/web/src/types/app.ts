@@ -145,6 +145,8 @@ export type PostItem = {
   attachments: unknown;
   anonymous: boolean;
   status: string;
+  recallIgnored: boolean;
+  recallIgnoredAt: string | null;
   createdAt: string;
   updatedAt: string;
   recallReason: string | null;
