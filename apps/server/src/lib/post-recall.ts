@@ -82,6 +82,8 @@ export async function executePostRecall({
       },
       data: {
         status: "recalled",
+        recallIgnored: false,
+        recallIgnoredAt: null,
         logs: {
           create: {
             tenantId,
@@ -219,6 +221,8 @@ export async function executePostRecall({
     },
     data: {
       status: "recalled",
+      recallIgnored: false,
+      recallIgnoredAt: null,
       logs: {
         create: {
           tenantId,

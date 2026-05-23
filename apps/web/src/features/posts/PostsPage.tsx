@@ -104,6 +104,7 @@ const reviewStatusOptions = [
   { value: "publishing", label: "发布中" },
   { value: "published", label: "已发布" },
   { value: "pending_recall", label: "待撤回" },
+  { value: "pending_recall_ignored", label: "已忽略撤回" },
   { value: "recalled", label: "已撤回" },
   { value: "failed", label: "发布失败" },
   { value: "all", label: "全部" },
@@ -331,6 +332,21 @@ export function PostsPage({
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "拒绝撤回失败");
       await refreshAll();
+    } finally {
+      setBusyPostId("");
+    }
+  }
+
+  async function ignoreRecallPost(post: ReviewPostItem) {
+    setBusyPostId(post.id);
+    try {
+      await api(`/api/review/posts/${post.id}/recall/ignore`, {
+        method: "POST",
+      });
+      toast.success("已忽略撤回申请，可在“已忽略撤回”筛选中找回。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "忽略撤回失败");
     } finally {
       setBusyPostId("");
     }
@@ -588,6 +604,7 @@ export function PostsPage({
                     onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                     onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
+                    onRecallIgnore={(post) => void ignoreRecallPost(post)}
                     onDetail={(post) => openPostDetail(post.id)}
                   />
               {reviewLoading ? (
@@ -1019,6 +1036,7 @@ function PendingRecallQueue({
   onImagePreview,
   onRecallApprove,
   onRecallReject,
+  onRecallIgnore,
   onDetail,
 }: {
   posts: ReviewPostItem[];
@@ -1028,6 +1046,7 @@ function PendingRecallQueue({
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onRecallApprove: (post: ReviewPostItem) => void;
   onRecallReject: (post: ReviewPostItem) => void;
+  onRecallIgnore: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (loading && posts.length === 0) {
@@ -1064,6 +1083,7 @@ function PendingRecallQueue({
             onReject={() => undefined}
             onRecallApprove={() => onRecallApprove(post)}
             onRecallReject={() => onRecallReject(post)}
+            onRecallIgnore={() => onRecallIgnore(post)}
             onDetail={() => onDetail(post)}
           />
         ))}
@@ -1083,6 +1103,7 @@ function ReviewCard({
   onReject,
   onRecallApprove,
   onRecallReject,
+  onRecallIgnore,
   onRecallDirect,
   onRecallDirectSilent,
   onDetail,
@@ -1097,6 +1118,7 @@ function ReviewCard({
   onReject: () => void;
   onRecallApprove: () => void;
   onRecallReject: () => void;
+  onRecallIgnore?: () => void;
   onRecallDirect?: () => void;
   onRecallDirectSilent?: () => void;
   onDetail: () => void;
@@ -1145,6 +1167,7 @@ function ReviewCard({
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} />
 
         {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
+        {canApproveRecall && post.recallIgnored ? <IgnoredRecallBlock ignoredAt={post.recallIgnoredAt} /> : null}
 
         {images.length > 0 ? <ImageGallery images={images} reviewMode onImageClick={onImagePreview} /> : <NoImagePill />}
 
@@ -1170,6 +1193,11 @@ function ReviewCard({
                 <XIcon data-icon="inline-start" />
                 拒绝撤回
               </Button>
+              {!post.recallIgnored && onRecallIgnore ? (
+                <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallIgnore}>
+                  忽略
+                </Button>
+              ) : null}
               <Button size="sm" className="font-medium" disabled={busy} onClick={onRecallApprove}>
                 <RotateCcwIcon data-icon="inline-start" />
                 同意撤回
@@ -1388,6 +1416,15 @@ function RecallReasonBlock({ reason }: { reason?: string | null }) {
     <div className="rounded-md border border-violet-200 bg-violet-50 p-3 dark:border-violet-900/60 dark:bg-violet-950/30">
       <p className="text-xs font-black text-violet-900 dark:text-violet-100">撤回理由</p>
       <p className="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 text-violet-800 dark:text-violet-200">{reason?.trim() || "未填写"}</p>
+    </div>
+  );
+}
+
+function IgnoredRecallBlock({ ignoredAt }: { ignoredAt?: string | null }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-black text-slate-700">已忽略</p>
+      <p className="mt-1 text-xs font-semibold text-slate-500">这条撤回申请已从顶部固定队列折叠，可继续在这里同意或拒绝。{ignoredAt ? ` 忽略时间：${formatFullDateTime(ignoredAt)}` : ""}</p>
     </div>
   );
 }
