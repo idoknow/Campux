@@ -21,8 +21,8 @@ describe("private posting command parsing", () => {
   });
 
   test("detects cancel command with either hash", () => {
-    expect(isPrivatePostCancelText("#取消投稿")).toBe(true);
-    expect(isPrivatePostCancelText("＃取消投稿")).toBe(true);
+    expect(isPrivatePostCancelText("#取消本次投稿")).toBe(true);
+    expect(isPrivatePostCancelText("＃取消本次投稿")).toBe(true);
   });
 
   test("detects anonymous and real-name replies", () => {

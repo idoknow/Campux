@@ -17,7 +17,7 @@ export function isPrivatePostFinishText(input: string) {
 }
 
 export function isPrivatePostCancelText(input: string) {
-  return /^(?:#|＃)取消投稿\s*$/.test(input.trim());
+  return /^(?:#|＃)取消本次投稿\s*$/.test(input.trim());
 }
 
 export function parsePrivatePostModeText(input: string) {

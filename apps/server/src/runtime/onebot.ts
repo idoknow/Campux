@@ -93,8 +93,8 @@ type OneBotMessageEvent = {
 const privateHelp = [
   "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
   "可以发送 #重置密码，重置你的登录密码。",
-  "想投稿时先发 #投稿 正文，然后回复 #匿名 或 #实名；后面只发图片，准备好了再发 #结束投稿。",
-  "不想继续时发 #取消投稿，就能取消这次投稿。",
+  "想投稿时先发 #投稿 正文，然后回复 #匿名 或 #实名；后面发图片，准备好了再发 #结束投稿。",
+  "不想继续投稿时发 #取消本次投稿，就能取消这次投稿。",
 ].join("\n");
 
 const reviewHelp = [
@@ -791,7 +791,7 @@ export class OneBotRuntime {
           return;
         }
 
-        await this.sendPrivateMessage(botQqUin, userQqUin, "这次投稿还在等你选匿名还是实名，回复 #匿名 或 #实名；不想继续可以发 #取消投稿。");
+        await this.sendPrivateMessage(botQqUin, userQqUin, "这次投稿还在等你选匿名还是实名，回复 #匿名 或 #实名；不想继续投稿可以发 #取消本次投稿。");
         return;
       }
 
@@ -812,7 +812,7 @@ export class OneBotRuntime {
           if (draft.awaitingImageDecision) {
             const decision = parsePrivatePostImageDecisionText(draftText);
             if (!decision) {
-              await this.sendPrivateMessage(botQqUin, userQqUin, "现在请回复 #添加图片 / #是 或 #不添加图片 / #否；不想继续可以发 #取消投稿。");
+              await this.sendPrivateMessage(botQqUin, userQqUin, "现在请回复 #是 或 #否 选择是否添加图片；不想继续投稿可以发 #取消本次投稿。");
               return;
             }
 
@@ -822,7 +822,7 @@ export class OneBotRuntime {
               return;
             }
 
-            await this.sendPrivateMessage(botQqUin, userQqUin, "好的，请开始发送图片，发完图片后再发 #结束投稿 提交稿件；发送 #取消投稿 放弃。");
+            await this.sendPrivateMessage(botQqUin, userQqUin, "好的，请开始发送图片，发完图片后再发 #结束投稿 提交稿件；发送 #取消本次投稿 放弃。");
             return;
           }
 
@@ -1199,7 +1199,7 @@ export class OneBotRuntime {
     const parts = [
       `我先帮你记下啦：正文 ${text.length} 字${attachmentCount > 0 ? `，图片 ${attachmentCount} 张` : ""}。`,
       "现在回复 #匿名 或 #实名 选择投稿方式。",
-      "如果不想继续，可以发 #取消投稿。",
+      "如果不想继续投稿，可以发 #取消本次投稿。",
     ];
     return parts.join("\n");
   }
@@ -1239,7 +1239,7 @@ export class OneBotRuntime {
     await this.sendPrivateMessage(
       botQqUin,
       userQqUin,
-      `我已记录正文（${pending.text.length} 字${have}）。\n现在回复 #添加图片 / #是 或 #不添加图片 / #否 选择是否添加图片；不想继续可以发 #取消投稿。`,
+      `我已记录正文（${pending.text.length} 字${have}）。\n现在回复 #是 或 #否 选择是否添加图片；不想继续投稿可以发 #取消本次投稿。`,
     );
   }
 
