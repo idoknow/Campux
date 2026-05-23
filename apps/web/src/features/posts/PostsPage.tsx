@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  CameraIcon,
   CheckIcon,
   ClockIcon,
   EyeOffIcon,
@@ -14,7 +13,6 @@ import {
   SlidersHorizontalIcon,
   SparklesIcon,
   UserIcon,
-  UserRoundIcon,
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -1005,7 +1003,7 @@ function ReviewList({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2 md:gap-3">
       {posts.map((post, index) => (
         <ReviewCard
           key={post.id}
@@ -1070,7 +1068,7 @@ function PendingRecallQueue({
         </div>
         <Badge className="rounded-full bg-white text-violet-700 shadow-none ring-1 ring-violet-200 dark:bg-violet-950 dark:text-violet-100 dark:ring-violet-800">{posts.length} 条</Badge>
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2 md:gap-3">
         {posts.map((post, index) => (
           <ReviewCard
             key={post.id}
@@ -1133,7 +1131,7 @@ function ReviewCard({
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
-      <CardContent className="grid gap-3 p-3">
+      <CardContent className="grid gap-2 p-2.5 md:gap-3 md:p-3">
         <PostMetaHeader
           displayId={`稿件 ${post.displayId}`}
           anonymous={post.anonymous}
@@ -1149,32 +1147,23 @@ function ReviewCard({
           }
         />
 
-        <div className="product-subsection p-3">
-          <div className="flex items-start gap-2">
-            <span className="grid size-9 shrink-0 place-items-center rounded-md bg-white text-slate-600 ring-1 ring-slate-200">
-              <UserRoundIcon className="size-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="truncate text-sm font-semibold text-slate-950">{authorName}</p>
-                <Badge className="rounded-full bg-white text-slate-600 ring-1 ring-slate-200 shadow-none">QQ {authorQq}</Badge>
-              </div>
-              <p className="mt-1 break-all text-xs font-bold text-slate-500">账号 ID：{post.author?.id ?? "未知"}</p>
-            </div>
-          </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-500">
+          <span className="min-w-0 truncate text-slate-800">{authorName}</span>
+          <span>QQ {authorQq}</span>
+          {post.author?.id ? <span className="hidden break-all sm:inline">账号 {shortId(post.author.id)}</span> : null}
         </div>
 
-        <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} />
+        <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact />
 
         {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
         {canApproveRecall && post.recallIgnored ? <IgnoredRecallBlock ignoredAt={post.recallIgnoredAt} /> : null}
 
-        {images.length > 0 ? <ImageGallery images={images} reviewMode onImageClick={onImagePreview} /> : <NoImagePill />}
+        {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
-            <span className="break-all">内部 ID：{shortId(post.id)}</span>
-            <span>创建：{formatFullDateTime(post.createdAt)}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+            <span>{formatPostDate(post.createdAt)}</span>
+            <span className="hidden sm:inline">内部 {shortId(post.id)}</span>
           </div>
           {canReviewPost ? (
             <div className="flex gap-2">
@@ -1245,7 +1234,7 @@ function PostList({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2 md:gap-3">
       {posts.map((post, index) => (
         <PostCard
           key={post.id}
@@ -1289,7 +1278,7 @@ function PostCard({
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
-      <CardContent className="grid gap-3 p-3">
+      <CardContent className="grid gap-2 p-2.5 md:gap-3 md:p-3">
         <PostMetaHeader
           displayId={post.displayId}
           anonymous={post.anonymous}
@@ -1307,11 +1296,11 @@ function PostCard({
           }
         />
 
-        <PostTextBlock text={post.text} createdAt={post.createdAt} />
+        <PostTextBlock text={post.text} createdAt={post.createdAt} compact />
 
         {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
 
-        {images.length > 0 ? <ImageGallery images={images} onImageClick={onImagePreview} /> : <NoImagePill />}
+        {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
           <span className="inline-flex items-center gap-1">
@@ -1348,18 +1337,18 @@ function PostMetaHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="flex flex-wrap items-start justify-between gap-2 md:gap-3">
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
           <InfoPill icon={HashIcon}>{displayId}</InfoPill>
           <VisibilityPill anonymous={anonymous}>{anonymousLabel}</VisibilityPill>
           <InfoPill icon={ImageIcon}>{imageCount} 张图</InfoPill>
         </div>
-        {title ? <h3 className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-slate-950">{title}</h3> : null}
+        {title ? <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-5 text-slate-950 md:mt-2 md:line-clamp-2 md:text-base md:leading-6">{title}</h3> : null}
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 md:gap-2">
         {actions}
-        <Badge className={`rounded-full px-2.5 py-1 text-xs font-semibold shadow-none ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
+        <Badge className={`rounded-full px-2 py-0.5 text-xs font-semibold shadow-none md:px-2.5 md:py-1 ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
       </div>
     </div>
   );
@@ -1367,7 +1356,7 @@ function PostMetaHeader({
 
 function PreviewButton({ onClick }: { onClick: () => void }) {
   return (
-    <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold" onClick={onClick}>
+    <Button variant="outline" size="sm" className="h-7 px-2 text-xs font-bold md:h-8" onClick={onClick}>
       <ImageIcon data-icon="inline-start" />
       预览图
     </Button>
@@ -1392,7 +1381,26 @@ function RecallRequestButton({ busy, onClick }: { busy: boolean; onClick: () => 
   );
 }
 
-function PostTextBlock({ text, createdAt, updatedAt }: { text: string; createdAt: string; updatedAt?: string }) {
+function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: string; createdAt: string; updatedAt?: string; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2">
+        <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
+          <span className="inline-flex items-center gap-1">
+            <FileTextIcon className="size-3" />
+            {text.length} 字
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <ClockIcon className="size-3" />
+            {formatFullDateTime(createdAt)}
+          </span>
+          {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
+        </div>
+        <p className="line-clamp-3 whitespace-pre-wrap text-sm font-medium leading-5 text-slate-800 md:line-clamp-4">{text}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="product-row-card p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
@@ -1431,8 +1439,8 @@ function IgnoredRecallBlock({ ignoredAt }: { ignoredAt?: string | null }) {
 
 function InfoPill({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
-      <Icon className="size-3.5" />
+    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-slate-700 md:px-2 md:py-1 md:text-xs">
+      <Icon className="size-3 md:size-3.5" />
       {children}
     </span>
   );
@@ -1445,23 +1453,33 @@ function VisibilityPill({ anonymous, children }: { anonymous: boolean; children:
     : "border-sky-200 bg-sky-50 text-sky-800 ring-1 ring-sky-200";
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-black shadow-none ${className}`}>
-      <Icon className="size-3.5" />
+    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-black shadow-none md:gap-1.5 md:px-2.5 md:py-1 md:text-xs ${className}`}>
+      <Icon className="size-3 md:size-3.5" />
       {children}
     </span>
   );
 }
 
-function NoImagePill() {
-  return (
-    <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500">
-      <CameraIcon className="size-3.5" />
-      没有配图
-    </div>
-  );
-}
+function ImageGallery({ images, reviewMode = false, compact = false, onImageClick }: { images: PostImage[]; reviewMode?: boolean; compact?: boolean; onImageClick?: (images: PostImage[], index: number) => void }) {
+  if (compact) {
+    return (
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+        {images.slice(0, 5).map((image, index) => (
+          <button
+            key={image.key ?? `${image.url}-${index}`}
+            type="button"
+            className="relative size-12 shrink-0 overflow-hidden rounded-md bg-slate-50 text-left ring-1 ring-slate-200 transition hover:ring-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 md:size-14"
+            onClick={() => onImageClick?.(images, index)}
+            aria-label={`查看图片 ${index + 1}`}
+          >
+            <img src={getPostImageUrl(image)} alt={image.fileName ?? "稿件图片"} className="h-full w-full object-cover" loading="lazy" />
+            {index === 4 && images.length > 5 ? <div className="absolute inset-0 grid place-items-center bg-slate-950/45 text-sm font-black text-white">+{images.length - 5}</div> : null}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
-function ImageGallery({ images, reviewMode = false, onImageClick }: { images: PostImage[]; reviewMode?: boolean; onImageClick?: (images: PostImage[], index: number) => void }) {
   return (
     <div className={`mt-3 grid gap-2 ${reviewMode ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-3"}`}>
       {images.slice(0, reviewMode ? 9 : 6).map((image, index) => (
