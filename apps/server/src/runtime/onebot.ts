@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { Prisma } from "@campux/db";
 import {
@@ -44,13 +45,6 @@ type PendingAction = {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: Timer;
-};
-
-type FastifyBaseLogger = {
-  info: (...args: any[]) => void;
-  warn: (...args: any[]) => void;
-  error: (...args: any[]) => void;
-  debug?: (...args: any[]) => void;
 };
 
 type OneBotActionResponse = {
