@@ -1,5 +1,8 @@
 import { Buffer } from "node:buffer";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
+import { createS3Client } from "@campux/integrations";
 import { Prisma } from "@campux/db";
 import {
   BotWorkflowError,
@@ -13,7 +16,7 @@ import {
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
 import { writeAuditLog } from "../lib/audit";
-import { compressImageBuffer, deleteAttachmentObjects, readAttachmentObject, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
+import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
@@ -44,13 +47,6 @@ type PendingAction = {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: Timer;
-};
-
-type FastifyBaseLogger = {
-  info: (...args: any[]) => void;
-  warn: (...args: any[]) => void;
-  error: (...args: any[]) => void;
-  debug?: (...args: any[]) => void;
 };
 
 type OneBotActionResponse = {
@@ -637,20 +633,16 @@ export class OneBotRuntime {
     return selectReviewNotificationBot(bots);
   }
 
-  private async sendBotReviewGroupMessage(bot: { reviewGroupId: string | null } & Record<string, unknown>, message: unknown, logMessage: string) {
+  private async sendBotReviewGroupMessage(
+    bot: { qqUin: bigint; displayName?: string; reviewGroupId: string | null },
+    message: unknown,
+    logMessage: string,
+  ) {
     if (!bot.reviewGroupId) {
       return;
     }
-
-    const qqUin = bot.qqUin;
-    if (typeof qqUin !== "bigint" && typeof qqUin !== "number" && typeof qqUin !== "string") {
-      this.logger.warn({ bot }, "review notification bot missing qqUin");
-      return;
-    }
-
-    const botQqUin = qqUin.toString();
-    await this.sendGroupMessage(botQqUin, bot.reviewGroupId, message).catch((error) => {
-      this.logger.warn({ error, botQqUin, groupId: bot.reviewGroupId }, logMessage);
+    await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
+      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, logMessage);
     });
   }
 
@@ -1065,7 +1057,7 @@ export class OneBotRuntime {
         memberships: true,
       },
     });
-    const membership = operator?.memberships.find((item: { tenantId: string; role: string }) => item.tenantId === tenantId);
+    const membership = operator?.memberships.find((item) => item.tenantId === tenantId);
     if (!operator || !membership || !hasTenantRole(membership.role, "submitter")) {
       throw new BotWorkflowError("这个 QQ 还没有注册本校园墙，请先发 #注册账号。", 404);
     }
@@ -1263,7 +1255,7 @@ export class OneBotRuntime {
           return await fetchPrivatePostImage(resolvedUrl, fileName);
         }
       } catch (error) {
-        this.logger.debug?.({ error, botQqUin }, "onebot get_image fallback failed");
+        this.logger.debug({ error, botQqUin }, "onebot get_image fallback failed");
       }
     }
 
@@ -1394,7 +1386,7 @@ export class OneBotRuntime {
               },
             });
           },
-          { isolationLevel: "Serializable" },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
         break;
       } catch (error) {
@@ -1676,6 +1668,7 @@ export class OneBotRuntime {
     if (!this.config || !Array.isArray(attachments)) {
       return [];
     }
+    const s3 = createS3Client(this.config);
     const segments = [];
     for (const attachment of attachments) {
       const candidate = attachment as any;
@@ -1683,15 +1676,22 @@ export class OneBotRuntime {
         continue;
       }
       try {
-        const object = await readAttachmentObject(this.config, candidate.key);
-        if (!object) {
+        const object = await s3.send(
+          new GetObjectCommand({
+            Bucket: this.config.s3.bucket,
+            Key: candidate.key,
+          }),
+        );
+        const body = object.Body;
+        if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
           continue;
         }
-        const contentType = object.contentType ?? inferImageContentType(candidate.fileName ?? candidate.key);
+        const bytes = await body.transformToByteArray();
+        const contentType = object.ContentType ?? inferImageContentType(candidate.fileName ?? candidate.key);
         segments.push({
           type: "image",
           data: {
-            file: `base64://${object.bytes.toString("base64")}`,
+            file: `base64://${Buffer.from(bytes).toString("base64")}`,
             type: contentType,
           },
         });
@@ -1891,11 +1891,7 @@ function formatQZoneAutoRefreshReason(reason: string) {
 }
 
 function isTransactionSerializationFailure(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const code = (value as { code?: unknown }).code;
-  return code === "P2034";
+  return value instanceof Prisma.PrismaClientKnownRequestError && value.code === "P2034";
 }
 
 function normalizeImageFileName(value: unknown) {
