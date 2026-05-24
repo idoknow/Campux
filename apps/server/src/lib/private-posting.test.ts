@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText } from "./private-posting";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText, parsePrivatePostImageDecisionText } from "./private-posting";
 
 describe("private posting command parsing", () => {
   test("parses English hash start command", () => {
@@ -33,7 +33,12 @@ describe("private posting command parsing", () => {
   });
 
   test("detects add-image and no-image replies", () => {
-    // 图片确认交互已移除，客户端直接上传图片或继续发送正文。
+    expect(parsePrivatePostImageDecisionText("#添加图片")).toEqual({ addImages: true });
+    expect(parsePrivatePostImageDecisionText("＃要图片")).toEqual({ addImages: true });
+    expect(parsePrivatePostImageDecisionText("#是")).toEqual({ addImages: true });
+    expect(parsePrivatePostImageDecisionText("#不添加图片")).toEqual({ addImages: false });
+    expect(parsePrivatePostImageDecisionText("＃不要图")).toEqual({ addImages: false });
+    expect(parsePrivatePostImageDecisionText("#否")).toEqual({ addImages: false });
   });
 });
 
