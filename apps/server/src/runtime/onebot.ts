@@ -95,9 +95,6 @@ type OneBotMessageEvent = {
   };
 };
 
-// OneBot 消息段（segment）类型，兼容字符串或对象形式
-type OneBotMessageSegment = { type?: string; data?: Record<string, any> } | string;
-
 const privateHelp = [
   "可以发送 #注册账号 ，用当前 QQ 注册本校园墙账号。", ​
   "可以发送 #重置密码 ，重置你的登录密码。",
