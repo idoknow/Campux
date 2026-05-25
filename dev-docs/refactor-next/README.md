@@ -9,6 +9,7 @@
 3. [迁移路线与风险清单](./03-migration-plan.md)
 4. [CampuxNext 推进 Phase 文档](./04-implementation-phases.md)
 5. [运营管理员权限模型](./05-operations-admin-permission-model.md)
+6. [学校建模与 AI 自动审核设计](./06-school-modeling-ai-review.md)
 
 本次分析覆盖当前目录下的三个既有项目：
 
