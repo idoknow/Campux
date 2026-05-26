@@ -16,6 +16,11 @@ const tenantSummaryInclude = {
       key: "logo_url" as const,
     },
   },
+  aiSettings: {
+    select: {
+      enabled: true,
+    },
+  },
   _count: {
     select: {
       botAccounts: true,

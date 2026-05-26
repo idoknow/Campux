@@ -74,6 +74,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
                     key: "logo_url",
                   },
                 },
+                aiSettings: {
+                  select: {
+                    enabled: true,
+                  },
+                },
                 _count: {
                   select: {
                     botAccounts: true,
@@ -393,6 +398,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         metadata: {
           where: {
             key: "logo_url",
+          },
+        },
+        aiSettings: {
+          select: {
+            enabled: true,
           },
         },
         _count: {

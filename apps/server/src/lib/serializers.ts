@@ -7,6 +7,7 @@ export function toTenantSummary(
       posts?: number;
     };
     metadata?: Array<{ key: string; value: unknown }>;
+    aiSettings?: { enabled: boolean } | null;
   },
 ) {
   const logoUrl = tenant.metadata?.find((entry) => entry.key === "logo_url" && typeof entry.value === "string")?.value;
@@ -19,6 +20,7 @@ export function toTenantSummary(
     status: tenant.status,
     themeColor: tenant.themeColor,
     logoUrl: typeof logoUrl === "string" ? logoUrl : "",
+    aiEnabled: tenant.aiSettings?.enabled ?? true,
     botAccountCount: tenant._count?.botAccounts ?? 0,
     pendingPostCount: tenant._count?.posts ?? 0,
   };
@@ -42,6 +44,7 @@ export function toMembership(
         botAccounts?: number;
         posts?: number;
       };
+      aiSettings?: { enabled: boolean } | null;
     };
   },
 ) {

@@ -99,11 +99,13 @@ export function App() {
   const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
   const activeLogoUrl = (me?.authenticated ? selectedTenant?.logoUrl : hostTenant?.logoUrl)?.trim() || "/logo.svg";
   const availableNavItems = useMemo(() => {
+    const aiEnabled = selectedTenant?.aiEnabled ?? true;
+    const visibleNavItems = navItems.filter((item) => item.value !== "ai" || aiEnabled);
     if (!currentRole) {
-      return navItems.filter((item) => item.value !== "admin");
+      return visibleNavItems.filter((item) => item.value !== "admin");
     }
-    return navItems.filter((item) => canAccess(currentRole, item.minRole));
-  }, [currentRole]);
+    return visibleNavItems.filter((item) => canAccess(currentRole, item.minRole));
+  }, [currentRole, selectedTenant?.aiEnabled]);
 
   async function refreshMe() {
     const data = await api<MeResponse>("/api/me");
