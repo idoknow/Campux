@@ -66,7 +66,7 @@ const postsTabTitles: Record<PostsTab, string> = {
 const adminTabTitles: Record<AdminTab, string> = {
   users: "用户管理",
   bans: "封禁管理",
-  metadata: "元数据管理",
+  metadata: "系统设置",
   bots: "机器人管理",
   publish: "发布管理",
 };

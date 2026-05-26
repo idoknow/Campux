@@ -53,7 +53,7 @@ type AiSettingsForm = {
   modelingNotes: string;
 };
 
-type PanelTab = "overview" | "backfill" | "settings" | "recent";
+type PanelTab = "overview" | "backfill" | "recent";
 
 type LlmTestResult = {
   ok: boolean;
@@ -553,7 +553,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
         {panelOpen ? (
           <DraggableWindow
             title="图谱信息"
-            subtitle="概览、批次、设置、样本"
+            subtitle="概览、批次、样本"
             icon={InfoIcon}
             position={windowPositions.panel}
             minimized={minimizedWindows.panel}
@@ -783,7 +783,6 @@ function FloatingPanel({
   const tabs: Array<{ key: PanelTab; label: string; icon: typeof BotIcon }> = [
     { key: "overview", label: "概览", icon: ActivityIcon },
     { key: "backfill", label: "批次", icon: Layers3Icon },
-    { key: "settings", label: "设置", icon: KeyRoundIcon },
     { key: "recent", label: "样本", icon: DatabaseIcon },
   ];
   return (
@@ -812,19 +811,6 @@ function FloatingPanel({
             onRetry={onRetryBackfill}
             onCancel={onCancelBackfill}
             onRefresh={onRefresh}
-          />
-        ) : null}
-        {panel === "settings" ? (
-          <SettingsPanel
-            overview={overview}
-            form={form}
-            busy={busy}
-            testing={testing}
-            testResult={testResult}
-            isAdmin={isAdmin}
-            onFormChange={onFormChange}
-            onSave={onSaveSettings}
-            onTest={onTestSettings}
           />
         ) : null}
         {panel === "recent" ? <RecentPanel analyses={overview.analyses} busy={busy} onAnalyze={onAnalyzePost} /> : null}
