@@ -1,6 +1,7 @@
 import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
+import { AiPage } from "@/features/ai/AiPage";
 import { PostPage } from "@/features/posts/PostPage";
 import { PostsPage } from "@/features/posts/PostsPage";
 import { StatsPage } from "@/features/stats/StatsPage";
@@ -88,7 +89,7 @@ export function AppShell({
           onSelectTenant={onSelectTenant}
         />
 
-        <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:mx-auto md:max-w-[980px] md:border-x md:border-slate-200">
+        <div className={`flex h-dvh w-full flex-col overflow-hidden bg-background ${activeTab === "ai" ? "md:max-w-none" : "md:mx-auto md:max-w-[980px] md:border-x md:border-slate-200"}`}>
           <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} />
 
           <main className="min-h-0 flex-1 overflow-hidden">
@@ -125,6 +126,10 @@ export function AppShell({
 
             <TabsContent value="services" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
               <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
+            </TabsContent>
+
+            <TabsContent value="ai" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+              <AiPage me={me} />
             </TabsContent>
 
             <TabsContent value="stats" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">

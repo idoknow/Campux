@@ -150,7 +150,6 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         displayId: post.displayId,
       },
     });
-
     await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
 
     return {
@@ -205,7 +204,6 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         comment: body.comment?.trim() || null,
       },
     });
-
     oneBot?.notifyReviewResult(updated.id, "rejected", body.comment?.trim() || "审核拒绝").catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify review rejection");
     });

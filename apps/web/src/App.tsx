@@ -30,6 +30,7 @@ type SelectTenantResponse = {
 const tabPaths: Record<MainTab, string> = {
   post: "/post",
   posts: "/posts",
+  ai: "/ai",
   stats: "/stats",
   services: "/services",
   admin: "/admin",
@@ -51,6 +52,7 @@ const adminTabPaths: Record<AdminTab, string> = {
 const mainTabTitles: Record<MainTab, string> = {
   post: "投稿",
   posts: "稿件",
+  ai: "AI",
   stats: "统计",
   services: "服务",
   admin: "管理",
