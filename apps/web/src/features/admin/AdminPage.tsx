@@ -6,6 +6,7 @@ import {
   BotIcon,
   CheckCircle2Icon,
   CopyIcon,
+  KeyRoundIcon,
   MegaphoneIcon,
   MessageSquareTextIcon,
   PlusIcon,
@@ -14,6 +15,8 @@ import {
   RotateCcwIcon,
   SaveIcon,
   ShieldCheckIcon,
+  SparklesIcon,
+  TestTube2Icon,
   Trash2Icon,
   UserRoundIcon,
   WifiIcon,
@@ -23,7 +26,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
 import { readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiOverview, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -105,6 +108,33 @@ type OAuthClientSecretModal = {
   clientSecret: string;
 };
 
+type AiSettingsForm = {
+  enabled: boolean;
+  mode: "local" | "llm";
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  clearApiKey: boolean;
+  temperature: number;
+  timeoutSeconds: number;
+  tone: string;
+  strictPrivacy: boolean;
+  allowedCategoriesText: string;
+  modelingKeywordsText: string;
+  modelingNotes: string;
+};
+
+type LlmTestResult = {
+  ok: boolean;
+  mode: "local" | "llm";
+  provider: string;
+  model: string;
+  baseUrl: string;
+  latencyMs: number | null;
+  message: string;
+};
+
 type TenantLogoUploadResponse = {
   logoUrl: string;
   metadata: TenantMetadata;
@@ -176,6 +206,10 @@ export function AdminPage({
   onSaved: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TenantSettingsForm>(() => toForm(selectedTenant, metadata));
+  const [aiOverview, setAiOverview] = useState<AiOverview | null>(null);
+  const [aiForm, setAiForm] = useState<AiSettingsForm | null>(null);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<LlmTestResult | null>(null);
   const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
   const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
   const [members, setMembers] = useState<AdminMember[]>([]);
@@ -296,7 +330,7 @@ export function AdminPage({
   async function refreshAdminData() {
     setAdminLoading(true);
     try {
-      const [memberData, botData, targetData, attemptData, banData, oauthSettingsData, oauthClientData] = await Promise.all([
+      const [memberData, botData, targetData, attemptData, banData, oauthSettingsData, oauthClientData, aiOverviewData] = await Promise.all([
         fetchMembers(memberPage),
         api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
         api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
@@ -304,6 +338,7 @@ export function AdminPage({
         fetchBanRecords(banPage),
         api<OAuthClientSettingsResponse>("/api/admin/oauth/settings"),
         api<{ clients: OAuthClientItem[] }>("/api/admin/oauth/clients"),
+        api<AiOverview>("/api/ai/overview"),
       ]);
       setMembers(memberData.members);
       setMemberPagination(memberData.pagination);
@@ -315,6 +350,8 @@ export function AdminPage({
       setBanPagination(banData.pagination);
       setOAuthSettings(oauthSettingsData.settings);
       setOAuthClients(oauthClientData.clients);
+      setAiOverview(aiOverviewData);
+      setAiForm(aiSettingsToForm(aiOverviewData.settings));
     } finally {
       setAdminLoading(false);
     }
@@ -391,7 +428,7 @@ export function AdminPage({
         }),
       });
       await onSaved();
-      toast.success("元数据已保存。");
+      toast.success("系统设置已保存。");
     } catch (caught) {
       toast.error(caught instanceof SyntaxError ? "服务入口 JSON 格式不正确" : caught instanceof Error ? caught.message : "保存失败");
     } finally {
@@ -412,6 +449,71 @@ export function AdminPage({
       toast.error(caught instanceof Error ? caught.message : "保存 OAuth 设置失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function buildAiSettingsPayload() {
+    if (!aiForm) return null;
+    const rules: AiRules = {
+      tone: aiForm.tone.trim(),
+      strictPrivacy: aiForm.strictPrivacy,
+      allowedCategories: lines(aiForm.allowedCategoriesText),
+      modelingKeywords: lines(aiForm.modelingKeywordsText),
+      modelingNotes: aiForm.modelingNotes.trim(),
+    };
+    return {
+      enabled: aiForm.enabled,
+      mode: aiForm.mode,
+      provider: aiForm.provider.trim(),
+      baseUrl: aiForm.baseUrl.trim(),
+      model: aiForm.model.trim(),
+      apiKey: aiForm.apiKey.trim() || undefined,
+      clearApiKey: aiForm.clearApiKey,
+      temperature: aiForm.temperature,
+      timeoutSeconds: aiForm.timeoutSeconds,
+      rules,
+    };
+  }
+
+  async function saveAiSettings() {
+    const payload = buildAiSettingsPayload();
+    if (!payload) return;
+    setBusy(true);
+    try {
+      const response = await api<{ settings: TenantAiSettings }>("/api/admin/ai/settings", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      setAiForm(aiSettingsToForm(response.settings));
+      setAiOverview((current) => current ? { ...current, settings: response.settings } : current);
+      setAiTestResult(null);
+      toast.success("AI 实验功能设置已保存。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "保存 AI 设置失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testAiSettings() {
+    const payload = buildAiSettingsPayload();
+    if (!payload) return;
+    setAiTesting(true);
+    try {
+      const response = await api<{ result: LlmTestResult }>("/api/admin/ai/settings/test", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setAiTestResult(response.result);
+      if (response.result.ok) {
+        toast.success(response.result.message);
+      } else {
+        toast.error(response.result.message);
+      }
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "LLM 测试失败");
+    } finally {
+      setAiTesting(false);
     }
   }
 
@@ -793,7 +895,7 @@ export function AdminPage({
             封禁
           </TabsTrigger>
           <TabsTrigger value="metadata" className={managementTabsTriggerClassName}>
-            元数据
+            系统设置
           </TabsTrigger>
           <TabsTrigger value="bots" className={managementTabsTriggerClassName}>
             机器人
@@ -883,6 +985,24 @@ export function AdminPage({
             <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <div className="flex flex-col gap-4">
                 <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} onUploaded={onSaved} />
+                {aiOverview && aiForm ? (
+                  <AdminAiSettingsPanel
+                    overview={aiOverview}
+                    form={aiForm}
+                    busy={busy}
+                    testing={aiTesting}
+                    testResult={aiTestResult}
+                    onFormChange={setAiForm}
+                    onSave={() => void saveAiSettings()}
+                    onTest={() => void testAiSettings()}
+                  />
+                ) : (
+                  <Card className="rounded-md border-slate-200 bg-white shadow-none">
+                    <CardContent className="p-4">
+                      <LoadingBlock title="正在加载 AI 实验功能设置" />
+                    </CardContent>
+                  </Card>
+                )}
                 <OAuthPanel
                   settings={oauthSettings}
                   clients={oauthClients}
@@ -1411,7 +1531,7 @@ function MetadataPanel({
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={MegaphoneIcon} title="元数据" description="校园墙名称、公告、投稿规则和服务入口" color="product-accent-green" />
+        <PanelTitle icon={MegaphoneIcon} title="系统设置" description="校园墙名称、公告、投稿规则和服务入口" color="product-accent-green" />
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="grid gap-1 text-sm font-medium">
             校园墙名称
@@ -1535,8 +1655,138 @@ function MetadataPanel({
         </div>
         <Button className="mt-4 px-5 font-medium" disabled={busy || logoUploading} onClick={onSave}>
           <SaveIcon data-icon="inline-start" />
-          保存元数据
+          保存系统设置
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AdminAiSettingsPanel({
+  overview,
+  form,
+  busy,
+  testing,
+  testResult,
+  onFormChange,
+  onSave,
+  onTest,
+}: {
+  overview: AiOverview;
+  form: AiSettingsForm;
+  busy: boolean;
+  testing: boolean;
+  testResult: LlmTestResult | null;
+  onFormChange: (form: AiSettingsForm) => void;
+  onSave: () => void;
+  onTest: () => void;
+}) {
+  return (
+    <Card className="rounded-md border-slate-200 bg-white shadow-none">
+      <CardContent className="p-4">
+        <PanelTitle
+          icon={SparklesIcon}
+          title="AI 实验功能"
+          description="开启校园建模、配置 LLM 能力和文本分析规则"
+          color="product-accent-violet"
+          action={<Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">实验性</Badge>}
+        />
+
+        <div className="mt-4 grid gap-4">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">启用 AI 建模</p>
+              <p className="mt-1 text-xs text-slate-500">{form.mode === "llm" ? "启用后使用 LLM 分析，失败时本地规则回退。" : "启用后使用本地文本规则分析。"}</p>
+            </div>
+            <Switch checked={form.enabled} disabled={busy || testing} onCheckedChange={(enabled) => onFormChange({ ...form, enabled })} />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1 text-sm font-medium">
+              模式
+              <Select value={form.mode} disabled={busy || testing} onValueChange={(mode) => onFormChange({ ...form, mode: mode as "local" | "llm" })}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">本地规则</SelectItem>
+                  <SelectItem value="llm">LLM</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Provider
+              <Input value={form.provider} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, provider: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium md:col-span-2">
+              Base URL
+              <Input value={form.baseUrl} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, baseUrl: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Model
+              <Input value={form.model} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, model: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              API Key
+              <Input
+                type="password"
+                value={form.apiKey}
+                placeholder={overview.settings.apiKeyConfigured ? "保持不变" : "未配置"}
+                disabled={busy || testing}
+                onChange={(event) => onFormChange({ ...form, apiKey: event.target.value, clearApiKey: false })}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Temperature
+              <Input type="number" step="0.1" min={0} max={1} value={form.temperature} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, temperature: Number(event.target.value) })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Timeout
+              <Input type="number" min={5} max={120} value={form.timeoutSeconds} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, timeoutSeconds: Number(event.target.value) })} />
+            </label>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1 text-sm font-medium">
+              墙号语气
+              <Input value={form.tone} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, tone: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              建模备注
+              <Input value={form.modelingNotes} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, modelingNotes: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              允许分类
+              <Textarea className="min-h-24" value={form.allowedCategoriesText} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, allowedCategoriesText: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              建模关键词
+              <Textarea className="min-h-24" value={form.modelingKeywordsText} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, modelingKeywordsText: event.target.value })} />
+            </label>
+          </div>
+
+          {testResult ? (
+            <div className={`rounded-md border p-3 text-sm font-semibold leading-6 ${testResult.ok ? "border-green-200 bg-green-50 text-green-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+              <div>{testResult.message}</div>
+              <div className="mt-1 text-xs opacity-80">{testResult.model} · {testResult.latencyMs === null ? "本地模式" : `${testResult.latencyMs}ms`}</div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            {overview.settings.apiKeyConfigured ? (
+              <Button type="button" variant="outline" disabled={busy || testing} onClick={() => onFormChange({ ...form, apiKey: "", clearApiKey: true })}>
+                <KeyRoundIcon data-icon="inline-start" />
+                清除 Key
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" disabled={busy || testing} onClick={onTest}>
+              <TestTube2Icon data-icon="inline-start" />
+              {testing ? "测试中" : "测试连接"}
+            </Button>
+            <Button type="button" disabled={busy || testing} onClick={onSave}>
+              <SaveIcon data-icon="inline-start" />
+              保存 AI 设置
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -2803,6 +3053,29 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
   };
+}
+
+function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
+  return {
+    enabled: settings.enabled,
+    mode: settings.mode,
+    provider: settings.provider,
+    baseUrl: settings.baseUrl ?? "",
+    model: settings.model ?? "",
+    apiKey: "",
+    clearApiKey: false,
+    temperature: settings.temperature,
+    timeoutSeconds: settings.timeoutSeconds,
+    tone: settings.rules.tone ?? "",
+    strictPrivacy: Boolean(settings.rules.strictPrivacy),
+    allowedCategoriesText: (settings.rules.allowedCategories ?? []).join("\n"),
+    modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
+    modelingNotes: settings.rules.modelingNotes ?? "",
+  };
+}
+
+function lines(value: string) {
+  return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
 }
 
 function defaultOAuthClientForm(): OAuthClientForm {

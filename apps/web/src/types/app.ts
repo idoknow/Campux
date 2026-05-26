@@ -1,6 +1,6 @@
 import type { TenantSummary } from "@campux/domain";
 
-export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
+export type MainTab = "post" | "posts" | "ai" | "stats" | "services" | "admin";
 export type PostsTab = "mine" | "review";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
@@ -323,6 +323,173 @@ export type AdminBotAccount = {
     displayName: string;
     enabled: boolean;
     required: boolean;
+  }>;
+};
+
+export type AiRules = {
+  tone?: string;
+  strictPrivacy?: boolean;
+  allowedCategories?: string[];
+  modelingKeywords?: string[];
+  modelingNotes?: string;
+};
+
+export type TenantAiSettings = {
+  enabled: boolean;
+  mode: "local" | "llm";
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKeyConfigured: boolean;
+  temperature: number;
+  timeoutSeconds: number;
+  rules: AiRules;
+};
+
+export type AiEntity = {
+  id: string;
+  type: string;
+  name: string;
+  aliases: unknown;
+  confidence: number;
+  source: string;
+  evidence: AiEntityEvidence[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  updatedAt: string;
+};
+
+export type AiEntityEvidence = {
+  text: string;
+  postId: string | null;
+  analysisId: string | null;
+  seenAt: string | null;
+  post: {
+    id: string;
+    displayId: number;
+    legacyTenantSlug: string | null;
+    legacyDisplayId: number | null;
+    legacyUuid: string | null;
+    text: string;
+    attachments: unknown;
+    anonymous: boolean;
+    status: string;
+    recallIgnored: boolean;
+    recallIgnoredAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+    author: {
+      id: string;
+      qqUin: string;
+      displayName: string | null;
+      email: string | null;
+    };
+  } | null;
+};
+
+export type AiAnalysisItem = {
+  id: string;
+  postId: string;
+  displayId: number;
+  postText: string;
+  postStatus: string;
+  postCreatedAt: string;
+  provider: string;
+  model: string;
+  status: string;
+  confidence: number | null;
+  categories: unknown;
+  entities: unknown;
+  reasons: unknown;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AiOverview = {
+  settings: TenantAiSettings;
+  snapshot: {
+    id: string;
+    version: number;
+    status: string;
+    summary: string;
+    entities: unknown;
+    modelingMemory: unknown;
+    rules: unknown;
+    metrics: unknown;
+    createdAt: string;
+  } | null;
+  entities: AiEntity[];
+  analyses: AiAnalysisItem[];
+  metrics: {
+    totalEntities: number;
+    entityTypeCounts: Record<string, number>;
+    analyzedPosts: number;
+    runningPosts: number;
+    failedPosts: number;
+    categoryCounts: Record<string, number>;
+  };
+  graph: {
+    nodes: Array<{
+      id: string;
+      label: string;
+      kind: string;
+      weight: number;
+      score?: number;
+      radius?: number;
+      degree?: number;
+      community?: string;
+      entityId?: string;
+      entityType?: string;
+      confidence?: number;
+      occurrenceCount?: number;
+      description?: string | null;
+    }>;
+    edges: Array<{
+      source: string;
+      target: string;
+      label: string;
+      type?: string;
+      weight: number;
+      confidence?: number;
+      signalCount?: number;
+      directed?: boolean;
+    }>;
+    stats?: {
+      entityNodes: number;
+      relationEdges: number;
+      cooccurrenceEdges: number;
+      communities: number;
+    };
+  };
+  backfills: AiBackfillBatch[];
+};
+
+export type AiBackfillBatch = {
+  id: string;
+  tenantId: string;
+  actorId: string | null;
+  status: string;
+  mode: "missing" | "failed" | "all" | string;
+  totalCount: number;
+  queuedCount: number;
+  runningCount: number;
+  succeededCount: number;
+  skippedCount: number;
+  failedCount: number;
+  maxAttempts: number;
+  lastError: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  logs: Array<{
+    id: string;
+    level: string;
+    event: string;
+    message: string;
+    detail: unknown;
+    createdAt: string;
   }>;
 };
 
