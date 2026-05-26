@@ -67,6 +67,11 @@ model Tenant {
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
   auditLogs      AuditLog[]
+  aiSettings     TenantAiSettings?
+  schoolEntities SchoolEntity[]
+  schoolModelSnapshots SchoolModelSnapshot[]
+  postAiAnalyses PostAiAnalysis[]
+  aiBackfillBatches AiBackfillBatch[]
 }
 
 model User {
@@ -85,6 +90,7 @@ model User {
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
+  aiBackfillBatches AiBackfillBatch[]
 }
 
 model EmailVerificationCode {
@@ -232,6 +238,8 @@ model Post {
   author          User             @relation(fields: [authorId], references: [id])
   logs            PostLog[]
   publishAttempts PublishAttempt[]
+  aiAnalyses      PostAiAnalysis[]
+  aiBackfillItems AiBackfillItem[]
 
   @@unique([tenantId, displayId])
   @@unique([tenantId, legacyDisplayId])
@@ -366,4 +374,143 @@ model AuditLog {
   @@index([tenantId, createdAt])
   @@index([actorId, createdAt])
   @@index([action, createdAt])
+}
+
+model TenantAiSettings {
+  id                         String   @id @default(uuid())
+  tenantId                   String   @unique
+  enabled                    Boolean  @default(true)
+  mode                       String   @default("local") // local | llm
+  provider                   String   @default("openai_compatible")
+  baseUrl                    String   @default("https://api.openai.com/v1")
+  model                      String   @default("gpt-4.1-mini")
+  apiKeySecret               Json?
+  temperature                Float    @default(0.2)
+  timeoutSeconds             Int      @default(30)
+  rules                      Json     @default("{}")
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  tenant                     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model SchoolEntity {
+  id          String   @id @default(uuid())
+  tenantId    String
+  type        String
+  name        String
+  aliases     Json     @default("[]")
+  confidence  Float    @default(0.5)
+  source      String
+  evidence    Json     @default("[]")
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, type])
+  @@unique([tenantId, type, name])
+}
+
+model SchoolModelSnapshot {
+  id         String   @id @default(uuid())
+  tenantId   String
+  version    Int
+  status     String   @default("active")
+  summary    String
+  entities   Json
+  modelingMemory Json
+  rules      Json
+  metrics    Json     @default("{}")
+  createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  analyses   PostAiAnalysis[]
+
+  @@unique([tenantId, version])
+  @@index([tenantId, status, createdAt])
+}
+
+model PostAiAnalysis {
+  id                String   @id @default(uuid())
+  tenantId          String
+  postId            String
+  modelSnapshotId   String?
+  provider          String
+  model             String
+  status            String   @default("pending")
+  confidence        Float?
+  categories        Json     @default("[]")
+  entities          Json     @default("[]")
+  reasons           Json     @default("[]")
+  rawOutput         Json?
+  error             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  modelSnapshot     SchoolModelSnapshot? @relation(fields: [modelSnapshotId], references: [id], onDelete: SetNull)
+
+  @@unique([postId])
+  @@index([tenantId, status, createdAt])
+}
+
+model AiBackfillBatch {
+  id             String   @id @default(uuid())
+  tenantId       String
+  actorId        String?
+  status         String   @default("queued")
+  mode           String   @default("missing")
+  totalCount     Int      @default(0)
+  queuedCount    Int      @default(0)
+  runningCount   Int      @default(0)
+  succeededCount Int      @default(0)
+  skippedCount   Int      @default(0)
+  failedCount    Int      @default(0)
+  maxAttempts    Int      @default(3)
+  lastError      String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor          User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  items          AiBackfillItem[]
+  logs           AiBackfillLog[]
+
+  @@index([tenantId, status, createdAt])
+}
+
+model AiBackfillItem {
+  id          String   @id @default(uuid())
+  tenantId    String
+  batchId     String
+  postId      String
+  status      String   @default("queued")
+  attempts    Int      @default(0)
+  nextRunAt   DateTime @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  batch       AiBackfillBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, postId])
+  @@index([tenantId, status, nextRunAt])
+  @@index([batchId, status, nextRunAt])
+}
+
+model AiBackfillLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  batchId   String
+  level     String   @default("info")
+  event     String
+  message   String
+  detail    Json     @default("{}")
+  createdAt DateTime @default(now())
+  batch     AiBackfillBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([batchId, createdAt])
 }

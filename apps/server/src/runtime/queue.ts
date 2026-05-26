@@ -4,7 +4,11 @@ export type RuntimeJobName =
   | "notifyNewPost"
   | "notifyPostCancelled"
   | "notifyReviewResult"
-  | "publishPost";
+  | "publishPost"
+  | "aiAnalyzePost"
+  | "refreshSchoolModel"
+  | "aiBackfillBatch"
+  | "aiBackfillItem";
 
 export type RuntimeJob = {
   id: string;

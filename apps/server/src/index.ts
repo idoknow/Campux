@@ -7,9 +7,11 @@ import fastifyStatic from "@fastify/static";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
 import { OneBotRuntime } from "./runtime/onebot";
+import { recoverAiBackfillJobs, registerCampusModelingWorker } from "./runtime/campus-modeling";
 import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publishing";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
+import { registerAiRoutes } from "./routes/ai";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerBotRoutes } from "./routes/bot";
 import { registerHealthRoutes } from "./routes/health";
@@ -48,16 +50,18 @@ const queue = createRuntimeQueue({
 });
 const oneBot = new OneBotRuntime(queue, app.log, config);
 registerPublishingWorker(queue, app.log, config, oneBot);
+registerCampusModelingWorker(queue, app.log);
 
 await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
 registerAuthRoutes(app, config);
 registerTenantRoutes(app);
 registerMetadataRoutes(app, config);
+registerAiRoutes(app, queue);
 registerOAuthRoutes(app);
 registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
-registerPostRoutes(app, config, oneBot);
+registerPostRoutes(app, config, queue, oneBot);
 registerReviewRoutes(app, queue, oneBot);
 registerStatsRoutes(app);
 registerSystemRoutes(app, queue);
@@ -85,6 +89,7 @@ app.addHook("onClose", async () => {
 
 await queue.start();
 await recoverPublishAttempts(queue, app.log);
+await recoverAiBackfillJobs(queue, app.log);
 const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
 
 app.addHook("onClose", async () => {

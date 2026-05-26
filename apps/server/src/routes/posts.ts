@@ -15,6 +15,8 @@ import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
+import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
+import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 
 const fileQuerySchema = z.object({
@@ -128,7 +130,7 @@ function isTransactionSerializationFailure(value: unknown) {
   return value instanceof Prisma.PrismaClientKnownRequestError && value.code === "P2034";
 }
 
-export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, oneBot?: OneBotRuntime) {
+export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
@@ -331,6 +333,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, o
       oneBot?.notifyNewPost(post.id).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to notify review group");
       });
+      enqueueAiAnalyzePost(queue, context.selectedTenant.id, post.id);
 
       return {
         post: toPostListItem(post),
