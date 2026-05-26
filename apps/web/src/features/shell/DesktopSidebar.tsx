@@ -52,7 +52,12 @@ export function DesktopSidebar({
                 className="h-9 justify-start rounded-full px-3 text-sm text-slate-600 shadow-none data-[state=active]:bg-blue-50 data-[state=active]:font-bold data-[state=active]:text-blue-700 data-[state=active]:shadow-none"
               >
                 <Icon className="mr-2 size-4.5" strokeWidth={2.1} />
-                {item.label}
+                <span className="min-w-0 truncate">{item.label}</span>
+                {item.badge ? (
+                  <span className="ml-auto rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-black leading-none text-amber-700 ring-1 ring-amber-200">
+                    {item.badge}
+                  </span>
+                ) : null}
               </TabsTrigger>
             );
           })}
