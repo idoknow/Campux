@@ -8,6 +8,7 @@ export type NavItem = {
   emoji: string;
   icon: LucideIcon;
   minRole: TenantRole;
+  badge?: string;
 };
 
 export const defaultMetadata: TenantMetadata = {
@@ -37,7 +38,7 @@ export const navItems = [
   { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },
   { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon, minRole: "submitter" },
   { value: "services", label: "服务", emoji: "🛠", icon: WrenchIcon, minRole: "submitter" },
-  { value: "ai", label: "AI", emoji: "AI", icon: SparklesIcon, minRole: "reviewer" },
+  { value: "ai", label: "AI", emoji: "AI", icon: SparklesIcon, minRole: "reviewer", badge: "实验性" },
   { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "admin" },
   { value: "stats", label: "统计", emoji: "📊", icon: BarChart3Icon, minRole: "reviewer" },
 ] satisfies NavItem[];
