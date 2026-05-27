@@ -74,6 +74,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
                     key: "logo_url",
                   },
                 },
+                aiSettings: {
+                  select: {
+                    enabled: true,
+                  },
+                },
                 _count: {
                   select: {
                     botAccounts: true,
@@ -378,7 +383,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const membership = context.memberships.find((item) => item.tenantId === body.tenantId);
-    if (!membership && context.user.systemRole !== "system_operator") {
+    const effectiveMembership = membership ?? (context.user.systemRole === "system_operator" ? { id: `system-operator:${body.tenantId}`, role: "admin" as const } : null);
+    if (!effectiveMembership) {
       return reply.code(403).send({ message: "没有访问该校园墙的权限" });
     }
 
@@ -393,6 +399,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         metadata: {
           where: {
             key: "logo_url",
+          },
+        },
+        aiSettings: {
+          select: {
+            enabled: true,
           },
         },
         _count: {
@@ -411,7 +422,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     return {
       ok: true,
       currentTenant: toTenantSummary(tenant),
-      currentMembership: membership ? { id: membership.id, role: membership.role } : null,
+      currentMembership: { id: effectiveMembership.id, role: effectiveMembership.role },
       activeBan: membership ? toActiveBan(await findActiveBan(body.tenantId, context.user.id)) : null,
     };
   });

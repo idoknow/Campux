@@ -486,6 +486,7 @@ export function AdminPage({
       });
       setAiForm(aiSettingsToForm(response.settings));
       setAiOverview((current) => current ? { ...current, settings: response.settings } : current);
+      await onSaved();
       setAiTestResult(null);
       toast.success("AI 实验功能设置已保存。");
     } catch (caught) {

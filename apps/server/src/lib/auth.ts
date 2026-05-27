@@ -16,6 +16,11 @@ const tenantSummaryInclude = {
       key: "logo_url" as const,
     },
   },
+  aiSettings: {
+    select: {
+      enabled: true,
+    },
+  },
   _count: {
     select: {
       botAccounts: true,
@@ -131,7 +136,8 @@ export async function getSessionContext(request: FastifyRequest) {
   const hostTenant = await findTenantByRequestHost(request);
   if (hostTenant) {
     const hostMembership = session.user.memberships.find((membership) => membership.tenantId === hostTenant.id);
-    if (!hostMembership) {
+    const selectedMembership = hostMembership ?? syntheticSystemOperatorMembership(session.user.id, hostTenant.id, session.user.systemRole);
+    if (!selectedMembership) {
       return null;
     }
     if (session.selectedTenantId !== hostTenant.id) {
@@ -143,14 +149,14 @@ export async function getSessionContext(request: FastifyRequest) {
       session.selectedTenant = hostTenant;
     }
 
-    const activeBan = await findActiveBan(hostTenant.id, session.user.id);
+    const activeBan = hostMembership ? await findActiveBan(hostTenant.id, session.user.id) : null;
 
     return {
       session,
       user: session.user,
-      memberships: [hostMembership],
+      memberships: hostMembership ? [hostMembership] : [],
       selectedTenant: hostTenant,
-      selectedMembership: hostMembership,
+      selectedMembership,
       activeBan,
       hostTenant,
     };
@@ -158,6 +164,7 @@ export async function getSessionContext(request: FastifyRequest) {
 
   const selectedMembership = session.selectedTenantId
     ? session.user.memberships.find((membership) => membership.tenantId === session.selectedTenantId)
+      ?? syntheticSystemOperatorMembership(session.user.id, session.selectedTenantId, session.user.systemRole)
     : null;
 
   return {
@@ -166,9 +173,31 @@ export async function getSessionContext(request: FastifyRequest) {
     memberships: session.user.memberships,
     selectedTenant: session.selectedTenant,
     selectedMembership,
-    activeBan: session.selectedTenantId ? await findActiveBan(session.selectedTenantId, session.user.id) : null,
+    activeBan: session.selectedTenantId && selectedMembership && !isSyntheticSystemOperatorMembership(selectedMembership.id) ? await findActiveBan(session.selectedTenantId, session.user.id) : null,
     hostTenant: null,
   };
+}
+
+function syntheticSystemOperatorMembership(userId: string, tenantId: string, systemRole: SystemRole | null) {
+  if (systemRole !== "system_operator") {
+    return null;
+  }
+
+  return {
+    id: syntheticSystemOperatorMembershipId(tenantId),
+    tenantId,
+    userId,
+    role: "admin" as const,
+    createdAt: new Date(0),
+  };
+}
+
+function syntheticSystemOperatorMembershipId(tenantId: string) {
+  return `system-operator:${tenantId}`;
+}
+
+function isSyntheticSystemOperatorMembership(id: string) {
+  return id.startsWith("system-operator:");
 }
 
 export async function findActiveBan(tenantId: string, userId: string) {
