@@ -74,7 +74,15 @@ function defaultPagination(): Pagination {
   };
 }
 
-export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanelMode; onTenantCreated?: (() => Promise<void>) | undefined }) {
+export function OpsPanel({
+  mode = "system",
+  onTenantCreated,
+  onEnterTenant,
+}: {
+  mode?: OpsPanelMode;
+  onTenantCreated?: (() => Promise<void>) | undefined;
+  onEnterTenant?: ((tenantId: string) => Promise<void>) | undefined;
+}) {
   const isSystemMode = mode === "system";
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
@@ -103,6 +111,7 @@ export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanel
   const [membershipForm, setMembershipForm] = useState<{ tenantId: string; role: TenantRole | SystemRole }>({ tenantId: "", role: "submitter" });
   const [busyStatus, setBusyStatus] = useState<TenantStatus | "">("");
   const [creatingTenant, setCreatingTenant] = useState(false);
+  const [enteringTenantId, setEnteringTenantId] = useState("");
   const [savingHost, setSavingHost] = useState(false);
   const [savingManagementHost, setSavingManagementHost] = useState(false);
   const [hostDraft, setHostDraft] = useState("");
@@ -332,6 +341,22 @@ export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanel
     }
   }
 
+  async function enterTenantAsAdmin(tenant: SystemTenant) {
+    if (!onEnterTenant) {
+      return;
+    }
+
+    setEnteringTenantId(tenant.id);
+    try {
+      await onEnterTenant(tenant.id);
+      toast.success(`正在以管理员身份进入 ${tenant.name}。`);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "进入校园墙失败");
+    } finally {
+      setEnteringTenantId("");
+    }
+  }
+
   function toggleUserRoleFilter(role: SystemUserRoleFilter) {
     setSelectedUserRoleFilters((current) => (current.includes(role) ? current.filter((item) => item !== role) : [...current, role]));
     setUserPage(1);
@@ -415,6 +440,26 @@ export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanel
       await Promise.all([refreshOperationsAdmins(), refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "移除访问权失败");
+    } finally {
+      setAccessBusyKey("");
+    }
+  }
+
+  async function revokeUserTenantMembership(user: SystemUser, membership: SystemUser["memberships"][number]) {
+    if (!window.confirm(`确认移除 ${user.displayName ?? user.qqUin} 在 ${membership.tenant.name} 的${roleLabels[membership.role]}身份？`)) {
+      return;
+    }
+
+    const busyKey = `revoke:${membership.id}`;
+    setAccessBusyKey(busyKey);
+    try {
+      await api(`/api/system/users/${user.id}/memberships/${membership.id}`, {
+        method: "DELETE",
+      });
+      toast.success(`已移除 ${membership.tenant.name} 的${roleLabels[membership.role]}身份。`);
+      await Promise.all([refreshOperationsAdmins(), refreshUsers(userPage), refreshOverview(selectedTenantId), refreshAudit(1)]);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "删除租户身份失败");
     } finally {
       setAccessBusyKey("");
     }
@@ -538,7 +583,14 @@ export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanel
                   <p className="mt-1 text-sm text-slate-500">{selectedTenant.slug}</p>
                   <p className="mt-1 text-sm font-semibold text-slate-500">{selectedTenant.host ?? "未绑定专属 host"}</p>
                 </div>
-                <Badge variant={selectedTenant.status === "active" ? "secondary" : "outline"}>{statusLabels[selectedTenant.status]}</Badge>
+                <div className="flex flex-wrap items-center gap-2">
+                  {onEnterTenant ? (
+                    <Button size="sm" className="font-medium" disabled={enteringTenantId === selectedTenant.id} onClick={() => void enterTenantAsAdmin(selectedTenant)}>
+                      作为管理员进入
+                    </Button>
+                  ) : null}
+                  <Badge variant={selectedTenant.status === "active" ? "secondary" : "outline"}>{statusLabels[selectedTenant.status]}</Badge>
+                </div>
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -669,6 +721,7 @@ export function OpsPanel({ mode = "system", onTenantCreated }: { mode?: OpsPanel
                 }}
                 onTenantFilterChange={changeUserTenantFilter}
                 onOpenAssignMembership={openMembershipDialog}
+                onRevokeMembership={revokeUserTenantMembership}
                 onPageChange={setUserPage}
                 onToggleRoleFilter={toggleUserRoleFilter}
               />
@@ -975,6 +1028,7 @@ function GlobalUsersTable({
   onClearRoleFilters,
   onTenantFilterChange,
   onOpenAssignMembership,
+  onRevokeMembership,
   onPageChange,
   onToggleRoleFilter,
 }: {
@@ -993,6 +1047,7 @@ function GlobalUsersTable({
   onClearRoleFilters: () => void;
   onTenantFilterChange: (tenantId: string) => void;
   onOpenAssignMembership: (user: SystemUser) => void;
+  onRevokeMembership: (user: SystemUser, membership: SystemUser["memberships"][number]) => void;
   onPageChange: (page: number) => void;
   onToggleRoleFilter: (role: SystemUserRoleFilter) => void;
 }) {
@@ -1101,9 +1156,17 @@ function GlobalUsersTable({
                 {user.isTestAccount ? <Badge variant="outline">测试账号</Badge> : null}
                 {user.memberships.length === 0 ? <Badge variant="outline">未加入租户</Badge> : null}
                 {user.memberships.slice(0, 4).map((membership) => (
-                  <Badge key={membership.id} variant="outline">
+                  <span key={membership.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700">
                     {membership.tenant.name} · {roleLabels[membership.role]}
-                  </Badge>
+                    <button
+                      type="button"
+                      className="ml-0.5 inline-flex size-4 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      onClick={() => onRevokeMembership(user, membership)}
+                      aria-label={`删除 ${membership.tenant.name} 的${roleLabels[membership.role]}身份`}
+                    >
+                      <Trash2Icon className="size-3" />
+                    </button>
+                  </span>
                 ))}
                 {user.memberships.length > 4 ? <Badge variant="outline">+{user.memberships.length - 4}</Badge> : null}
               </div>
