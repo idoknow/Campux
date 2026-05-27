@@ -377,7 +377,7 @@ export async function recoverAiBackfillJobs(queue: RuntimeQueue, logger: Fastify
 export async function createAiBackfillBatch(queue: RuntimeQueue, tenantId: string, actorId: string | null, options: CreateAiBackfillOptions = {}) {
   const mode = normalizeBackfillMode(options.mode);
   const maxAttempts = Math.max(1, Math.min(8, Math.floor(options.maxAttempts ?? 3)));
-  const limit = options.limit === undefined ? undefined : Math.max(1, Math.min(50_000, Math.floor(options.limit)));
+  const limit = options.limit === undefined ? undefined : Math.max(1, Math.floor(options.limit));
 
   const active = await prisma.aiBackfillBatch.findFirst({
     where: {
@@ -551,17 +551,15 @@ export async function cancelAiBackfillBatch(tenantId: string, batchId: string) {
   return serializeBackfillBatch(batchId);
 }
 
-export async function listAiBackfillBatches(tenantId: string, take = 5) {
+export async function listAiBackfillBatches(tenantId: string) {
   const batches = await prisma.aiBackfillBatch.findMany({
     where: { tenantId },
     include: {
       logs: {
         orderBy: { createdAt: "desc" },
-        take: 20,
       },
     },
     orderBy: { createdAt: "desc" },
-    take,
   });
 
   return batches.map(serializeBackfillBatchRecord);
@@ -1063,7 +1061,7 @@ async function upsertSchoolEntities(tenantId: string, analysisId: string, postId
       },
     });
     const evidence = [
-      ...normalizeEvidence(existing?.evidence).slice(-9),
+      ...normalizeEvidence(existing?.evidence),
       {
         postId,
         analysisId,
@@ -1105,12 +1103,10 @@ export async function refreshSchoolModelSnapshot(tenantId: string) {
     prisma.schoolEntity.findMany({
       where: { tenantId },
       orderBy: [{ confidence: "desc" }, { lastSeenAt: "desc" }],
-      take: 300,
     }),
     prisma.postAiAnalysis.findMany({
       where: { tenantId, status: "completed" },
       orderBy: { updatedAt: "desc" },
-      take: 200,
     }),
     prisma.schoolModelSnapshot.findFirst({
       where: { tenantId },
@@ -1121,7 +1117,7 @@ export async function refreshSchoolModelSnapshot(tenantId: string) {
 
   const categoryCounts = countBy(analyses.flatMap((analysis) => normalizeStringArray(analysis.categories)));
   const entityTypeCounts = countBy(entities.map((entity) => entity.type));
-  const topModelingSignals = topStrings(analyses.flatMap((analysis) => normalizeStringArray(analysis.reasons)), 10);
+  const topModelingSignals = topStrings(analyses.flatMap((analysis) => normalizeStringArray(analysis.reasons)));
   const summary = buildSnapshotSummary(entities.length, analyses.length, categoryCounts, entityTypeCounts);
 
   await prisma.schoolModelSnapshot.updateMany({
@@ -1155,7 +1151,6 @@ export async function refreshSchoolModelSnapshot(tenantId: string) {
         entityTypeCounts,
         topModelingSignals,
         recentSamples: analyses
-          .slice(0, 12)
           .map((analysis) => ({
             postId: analysis.postId,
             categories: normalizeStringArray(analysis.categories),
@@ -1358,7 +1353,6 @@ async function serializeBackfillBatch(batchId: string) {
     include: {
       logs: {
         orderBy: { createdAt: "desc" },
-        take: 20,
       },
     },
   });
@@ -1448,10 +1442,9 @@ function countBy(values: string[]) {
   }, {});
 }
 
-function topStrings(values: string[], limit: number) {
+function topStrings(values: string[]) {
   return Object.entries(countBy(values))
     .sort((left, right) => right[1] - left[1])
-    .slice(0, limit)
     .map(([text, count]) => ({ text, count }));
 }
 
