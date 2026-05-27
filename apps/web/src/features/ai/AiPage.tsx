@@ -433,7 +433,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
   }
 
   const selectedEntity = useMemo(() => overview?.entities.find((entity) => entity.id === selectedEntityId) ?? null, [overview, selectedEntityId]);
-  const recentModelingAnalyses = useMemo(() => overview?.analyses.filter((item) => item.status === "completed").slice(0, 8) ?? [], [overview]);
+  const recentModelingAnalyses = useMemo(() => overview?.analyses.filter((item) => item.status === "completed") ?? [], [overview]);
   const activeBatch = overview?.backfills.find((batch) => batch.status === "queued" || batch.status === "running") ?? null;
 
   function moveWindow(key: FloatingWindowKey, position: FloatingWindowPosition) {
@@ -1034,7 +1034,7 @@ function BackfillPanel({
           </div>
           {latest.lastError ? <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs font-semibold leading-5 text-rose-700">{latest.lastError}</div> : null}
           <div className="space-y-1.5">
-            {latest.logs.length === 0 ? <EmptyCard title="暂无日志" /> : latest.logs.slice(0, 12).map((log) => (
+            {latest.logs.length === 0 ? <EmptyCard title="暂无日志" /> : latest.logs.map((log) => (
               <div key={log.id} className="flex gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
                 <span className={`mt-1 size-2 shrink-0 rounded-full ${log.level === "error" ? "bg-rose-500" : log.level === "warn" ? "bg-amber-500" : "bg-blue-500"}`} />
                 <div className="min-w-0">
@@ -1084,7 +1084,7 @@ function GraphPanel({
   const fixedNodePositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const [graphSize, setGraphSize] = useState<GraphSize>({ width: 1200, height: 760 });
   const entityByNodeId = useMemo(() => new Map(overview.entities.map((entity) => [`entity:${entity.id}`, entity])), [overview.entities]);
-  const nodes = useMemo(() => overview.graph.nodes.slice(0, 180), [overview.graph.nodes]);
+  const nodes = useMemo(() => overview.graph.nodes, [overview.graph.nodes]);
   const normalizedSearch = normalizeSearchTerm(searchQuery);
   const matchedNodeIds = useMemo(() => {
     if (!normalizedSearch) return new Set<string>();
@@ -1095,8 +1095,10 @@ function GraphPanel({
   const searchActive = Boolean(normalizedSearch);
   const edges = useMemo(() => {
     const nodeIds = new Set(nodes.map((node) => node.id));
-    return overview.graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)).slice(0, 280);
+    return overview.graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
   }, [nodes, overview.graph.edges]);
+  const showNodeLabels = nodes.length <= 900 || searchActive || transform.scale >= 1.18;
+  const showEdgeLabels = edges.length <= 800 || searchActive || transform.scale >= 1.45;
   const graphBounds = useMemo(() => createGraphBounds(graphSize, nodes.length), [graphSize, nodes.length]);
   const positioned = useOrganicGraphLayout(nodes, edges, graphBounds, fixedNodePositionsRef);
   const byId = new Map(positioned.map((node) => [node.id, node]));
@@ -1277,7 +1279,7 @@ function GraphPanel({
             const target = byId.get(edge.target);
             if (!source || !target) return null;
             const searchRelated = !searchActive || matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target);
-            const relationLabel = edgeLabelText(edge);
+            const relationLabel = showEdgeLabels ? edgeLabelText(edge) : "";
             const relationLabelX = (source.x + target.x) / 2;
             const relationLabelY = (source.y + target.y) / 2 - 5;
             const relationLabelWidth = relationLabel ? edgeLabelWidth(relationLabel) : 0;
@@ -1353,9 +1355,11 @@ function GraphPanel({
                   ) : null}
                   <circle cx={node.x} cy={node.y} r={node.r + (selected ? 8 : 0)} fill={selected ? graphTheme.selectedHalo : graphTheme.nodeHalo} opacity={selected ? "0.18" : "0.82"} />
                   <circle cx={node.x} cy={node.y} r={node.r} fill={nodeFillForNode(node, graphTheme)} stroke={selected ? graphTheme.selectedStroke : graphTheme.nodeStroke} strokeWidth={selected ? 5 : 3} />
-                  <text x={node.x} y={node.y + node.r + 18} textAnchor="middle" className="pointer-events-none select-none text-[13px] font-bold" fill={graphTheme.labelText} stroke={graphTheme.labelStroke} strokeWidth="4" paintOrder="stroke">
-                    {shortLabel(node.label, labelLength)}
-                  </text>
+                  {showNodeLabels || searchMatched || selected ? (
+                    <text x={node.x} y={node.y + node.r + 18} textAnchor="middle" className="pointer-events-none select-none text-[13px] font-bold" fill={graphTheme.labelText} stroke={graphTheme.labelStroke} strokeWidth="4" paintOrder="stroke">
+                      {shortLabel(node.label, labelLength)}
+                    </text>
+                  ) : null}
                   <text x={node.x} y={node.y + 4} textAnchor="middle" className="pointer-events-none select-none fill-white text-[11px] font-black">
                     {entityTypeLabels[entity.type]?.slice(0, 2) ?? "实体"}
                   </text>
@@ -1368,9 +1372,11 @@ function GraphPanel({
                   <circle cx={node.x} cy={node.y} r={node.r + 10} fill={graphTheme.searchFill} stroke={graphTheme.searchStroke} strokeWidth="2.5" opacity="0.82" />
                 ) : null}
                 <circle cx={node.x} cy={node.y} r={node.r} fill={nodeFillForNode(node, graphTheme)} stroke={graphTheme.nodeStroke} strokeWidth="3" />
-                <text x={node.x} y={node.y + node.r + 18} textAnchor="middle" className="pointer-events-none select-none text-[13px] font-bold" fill={graphTheme.labelText} stroke={graphTheme.labelStroke} strokeWidth="4" paintOrder="stroke">
-                  {shortLabel(node.label, labelLength)}
-                </text>
+                {showNodeLabels || searchMatched ? (
+                  <text x={node.x} y={node.y + node.r + 18} textAnchor="middle" className="pointer-events-none select-none text-[13px] font-bold" fill={graphTheme.labelText} stroke={graphTheme.labelStroke} strokeWidth="4" paintOrder="stroke">
+                    {shortLabel(node.label, labelLength)}
+                  </text>
+                ) : null}
               </g>
             );
           })}
@@ -1478,7 +1484,7 @@ function EvidencePostCard({ evidence }: { evidence: AiEntityEvidence }) {
 function RecentPanel({ analyses, busy, onAnalyze }: { analyses: AiAnalysisItem[]; busy: boolean; onAnalyze: (postId: string) => Promise<void> }) {
   return (
     <div className="space-y-2">
-      {analyses.length === 0 ? <EmptyCard title="暂无分析结果" /> : analyses.slice(0, 16).map((analysis) => (
+      {analyses.length === 0 ? <EmptyCard title="暂无分析结果" /> : analyses.map((analysis) => (
         <AnalysisRow key={analysis.id} analysis={analysis} busy={busy} onAnalyze={onAnalyze} />
       ))}
     </div>
@@ -1584,7 +1590,7 @@ function ModelingSampleRow({ analysis }: { analysis: AiAnalysisItem }) {
 }
 
 function KeyValueGrid({ values, labels = {} }: { values: Record<string, number>; labels?: Record<string, string> }) {
-  const entries = Object.entries(values).sort((left, right) => right[1] - left[1]).slice(0, 6);
+  const entries = Object.entries(values).sort((left, right) => right[1] - left[1]);
   if (entries.length === 0) return <div className="rounded-md border border-slate-200 bg-white p-2 text-xs font-semibold text-slate-500">暂无数据</div>;
   return (
     <>
@@ -1850,21 +1856,17 @@ function stepOrganicGraph(
 ) {
   const nodes = [...positions.values()];
   const repulsion = Math.max(7600, Math.min(18000, bounds.width * bounds.height * 0.0022));
-  for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
-    const left = nodes[leftIndex]!;
-    for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
-      const right = nodes[rightIndex]!;
-      const dx = right.x - left.x || 0.01;
-      const dy = right.y - left.y || 0.01;
-      const distance = Math.max(left.r + right.r + 4, Math.hypot(dx, dy));
-      const kindFactor = left.kind === "entity" && right.kind === "entity" ? 1 : 0.64;
-      const force = Math.min(8, repulsion * kindFactor / (distance * distance));
-      const fx = (dx / distance) * force;
-      const fy = (dy / distance) * force;
-      pushVelocity(velocities, fixedPositions, left.id, -fx, -fy);
-      pushVelocity(velocities, fixedPositions, right.id, fx, fy);
-    }
-  }
+  forEachNearbyNodePair(nodes, 150, (left, right) => {
+    const dx = right.x - left.x || 0.01;
+    const dy = right.y - left.y || 0.01;
+    const distance = Math.max(left.r + right.r + 4, Math.hypot(dx, dy));
+    const kindFactor = left.kind === "entity" && right.kind === "entity" ? 1 : 0.64;
+    const force = Math.min(8, repulsion * kindFactor / (distance * distance));
+    const fx = (dx / distance) * force;
+    const fy = (dy / distance) * force;
+    pushVelocity(velocities, fixedPositions, left.id, -fx, -fy);
+    pushVelocity(velocities, fixedPositions, right.id, fx, fy);
+  });
 
   for (const edge of edges) {
     const source = positions.get(edge.source);
@@ -1894,7 +1896,6 @@ function stepOrganicGraph(
     const velocity = velocities.get(node.id) ?? { x: 0, y: 0 };
     velocity.x += (anchor.x - node.x) * pull;
     velocity.y += (anchor.y - node.y) * pull;
-    applySoftBounds(node, velocity, bounds);
     velocity.x *= 0.82;
     velocity.y *= 0.82;
     node.x += velocity.x;
@@ -1909,14 +1910,6 @@ function pushVelocity(velocities: Map<string, { x: number; y: number }>, fixed: 
   velocity.x += x;
   velocity.y += y;
   velocities.set(nodeId, velocity);
-}
-
-function applySoftBounds(node: PositionedGraphNode, velocity: { x: number; y: number }, bounds: GraphBounds) {
-  const margin = Math.max(42, node.r + 14);
-  if (node.x < bounds.minX + margin) velocity.x += (bounds.minX + margin - node.x) * 0.018;
-  if (node.x > bounds.maxX - margin) velocity.x -= (node.x - (bounds.maxX - margin)) * 0.018;
-  if (node.y < bounds.minY + margin) velocity.y += (bounds.minY + margin - node.y) * 0.018;
-  if (node.y > bounds.maxY - margin) velocity.y -= (node.y - (bounds.maxY - margin)) * 0.018;
 }
 
 function graphAnchor(node: PositionedGraphNode, bounds: GraphBounds) {
@@ -1983,23 +1976,20 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
   const byId = new Map(positioned.map((node) => [node.id, node]));
   const velocity = new Map(positioned.map((node) => [node.id, { x: 0, y: 0 }]));
 
-  for (let iteration = 0; iteration < 170; iteration += 1) {
-    for (let leftIndex = 0; leftIndex < positioned.length; leftIndex += 1) {
-      const left = positioned[leftIndex]!;
-      for (let rightIndex = leftIndex + 1; rightIndex < positioned.length; rightIndex += 1) {
-        const right = positioned[rightIndex]!;
-        const dx = right.x - left.x || 0.01;
-        const dy = right.y - left.y || 0.01;
-        const distance = Math.max(22, Math.hypot(dx, dy));
-        const force = Math.min(10, (9200 / (distance * distance)) * (left.kind === right.kind ? 1 : 0.72));
-        const fx = (dx / distance) * force;
-        const fy = (dy / distance) * force;
-        velocity.get(left.id)!.x -= fx;
-        velocity.get(left.id)!.y -= fy;
-        velocity.get(right.id)!.x += fx;
-        velocity.get(right.id)!.y += fy;
-      }
-    }
+  const iterationCount = nodes.length > 3000 ? 24 : nodes.length > 1200 ? 40 : nodes.length > 600 ? 80 : 170;
+  for (let iteration = 0; iteration < iterationCount; iteration += 1) {
+    forEachNearbyNodePair(positioned, 150, (left, right) => {
+      const dx = right.x - left.x || 0.01;
+      const dy = right.y - left.y || 0.01;
+      const distance = Math.max(22, Math.hypot(dx, dy));
+      const force = Math.min(10, (9200 / (distance * distance)) * (left.kind === right.kind ? 1 : 0.72));
+      const fx = (dx / distance) * force;
+      const fy = (dy / distance) * force;
+      velocity.get(left.id)!.x -= fx;
+      velocity.get(left.id)!.y -= fy;
+      velocity.get(right.id)!.x += fx;
+      velocity.get(right.id)!.y += fy;
+    });
 
     for (const edge of edges) {
       const source = byId.get(edge.source);
@@ -2037,12 +2027,44 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
       currentVelocity.y += (anchor.y - node.y) * pull;
       currentVelocity.x *= 0.72;
       currentVelocity.y *= 0.72;
-      node.x = clampNumber(node.x + currentVelocity.x, bounds.minX + 36, bounds.maxX - 36);
-      node.y = clampNumber(node.y + currentVelocity.y, bounds.minY + 36, bounds.maxY - 36);
+      node.x += currentVelocity.x;
+      node.y += currentVelocity.y;
     }
   }
 
   return positioned.sort((left, right) => (left.kind === "tenant" ? 1 : 0) - (right.kind === "tenant" ? 1 : 0));
+}
+
+function forEachNearbyNodePair(nodes: PositionedGraphNode[], cellSize: number, visit: (left: PositionedGraphNode, right: PositionedGraphNode) => void) {
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const cells = new Map<string, PositionedGraphNode[]>();
+  for (const node of nodes) {
+    const cellX = Math.floor(node.x / cellSize);
+    const cellY = Math.floor(node.y / cellSize);
+    const key = `${cellX}:${cellY}`;
+    const bucket = cells.get(key);
+    if (bucket) {
+      bucket.push(node);
+    } else {
+      cells.set(key, [node]);
+    }
+  }
+
+  for (const left of nodes) {
+    const leftIndex = indexById.get(left.id) ?? 0;
+    const cellX = Math.floor(left.x / cellSize);
+    const cellY = Math.floor(left.y / cellSize);
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+        const bucket = cells.get(`${cellX + offsetX}:${cellY + offsetY}`) ?? [];
+        for (const right of bucket) {
+          const rightIndex = indexById.get(right.id) ?? 0;
+          if (rightIndex <= leftIndex) continue;
+          visit(left, right);
+        }
+      }
+    }
+  }
 }
 
 function edgeIdealDistance(edge: AiGraphEdge) {

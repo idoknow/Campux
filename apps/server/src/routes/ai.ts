@@ -32,7 +32,7 @@ const postParamsSchema = z.object({
 const backfillCreateSchema = z.object({
   mode: z.enum(["missing", "failed", "all"]).default("missing"),
   maxAttempts: z.number().int().min(1).max(8).default(3),
-  limit: z.number().int().min(1).max(50_000).optional(),
+  limit: z.number().int().min(1).optional(),
 });
 
 const backfillParamsSchema = z.object({
@@ -52,7 +52,6 @@ export function registerAiRoutes(app: FastifyInstance, queue: RuntimeQueue) {
       prisma.schoolEntity.findMany({
         where: { tenantId },
         orderBy: [{ confidence: "desc" }, { lastSeenAt: "desc" }],
-        take: 250,
       }),
       prisma.postAiAnalysis.findMany({
         where: { tenantId },
@@ -68,9 +67,8 @@ export function registerAiRoutes(app: FastifyInstance, queue: RuntimeQueue) {
           },
         },
         orderBy: { updatedAt: "desc" },
-        take: 50,
       }),
-      listAiBackfillBatches(tenantId, 5),
+      listAiBackfillBatches(tenantId),
     ]);
 
     const evidencePostIds = [...new Set(entities.flatMap((entity) => normalizeEvidenceRecords(entity.evidence).map((item) => item.postId).filter((postId): postId is string => Boolean(postId))))];
@@ -468,7 +466,7 @@ function buildGraph(
       .filter(uniqueBy((item) => item.nodeId));
     if (signals.length === 0) continue;
 
-    const categories = normalizeStringArray(analysis.categories).slice(0, 6);
+    const categories = normalizeStringArray(analysis.categories);
     for (const signal of signals) {
       const stats = entityStats.get(signal.nodeId) ?? {
         occurrenceCount: 0,
@@ -515,8 +513,7 @@ function buildGraph(
         score: (stats?.occurrenceCount ?? 0) * 2 + entity.confidence * 10,
       };
     })
-    .sort((left, right) => right.score - left.score || right.entity.confidence - left.entity.confidence)
-    .slice(0, 140);
+    .sort((left, right) => right.score - left.score || right.entity.confidence - left.entity.confidence);
   const selectedEntityIds = new Set(selectedEntities.map((item) => item.nodeId));
   const selectedEdges = [...cooccurrence.values()]
     .filter((edge) => selectedEntityIds.has(edge.source) && selectedEntityIds.has(edge.target))
@@ -525,8 +522,7 @@ function buildGraph(
       confidence: edge.signalCount > 0 ? edge.confidenceTotal / edge.signalCount : 0.5,
       weight: edge.signalCount * (edge.signalCount > 0 ? edge.confidenceTotal / edge.signalCount : 0.5),
     }))
-    .sort((left, right) => right.weight - left.weight)
-    .slice(0, 180);
+    .sort((left, right) => right.weight - left.weight);
   const communities = detectGraphCommunities(selectedEntities.map((item) => item.nodeId), selectedEdges);
 
   const nodes: GraphNode[] = [
@@ -566,7 +562,7 @@ function buildGraph(
   }
 
   const categoryCounts = countBy(completed.flatMap((analysis) => normalizeStringArray(analysis.categories)));
-  for (const [category, count] of Object.entries(categoryCounts).sort((left, right) => right[1] - left[1]).slice(0, 16)) {
+  for (const [category, count] of Object.entries(categoryCounts).sort((left, right) => right[1] - left[1])) {
     const categoryId = `category:${category}`;
     nodes.push({
       id: categoryId,
@@ -609,7 +605,7 @@ function buildGraph(
       signalCount: Math.max(1, occurrenceCount),
     });
 
-    for (const [category, count] of Object.entries(stats?.categoryCounts ?? {}).sort((left, right) => right[1] - left[1]).slice(0, 2)) {
+    for (const [category, count] of Object.entries(stats?.categoryCounts ?? {}).sort((left, right) => right[1] - left[1])) {
       const categoryId = `category:${category}`;
       if (count > 0) {
         addEdge({ source: nodeId, target: categoryId, label: category, type: "CATEGORY_SIGNAL", weight: count, confidence: Math.min(0.99, entity.confidence), signalCount: count });
@@ -669,7 +665,6 @@ function normalizeStringArray(value: unknown): string[] {
 function buildRelationLabel(categories: Record<string, number>, signalCount: number) {
   const topCategories = Object.entries(categories)
     .sort((left, right) => right[1] - left[1])
-    .slice(0, 2)
     .map(([category]) => category);
   const topicLabel = topCategories.length > 0 ? topCategories.join("/") : "共现";
   return signalCount > 1 ? `${topicLabel} · ${signalCount}次` : topicLabel;
