@@ -99,11 +99,13 @@ export function App() {
   const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
   const activeLogoUrl = (me?.authenticated ? selectedTenant?.logoUrl : hostTenant?.logoUrl)?.trim() || "/logo.svg";
   const availableNavItems = useMemo(() => {
+    const aiEnabled = selectedTenant?.aiEnabled ?? true;
+    const visibleNavItems = navItems.filter((item) => item.value !== "ai" || aiEnabled);
     if (!currentRole) {
-      return navItems.filter((item) => item.value !== "admin");
+      return visibleNavItems.filter((item) => item.value !== "admin");
     }
-    return navItems.filter((item) => canAccess(currentRole, item.minRole));
-  }, [currentRole]);
+    return visibleNavItems.filter((item) => canAccess(currentRole, item.minRole));
+  }, [currentRole, selectedTenant?.aiEnabled]);
 
   async function refreshMe() {
     const data = await api<MeResponse>("/api/me");
@@ -485,10 +487,10 @@ export function App() {
 
   if (canOpenOps(me) && (route.kind === "ops" || me.memberships.length === 0)) {
     if (me.memberships.length > 0) {
-      return <OpsStandaloneScreen me={me} onBackToTenants={() => navigate({ kind: "tenants" })} onTenantCreated={refreshMe} onLogout={logout} />;
+      return <OpsStandaloneScreen me={me} onBackToTenants={() => navigate({ kind: "tenants" })} onTenantCreated={refreshMe} onEnterTenant={selectTenant} onLogout={logout} />;
     }
 
-    return <OpsStandaloneScreen me={me} onTenantCreated={refreshMe} onLogout={logout} />;
+    return <OpsStandaloneScreen me={me} onTenantCreated={refreshMe} onEnterTenant={selectTenant} onLogout={logout} />;
   }
 
   if (me.needsTenantSelection || !me.currentTenant || !me.currentMembership) {

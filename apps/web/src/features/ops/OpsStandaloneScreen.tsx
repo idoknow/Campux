@@ -8,11 +8,13 @@ export function OpsStandaloneScreen({
   me,
   onBackToTenants,
   onTenantCreated,
+  onEnterTenant,
   onLogout,
 }: {
   me: AuthenticatedMe;
   onBackToTenants?: () => void;
   onTenantCreated?: (() => Promise<void>) | undefined;
+  onEnterTenant?: ((tenantId: string) => Promise<void>) | undefined;
   onLogout: () => void;
 }) {
   const mode = me.user.systemRole === "system_operator" ? "system" : "operations";
@@ -41,7 +43,7 @@ export function OpsStandaloneScreen({
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mx-auto max-w-6xl">
-          <OpsPanel mode={mode} onTenantCreated={onTenantCreated} />
+          <OpsPanel mode={mode} onTenantCreated={onTenantCreated} onEnterTenant={onEnterTenant} />
         </div>
       </div>
     </main>

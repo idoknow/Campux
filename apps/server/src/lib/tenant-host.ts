@@ -67,6 +67,11 @@ export async function findTenantByRequestHost(request: FastifyRequest) {
           key: "logo_url",
         },
       },
+      aiSettings: {
+        select: {
+          enabled: true,
+        },
+      },
       _count: {
         select: {
           botAccounts: true,

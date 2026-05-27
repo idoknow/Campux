@@ -23,6 +23,11 @@ export function registerTenantRoutes(app: FastifyInstance) {
             key: "logo_url",
           },
         },
+        aiSettings: {
+          select: {
+            enabled: true,
+          },
+        },
         _count: {
           select: {
             botAccounts: true,
