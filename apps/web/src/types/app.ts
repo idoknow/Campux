@@ -353,10 +353,14 @@ export type AiEntity = {
   aliases: unknown;
   confidence: number;
   source: string;
-  evidence: AiEntityEvidence[];
+  evidence?: AiEntityEvidence[];
   firstSeenAt: string;
   lastSeenAt: string;
   updatedAt: string;
+};
+
+export type AiEntityDetail = AiEntity & {
+  evidence: AiEntityEvidence[];
 };
 
 export type AiEntityEvidence = {
@@ -413,10 +417,10 @@ export type AiOverview = {
     version: number;
     status: string;
     summary: string;
-    entities: unknown;
-    modelingMemory: unknown;
-    rules: unknown;
-    metrics: unknown;
+    entities?: unknown;
+    modelingMemory?: unknown;
+    rules?: unknown;
+    metrics?: unknown;
     createdAt: string;
   } | null;
   entities: AiEntity[];

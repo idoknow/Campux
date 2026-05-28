@@ -39,11 +39,17 @@ const backfillParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+const entityParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
+const graphOverviewEdgeLimit = 6_000;
+
 export function registerAiRoutes(app: FastifyInstance, queue: RuntimeQueue) {
   app.get("/api/ai/overview", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
     const tenantId = context.selectedTenant.id;
-    const [settings, snapshot, entities, analyses, backfills] = await Promise.all([
+    const [settings, snapshot, entities, analyses, recentAnalyses, backfills] = await Promise.all([
       readTenantAiSettings(tenantId),
       prisma.schoolModelSnapshot.findFirst({
         where: { tenantId, status: "active" },
@@ -52,6 +58,24 @@ export function registerAiRoutes(app: FastifyInstance, queue: RuntimeQueue) {
       prisma.schoolEntity.findMany({
         where: { tenantId },
         orderBy: [{ confidence: "desc" }, { lastSeenAt: "desc" }],
+      }),
+      prisma.postAiAnalysis.findMany({
+        where: { tenantId },
+        select: {
+          id: true,
+          postId: true,
+          provider: true,
+          model: true,
+          status: true,
+          confidence: true,
+          categories: true,
+          entities: true,
+          reasons: true,
+          error: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: "desc" },
       }),
       prisma.postAiAnalysis.findMany({
         where: { tenantId },
@@ -67,11 +91,78 @@ export function registerAiRoutes(app: FastifyInstance, queue: RuntimeQueue) {
           },
         },
         orderBy: { updatedAt: "desc" },
+        take: 80,
       }),
       listAiBackfillBatches(tenantId),
     ]);
 
-    const evidencePostIds = [...new Set(entities.flatMap((entity) => normalizeEvidenceRecords(entity.evidence).map((item) => item.postId).filter((postId): postId is string => Boolean(postId))))];
+    const serializedEntities = entities.map((entity) => ({
+      id: entity.id,
+      type: entity.type,
+      name: entity.name,
+      aliases: entity.aliases,
+      confidence: entity.confidence,
+      source: entity.source,
+      evidence: [],
+      firstSeenAt: entity.firstSeenAt.toISOString(),
+      lastSeenAt: entity.lastSeenAt.toISOString(),
+      updatedAt: entity.updatedAt.toISOString(),
+    }));
+    const serializedAnalyses = recentAnalyses.map((analysis) => ({
+      id: analysis.id,
+      postId: analysis.postId,
+      displayId: analysis.post.displayId,
+      postText: truncateText(analysis.post.text, 180),
+      postStatus: analysis.post.status,
+      postCreatedAt: analysis.post.createdAt.toISOString(),
+      provider: analysis.provider,
+      model: analysis.model,
+      status: analysis.status,
+      confidence: analysis.confidence,
+      categories: analysis.categories,
+      entities: analysis.entities,
+      reasons: analysis.reasons,
+      error: analysis.error,
+      createdAt: analysis.createdAt.toISOString(),
+      updatedAt: analysis.updatedAt.toISOString(),
+    }));
+
+    return {
+      settings,
+      snapshot: snapshot
+        ? {
+          id: snapshot.id,
+          version: snapshot.version,
+          status: snapshot.status,
+          summary: snapshot.summary,
+          metrics: snapshot.metrics,
+          createdAt: snapshot.createdAt.toISOString(),
+        }
+        : null,
+      entities: [],
+      analyses: serializedAnalyses,
+      metrics: buildMetrics(serializedEntities, analyses),
+      graph: buildGraph(context.selectedTenant.name, serializedEntities, analyses),
+      backfills,
+    };
+  });
+
+  app.get("/api/ai/entities/:id", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "reviewer");
+    const tenantId = context.selectedTenant.id;
+    const params = entityParamsSchema.parse(request.params);
+    const entity = await prisma.schoolEntity.findFirst({
+      where: {
+        tenantId,
+        id: params.id,
+      },
+    });
+
+    if (!entity) {
+      return reply.code(404).send({ message: "实体不存在" });
+    }
+
+    const evidencePostIds = [...new Set(normalizeEvidenceRecords(entity.evidence).map((item) => item.postId).filter((postId): postId is string => Boolean(postId)))];
     const evidencePosts = evidencePostIds.length > 0
       ? await prisma.post.findMany({
         where: {
@@ -105,57 +196,19 @@ export function registerAiRoutes(app: FastifyInstance, queue: RuntimeQueue) {
       : [];
     const evidencePostById = new Map(evidencePosts.map((post) => [post.id, serializeEvidencePost(post)]));
 
-    const serializedEntities = entities.map((entity) => ({
-      id: entity.id,
-      type: entity.type,
-      name: entity.name,
-      aliases: entity.aliases,
-      confidence: entity.confidence,
-      source: entity.source,
-      evidence: enrichEvidenceWithPosts(entity.evidence, evidencePostById),
-      firstSeenAt: entity.firstSeenAt.toISOString(),
-      lastSeenAt: entity.lastSeenAt.toISOString(),
-      updatedAt: entity.updatedAt.toISOString(),
-    }));
-    const serializedAnalyses = analyses.map((analysis) => ({
-      id: analysis.id,
-      postId: analysis.postId,
-      displayId: analysis.post.displayId,
-      postText: analysis.post.text,
-      postStatus: analysis.post.status,
-      postCreatedAt: analysis.post.createdAt.toISOString(),
-      provider: analysis.provider,
-      model: analysis.model,
-      status: analysis.status,
-      confidence: analysis.confidence,
-      categories: analysis.categories,
-      entities: analysis.entities,
-      reasons: analysis.reasons,
-      error: analysis.error,
-      createdAt: analysis.createdAt.toISOString(),
-      updatedAt: analysis.updatedAt.toISOString(),
-    }));
-
     return {
-      settings,
-      snapshot: snapshot
-        ? {
-          id: snapshot.id,
-          version: snapshot.version,
-          status: snapshot.status,
-          summary: snapshot.summary,
-          entities: snapshot.entities,
-          modelingMemory: snapshot.modelingMemory,
-          rules: snapshot.rules,
-          metrics: snapshot.metrics,
-          createdAt: snapshot.createdAt.toISOString(),
-        }
-        : null,
-      entities: serializedEntities,
-      analyses: serializedAnalyses,
-      metrics: buildMetrics(serializedEntities, serializedAnalyses),
-      graph: buildGraph(context.selectedTenant.name, serializedEntities, serializedAnalyses),
-      backfills,
+      entity: {
+        id: entity.id,
+        type: entity.type,
+        name: entity.name,
+        aliases: entity.aliases,
+        confidence: entity.confidence,
+        source: entity.source,
+        evidence: enrichEvidenceWithPosts(entity.evidence, evidencePostById),
+        firstSeenAt: entity.firstSeenAt.toISOString(),
+        lastSeenAt: entity.lastSeenAt.toISOString(),
+        updatedAt: entity.updatedAt.toISOString(),
+      },
     };
   });
 
@@ -400,7 +453,7 @@ function buildMetrics(
 function buildGraph(
   tenantName: string,
   entities: Array<{ id: string; type: string; name: string; confidence: number }>,
-  analyses: Array<{ status: string; categories: unknown; entities: unknown; displayId: number }>,
+  analyses: Array<{ status: string; categories: unknown; entities: unknown }>,
 ) {
   type GraphNode = {
     id: string;
@@ -626,12 +679,13 @@ function buildGraph(
     });
   }
 
+  const displayEdges = prioritizeGraphEdges(edges).slice(0, graphOverviewEdgeLimit);
   return {
     nodes: nodes.map((node) => ({
       ...node,
       degree: degree.get(node.id) ?? 0,
     })),
-    edges,
+    edges: displayEdges,
     stats: {
       entityNodes: selectedEntities.length,
       relationEdges: edges.length,
@@ -639,6 +693,19 @@ function buildGraph(
       communities: new Set([...communities.values()]).size,
     },
   };
+}
+
+function prioritizeGraphEdges(edges: Array<{ type: string; weight: number; signalCount: number; source: string; target: string }>) {
+  return edges
+    .map((edge, index) => ({ edge, index, score: graphEdgePriority(edge) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((item) => item.edge);
+}
+
+function graphEdgePriority(edge: { type: string; weight: number; signalCount: number; source: string; target: string }) {
+  const typeBoost = edge.type === "CO_OCCURS" ? 1_000_000 : edge.type === "CATEGORY_SIGNAL" ? 120_000 : edge.type === "TYPE_MEMBER" ? 60_000 : 20_000;
+  const hubBoost = edge.source === "tenant" || edge.target === "tenant" ? 30_000 : 0;
+  return typeBoost + hubBoost + edge.weight * 10 + edge.signalCount;
 }
 
 const entityTypeLabels: Record<string, string> = {
@@ -662,9 +729,14 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
 }
 
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
 function buildRelationLabel(categories: Record<string, number>, signalCount: number) {
   const topCategories = Object.entries(categories)
     .sort((left, right) => right[1] - left[1])
+    .slice(0, 2)
     .map(([category]) => category);
   const topicLabel = topCategories.length > 0 ? topCategories.join("/") : "共现";
   return signalCount > 1 ? `${topicLabel} · ${signalCount}次` : topicLabel;
