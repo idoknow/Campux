@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import type { AuthenticatedMe, AiAnalysisItem, AiBackfillBatch, AiEntity, AiEntityEvidence, AiOverview, AiRules, TenantAiSettings } from "@/types/app";
+import type { AuthenticatedMe, AiAnalysisItem, AiBackfillBatch, AiEntity, AiEntityDetail, AiEntityEvidence, AiOverview, AiRules, TenantAiSettings } from "@/types/app";
 import {
   ActivityIcon,
   BotIcon,
@@ -221,6 +221,8 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
   const [overview, setOverview] = useState<AiOverview | null>(null);
   const [form, setForm] = useState<AiSettingsForm | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [selectedEntityDetail, setSelectedEntityDetail] = useState<AiEntityDetail | null>(null);
+  const [selectedEntityLoading, setSelectedEntityLoading] = useState(false);
   const [graphSearch, setGraphSearch] = useState("");
   const [panel, setPanel] = useState<PanelTab>("overview");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -259,11 +261,42 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
   }, []);
 
   useEffect(() => {
-    if (!selectedEntityId || overview?.entities.some((entity) => entity.id === selectedEntityId)) {
+    if (!selectedEntityId || overview?.graph.nodes.some((node) => node.entityId === selectedEntityId)) {
       return;
     }
     setSelectedEntityId(null);
+    setSelectedEntityDetail(null);
   }, [overview, selectedEntityId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedEntityId) {
+      setSelectedEntityDetail(null);
+      setSelectedEntityLoading(false);
+      return;
+    }
+    setSelectedEntityLoading(true);
+    void api<{ entity: AiEntityDetail }>(`/api/ai/entities/${encodeURIComponent(selectedEntityId)}`)
+      .then((response) => {
+        if (!cancelled) {
+          setSelectedEntityDetail(response.entity);
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          toast.error(caught instanceof Error ? caught.message : "实体详情加载失败");
+          setSelectedEntityDetail(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSelectedEntityLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntityId]);
 
   async function refresh() {
     const firstLoad = overview === null;
@@ -432,7 +465,11 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
     }
   }
 
-  const selectedEntity = useMemo(() => overview?.entities.find((entity) => entity.id === selectedEntityId) ?? null, [overview, selectedEntityId]);
+  const selectedEntity = useMemo(() => {
+    const node = overview?.graph.nodes.find((item) => item.entityId === selectedEntityId);
+    return node ? entityFromGraphNode(node) : null;
+  }, [overview, selectedEntityId]);
+  const selectedEntityForPanel = selectedEntityDetail ?? selectedEntity;
   const recentModelingAnalyses = useMemo(() => overview?.analyses.filter((item) => item.status === "completed") ?? [], [overview]);
   const activeBatch = overview?.backfills.find((batch) => batch.status === "queued" || batch.status === "running") ?? null;
 
@@ -584,10 +621,10 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
           </DraggableWindow>
         ) : null}
 
-        {selectedEntity ? (
+        {selectedEntityForPanel ? (
           <DraggableWindow
-            title={selectedEntity.name}
-            subtitle={entityTypeLabels[selectedEntity.type] ?? selectedEntity.type}
+            title={selectedEntityForPanel.name}
+            subtitle={entityTypeLabels[selectedEntityForPanel.type] ?? selectedEntityForPanel.type}
             icon={DatabaseIcon}
             position={windowPositions.entity}
             minimized={minimizedWindows.entity}
@@ -597,7 +634,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
             onMinimizedChange={(minimized) => setWindowMinimized("entity", minimized)}
             onClose={() => setSelectedEntityId(null)}
           >
-            <EntityDetailPanel entity={selectedEntity} />
+            <EntityDetailPanel entity={selectedEntityForPanel} loading={selectedEntityLoading} />
           </DraggableWindow>
         ) : null}
       </div>
@@ -1070,8 +1107,11 @@ function GraphPanel({
   onEntityClick: (entity: AiEntity) => void;
 }) {
   const panStateRef = useRef<{ pointerId: number; startX: number; startY: number; graphX: number; graphY: number } | null>(null);
+  const transformRef = useRef(transform);
+  const transformFrameRef = useRef<number | null>(null);
+  const pendingTransformRef = useRef<GraphTransform | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const didInitialFitRef = useRef(false);
   const nodeDragStateRef = useRef<{
     pointerId: number;
@@ -1084,9 +1124,12 @@ function GraphPanel({
   } | null>(null);
   const fixedNodePositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const [graphSize, setGraphSize] = useState<GraphSize>({ width: 1200, height: 760 });
-  const entityByNodeId = useMemo(() => new Map(overview.entities.map((entity) => [`entity:${entity.id}`, entity])), [overview.entities]);
   const nodes = useMemo(() => overview.graph.nodes, [overview.graph.nodes]);
-  const normalizedSearch = normalizeSearchTerm(searchQuery);
+  const entityByNodeId = useMemo(() => new Map(nodes
+    .filter((node) => node.kind === "entity" && node.entityId)
+    .map((node) => [node.id, entityFromGraphNode(node)])), [nodes]);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const normalizedSearch = normalizeSearchTerm(deferredSearchQuery);
   const matchedNodeIds = useMemo(() => {
     if (!normalizedSearch) return new Set<string>();
     return new Set(nodes
@@ -1102,9 +1145,10 @@ function GraphPanel({
   const showEdgeLabels = edges.length <= 800 || searchActive || transform.scale >= 1.45;
   const graphBounds = useMemo(() => createGraphBounds(graphSize, nodes.length), [graphSize, nodes.length]);
   const { positioned, moveNode } = useOrganicGraphLayout(nodes, edges, graphBounds, fixedNodePositionsRef);
-  const byId = new Map(positioned.map((node) => [node.id, node]));
+  const byId = useMemo(() => new Map(positioned.map((node) => [node.id, node])), [positioned]);
   const visibleRect = useMemo(() => visibleGraphRect(graphSize, transform), [graphSize, transform]);
   const selectedNodeId = selectedEntityId ? `entity:${selectedEntityId}` : null;
+  const rankedEdges = useMemo(() => edges.slice().sort((left, right) => baseEdgePriority(right) - baseEdgePriority(left)), [edges]);
   const renderedNodeIds = useMemo(() => {
     const hubNodeIds: string[] = [];
     const priorityEntityIds: string[] = [];
@@ -1125,18 +1169,54 @@ function GraphPanel({
     const visibleBudget = graphNodeRenderBudget(transform.scale, searchActive);
     const visibleNodeIds = new Set([...hubNodeIds, ...priorityEntityIds]);
     const remainingBudget = Math.max(0, visibleBudget - priorityEntityIds.length);
-    for (const node of visibleEntities
-      .sort((left, right) => (right.score ?? 0) - (left.score ?? 0) || right.weight - left.weight)
-      .slice(0, remainingBudget)) {
+    for (const node of selectTopVisibleNodes(visibleEntities, remainingBudget)) {
       visibleNodeIds.add(node.id);
     }
     return visibleNodeIds;
   }, [matchedNodeIds, positioned, searchActive, selectedNodeId, transform.scale, visibleRect]);
   const renderedNodes = useMemo(() => positioned.filter((node) => renderedNodeIds.has(node.id)), [positioned, renderedNodeIds]);
-  const renderedEdges = useMemo(() => edges
-    .filter((edge) => renderedNodeIds.has(edge.source) && renderedNodeIds.has(edge.target))
-    .sort((left, right) => edgeRenderPriority(right, selectedNodeId, matchedNodeIds) - edgeRenderPriority(left, selectedNodeId, matchedNodeIds))
-    .slice(0, graphEdgeRenderBudget(transform.scale, searchActive)), [edges, matchedNodeIds, renderedNodeIds, searchActive, selectedNodeId, transform.scale]);
+  const renderedEdges = useMemo(() => {
+    const edgeBudget = graphEdgeRenderBudget(transform.scale, searchActive);
+    const selectedEdges: AiGraphEdge[] = [];
+    const matchedEdges: AiGraphEdge[] = [];
+    const baseEdges: AiGraphEdge[] = [];
+    for (const edge of rankedEdges) {
+      if (!renderedNodeIds.has(edge.source) || !renderedNodeIds.has(edge.target)) continue;
+      if (selectedNodeId && (edge.source === selectedNodeId || edge.target === selectedNodeId)) {
+        selectedEdges.push(edge);
+      } else if (matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target)) {
+        matchedEdges.push(edge);
+      } else {
+        baseEdges.push(edge);
+      }
+      if (selectedEdges.length + matchedEdges.length + baseEdges.length >= edgeBudget) break;
+    }
+    return [...selectedEdges, ...matchedEdges, ...baseEdges].slice(0, edgeBudget);
+  }, [matchedNodeIds, rankedEdges, renderedNodeIds, searchActive, selectedNodeId, transform.scale]);
+
+  useEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
+
+  useEffect(() => () => {
+    if (transformFrameRef.current !== null) {
+      cancelAnimationFrame(transformFrameRef.current);
+    }
+  }, []);
+
+  function scheduleTransformChange(nextTransform: GraphTransform) {
+    transformRef.current = nextTransform;
+    pendingTransformRef.current = nextTransform;
+    if (transformFrameRef.current !== null) return;
+    transformFrameRef.current = requestAnimationFrame(() => {
+      transformFrameRef.current = null;
+      const pending = pendingTransformRef.current;
+      pendingTransformRef.current = null;
+      if (pending) {
+        onTransformChange(pending);
+      }
+    });
+  }
 
   useEffect(() => {
     const nodeIds = new Set(nodes.map((node) => node.id));
@@ -1170,62 +1250,84 @@ function GraphPanel({
     });
   }, [graphSize.height, graphSize.width, nodes.length, onTransformChange]);
 
-  function startPan(event: React.PointerEvent<SVGSVGElement>) {
-    const target = event.target instanceof Element ? event.target : null;
-    if (event.button !== 0 || target?.closest('[role="button"]')) {
+  function startCanvasPointer(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.button !== 0) return;
+    const point = pointerToGraphPoint(event);
+    const hitNode = point ? hitEntityNode(point) : null;
+    if (hitNode) {
+      event.preventDefault();
+      startNodeDrag(event, hitNode);
       return;
     }
+    startPan(event);
+  }
+
+  function startPan(event: React.PointerEvent<HTMLCanvasElement>) {
+    const currentTransform = transformRef.current;
     panStateRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      graphX: transform.x,
-      graphY: transform.y,
+      graphX: currentTransform.x,
+      graphY: currentTransform.y,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
-  function movePan(event: React.PointerEvent<SVGSVGElement>) {
+  function moveCanvasPointer(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (nodeDragStateRef.current?.pointerId === event.pointerId) {
+      moveNodeDrag(event);
+      return;
+    }
+    movePan(event);
+  }
+
+  function movePan(event: React.PointerEvent<HTMLCanvasElement>) {
     const state = panStateRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
-    onTransformChange({
-      ...transform,
+    scheduleTransformChange({
+      ...transformRef.current,
       x: state.graphX + event.clientX - state.startX,
       y: state.graphY + event.clientY - state.startY,
     });
   }
 
-  function endPan(event: React.PointerEvent<SVGSVGElement>) {
+  function endCanvasPointer(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (nodeDragStateRef.current?.pointerId === event.pointerId) {
+      endNodeDrag(event);
+    }
+    endPan(event);
+  }
+
+  function endPan(event: React.PointerEvent<HTMLCanvasElement>) {
     if (panStateRef.current?.pointerId === event.pointerId) {
       panStateRef.current = null;
     }
   }
 
-  function zoomWithWheel(event: React.WheelEvent<SVGSVGElement>) {
+  function zoomWithWheel(event: React.WheelEvent<HTMLCanvasElement>) {
     event.preventDefault();
-    const nextScale = clampNumber(transform.scale * (event.deltaY < 0 ? 1.08 : 0.92), 0.18, 2.4);
-    if (nextScale === transform.scale) return;
-    const svgPoint = clientToSvgPoint(event.clientX, event.clientY);
-    if (!svgPoint) {
-      onTransformChange({ ...transform, scale: nextScale });
+    const currentTransform = transformRef.current;
+    const nextScale = clampNumber(currentTransform.scale * (event.deltaY < 0 ? 1.08 : 0.92), 0.18, 2.4);
+    if (nextScale === currentTransform.scale) return;
+    const canvasPoint = clientToCanvasPoint(event.clientX, event.clientY);
+    if (!canvasPoint) {
+      scheduleTransformChange({ ...currentTransform, scale: nextScale });
       return;
     }
     const graphPoint = {
-      x: (svgPoint.x - transform.x) / transform.scale,
-      y: (svgPoint.y - transform.y) / transform.scale,
+      x: (canvasPoint.x - currentTransform.x) / currentTransform.scale,
+      y: (canvasPoint.y - currentTransform.y) / currentTransform.scale,
     };
-    onTransformChange({
-      ...transform,
+    scheduleTransformChange({
+      ...currentTransform,
       scale: nextScale,
-      x: svgPoint.x - graphPoint.x * nextScale,
-      y: svgPoint.y - graphPoint.y * nextScale,
+      x: canvasPoint.x - graphPoint.x * nextScale,
+      y: canvasPoint.y - graphPoint.y * nextScale,
     });
   }
 
-  function startNodeDrag(event: React.PointerEvent<SVGGElement>, node: PositionedGraphNode) {
-    if (event.button !== 0 || node.kind !== "entity") return;
-    event.preventDefault();
-    event.stopPropagation();
+  function startNodeDrag(event: React.PointerEvent<HTMLCanvasElement>, node: PositionedGraphNode) {
     const point = pointerToGraphPoint(event);
     if (!point) return;
     nodeDragStateRef.current = {
@@ -1240,11 +1342,10 @@ function GraphPanel({
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
-  function moveNodeDrag(event: React.PointerEvent<SVGGElement>) {
+  function moveNodeDrag(event: React.PointerEvent<HTMLCanvasElement>) {
     const state = nodeDragStateRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
     event.preventDefault();
-    event.stopPropagation();
     const point = pointerToGraphPoint(event);
     if (!point) return;
     const x = state.startNodeX + point.x - state.startGraphX;
@@ -1257,39 +1358,71 @@ function GraphPanel({
     moveNode(state.nodeId, x, y);
   }
 
-  function endNodeDrag(event: React.PointerEvent<SVGGElement>, entity: AiEntity) {
+  function endNodeDrag(event: React.PointerEvent<HTMLCanvasElement>) {
     const state = nodeDragStateRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
     event.preventDefault();
-    event.stopPropagation();
     nodeDragStateRef.current = null;
     if (!state.moved) {
-      onEntityClick(entity);
+      const entity = entityByNodeId.get(state.nodeId);
+      if (entity) {
+        onEntityClick(entity);
+      }
     }
   }
 
-  function pointerToGraphPoint(event: React.PointerEvent<SVGElement>) {
-    const svgPoint = clientToSvgPoint(event.clientX, event.clientY);
-    if (!svgPoint) return null;
+  function pointerToGraphPoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvasPoint = clientToCanvasPoint(event.clientX, event.clientY);
+    if (!canvasPoint) return null;
+    const currentTransform = transformRef.current;
     return {
-      x: (svgPoint.x - transform.x) / transform.scale,
-      y: (svgPoint.y - transform.y) / transform.scale,
+      x: (canvasPoint.x - currentTransform.x) / currentTransform.scale,
+      y: (canvasPoint.y - currentTransform.y) / currentTransform.scale,
     };
   }
 
-  function clientToSvgPoint(clientX: number, clientY: number) {
-    const svg = svgRef.current;
-    if (!svg) return null;
-    const rect = svg.getBoundingClientRect();
+  function clientToCanvasPoint(clientX: number, clientY: number) {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
-    const viewBox = svg.viewBox.baseVal;
-    const viewBoxWidth = viewBox.width || graphSize.width;
-    const viewBoxHeight = viewBox.height || graphSize.height;
     return {
-      x: viewBox.x + ((clientX - rect.left) / rect.width) * viewBoxWidth,
-      y: viewBox.y + ((clientY - rect.top) / rect.height) * viewBoxHeight,
+      x: ((clientX - rect.left) / rect.width) * graphSize.width,
+      y: ((clientY - rect.top) / rect.height) * graphSize.height,
     };
   }
+
+  function hitEntityNode(point: { x: number; y: number }) {
+    for (let index = renderedNodes.length - 1; index >= 0; index -= 1) {
+      const node = renderedNodes[index]!;
+      if (node.kind !== "entity") continue;
+      const distance = Math.hypot(point.x - node.x, point.y - node.y);
+      if (distance <= node.r + 10) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    drawCanvasGraph({
+      canvas,
+      size: graphSize,
+      transform,
+      nodes: renderedNodes,
+      edges: renderedEdges,
+      byId,
+      entityByNodeId,
+      graphTheme,
+      selectedEntityId,
+      matchedNodeIds,
+      searchActive,
+      showNodeLabels,
+      showEdgeLabels,
+    });
+  }, [byId, entityByNodeId, graphSize, graphTheme, matchedNodeIds, renderedEdges, renderedNodes, searchActive, selectedEntityId, showEdgeLabels, showNodeLabels, transform]);
 
   if (nodes.length <= 1) {
     return (
@@ -1309,131 +1442,22 @@ function GraphPanel({
         backgroundSize: "42px 42px",
       }}
     >
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${graphSize.width} ${graphSize.height}`}
+      <canvas
+        ref={canvasRef}
+        width={graphSize.width}
+        height={graphSize.height}
         className="h-full min-h-[calc(100vh-72px)] w-full cursor-grab touch-none active:cursor-grabbing"
-        onPointerDown={startPan}
-        onPointerMove={movePan}
-        onPointerUp={endPan}
-        onPointerCancel={endPan}
+        onPointerDown={startCanvasPointer}
+        onPointerMove={moveCanvasPointer}
+        onPointerUp={endCanvasPointer}
+        onPointerCancel={endCanvasPointer}
         onWheel={zoomWithWheel}
-      >
-        <rect width={graphSize.width} height={graphSize.height} fill="transparent" />
-        <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
-          {renderedEdges.map((edge, index) => {
-            const source = byId.get(edge.source);
-            const target = byId.get(edge.target);
-            if (!source || !target) return null;
-            const searchRelated = !searchActive || matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target);
-            const relationLabel = showEdgeLabels ? edgeLabelText(edge) : "";
-            const relationLabelX = (source.x + target.x) / 2;
-            const relationLabelY = (source.y + target.y) / 2 - 5;
-            const relationLabelWidth = relationLabel ? edgeLabelWidth(relationLabel) : 0;
-            return (
-              <g key={`${edge.source}-${edge.target}-${index}`}>
-                <path
-                  d={edgePath(source, target)}
-                  fill="none"
-                  stroke={edgeStroke(edge.type, graphTheme)}
-                  strokeDasharray={edgeDash(edge.type)}
-                  strokeLinecap="round"
-                  strokeOpacity={(edge.type === "CO_OCCURS" ? 0.5 : 0.32) * (searchRelated ? 1 : 0.18)}
-                  strokeWidth={edgeWidth(edge)}
-                />
-                {relationLabel && searchRelated ? (
-                  <g className="pointer-events-none select-none" opacity={searchActive ? 0.95 : 1}>
-                    <rect
-                      x={relationLabelX - relationLabelWidth / 2}
-                      y={relationLabelY - 8}
-                      width={relationLabelWidth}
-                      height={16}
-                      rx={4}
-                      fill={graphTheme.labelBg}
-                      fillOpacity={0.92}
-                      stroke={edgeStroke(edge.type, graphTheme)}
-                      strokeOpacity={0.22}
-                    />
-                    <text
-                      x={relationLabelX}
-                      y={relationLabelY + 4}
-                      textAnchor="middle"
-                      className="text-[9px] font-bold"
-                      fill={graphTheme.labelText}
-                    >
-                      {shortLabel(relationLabel, 14)}
-                    </text>
-                  </g>
-                ) : null}
-              </g>
-            );
-          })}
-          {renderedNodes.map((node) => {
-            const entity = entityByNodeId.get(node.id);
-            const selected = entity?.id === selectedEntityId;
-            const searchMatched = matchedNodeIds.has(node.id);
-            const nodeOpacity = searchActive && !searchMatched ? 0.28 : 1;
-            const labelLength = node.kind === "tenant" ? 16 : 12;
-            if (entity) {
-              return (
-                <g
-                  key={node.id}
-                  role="button"
-                  aria-label={`${entity.name} 详情`}
-                  tabIndex={0}
-                  className="cursor-grab outline-none active:cursor-grabbing"
-                  onPointerDown={(event) => startNodeDrag(event, node)}
-                  onPointerMove={moveNodeDrag}
-                  onPointerUp={(event) => endNodeDrag(event, entity)}
-                  onPointerCancel={(event) => {
-                    event.stopPropagation();
-                    nodeDragStateRef.current = null;
-                  }}
-                  opacity={nodeOpacity}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onEntityClick(entity);
-                    }
-                  }}
-                >
-                  {searchMatched ? (
-                    <circle cx={node.x} cy={node.y} r={node.r + 12} fill={graphTheme.searchFill} stroke={graphTheme.searchStroke} strokeWidth="2.5" opacity="0.82" />
-                  ) : null}
-                  <circle cx={node.x} cy={node.y} r={node.r + (selected ? 8 : 0)} fill={selected ? graphTheme.selectedHalo : graphTheme.nodeHalo} opacity={selected ? "0.18" : "0.82"} />
-                  <circle cx={node.x} cy={node.y} r={node.r} fill={nodeFillForNode(node, graphTheme)} stroke={selected ? graphTheme.selectedStroke : graphTheme.nodeStroke} strokeWidth={selected ? 5 : 3} />
-                  {showNodeLabels || searchMatched || selected ? (
-                    <text x={node.x} y={node.y + node.r + 18} textAnchor="middle" className="pointer-events-none select-none text-[13px] font-bold" fill={graphTheme.labelText} stroke={graphTheme.labelStroke} strokeWidth="4" paintOrder="stroke">
-                      {shortLabel(node.label, labelLength)}
-                    </text>
-                  ) : null}
-                  <text x={node.x} y={node.y + 4} textAnchor="middle" className="pointer-events-none select-none fill-white text-[11px] font-black">
-                    {entityTypeLabels[entity.type]?.slice(0, 2) ?? "实体"}
-                  </text>
-                </g>
-              );
-            }
-            return (
-              <g key={node.id} opacity={nodeOpacity}>
-                {searchMatched ? (
-                  <circle cx={node.x} cy={node.y} r={node.r + 10} fill={graphTheme.searchFill} stroke={graphTheme.searchStroke} strokeWidth="2.5" opacity="0.82" />
-                ) : null}
-                <circle cx={node.x} cy={node.y} r={node.r} fill={nodeFillForNode(node, graphTheme)} stroke={graphTheme.nodeStroke} strokeWidth="3" />
-                {showNodeLabels || searchMatched ? (
-                  <text x={node.x} y={node.y + node.r + 18} textAnchor="middle" className="pointer-events-none select-none text-[13px] font-bold" fill={graphTheme.labelText} stroke={graphTheme.labelStroke} strokeWidth="4" paintOrder="stroke">
-                    {shortLabel(node.label, labelLength)}
-                  </text>
-                ) : null}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
+      />
     </div>
   );
 }
 
-function EntityDetailPanel({ entity }: { entity: AiEntity }) {
+function EntityDetailPanel({ entity, loading }: { entity: AiEntity; loading: boolean }) {
   const aliases = toStrings(entity.aliases);
   const evidence = toEvidence(entity.evidence);
   return (
@@ -1447,12 +1471,16 @@ function EntityDetailPanel({ entity }: { entity: AiEntity }) {
           </div>
         </div>
       </div>
-      <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
-        <CompactDetailLine label="来源" value={entity.source} />
-        <CompactDetailLine label="最近" value={formatTime(entity.lastSeenAt)} />
-        <CompactDetailLine label="首次" value={formatTime(entity.firstSeenAt)} />
-        <CompactDetailLine label="更新" value={formatTime(entity.updatedAt)} />
-      </div>
+      {loading ? (
+        <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-semibold text-slate-500">正在加载实体详情...</div>
+      ) : (
+        <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
+          <CompactDetailLine label="来源" value={entity.source} />
+          <CompactDetailLine label="最近" value={formatTime(entity.lastSeenAt)} />
+          <CompactDetailLine label="首次" value={formatTime(entity.firstSeenAt)} />
+          <CompactDetailLine label="更新" value={formatTime(entity.updatedAt)} />
+        </div>
+      )}
       {aliases.length > 0 ? (
         <div className="mt-2">
           <div className="text-xs font-black text-slate-500">别名</div>
@@ -1462,10 +1490,11 @@ function EntityDetailPanel({ entity }: { entity: AiEntity }) {
       <div className="mt-2">
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs font-black text-slate-500">原稿件</div>
-          <Badge variant="outline">{evidence.filter((item) => item.post).length}/{evidence.length}</Badge>
+          <Badge variant="outline">{loading ? "加载中" : `${evidence.filter((item) => item.post).length}/${evidence.length}`}</Badge>
         </div>
         <div className="mt-1.5 space-y-1.5">
-          {evidence.length === 0 ? <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-500">暂无证据片段</div> : evidence.slice().reverse().map((item, index) => (
+          {loading ? <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs font-semibold text-slate-500">正在加载完整原稿件...</div> : null}
+          {!loading && evidence.length === 0 ? <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-500">暂无证据片段</div> : evidence.slice().reverse().map((item, index) => (
             <EvidencePostCard key={`${item.postId ?? index}-${item.seenAt ?? index}`} evidence={item} />
           ))}
         </div>
@@ -1687,6 +1716,22 @@ function toStrings(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function entityFromGraphNode(node: AiGraphNode): AiEntity {
+  const now = new Date(0).toISOString();
+  return {
+    id: node.entityId ?? node.id.replace(/^entity:/, ""),
+    type: node.entityType ?? "entity",
+    name: node.label,
+    aliases: [],
+    confidence: node.confidence ?? 0.5,
+    source: "ai_extract",
+    evidence: [],
+    firstSeenAt: now,
+    lastSeenAt: now,
+    updatedAt: now,
+  };
+}
+
 function toEvidence(value: unknown): AiEntityEvidence[] {
   if (!Array.isArray(value)) return [];
   return value.map((item): AiEntityEvidence | null => {
@@ -1858,25 +1903,42 @@ function nodeIntersectsRect(node: PositionedGraphNode, rect: { minX: number; max
 }
 
 function graphNodeRenderBudget(scale: number, searchActive: boolean) {
-  if (searchActive) return 1800;
-  if (scale < 0.55) return 760;
-  if (scale < 0.9) return 1100;
-  if (scale < 1.35) return 1600;
-  return 2400;
+  if (searchActive) return 1200;
+  if (scale < 0.55) return 420;
+  if (scale < 0.9) return 680;
+  if (scale < 1.35) return 980;
+  return 1400;
 }
 
 function graphEdgeRenderBudget(scale: number, searchActive: boolean) {
-  if (searchActive) return 2600;
-  if (scale < 0.55) return 1200;
-  if (scale < 0.9) return 1800;
-  if (scale < 1.35) return 2600;
-  return 3800;
+  if (searchActive) return 1400;
+  if (scale < 0.55) return 520;
+  if (scale < 0.9) return 860;
+  if (scale < 1.35) return 1200;
+  return 1800;
 }
 
-function edgeRenderPriority(edge: AiGraphEdge, selectedNodeId: string | null, matchedNodeIds: Set<string>) {
-  const focus = edge.source === selectedNodeId || edge.target === selectedNodeId ? 1_000_000 : 0;
-  const search = matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target) ? 500_000 : 0;
-  return focus + search + edge.weight * 10 + (edge.signalCount ?? 0);
+function selectTopVisibleNodes(nodes: PositionedGraphNode[], limit: number) {
+  if (limit <= 0) return [];
+  if (nodes.length <= limit) return nodes;
+  return nodes
+    .map((node) => ({ node, priority: nodePriority(node) }))
+    .sort((left, right) => right.priority - left.priority)
+    .slice(0, limit)
+    .map((item) => item.node);
+}
+
+function nodePriority(node: PositionedGraphNode) {
+  return (node.score ?? 0) * 8 + node.weight * 2 + (node.degree ?? 0);
+}
+
+function nodePriorityForRaw(node: AiGraphNode) {
+  return (node.score ?? 0) * 8 + node.weight * 2 + (node.degree ?? 0);
+}
+
+function baseEdgePriority(edge: AiGraphEdge) {
+  const typeBoost = edge.type === "CO_OCCURS" ? 100_000 : edge.type === "TYPE_MEMBER" ? 20_000 : 10_000;
+  return typeBoost + edge.weight * 10 + (edge.signalCount ?? 0);
 }
 
 function normalizeSearchTerm(value: string) {
@@ -2000,6 +2062,220 @@ function stepOrganicGraph(
   }
 }
 
+function drawCanvasGraph({
+  canvas,
+  size,
+  transform,
+  nodes,
+  edges,
+  byId,
+  entityByNodeId,
+  graphTheme,
+  selectedEntityId,
+  matchedNodeIds,
+  searchActive,
+  showNodeLabels,
+  showEdgeLabels,
+}: {
+  canvas: HTMLCanvasElement;
+  size: GraphSize;
+  transform: GraphTransform;
+  nodes: PositionedGraphNode[];
+  edges: AiGraphEdge[];
+  byId: Map<string, PositionedGraphNode>;
+  entityByNodeId: Map<string, AiEntity>;
+  graphTheme: GraphColorTheme;
+  selectedEntityId: string | null;
+  matchedNodeIds: Set<string>;
+  searchActive: boolean;
+  showNodeLabels: boolean;
+  showEdgeLabels: boolean;
+}) {
+  const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+  const pixelWidth = Math.max(1, Math.floor(size.width * pixelRatio));
+  const pixelHeight = Math.max(1, Math.floor(size.height * pixelRatio));
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, size.width, size.height);
+  context.save();
+  context.translate(transform.x, transform.y);
+  context.scale(transform.scale, transform.scale);
+
+  for (const edge of edges) {
+    const source = byId.get(edge.source);
+    const target = byId.get(edge.target);
+    if (!source || !target) continue;
+    const searchRelated = !searchActive || matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target);
+    const opacity = (edge.type === "CO_OCCURS" ? 0.5 : 0.32) * (searchRelated ? 1 : 0.18);
+    drawCanvasEdge(context, source, target, edge, graphTheme, opacity);
+
+    const relationLabel = showEdgeLabels ? edgeLabelText(edge) : "";
+    if (relationLabel && searchRelated) {
+      drawCanvasEdgeLabel(context, source, target, edge, relationLabel, graphTheme, searchActive ? 0.95 : 1);
+    }
+  }
+
+  for (const node of nodes) {
+    const entity = entityByNodeId.get(node.id);
+    const selected = entity?.id === selectedEntityId;
+    const searchMatched = matchedNodeIds.has(node.id);
+    const nodeOpacity = searchActive && !searchMatched ? 0.28 : 1;
+    drawCanvasNode(context, node, entity, {
+      selected,
+      searchMatched,
+      opacity: nodeOpacity,
+      showLabel: showNodeLabels || searchMatched || selected,
+      graphTheme,
+    });
+  }
+
+  context.restore();
+}
+
+function drawCanvasEdge(
+  context: CanvasRenderingContext2D,
+  source: PositionedGraphNode,
+  target: PositionedGraphNode,
+  edge: AiGraphEdge,
+  graphTheme: GraphColorTheme,
+  opacity: number,
+) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const curve = Math.min(44, Math.max(12, distance * 0.08));
+  const sign = deterministicJitter(`${source.id}->${target.id}`).x > 0 ? 1 : -1;
+  const cx = (source.x + target.x) / 2 + (-dy / distance) * curve * sign;
+  const cy = (source.y + target.y) / 2 + (dx / distance) * curve * sign;
+  context.save();
+  context.globalAlpha = opacity;
+  context.beginPath();
+  context.moveTo(source.x, source.y);
+  context.quadraticCurveTo(cx, cy, target.x, target.y);
+  context.strokeStyle = edgeStroke(edge.type, graphTheme);
+  context.lineWidth = edgeWidth(edge);
+  context.lineCap = "round";
+  context.setLineDash(edgeDashArray(edge.type));
+  context.stroke();
+  context.restore();
+}
+
+function drawCanvasEdgeLabel(
+  context: CanvasRenderingContext2D,
+  source: PositionedGraphNode,
+  target: PositionedGraphNode,
+  edge: AiGraphEdge,
+  label: string,
+  graphTheme: GraphColorTheme,
+  opacity: number,
+) {
+  const text = shortLabel(label, 14);
+  const x = (source.x + target.x) / 2;
+  const y = (source.y + target.y) / 2 - 5;
+  const width = edgeLabelWidth(text);
+  context.save();
+  context.globalAlpha = opacity;
+  context.font = "700 9px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = graphTheme.labelBg;
+  context.strokeStyle = edgeStroke(edge.type, graphTheme);
+  context.globalAlpha = opacity * 0.92;
+  roundRectPath(context, x - width / 2, y - 8, width, 16, 4);
+  context.fill();
+  context.globalAlpha = opacity * 0.22;
+  context.stroke();
+  context.globalAlpha = opacity;
+  context.fillStyle = graphTheme.labelText;
+  context.fillText(text, x, y);
+  context.restore();
+}
+
+function drawCanvasNode(
+  context: CanvasRenderingContext2D,
+  node: PositionedGraphNode,
+  entity: AiEntity | undefined,
+  options: {
+    selected?: boolean;
+    searchMatched: boolean;
+    opacity: number;
+    showLabel: boolean;
+    graphTheme: GraphColorTheme;
+  },
+) {
+  const { graphTheme, opacity, searchMatched, selected, showLabel } = options;
+  context.save();
+  context.globalAlpha = opacity;
+  if (searchMatched) {
+    context.beginPath();
+    context.arc(node.x, node.y, node.r + (entity ? 12 : 10), 0, Math.PI * 2);
+    context.fillStyle = graphTheme.searchFill;
+    context.strokeStyle = graphTheme.searchStroke;
+    context.lineWidth = 2.5;
+    context.globalAlpha = opacity * 0.82;
+    context.fill();
+    context.stroke();
+    context.globalAlpha = opacity;
+  }
+
+  context.beginPath();
+  context.arc(node.x, node.y, node.r + (selected ? 8 : 0), 0, Math.PI * 2);
+  context.fillStyle = selected ? graphTheme.selectedHalo : graphTheme.nodeHalo;
+  context.globalAlpha = opacity * (selected ? 0.18 : 0.82);
+  context.fill();
+
+  context.globalAlpha = opacity;
+  context.beginPath();
+  context.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+  context.fillStyle = nodeFillForNode(node, graphTheme);
+  context.strokeStyle = selected ? graphTheme.selectedStroke : graphTheme.nodeStroke;
+  context.lineWidth = selected ? 5 : 3;
+  context.fill();
+  context.stroke();
+
+  if (entity) {
+    context.font = "900 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = "#ffffff";
+    context.fillText(entityTypeLabels[entity.type]?.slice(0, 2) ?? "实体", node.x, node.y + 1);
+  }
+
+  if (showLabel) {
+    const labelLength = node.kind === "tenant" ? 16 : 12;
+    context.font = "700 13px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.lineJoin = "round";
+    context.strokeStyle = graphTheme.labelStroke;
+    context.lineWidth = 4;
+    context.strokeText(shortLabel(node.label, labelLength), node.x, node.y + node.r + 18);
+    context.fillStyle = graphTheme.labelText;
+    context.fillText(shortLabel(node.label, labelLength), node.x, node.y + node.r + 18);
+  }
+  context.restore();
+}
+
+function roundRectPath(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+}
+
 function pushVelocity(velocities: Map<string, { x: number; y: number }>, fixed: Record<string, { x: number; y: number }>, nodeId: string, x: number, y: number) {
   if (fixed[nodeId]) return;
   const velocity = velocities.get(nodeId) ?? { x: 0, y: 0 };
@@ -2029,8 +2305,10 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
   const { centerX, centerY } = bounds;
   const entityNodes = nodes.filter((node) => node.kind === "entity");
   const hubNodes = nodes.filter((node) => node.kind !== "entity" && node.kind !== "tenant");
+  const largeGraph = nodes.length > 1800;
   const communities = [...new Set(entityNodes.map((node) => node.community ?? node.entityType ?? "entity"))];
   const communityCenters = new Map<string, { x: number; y: number }>();
+  const entityPlacement = new Map<string, { index: number; total: number }>();
 
   communities.forEach((community, index) => {
     const angle = (Math.PI * 2 * index) / Math.max(1, communities.length) - Math.PI / 2;
@@ -2041,6 +2319,15 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
       y: centerY + Math.sin(angle) * radiusY,
     });
   });
+
+  for (const community of communities) {
+    const bucket = entityNodes
+      .filter((node) => (node.community ?? node.entityType ?? "entity") === community)
+      .sort((left, right) => nodePriorityForRaw(right) - nodePriorityForRaw(left));
+    bucket.forEach((node, index) => {
+      entityPlacement.set(node.id, { index, total: bucket.length });
+    });
+  }
 
   const positioned: PositionedGraphNode[] = nodes.map((node, index) => {
     const r = node.radius ?? Math.max(10, Math.min(30, 8 + Math.sqrt(Math.max(1, node.weight)) * 3));
@@ -2062,6 +2349,16 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
     }
     const anchor = communityCenters.get(node.community ?? node.entityType ?? "entity") ?? { x: centerX, y: centerY };
     const jitter = deterministicJitter(node.id);
+    if (largeGraph) {
+      const placement = entityPlacement.get(node.id) ?? { index, total: entityNodes.length };
+      const offset = largeGraphEntityOffset(placement.index, placement.total, bounds);
+      return {
+        ...node,
+        x: anchor.x + offset.x + jitter.x * 18,
+        y: anchor.y + offset.y + jitter.y * 18,
+        r,
+      };
+    }
     return {
       ...node,
       x: anchor.x + jitter.x * 86,
@@ -2072,7 +2369,7 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
   const byId = new Map(positioned.map((node) => [node.id, node]));
   const velocity = new Map(positioned.map((node) => [node.id, { x: 0, y: 0 }]));
 
-  const iterationCount = nodes.length > 3000 ? 24 : nodes.length > 1200 ? 40 : nodes.length > 600 ? 80 : 170;
+  const iterationCount = largeGraph ? 0 : nodes.length > 1200 ? 32 : nodes.length > 600 ? 70 : 150;
   for (let iteration = 0; iteration < iterationCount; iteration += 1) {
     forEachNearbyNodePair(positioned, 150, (left, right) => {
       const dx = right.x - left.x || 0.01;
@@ -2139,6 +2436,17 @@ function isUsableGraphPosition(node: PositionedGraphNode, bounds: GraphBounds) {
     Math.abs(node.x - bounds.centerX) <= bounds.width * 2 &&
     Math.abs(node.y - bounds.centerY) <= bounds.height * 2
   );
+}
+
+function largeGraphEntityOffset(index: number, total: number, bounds: GraphBounds) {
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const radiusStep = Math.max(17, Math.min(32, Math.sqrt((bounds.width * bounds.height) / Math.max(1, total)) * 0.34));
+  const radius = Math.sqrt(index + 0.5) * radiusStep;
+  const angle = index * goldenAngle;
+  return {
+    x: Math.cos(angle) * radius,
+    y: Math.sin(angle) * radius * 0.78,
+  };
 }
 
 function limitVelocity(velocity: { x: number; y: number }, max: number) {
@@ -2211,16 +2519,22 @@ function edgePath(source: PositionedGraphNode, target: PositionedGraphNode) {
 }
 
 function edgeStroke(type: string | undefined, graphTheme: GraphColorTheme) {
-  if (type === "CO_OCCURS") return graphTheme.edges.CO_OCCURS;
-  if (type === "CATEGORY_SIGNAL" || type === "CATEGORY_GROUP") return graphTheme.edges.CATEGORY;
-  if (type === "TYPE_MEMBER" || type === "TYPE_GROUP") return graphTheme.edges.TYPE;
-  return graphTheme.edges.DEFAULT;
+  if (type === "CO_OCCURS") return graphTheme.edges.CO_OCCURS ?? graphTheme.edges.DEFAULT ?? "#94a3b8";
+  if (type === "CATEGORY_SIGNAL" || type === "CATEGORY_GROUP") return graphTheme.edges.CATEGORY ?? graphTheme.edges.DEFAULT ?? "#94a3b8";
+  if (type === "TYPE_MEMBER" || type === "TYPE_GROUP") return graphTheme.edges.TYPE ?? graphTheme.edges.DEFAULT ?? "#94a3b8";
+  return graphTheme.edges.DEFAULT ?? "#94a3b8";
 }
 
 function edgeDash(type?: string) {
   if (type === "CATEGORY_SIGNAL") return "4 4";
   if (type === "TYPE_MEMBER") return "2 5";
   return undefined;
+}
+
+function edgeDashArray(type?: string) {
+  if (type === "CATEGORY_SIGNAL") return [4, 4];
+  if (type === "TYPE_MEMBER") return [2, 5];
+  return [];
 }
 
 function edgeWidth(edge: AiGraphEdge) {
@@ -2238,11 +2552,11 @@ function edgeLabelWidth(label: string) {
 }
 
 function nodeFillForNode(node: AiGraphNode, graphTheme: GraphColorTheme) {
-  if (node.kind === "tenant") return graphTheme.nodes.tenant;
-  if (node.kind === "type") return graphTheme.nodes.type;
-  if (node.kind === "category") return graphTheme.nodes.category;
-  if (node.entityType && node.entityType in graphTheme.nodes) return graphTheme.nodes[node.entityType];
-  return graphTheme.nodes.default;
+  if (node.kind === "tenant") return graphTheme.nodes.tenant ?? graphTheme.nodes.default ?? "#2563eb";
+  if (node.kind === "type") return graphTheme.nodes.type ?? graphTheme.nodes.default ?? "#7c3aed";
+  if (node.kind === "category") return graphTheme.nodes.category ?? graphTheme.nodes.default ?? "#16a34a";
+  if (node.entityType && node.entityType in graphTheme.nodes) return graphTheme.nodes[node.entityType] ?? graphTheme.nodes.default ?? "#0ea5e9";
+  return graphTheme.nodes.default ?? "#0ea5e9";
 }
 
 function nodeFill(kind: string) {
