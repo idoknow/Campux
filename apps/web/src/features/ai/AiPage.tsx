@@ -457,7 +457,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
   }
 
   function zoomGraph(delta: number) {
-    setGraphTransform((current) => ({ ...current, scale: clampNumber(current.scale + delta, 0.45, 2.4) }));
+    setGraphTransform((current) => ({ ...current, scale: clampNumber(current.scale + delta, 0.18, 2.4) }));
   }
 
   function resetGraphTransform() {
@@ -1072,6 +1072,7 @@ function GraphPanel({
   const panStateRef = useRef<{ pointerId: number; startX: number; startY: number; graphX: number; graphY: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const didInitialFitRef = useRef(false);
   const nodeDragStateRef = useRef<{
     pointerId: number;
     nodeId: string;
@@ -1100,8 +1101,42 @@ function GraphPanel({
   const showNodeLabels = nodes.length <= 900 || searchActive || transform.scale >= 1.18;
   const showEdgeLabels = edges.length <= 800 || searchActive || transform.scale >= 1.45;
   const graphBounds = useMemo(() => createGraphBounds(graphSize, nodes.length), [graphSize, nodes.length]);
-  const positioned = useOrganicGraphLayout(nodes, edges, graphBounds, fixedNodePositionsRef);
+  const { positioned, moveNode } = useOrganicGraphLayout(nodes, edges, graphBounds, fixedNodePositionsRef);
   const byId = new Map(positioned.map((node) => [node.id, node]));
+  const visibleRect = useMemo(() => visibleGraphRect(graphSize, transform), [graphSize, transform]);
+  const selectedNodeId = selectedEntityId ? `entity:${selectedEntityId}` : null;
+  const renderedNodeIds = useMemo(() => {
+    const hubNodeIds: string[] = [];
+    const priorityEntityIds: string[] = [];
+    const visibleEntities: PositionedGraphNode[] = [];
+    for (const node of positioned) {
+      if (node.kind !== "entity") {
+        hubNodeIds.push(node.id);
+        continue;
+      }
+      if (node.id === selectedNodeId || matchedNodeIds.has(node.id)) {
+        priorityEntityIds.push(node.id);
+        continue;
+      }
+      if (nodeIntersectsRect(node, visibleRect)) {
+        visibleEntities.push(node);
+      }
+    }
+    const visibleBudget = graphNodeRenderBudget(transform.scale, searchActive);
+    const visibleNodeIds = new Set([...hubNodeIds, ...priorityEntityIds]);
+    const remainingBudget = Math.max(0, visibleBudget - priorityEntityIds.length);
+    for (const node of visibleEntities
+      .sort((left, right) => (right.score ?? 0) - (left.score ?? 0) || right.weight - left.weight)
+      .slice(0, remainingBudget)) {
+      visibleNodeIds.add(node.id);
+    }
+    return visibleNodeIds;
+  }, [matchedNodeIds, positioned, searchActive, selectedNodeId, transform.scale, visibleRect]);
+  const renderedNodes = useMemo(() => positioned.filter((node) => renderedNodeIds.has(node.id)), [positioned, renderedNodeIds]);
+  const renderedEdges = useMemo(() => edges
+    .filter((edge) => renderedNodeIds.has(edge.source) && renderedNodeIds.has(edge.target))
+    .sort((left, right) => edgeRenderPriority(right, selectedNodeId, matchedNodeIds) - edgeRenderPriority(left, selectedNodeId, matchedNodeIds))
+    .slice(0, graphEdgeRenderBudget(transform.scale, searchActive)), [edges, matchedNodeIds, renderedNodeIds, searchActive, selectedNodeId, transform.scale]);
 
   useEffect(() => {
     const nodeIds = new Set(nodes.map((node) => node.id));
@@ -1123,6 +1158,17 @@ function GraphPanel({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (didInitialFitRef.current || nodes.length <= 1200 || graphSize.width <= 0 || graphSize.height <= 0) return;
+    const scale = 0.42;
+    didInitialFitRef.current = true;
+    onTransformChange({
+      scale,
+      x: (graphSize.width * (1 - scale)) / 2,
+      y: (graphSize.height * (1 - scale)) / 2,
+    });
+  }, [graphSize.height, graphSize.width, nodes.length, onTransformChange]);
 
   function startPan(event: React.PointerEvent<SVGSVGElement>) {
     const target = event.target instanceof Element ? event.target : null;
@@ -1157,7 +1203,7 @@ function GraphPanel({
 
   function zoomWithWheel(event: React.WheelEvent<SVGSVGElement>) {
     event.preventDefault();
-    const nextScale = clampNumber(transform.scale * (event.deltaY < 0 ? 1.08 : 0.92), 0.45, 2.4);
+    const nextScale = clampNumber(transform.scale * (event.deltaY < 0 ? 1.08 : 0.92), 0.18, 2.4);
     if (nextScale === transform.scale) return;
     const svgPoint = clientToSvgPoint(event.clientX, event.clientY);
     if (!svgPoint) {
@@ -1208,6 +1254,7 @@ function GraphPanel({
       ...fixedNodePositionsRef.current,
       [state.nodeId]: { x, y },
     };
+    moveNode(state.nodeId, x, y);
   }
 
   function endNodeDrag(event: React.PointerEvent<SVGGElement>, entity: AiEntity) {
@@ -1274,7 +1321,7 @@ function GraphPanel({
       >
         <rect width={graphSize.width} height={graphSize.height} fill="transparent" />
         <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
-          {edges.map((edge, index) => {
+          {renderedEdges.map((edge, index) => {
             const source = byId.get(edge.source);
             const target = byId.get(edge.target);
             if (!source || !target) return null;
@@ -1321,7 +1368,7 @@ function GraphPanel({
               </g>
             );
           })}
-          {positioned.map((node) => {
+          {renderedNodes.map((node) => {
             const entity = entityByNodeId.get(node.id);
             const selected = entity?.id === selectedEntityId;
             const searchMatched = matchedNodeIds.has(node.id);
@@ -1795,6 +1842,43 @@ function createGraphBounds(size: GraphSize, nodeCount: number): GraphBounds {
   };
 }
 
+function visibleGraphRect(size: GraphSize, transform: GraphTransform) {
+  const padding = 260 / transform.scale;
+  return {
+    minX: (0 - transform.x) / transform.scale - padding,
+    maxX: (size.width - transform.x) / transform.scale + padding,
+    minY: (0 - transform.y) / transform.scale - padding,
+    maxY: (size.height - transform.y) / transform.scale + padding,
+  };
+}
+
+function nodeIntersectsRect(node: PositionedGraphNode, rect: { minX: number; maxX: number; minY: number; maxY: number }) {
+  const radius = Math.max(42, node.r + 26);
+  return node.x + radius >= rect.minX && node.x - radius <= rect.maxX && node.y + radius >= rect.minY && node.y - radius <= rect.maxY;
+}
+
+function graphNodeRenderBudget(scale: number, searchActive: boolean) {
+  if (searchActive) return 1800;
+  if (scale < 0.55) return 760;
+  if (scale < 0.9) return 1100;
+  if (scale < 1.35) return 1600;
+  return 2400;
+}
+
+function graphEdgeRenderBudget(scale: number, searchActive: boolean) {
+  if (searchActive) return 2600;
+  if (scale < 0.55) return 1200;
+  if (scale < 0.9) return 1800;
+  if (scale < 1.35) return 2600;
+  return 3800;
+}
+
+function edgeRenderPriority(edge: AiGraphEdge, selectedNodeId: string | null, matchedNodeIds: Set<string>) {
+  const focus = edge.source === selectedNodeId || edge.target === selectedNodeId ? 1_000_000 : 0;
+  const search = matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target) ? 500_000 : 0;
+  return focus + search + edge.weight * 10 + (edge.signalCount ?? 0);
+}
+
 function normalizeSearchTerm(value: string) {
   return value.trim().toLocaleLowerCase("zh-CN");
 }
@@ -1819,6 +1903,7 @@ function useOrganicGraphLayout(
   const [positioned, setPositioned] = useState<PositionedGraphNode[]>([]);
   const positionsRef = useRef<Map<string, PositionedGraphNode>>(new Map());
   const velocitiesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const livePhysics = nodes.length <= 1200;
 
   useEffect(() => {
     const previous = positionsRef.current;
@@ -1829,6 +1914,7 @@ function useOrganicGraphLayout(
   }, [nodes, edges, bounds.width, bounds.height, bounds.centerX, bounds.centerY]);
 
   useEffect(() => {
+    if (!livePhysics) return;
     let frame = 0;
     let active = true;
     const tick = () => {
@@ -1842,9 +1928,18 @@ function useOrganicGraphLayout(
       active = false;
       cancelAnimationFrame(frame);
     };
-  }, [edges, bounds.width, bounds.height, bounds.centerX, bounds.centerY, fixedPositionsRef]);
+  }, [edges, bounds.width, bounds.height, bounds.centerX, bounds.centerY, fixedPositionsRef, livePhysics]);
 
-  return positioned;
+  function moveNode(nodeId: string, x: number, y: number) {
+    const node = positionsRef.current.get(nodeId);
+    if (!node) return;
+    node.x = x;
+    node.y = y;
+    velocitiesRef.current.set(nodeId, { x: 0, y: 0 });
+    setPositioned([...positionsRef.current.values()].map((item) => ({ ...item })));
+  }
+
+  return { positioned, moveNode };
 }
 
 function stepOrganicGraph(
@@ -1898,6 +1993,7 @@ function stepOrganicGraph(
     velocity.y += (anchor.y - node.y) * pull;
     velocity.x *= 0.82;
     velocity.y *= 0.82;
+    limitVelocity(velocity, 42);
     node.x += velocity.x;
     node.y += velocity.y;
     velocities.set(node.id, velocity);
@@ -1949,7 +2045,7 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
   const positioned: PositionedGraphNode[] = nodes.map((node, index) => {
     const r = node.radius ?? Math.max(10, Math.min(30, 8 + Math.sqrt(Math.max(1, node.weight)) * 3));
     const previous = previousPositions?.get(node.id);
-    if (previous) {
+    if (previous && isUsableGraphPosition(previous, bounds)) {
       return { ...node, x: previous.x, y: previous.y, r };
     }
     if (node.kind === "tenant") {
@@ -2027,12 +2123,27 @@ function layoutGraph(nodes: AiGraphNode[], edges: AiGraphEdge[], bounds: GraphBo
       currentVelocity.y += (anchor.y - node.y) * pull;
       currentVelocity.x *= 0.72;
       currentVelocity.y *= 0.72;
+      limitVelocity(currentVelocity, 42);
       node.x += currentVelocity.x;
       node.y += currentVelocity.y;
     }
   }
 
   return positioned.sort((left, right) => (left.kind === "tenant" ? 1 : 0) - (right.kind === "tenant" ? 1 : 0));
+}
+
+function isUsableGraphPosition(node: PositionedGraphNode, bounds: GraphBounds) {
+  return (
+    Number.isFinite(node.x) &&
+    Number.isFinite(node.y) &&
+    Math.abs(node.x - bounds.centerX) <= bounds.width * 2 &&
+    Math.abs(node.y - bounds.centerY) <= bounds.height * 2
+  );
+}
+
+function limitVelocity(velocity: { x: number; y: number }, max: number) {
+  velocity.x = clampNumber(velocity.x, -max, max);
+  velocity.y = clampNumber(velocity.y, -max, max);
 }
 
 function forEachNearbyNodePair(nodes: PositionedGraphNode[], cellSize: number, visit: (left: PositionedGraphNode, right: PositionedGraphNode) => void) {
