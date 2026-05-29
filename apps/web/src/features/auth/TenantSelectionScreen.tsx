@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronRightIcon, LogOutIcon } from "lucide-react";
 import { roleLabels } from "@/lib/app-model";
+import { getTenantSelectionOptions } from "./tenant-selection-options";
 import type { AuthenticatedMe } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +19,7 @@ export function TenantSelectionScreen({
   onLogout: () => Promise<void>;
 }) {
   const [busyTenantId, setBusyTenantId] = useState("");
+  const tenantOptions = getTenantSelectionOptions(me);
 
   async function select(tenantId: string) {
     setBusyTenantId(tenantId);
@@ -58,22 +60,22 @@ export function TenantSelectionScreen({
         </div>
 
         <div className="mt-5 grid gap-3">
-          {me.memberships.length === 0 ? (
+          {tenantOptions.length === 0 ? (
             <Card className="bg-orange-50">
               <CardContent className="p-4 text-sm font-medium text-orange-900">暂无可访问的校园墙，请先通过对应校园墙机器人注册。</CardContent>
             </Card>
           ) : null}
-          {me.memberships.map((membership) => (
+          {tenantOptions.map((option) => (
             <Button
-              key={membership.id}
+              key={option.key}
               variant="outline"
               className="h-auto justify-between rounded-md bg-white p-4 text-left"
-              disabled={busyTenantId === membership.tenant.id}
-              onClick={() => void select(membership.tenant.id)}
+              disabled={busyTenantId === option.tenantId}
+              onClick={() => void select(option.tenantId)}
             >
               <span>
-                <span className="block font-bold">{membership.tenant.name}</span>
-                <span className="text-xs text-slate-500">{roleLabels[membership.role]}</span>
+                <span className="block font-bold">{option.tenant.name}</span>
+                <span className="text-xs text-slate-500">{option.syntheticSystemAccess ? "系统运维 · 管理员身份" : roleLabels[option.role]}</span>
               </span>
               <ChevronRightIcon data-icon="inline-end" />
             </Button>

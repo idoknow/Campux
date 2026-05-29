@@ -143,7 +143,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       };
     }
 
-    const onlyMembership = user.memberships.length === 1 ? user.memberships[0] : undefined;
+    const systemAccessibleTenants = await listSystemAccessibleTenants(user.systemRole);
+    const onlyMembership = user.systemRole === "system_operator" ? undefined : user.memberships.length === 1 ? user.memberships[0] : undefined;
     const selectedTenantId = onlyMembership?.tenantId ?? null;
     const token = await createSession(user.id, selectedTenantId);
     setSessionCookie(reply, token);
@@ -152,10 +153,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       authenticated: true,
       user: toPublicUser(user),
       memberships: user.memberships.map(toMembership),
+      systemAccessibleTenants,
       currentTenant: onlyMembership ? toTenantSummary(onlyMembership.tenant) : null,
       currentMembership: onlyMembership ? { id: onlyMembership.id, role: onlyMembership.role } : null,
       activeBan: onlyMembership ? toActiveBan(await findActiveBan(onlyMembership.tenantId, user.id)) : null,
-      needsTenantSelection: user.memberships.length > 1,
+      needsTenantSelection: !selectedTenantId && (user.memberships.length > 1 || systemAccessibleTenants.length > 0),
       hostLocked: false,
     };
   });
@@ -265,6 +267,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       authenticated: true,
       user: toPublicUser(user),
       memberships: [],
+      systemAccessibleTenants: [],
       currentTenant: null,
       currentMembership: null,
       activeBan: null,
@@ -360,16 +363,20 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       };
     }
 
+    const systemAccessibleTenants = await listSystemAccessibleTenants(context.user.systemRole);
+    const needsTenantSelection = !context.selectedTenant && (context.memberships.length > 1 || systemAccessibleTenants.length > 0);
+
     return {
       authenticated: true,
       user: toPublicUser(context.user),
       memberships: context.memberships.map(toMembership),
+      systemAccessibleTenants,
       currentTenant: context.selectedTenant ? toTenantSummary(context.selectedTenant) : null,
       currentMembership: context.selectedMembership
         ? { id: context.selectedMembership.id, role: context.selectedMembership.role }
         : null,
       activeBan: toActiveBan(context.activeBan),
-      needsTenantSelection: context.memberships.length > 1 && !context.selectedTenant,
+      needsTenantSelection,
       hostLocked: Boolean(context.hostTenant),
     };
   });
@@ -468,4 +475,38 @@ function toActiveBan(ban: Awaited<ReturnType<typeof findActiveBan>>) {
     endsAt: ban.endsAt.toISOString(),
     createdAt: ban.createdAt.toISOString(),
   };
+}
+
+async function listSystemAccessibleTenants(systemRole: string | null) {
+  if (systemRole !== "system_operator") {
+    return [];
+  }
+
+  const tenants = await prisma.tenant.findMany({
+    include: {
+      metadata: {
+        where: {
+          key: "logo_url",
+        },
+      },
+      aiSettings: {
+        select: {
+          enabled: true,
+        },
+      },
+      _count: {
+        select: {
+          botAccounts: true,
+          posts: {
+            where: {
+              status: "pending_approval",
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ status: "asc" }, { createdAt: "asc" }],
+  });
+
+  return tenants.map(toTenantSummary);
 }
