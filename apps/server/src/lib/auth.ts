@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { SystemRole, TenantRole } from "@campux/db";
 import { prisma } from "./prisma";
+import { isSyntheticSystemOperatorMembership, resolveEffectiveTenantMembership } from "./tenant-access";
 import { findTenantByRequestHost } from "./tenant-host";
 
 export const sessionCookieName = "campux_session";
@@ -136,7 +137,12 @@ export async function getSessionContext(request: FastifyRequest) {
   const hostTenant = await findTenantByRequestHost(request);
   if (hostTenant) {
     const hostMembership = session.user.memberships.find((membership) => membership.tenantId === hostTenant.id);
-    const selectedMembership = hostMembership ?? syntheticSystemOperatorMembership(session.user.id, hostTenant.id, session.user.systemRole);
+    const selectedMembership = resolveEffectiveTenantMembership({
+      userId: session.user.id,
+      systemRole: session.user.systemRole,
+      tenantId: hostTenant.id,
+      memberships: session.user.memberships,
+    });
     if (!selectedMembership) {
       return null;
     }
@@ -163,8 +169,12 @@ export async function getSessionContext(request: FastifyRequest) {
   }
 
   const selectedMembership = session.selectedTenantId
-    ? session.user.memberships.find((membership) => membership.tenantId === session.selectedTenantId)
-      ?? syntheticSystemOperatorMembership(session.user.id, session.selectedTenantId, session.user.systemRole)
+    ? resolveEffectiveTenantMembership({
+        userId: session.user.id,
+        systemRole: session.user.systemRole,
+        tenantId: session.selectedTenantId,
+        memberships: session.user.memberships,
+      })
     : null;
 
   return {
@@ -176,28 +186,6 @@ export async function getSessionContext(request: FastifyRequest) {
     activeBan: session.selectedTenantId && selectedMembership && !isSyntheticSystemOperatorMembership(selectedMembership.id) ? await findActiveBan(session.selectedTenantId, session.user.id) : null,
     hostTenant: null,
   };
-}
-
-function syntheticSystemOperatorMembership(userId: string, tenantId: string, systemRole: SystemRole | null) {
-  if (systemRole !== "system_operator") {
-    return null;
-  }
-
-  return {
-    id: syntheticSystemOperatorMembershipId(tenantId),
-    tenantId,
-    userId,
-    role: "admin" as const,
-    createdAt: new Date(0),
-  };
-}
-
-function syntheticSystemOperatorMembershipId(tenantId: string) {
-  return `system-operator:${tenantId}`;
-}
-
-function isSyntheticSystemOperatorMembership(id: string) {
-  return id.startsWith("system-operator:");
 }
 
 export async function findActiveBan(tenantId: string, userId: string) {
