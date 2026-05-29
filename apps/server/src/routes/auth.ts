@@ -7,6 +7,7 @@ import { clearSessionCookie, createSession, findActiveBan, getCookie, getSession
 import { generateEmailCode, hashEmailCode, normalizeEmail, sendVerificationEmail } from "../lib/email";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
+import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
 import { findManagementHostByRequest, findTenantByRequestHost } from "../lib/tenant-host";
 
 const loginSchema = z.object({
@@ -114,7 +115,13 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     const hostTenant = await findTenantByRequestHost(request);
     if (hostTenant) {
       const hostMembership = user.memberships.find((membership) => membership.tenantId === hostTenant.id);
-      if (!hostMembership) {
+      const effectiveMembership = resolveEffectiveTenantMembership({
+        userId: user.id,
+        systemRole: user.systemRole,
+        tenantId: hostTenant.id,
+        memberships: user.memberships,
+      });
+      if (!effectiveMembership) {
         return reply.code(403).send({
           message: "该账号没有访问当前校园墙的权限",
         });
@@ -122,14 +129,15 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
 
       const token = await createSession(user.id, hostTenant.id);
       setSessionCookie(reply, token);
+      const visibleMemberships = hostMembership === undefined ? [] : [toMembership(hostMembership)];
 
       return {
         authenticated: true,
         user: toPublicUser(user),
-        memberships: [toMembership(hostMembership)],
+        memberships: visibleMemberships,
         currentTenant: toTenantSummary(hostTenant),
-        currentMembership: { id: hostMembership.id, role: hostMembership.role },
-        activeBan: toActiveBan(await findActiveBan(hostTenant.id, user.id)),
+        currentMembership: { id: effectiveMembership.id, role: effectiveMembership.role },
+        activeBan: hostMembership ? toActiveBan(await findActiveBan(hostTenant.id, user.id)) : null,
         needsTenantSelection: false,
         hostLocked: true,
       };
@@ -383,7 +391,12 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const membership = context.memberships.find((item) => item.tenantId === body.tenantId);
-    const effectiveMembership = membership ?? (context.user.systemRole === "system_operator" ? { id: `system-operator:${body.tenantId}`, role: "admin" as const } : null);
+    const effectiveMembership = resolveEffectiveTenantMembership({
+      userId: context.user.id,
+      systemRole: context.user.systemRole,
+      tenantId: body.tenantId,
+      memberships: context.memberships,
+    });
     if (!effectiveMembership) {
       return reply.code(403).send({ message: "没有访问该校园墙的权限" });
     }
