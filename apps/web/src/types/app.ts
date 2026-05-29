@@ -88,6 +88,7 @@ export type MeResponse =
         passwordChangeRequired: boolean;
       };
       memberships: Membership[];
+      systemAccessibleTenants?: TenantSummary[];
       currentTenant: TenantSummary | null;
       currentMembership: CurrentMembership | null;
       activeBan: ActiveBan | null;
