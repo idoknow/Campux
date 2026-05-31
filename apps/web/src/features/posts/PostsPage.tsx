@@ -833,7 +833,6 @@ export function PostsPage({
                 className="min-h-24 bg-white"
                 value={recallReason}
                 onChange={(event) => setRecallReason(event.target.value)}
-                placeholder="请说明为什么需要撤回，例如：内容有误、个人信息需要删除、图片传错了。"
               />
             </div>
           ) : null}
