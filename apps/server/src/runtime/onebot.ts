@@ -88,6 +88,9 @@ type OneBotMessageEvent = {
     nickname?: string;
     card?: string;
   };
+  message_id?: number | string;
+  // Some OneBot implementations include reply metadata in the message segments
+  // but we treat them as part of `message` / `raw_message` as fallback.
 };
 
 const privateHelp = [
@@ -1362,7 +1365,22 @@ export class OneBotRuntime {
       return;
     }
 
-    const command = parseCommand(extractPlainText(event));
+    let command = parseCommand(extractPlainText(event));
+
+    // 如果没有以 # 或 / 明确给出命令，但消息是 @ 机器人的短命令（比如 过/拒），支持基于 mention 的快捷命令。
+    if (!command && isMentioningBot(event, botQqUin)) {
+      const normalized = extractPlainText(event).replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+      const shortMatch = normalized.match(/^(过|通过)(?:\s*(.*))?$/);
+      if (shortMatch) {
+        command = { name: "通过", args: (shortMatch[2] ?? "").trim() };
+      } else {
+        const rejectMatch = normalized.match(/^(拒|拒绝)(?:\s*(.*))?$/);
+        if (rejectMatch) {
+          command = { name: "拒绝", args: (rejectMatch[2] ?? "").trim() };
+        }
+      }
+    }
+
     if (!command) {
       await this.replyToReviewGroupMention(event, botQqUin, groupId);
       return;
@@ -1370,7 +1388,11 @@ export class OneBotRuntime {
 
     try {
       if (command.name === "通过") {
-        const displayId = parseDisplayId(command.args);
+        let displayId = parseDisplayId(command.args);
+        // 尝试从引用消息解析稿件编号：仅在操作员 mention 机器人且存在引用时才解析
+        if (!displayId && isMentioningBot(event, botQqUin)) {
+          displayId = await this.tryResolveDisplayIdFromReply(event, botQqUin);
+        }
         if (!displayId) {
           await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
           return;
@@ -1389,10 +1411,24 @@ export class OneBotRuntime {
       }
 
       if (command.name === "拒绝") {
-        const parsed = parseRejectArgs(command.args);
+        // 拒绝可以是：#拒绝 <理由> <稿件id>
+        // 也可以是：@bot 引用机器人通知消息之后发送 "拒 <理由>"
+        let parsed = parseRejectArgs(command.args);
         if (!parsed) {
-          await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
-          return;
+          // 如果没有在 args 里解析到 displayId，尝试从引用消息里解析
+          const commentOnly = command.args.trim();
+          if (!commentOnly) {
+            await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+            return;
+          }
+          const displayIdFromReply = isMentioningBot(event, botQqUin)
+            ? await this.tryResolveDisplayIdFromReply(event, botQqUin)
+            : null;
+          if (!displayIdFromReply) {
+            await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+            return;
+          }
+          parsed = { displayId: displayIdFromReply, comment: commentOnly };
         }
         const result = await reviewPostViaBot({
           queue: this.queue,
@@ -1533,6 +1569,68 @@ export class OneBotRuntime {
 
       this.logger.warn({ error, botQqUin }, "onebot get_cookies failed; using development mock cookies");
       return `uin=o${botQqUin}; skey=matcha-dev-skey; p_skey=matcha-dev-pskey; pt4_token=matcha-dev-token`;
+    }
+  }
+
+  private async tryResolveDisplayIdFromReply(event: OneBotMessageEvent, botQqUin: string): Promise<number | null> {
+    try {
+      const replyId = (() => {
+        if (typeof event.raw_message === "string") {
+          const m = event.raw_message.match(/\[CQ:reply,id=(\d+)(?:,.*)?\]/);
+          if (m) return m[1];
+        }
+        if (Array.isArray(event.message)) {
+          for (const seg of event.message as any[]) {
+            if (!seg || typeof seg !== "object") continue;
+            if (seg.type === "reply") {
+              const id = seg.data?.id ?? seg.data?.msg_id ?? seg.data?.message_id;
+              if (id) return String(id);
+            }
+          }
+        }
+        if (event.message_id) {
+          return String(event.message_id);
+        }
+        return null;
+      })();
+
+      if (!replyId) {
+        return null;
+      }
+
+      const data = await this.callAction(botQqUin, "get_msg", { message_id: replyId }).catch(() => null);
+      if (!data) return null;
+
+      // Verify the replied message was sent by the bot itself
+      const sender = (data as any).sender ?? (data as any).user ?? null;
+      const senderId = sender
+        ? normalizeId(sender.user_id ?? sender.userId ?? sender.uin ?? sender.qq ?? sender.id)
+        : null;
+      if (!senderId || senderId !== botQqUin) {
+        return null;
+      }
+
+      // data may contain `message` (array) or `raw_message` or `message` string
+      let text = "";
+      if (Array.isArray((data as any).message)) {
+        text = (data as any).message
+          .map((seg: any) => (seg?.type === "text" ? seg?.data?.text ?? "" : ""))
+          .join("");
+      } else if (typeof (data as any).message === "string") {
+        text = (data as any).message;
+      } else if (typeof (data as any).raw_message === "string") {
+        text = (data as any).raw_message;
+      }
+
+      if (!text) return null;
+
+      // Try to extract displayId from notification text: prefer `编号：#123` then `#123`
+      const m = text.match(/(?:编号：#|#)(\d+)\b/);
+      if (!m) return null;
+      const id = Number(m[1]);
+      return Number.isInteger(id) && id > 0 ? id : null;
+    } catch (error) {
+      return null;
     }
   }
 
