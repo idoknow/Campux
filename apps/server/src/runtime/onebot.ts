@@ -1481,7 +1481,7 @@ export class OneBotRuntime {
           },
         ]);
         for (let index = 0; index < 60; index += 1) {
-          await Bun.sleep(2_000);
+          await sleep(2_000);
           const result = await pollQZoneQrLogin(task.id);
           if (result.status === "succeeded") {
             const session = await prisma.botSession.findFirst({
@@ -1753,6 +1753,10 @@ function formatDateTime(date: Date) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function inferImageContentType(name: string) {
