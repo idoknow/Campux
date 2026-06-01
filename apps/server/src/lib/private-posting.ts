@@ -20,6 +20,10 @@ export function isPrivatePostCancelText(input: string) {
   return /^(?:#|＃)取消本次投稿\s*$/.test(input.trim());
 }
 
+export function isPrivatePostUndoText(input: string) {
+  return /^(?:#|＃)(?:撤回|撤回上一条|撤回上一步)\s*$/.test(input.trim());
+}
+
 export function parsePrivatePostModeText(input: string) {
   const match = input.trim().match(/^(?:#|＃)(匿名|实名)(?:投稿)?\s*$/);
   if (!match) {
@@ -29,19 +33,6 @@ export function parsePrivatePostModeText(input: string) {
   return {
     anonymous: match[1] === "匿名",
   };
-}
-
-export function parsePrivatePostImageDecisionText(input: string) {
-  const trimmed = input.trim();
-  const m = trimmed.match(/^(?:#|＃)(?:添加图片|要图片|添加图|要图|是)\s*$/);
-  if (m) {
-    return { addImages: true };
-  }
-  const n = trimmed.match(/^(?:#|＃)(?:不添加图片|不要图片|不添加图|不要图|否)\s*$/);
-  if (n) {
-    return { addImages: false };
-  }
-  return null;
 }
 
 export function extractOneBotImageSegments(message: unknown) {

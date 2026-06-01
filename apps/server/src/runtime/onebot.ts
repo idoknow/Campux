@@ -19,7 +19,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, parsePrivatePostModeText, parsePrivatePostStartText, parsePrivatePostImageDecisionText } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
 import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
@@ -58,6 +58,17 @@ type OneBotActionResponse = {
   wording?: string;
 };
 
+type PrivatePostHistoryEntry =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "images";
+      attachmentCount: number;
+      uploadedKeys: string[];
+    };
+
 type PrivatePostDraft = {
   tenantId: string;
   text: string;
@@ -65,7 +76,7 @@ type PrivatePostDraft = {
   attachments: PostAttachment[];
   uploadedKeys: string[];
   updatedAt: number;
-  awaitingImageDecision?: boolean;
+  history: PrivatePostHistoryEntry[];
 };
 
 type PrivatePostPendingMode = {
@@ -74,6 +85,7 @@ type PrivatePostPendingMode = {
   attachments: PostAttachment[];
   uploadedKeys: string[];
   updatedAt: number;
+  history: PrivatePostHistoryEntry[];
 };
 
 type OneBotMessageEvent = {
@@ -96,7 +108,8 @@ type OneBotMessageEvent = {
 const privateHelp = [
   "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
   "可以发送 #重置密码，重置你的登录密码。",
-  "想投稿时先发 #投稿 正文，然后回复 #匿名 或 #实名；后面发图片，准备好了再发 #结束投稿。",
+  "想投稿时先发 #投稿 正文，然后回复 #匿名 或 #实名；后面可以继续发文字或图片，准备好了再发 #结束投稿。",
+  "发 #撤回 可以撤回本次投稿中最近追加的一段文字或一批图片。",
   "不想继续投稿时发 #取消本次投稿，就能取消这次投稿。",
 ].join("\n");
 
@@ -742,8 +755,22 @@ export class OneBotRuntime {
       }
 
       const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+      if (isPrivatePostUndoText(plainText)) {
+        await this.undoPrivatePostDraftEntry({
+          bot,
+          botQqUin,
+          userQqUin,
+        });
+        return;
+      }
+
       const pendingMode = this.privatePostPendingModes.get(draftKey);
       if (pendingMode) {
+        if (isPrivatePostFinishText(plainText)) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, "还差一步：先回复 #匿名 或 #实名 选择投稿方式，再发 #结束投稿 提交稿件。");
+          return;
+        }
+
         const selection = parsePrivatePostModeText(plainText);
         if (selection) {
           await this.selectPrivatePostMode({
@@ -755,41 +782,8 @@ export class OneBotRuntime {
           return;
         }
 
-        // 如果在 pending 状态，允许用户继续发送正文的后续段落（多段文字）或添加图片。
-        try {
-          const imageSegments = extractOneBotImageSegments(event.message);
-          if (imageSegments.length > 0) {
-            // 将新图片上载并追加到 pending
-            const staged = await this.stagePrivatePostAttachments(bot, event);
-            // 检查总数限制
-            if (pendingMode.attachments.length + staged.attachments.length > 9) {
-              await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
-              await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
-              return;
-            }
-
-            pendingMode.attachments.push(...staged.attachments);
-            pendingMode.uploadedKeys.push(...staged.uploadedKeys);
-            pendingMode.updatedAt = Date.now();
-            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pendingMode.text, pendingMode.attachments.length));
-            return;
-          }
-        } catch (error) {
-          // stagePrivatePostAttachments 会在内部进行上传回收；只需要通知用户错误
-          await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
-          return;
-        }
-
-        // 处理追加文字：合并为多段正文，限制 1000 字
-        const moreText = plainText.trim();
-        if (moreText.length > 0) {
-          const combined = (pendingMode.text ? `${pendingMode.text}\n${moreText}` : moreText).trim();
-          if (combined.length > 1_000) {
-            await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
-            return;
-          }
-          pendingMode.text = combined;
-          pendingMode.updatedAt = Date.now();
+        const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: pendingMode });
+        if (appended) {
           await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pendingMode.text, pendingMode.attachments.length));
           return;
         }
@@ -809,46 +803,9 @@ export class OneBotRuntime {
 
       const draft = this.privatePostDrafts.get(draftKey);
       if (draft) {
-          const draftText = extractOneBotPlainText(event.message, event.raw_message).trim();
-          const imageSegments = extractOneBotImageSegments(event.message);
-
-          if (draft.awaitingImageDecision) {
-            const decision = parsePrivatePostImageDecisionText(draftText);
-            if (!decision) {
-              await this.sendPrivateMessage(botQqUin, userQqUin, "现在请回复 #是 或 #否 选择是否添加图片；不想继续投稿可以发 #取消本次投稿。");
-              return;
-            }
-
-            draft.awaitingImageDecision = false;
-            if (!decision.addImages) {
-              await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
-              return;
-            }
-
-            await this.sendPrivateMessage(botQqUin, userQqUin, "好的，请开始发送图片，发完图片后再发 #结束投稿 提交稿件；发送 #取消本次投稿 放弃。");
-            return;
-          }
-
-          // 草稿阶段允许追加文字（每段新起一行）或继续上传图片
-          if (draftText.length > 0) {
-            const combined = (draft.text ? `${draft.text}\n${draftText}` : draftText).trim();
-            if (combined.length > 1_000) {
-              await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
-              return;
-            }
-            draft.text = combined;
-            draft.updatedAt = Date.now();
+          const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft });
+          if (appended) {
             await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
-            return;
-          }
-
-          if (imageSegments.length > 0) {
-            await this.appendPrivatePostDraftImages({
-              bot,
-              botQqUin,
-              userQqUin,
-              event,
-            });
             return;
           }
 
@@ -922,61 +879,90 @@ export class OneBotRuntime {
     await this.clearPrivatePostDraft(draftKey);
     const text = body.trim();
     const attachments = staged.attachments;
+    const history: PrivatePostHistoryEntry[] = [];
+    if (text) {
+      history.push({ type: "text", text });
+    }
+    if (attachments.length > 0) {
+      history.push({ type: "images", attachmentCount: attachments.length, uploadedKeys: staged.uploadedKeys });
+    }
     this.privatePostPendingModes.set(draftKey, {
       tenantId: bot.tenantId,
       text,
       attachments,
       uploadedKeys: staged.uploadedKeys,
       updatedAt: Date.now(),
+      history,
     });
 
     const summary = this.formatPrivatePostPendingSummary(text, attachments.length);
     await this.sendPrivateMessage(botQqUin, userQqUin, summary);
   }
 
-  private async appendPrivatePostDraftImages({
+  private async appendPrivatePostContent({
     bot,
     botQqUin,
     userQqUin,
     event,
+    target,
   }: {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
     botQqUin: string;
     userQqUin: string;
     event: OneBotMessageEvent;
+    target: PrivatePostDraft | PrivatePostPendingMode;
   }) {
     await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
 
-    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
-    const pending = this.privatePostPendingModes.get(draftKey);
-    if (pending) {
-      await this.clearPrivatePostPending(draftKey);
-      await this.sendPrivateMessage(botQqUin, userQqUin, "好，已经帮你取消这次投稿了。");
-      return;
+    const draftText = extractOneBotPlainText(event.message, event.raw_message).trim();
+    const imageSegments = extractOneBotImageSegments(event.message);
+
+    if (draftText.length > 0) {
+      const combined = (target.text ? `${target.text}\n${draftText}` : draftText).trim();
+      if (combined.length > 1_000) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
+        return false;
+      }
     }
 
-    const draft = this.privatePostDrafts.get(draftKey);
-    if (!draft) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发 #投稿 正文 吧。");
-      return;
+    let staged: { attachments: PostAttachment[]; uploadedKeys: string[] } | null = null;
+
+    if (imageSegments.length > 0) {
+      try {
+        staged = await this.stagePrivatePostAttachments(bot, event);
+      } catch (error) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
+        return false;
+      }
+      if (staged.attachments.length === 0) {
+        staged = null;
+      }
     }
 
-    const staged = await this.stagePrivatePostAttachments(bot, event);
-    if (staged.attachments.length === 0) {
-      return;
+    if (staged) {
+      if (target.attachments.length + staged.attachments.length > 9) {
+        await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
+        await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
+        return false;
+      }
     }
 
-    if (draft.attachments.length + staged.attachments.length > 9) {
-      await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
-      await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
-      return;
+    if (draftText.length > 0) {
+      target.text = (target.text ? `${target.text}\n${draftText}` : draftText).trim();
+      target.history.push({ type: "text", text: draftText });
     }
 
-    draft.attachments.push(...staged.attachments);
-    draft.uploadedKeys.push(...staged.uploadedKeys);
-    draft.updatedAt = Date.now();
+    if (staged) {
+      target.attachments.push(...staged.attachments);
+      target.uploadedKeys.push(...staged.uploadedKeys);
+      target.history.push({ type: "images", attachmentCount: staged.attachments.length, uploadedKeys: staged.uploadedKeys });
+    }
 
-    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
+    const didAppend = draftText.length > 0 || staged !== null;
+    if (didAppend) {
+      target.updatedAt = Date.now();
+    }
+    return didAppend;
   }
 
   private async cancelPrivatePostDraft({
@@ -1235,15 +1221,81 @@ export class OneBotRuntime {
       attachments: pending.attachments,
       uploadedKeys: pending.uploadedKeys,
       updatedAt: Date.now(),
-      awaitingImageDecision: true,
+      history: pending.history,
     });
 
     const have = pending.attachments.length > 0 ? `，已有 ${pending.attachments.length} 张图片` : "";
     await this.sendPrivateMessage(
       botQqUin,
       userQqUin,
-      `我已记录正文（${pending.text.length} 字${have}）。\n现在回复 #是 或 #否 选择是否添加图片；不想继续投稿可以发 #取消本次投稿。`,
+      `我已记录正文（${pending.text.length} 字${have}），${anonymous ? "匿名投稿" : "实名投稿"}。\n后面可以继续发送文字或图片；发 #撤回 可删除最近追加的一段内容；准备好了发 #结束投稿。`,
     );
+  }
+
+  private async undoPrivatePostDraftEntry({
+    bot,
+    botQqUin,
+    userQqUin,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const pending = this.privatePostPendingModes.get(draftKey);
+    if (pending) {
+      const undone = await this.popPrivatePostHistoryEntry(draftKey, pending);
+      if (!undone) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, "还没有可以撤回的投稿内容。继续发送正文或图片，或回复 #匿名 / #实名。");
+        return;
+      }
+      await this.sendPrivateMessage(botQqUin, userQqUin, `${undone}\n${this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length)}`);
+      return;
+    }
+
+    const draft = this.privatePostDrafts.get(draftKey);
+    if (!draft) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发 #投稿 正文 吧。");
+      return;
+    }
+
+    const undone = await this.popPrivatePostHistoryEntry(draftKey, draft);
+    if (!undone) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有可以撤回的投稿内容。继续发送文字或图片，或发 #取消本次投稿 放弃。");
+      return;
+    }
+    await this.sendPrivateMessage(botQqUin, userQqUin, `${undone}\n${this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous)}`);
+  }
+
+  private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode) {
+    const entry = target.history.pop();
+    if (!entry) {
+      return null;
+    }
+
+    if (entry.type === "text") {
+      target.text = this.rebuildPrivatePostText(target.history);
+      target.updatedAt = Date.now();
+      return "已撤回最近追加的一段文字。";
+    }
+
+    target.attachments.splice(-entry.attachmentCount, entry.attachmentCount);
+    target.uploadedKeys = target.uploadedKeys.filter((key) => !entry.uploadedKeys.includes(key));
+    target.updatedAt = Date.now();
+    await this.clearStagedPrivatePostAttachments(entry.uploadedKeys).catch((error) => {
+      this.logger.warn({ error, draftKey }, "failed to cleanup undone private post attachments");
+    });
+    return `已撤回最近追加的 ${entry.attachmentCount} 张图片。`;
+  }
+
+  private rebuildPrivatePostText(history: PrivatePostHistoryEntry[]) {
+    return history
+      .filter((entry): entry is Extract<PrivatePostHistoryEntry, { type: "text" }> => entry.type === "text")
+      .map((entry) => entry.text)
+      .join("\n")
+      .trim();
   }
 
   private async createPostFromPrivateDraft(
