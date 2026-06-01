@@ -15,12 +15,16 @@ describe("private posting command parsing", () => {
   });
 
   test("detects finish command with either hash", () => {
+    expect(isPrivatePostFinishText("#结束")).toBe(true);
+    expect(isPrivatePostFinishText("＃结束")).toBe(true);
     expect(isPrivatePostFinishText("#结束投稿")).toBe(true);
     expect(isPrivatePostFinishText("＃结束投稿")).toBe(true);
     expect(isPrivatePostFinishText("#结束投稿  ")).toBe(true);
   });
 
   test("detects cancel command with either hash", () => {
+    expect(isPrivatePostCancelText("#取消")).toBe(true);
+    expect(isPrivatePostCancelText("＃取消")).toBe(true);
     expect(isPrivatePostCancelText("#取消本次投稿")).toBe(true);
     expect(isPrivatePostCancelText("＃取消本次投稿")).toBe(true);
   });

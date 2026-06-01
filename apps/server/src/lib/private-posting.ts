@@ -13,11 +13,11 @@ export function parsePrivatePostStartText(input: string) {
 }
 
 export function isPrivatePostFinishText(input: string) {
-  return /^(?:#|＃)结束投稿\s*$/.test(input.trim());
+  return /^(?:#|＃)(?:结束|结束投稿)\s*$/.test(input.trim());
 }
 
 export function isPrivatePostCancelText(input: string) {
-  return /^(?:#|＃)取消本次投稿\s*$/.test(input.trim());
+  return /^(?:#|＃)(?:取消|取消本次投稿)\s*$/.test(input.trim());
 }
 
 export function isPrivatePostUndoText(input: string) {
