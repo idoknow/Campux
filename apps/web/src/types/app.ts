@@ -645,6 +645,9 @@ export type SystemTenant = {
   host: string | null;
   name: string;
   status: TenantStatus;
+  ready: boolean;
+  readyAt: string | null;
+  archiveWarningAt: string | null;
   createdAt: string;
   updatedAt: string;
   botAccountCount: number;

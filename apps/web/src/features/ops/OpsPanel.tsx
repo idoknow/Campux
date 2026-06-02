@@ -562,7 +562,15 @@ export function OpsPanel({
                     <span className="truncate font-semibold">{tenant.name}</span>
                     <Badge variant={tenant.status === "active" ? "secondary" : "outline"}>{statusLabels[tenant.status]}</Badge>
                   </span>
-                  <span className="mt-1 block truncate text-xs text-slate-500">{tenant.slug}</span>
+                  <span className="mt-1 flex flex-wrap items-center gap-1">
+                    <span className="truncate text-xs text-slate-500">{tenant.slug}</span>
+                    {tenant.status === "active" && !tenant.ready ? (
+                      <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[11px] text-amber-700">未就绪</Badge>
+                    ) : null}
+                    {tenant.status === "active" && tenant.archiveWarningAt ? (
+                      <Badge variant="outline" className="border-red-200 bg-red-50 text-[11px] text-red-700">待存档</Badge>
+                    ) : null}
+                  </span>
                   <span className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold text-slate-500">
                     <span>{tenant.memberCount} 用户</span>
                     <span>{tenant.botAccountCount} 墙号</span>
@@ -605,6 +613,12 @@ export function OpsPanel({
                   生命周期状态
                 </div>
                 <p className="mt-1 text-sm text-slate-500">{statusDescriptions[selectedTenant.status]}</p>
+                {selectedTenant.status === "active" && !selectedTenant.ready ? (
+                  <p className="mt-1 text-sm font-semibold text-amber-700">墙号机器人尚未接入，校园墙未就绪。创建满 30 天仍未接入且成员不超过 2 人会被自动存档。</p>
+                ) : null}
+                {selectedTenant.status === "active" && selectedTenant.archiveWarningAt ? (
+                  <p className="mt-1 text-sm font-semibold text-red-700">已发出自动存档预警，若仍未接入机器人将于预警 7 天后自动存档。</p>
+                ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {lifecycleActions.map((action) => {
                     const Icon = action.icon;
