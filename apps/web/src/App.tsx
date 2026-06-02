@@ -13,6 +13,8 @@ import { RequiredPasswordChangeScreen } from "@/features/auth/RequiredPasswordCh
 import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
 import { OAuthAuthorizeScreen } from "@/features/oauth/OAuthAuthorizeScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
+import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
+import { WallStatusScreen } from "@/features/onboarding/WallStatusScreen";
 import { AppShell } from "@/features/shell/AppShell";
 
 type AppRoute =
@@ -515,6 +517,44 @@ export function App() {
         clientResponse={oauthClientResponse}
         onLogout={logout}
         onRequireTenantSelection={() => navigate({ kind: "tenants" })}
+      />
+    );
+  }
+
+  // Archived walls are dormant: show a notice instead of the workspace.
+  if (me.currentTenant.status === "archived") {
+    return (
+      <WallStatusScreen
+        variant="archived"
+        wallName={me.currentTenant.name}
+        onBackToTenants={me.memberships.length > 1 || canOpenOps(me) ? () => navigate({ kind: "tenants" }) : undefined}
+        onLogout={logout}
+      />
+    );
+  }
+
+  // A wall is only operable once its bot has connected at least once. Until then
+  // route the operating admin through the guided setup wizard; other members see
+  // a short pending notice.
+  if (!me.currentTenant.ready) {
+    if (me.currentMembership.role === "admin") {
+      return (
+        <OnboardingWizard
+          tenant={me.currentTenant}
+          operatorName={me.user.displayName}
+          onRefreshMe={refreshMe}
+          onEnterWorkspace={() => setActiveTab("post")}
+          onBackToTenants={me.memberships.length > 1 || canOpenOps(me) ? () => navigate({ kind: "tenants" }) : undefined}
+          onLogout={logout}
+        />
+      );
+    }
+    return (
+      <WallStatusScreen
+        variant="pending"
+        wallName={me.currentTenant.name}
+        onBackToTenants={me.memberships.length > 1 || canOpenOps(me) ? () => navigate({ kind: "tenants" }) : undefined}
+        onLogout={logout}
       />
     );
   }

@@ -42,6 +42,8 @@ export const tenantSummarySchema = z.object({
   themeColor: z.string(),
   logoUrl: z.string(),
   aiEnabled: z.boolean(),
+  ready: z.boolean(),
+  readyAt: z.string().nullable(),
   botAccountCount: z.number().int().nonnegative(),
   pendingPostCount: z.number().int().nonnegative(),
 });
