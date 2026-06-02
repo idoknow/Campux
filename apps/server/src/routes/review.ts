@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PostStatus, Prisma } from "@campux/db";
 import { z } from "zod";
-import { requireTenantRole } from "../lib/auth";
+import { requireReadyTenant } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
@@ -27,7 +27,7 @@ const reviewQuerySchema = z.object({
 
 export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/review/posts", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const query = reviewQuerySchema.parse(request.query);
     const displayId = query.q && !Number.isNaN(Number(query.q)) ? Number(query.q) : null;
     const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
@@ -105,7 +105,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   });
 
   app.post("/api/review/posts/:id/approve", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const body = reviewBodySchema.parse(request.body ?? {});
     const post = await prisma.post.findFirst({
@@ -158,7 +158,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   });
 
   app.post("/api/review/posts/:id/reject", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const body = reviewBodySchema.parse(request.body ?? {});
     const post = await prisma.post.findFirst({
@@ -214,7 +214,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   });
 
   app.post("/api/review/posts/:id/recall/approve", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
@@ -259,7 +259,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   });
 
   app.post("/api/review/posts/:id/recall/reject", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const body = reviewBodySchema.parse(request.body ?? {});
     const post = await prisma.post.findFirst({
@@ -318,7 +318,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   });
 
   app.post("/api/review/posts/:id/recall/ignore", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
@@ -377,7 +377,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   });
 
   app.post("/api/review/posts/:id/recall/admin", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "admin");
+    const context = await requireReadyTenant(request, reply, "admin");
     const params = postParamsSchema.parse(request.params);
     const body = adminRecallBodySchema.parse(request.body ?? {});
     const post = await prisma.post.findFirst({

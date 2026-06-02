@@ -42,3 +42,6 @@ legacy/docker/volumes/
 legacy/docker/mongodb/mongodata/
 legacy/docker/minio/data/
 legacy/data/
+
+# Locally-installed Claude skills (not part of the project)
+.claude/skills/

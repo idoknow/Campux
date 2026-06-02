@@ -68,6 +68,8 @@ type SystemTenantRecord = {
   host: string | null;
   name: string;
   status: z.infer<typeof tenantStatusSchema>;
+  readyAt: Date | null;
+  archiveWarningAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   botAccounts?: Array<{
@@ -98,6 +100,9 @@ function toSystemTenant(tenant: SystemTenantRecord) {
     host: tenant.host,
     name: tenant.name,
     status: tenant.status,
+    ready: tenant.readyAt !== null,
+    readyAt: tenant.readyAt?.toISOString() ?? null,
+    archiveWarningAt: tenant.archiveWarningAt?.toISOString() ?? null,
     createdAt: tenant.createdAt.toISOString(),
     updatedAt: tenant.updatedAt.toISOString(),
     botAccountCount: tenant._count.botAccounts,
@@ -390,9 +395,13 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
     const updateData: {
       status?: z.infer<typeof tenantStatusSchema>;
       host?: string | null;
+      archiveWarningAt?: Date | null;
     } = {};
     if (body.status !== undefined) updateData.status = body.status;
     if (body.host !== undefined) updateData.host = normalizedHost ?? null;
+    // Restoring a wall to active clears any pending auto-archive warning so the
+    // scheduler does not immediately re-archive it.
+    if (body.status === "active") updateData.archiveWarningAt = null;
 
     const tenant = await prisma.tenant.update({
       where: { id: params.tenantId },

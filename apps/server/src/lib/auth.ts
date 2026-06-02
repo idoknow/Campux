@@ -213,11 +213,21 @@ export async function requireSession(request: FastifyRequest, reply: FastifyRepl
   return context;
 }
 
+export function isSystemOperatorContext(context: { user: { systemRole: SystemRole | null } }) {
+  return context.user.systemRole === "system_operator";
+}
+
 export async function requireTenantContext(request: FastifyRequest, reply: FastifyReply) {
   const context = await requireSession(request, reply);
   if (!context.selectedTenant || !context.selectedMembership) {
     reply.code(400);
     throw new Error("请先选择校园墙");
+  }
+  // Archived walls are dormant: members can no longer operate or configure them.
+  // System operators bypass this so they can inspect or restore the wall.
+  if (context.selectedTenant.status === "archived" && !isSystemOperatorContext(context)) {
+    reply.code(403);
+    throw new Error("校园墙已存档，请联系系统运维恢复后再操作");
   }
   if (context.activeBan) {
     reply.code(403);
@@ -250,6 +260,23 @@ export async function requireTenantRole(request: FastifyRequest, reply: FastifyR
   if (!hasTenantRole(context.selectedMembership.role, requiredRole)) {
     reply.code(403);
     throw new Error("没有权限执行此操作");
+  }
+
+  return context;
+}
+
+/**
+ * Gate for normal operating actions (posting, reviewing, stats). A wall only
+ * becomes operable once its bot has connected at least once (readyAt set during
+ * onboarding). Until then operators are routed through the guided setup wizard,
+ * which uses the configuration routes (metadata/bot/publish) — those are NOT
+ * gated here. System operators bypass the gate.
+ */
+export async function requireReadyTenant(request: FastifyRequest, reply: FastifyReply, requiredRole: TenantRole) {
+  const context = await requireTenantRole(request, reply, requiredRole);
+  if (context.selectedTenant.readyAt === null && !isSystemOperatorContext(context)) {
+    reply.code(409);
+    throw new Error("校园墙尚未完成初始化，请先在引导中接入墙号机器人");
   }
 
   return context;

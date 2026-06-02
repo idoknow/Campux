@@ -25,6 +25,7 @@ import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
 import { runDatabaseMigrations } from "./lib/migrations";
 import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
+import { registerTenantLifecycleScheduler } from "./runtime/tenant-lifecycle";
 import { ensureBotSessionSecretConfigured } from "./lib/secret-json";
 
 const config = loadConfig();
@@ -91,9 +92,11 @@ await queue.start();
 await recoverPublishAttempts(queue, app.log);
 await recoverAiBackfillJobs(queue, app.log);
 const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
+const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: app.log, config });
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();
+  stopTenantLifecycleScheduler();
 });
 
 await app.listen({

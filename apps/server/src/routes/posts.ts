@@ -9,7 +9,7 @@ import type { CampuxConfig } from "@campux/config";
 import { Prisma } from "@campux/db";
 import { createS3Client } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
-import { hasTenantRole, requireTenantContext } from "../lib/auth";
+import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
@@ -158,7 +158,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
   });
 
   app.post("/api/posts", async (request, reply) => {
-    const context = await requireTenantContext(request, reply);
+    const context = await requireReadyTenant(request, reply, "submitter");
     const compression = await readTenantImageCompression(prisma, context.selectedTenant.id);
 
     // Check ban first
@@ -499,7 +499,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
   });
 
   app.post("/api/posts/:id/cancel", async (request, reply) => {
-    const context = await requireTenantContext(request, reply);
+    const context = await requireReadyTenant(request, reply, "submitter");
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
@@ -543,7 +543,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
   });
 
   app.post("/api/posts/:id/recall/request", async (request, reply) => {
-    const context = await requireTenantContext(request, reply);
+    const context = await requireReadyTenant(request, reply, "submitter");
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireTenantRole } from "../lib/auth";
+import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -8,7 +8,7 @@ const publishAttemptStatuses = ["queued", "running", "succeeded", "failed", "ski
 
 export function registerStatsRoutes(app: FastifyInstance) {
   app.get("/api/stats/tenant", async (request, reply) => {
-    const context = await requireTenantRole(request, reply, "reviewer");
+    const context = await requireReadyTenant(request, reply, "reviewer");
     const tenantId = context.selectedTenant.id;
     const rangeDays = parseRangeDays(request.query);
     const now = new Date();

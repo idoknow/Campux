@@ -21,6 +21,8 @@ export function toTenantSummary(
     themeColor: tenant.themeColor,
     logoUrl: typeof logoUrl === "string" ? logoUrl : "",
     aiEnabled: tenant.aiSettings?.enabled ?? true,
+    ready: tenant.readyAt !== null,
+    readyAt: tenant.readyAt ? tenant.readyAt.toISOString() : null,
     botAccountCount: tenant._count?.botAccounts ?? 0,
     pendingPostCount: tenant._count?.posts ?? 0,
   };

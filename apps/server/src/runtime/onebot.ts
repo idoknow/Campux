@@ -1721,14 +1721,44 @@ export class OneBotRuntime {
   }
 
   private async markBotSeen(connection: OneBotConnection) {
+    const now = new Date();
     await prisma.botAccount.update({
       where: {
         id: connection.botAccountId,
       },
       data: {
-        lastSeenAt: new Date(),
+        lastSeenAt: now,
       },
     });
+    // First successful bot connection marks the wall as ready: the operator has
+    // proven control of the wall QQ via NapCat, so the workspace can unlock.
+    // readyAt is set once and never cleared, so a temporary disconnect later
+    // does not lock the operator back out.
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: connection.tenantId },
+      select: { readyAt: true, archiveWarningAt: true },
+    });
+    if (tenant && tenant.readyAt === null) {
+      await prisma.tenant.update({
+        where: { id: connection.tenantId },
+        data: { readyAt: now, archiveWarningAt: null },
+      });
+      await writeAuditLog({
+        tenantId: connection.tenantId,
+        actorId: null,
+        action: "tenant.ready",
+        targetType: "tenant",
+        targetId: connection.tenantId,
+        detail: { botAccountId: connection.botAccountId, selfId: connection.selfId },
+      }).catch((error) => this.logger.warn({ error, tenantId: connection.tenantId }, "failed to write tenant.ready audit log"));
+      this.logger.info({ tenantId: connection.tenantId, botAccountId: connection.botAccountId }, "tenant marked ready after first bot connection");
+    } else if (tenant && tenant.archiveWarningAt !== null) {
+      // A previously ready tenant reconnecting clears any pending archive warning.
+      await prisma.tenant.update({
+        where: { id: connection.tenantId },
+        data: { archiveWarningAt: null },
+      });
+    }
   }
 
   private async loadPostAttachmentSegments(attachments: unknown) {
