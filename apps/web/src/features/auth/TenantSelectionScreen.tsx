@@ -33,7 +33,7 @@ export function TenantSelectionScreen({
   const opsTitle = me.user.systemRole === "system_operator" ? "系统运维" : "运营管理";
   const opsDescription =
     me.user.systemRole === "system_operator"
-      ? "不进入具体校园墙，直接管理所有租户信息。"
+      ? "不进入具体校园墙，直接管理所有校园墙。"
       : "创建和管理你负责的校园墙，只展示你所属墙的运营信息。";
   const opsButton = me.user.systemRole === "system_operator" ? "进入运维面板" : "进入运营面板";
 

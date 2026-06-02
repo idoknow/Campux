@@ -74,6 +74,12 @@ function defaultPagination(): Pagination {
   };
 }
 
+// Operators shouldn't have to invent a URL slug. When left blank we generate a
+// valid one (matches the backend ^[a-z0-9][a-z0-9-]*[a-z0-9]$ rule).
+function generateWallSlug() {
+  return `wall-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function OpsPanel({
   mode = "system",
   onTenantCreated,
@@ -276,26 +282,26 @@ export function OpsPanel({
 
   async function createTenant() {
     setCreatingTenant(true);
+    const slug = tenantForm.slug.trim() || generateWallSlug();
     try {
       const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants", {
         method: "POST",
         body: JSON.stringify({
           name: tenantForm.name.trim(),
-          slug: tenantForm.slug.trim(),
+          slug,
           host: tenantForm.host.trim() || null,
           themeColor: tenantForm.themeColor,
-          ...(tenantForm.botQqUin.trim().length > 0 ? { botQqUin: tenantForm.botQqUin.trim() } : {}),
         }),
       });
       setTenants(data.tenants);
-      const created = data.tenants.find((tenant) => tenant.slug === tenantForm.slug.trim());
+      const created = data.tenants.find((tenant) => tenant.slug === slug);
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
       setTenantForm({ name: "", slug: "", host: "", themeColor: "#111827", botQqUin: "" });
-      toast.success("新校园墙已创建。");
+      toast.success("新校园墙已创建，进入后按引导完成接入。");
       await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
       await onTenantCreated?.();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "创建租户失败");
+      toast.error(caught instanceof Error ? caught.message : "创建校园墙失败");
     } finally {
       setCreatingTenant(false);
     }
@@ -538,14 +544,14 @@ export function OpsPanel({
               </div>
               <div className="grid gap-2">
                 <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
-                <Input placeholder="slug，例如 canton-wall" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
-                <Input placeholder="专属 host，可选" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
+                <Input placeholder="网址标识（可选，留空自动生成）" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
+                <Input placeholder="专属域名（可选）" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
                 <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
                   <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
                   <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
                 </div>
-                <Input placeholder="Bot QQ，可选" value={tenantForm.botQqUin} onChange={(event) => setTenantForm({ ...tenantForm, botQqUin: event.target.value })} />
-                <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0 || tenantForm.slug.trim().length === 0} onClick={() => void createTenant()}>
+                <p className="text-xs font-semibold text-slate-500">创建后进入校园墙，会有引导一步步带你接入墙号机器人。</p>
+                <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0} onClick={() => void createTenant()}>
                   <PlusIcon data-icon="inline-start" />
                   创建
                 </Button>
@@ -827,33 +833,33 @@ export function OpsPanel({
 
 function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelMode; hasTenants: boolean; selectedTenant: SystemTenant | undefined }) {
   const isSystemMode = mode === "system";
-  const botReady = Boolean(selectedTenant?.bots.length);
+  const botReady = Boolean(selectedTenant?.ready);
   const publishReady = Boolean(selectedTenant?.bots.some((bot) => bot.publishTargets.length > 0));
   const hostReady = Boolean(selectedTenant?.host);
   const steps = [
     {
       title: isSystemMode ? "开放管理端注册" : "创建校园墙",
-      detail: isSystemMode ? "设置管理端 host，例如 app.campux.top，让墙号运营者可以用邮箱注册运营管理员账号。" : "填写校园墙名称、slug 和可选专属 host，创建后你会自动成为该墙管理员。",
+      detail: isSystemMode ? "设置管理端 host，例如 app.campux.top，让墙号运营者可以用邮箱注册运营管理员账号。" : "填写校园墙名称即可，创建后你会自动成为该墙管理员。",
       done: isSystemMode ? true : hasTenants,
     },
     {
-      title: isSystemMode ? "分配运营资源" : "进入校园墙管理",
-      detail: isSystemMode ? "在运营管理员资源里给账号授权可管理的校园墙；系统运维仍保留全局能力。" : "创建完成后点击顶部“选择校园墙”，进入该墙的管理页继续配置 Bot、发布目标和规则。",
-      done: isSystemMode ? true : hasTenants,
+      title: isSystemMode ? "分配运营资源" : "进入开通引导",
+      detail: isSystemMode ? "在运营管理员资源里给账号授权可管理的校园墙；系统运维仍保留全局能力。" : "点击校园墙的「作为管理员进入」，会有引导带你一步步完成接入。",
+      done: isSystemMode ? true : botReady,
     },
     {
-      title: "接入 NapCat / OneBot",
-      detail: "在租户管理页添加 Bot，复制协议端连接 URL，粘贴到 NapCat 的反向 WebSocket 配置。",
+      title: "接入墙号机器人",
+      detail: "在开通引导里用墙号 QQ 登录 NapCat，粘贴连接地址，连接成功即完成认证、校园墙就绪。",
       done: botReady,
     },
     {
-      title: "配置发布目标",
-      detail: "添加 QZone 发布目标，选择扫码登录或协议获取 cookies，确认 cookies 可用后即可开始审核发布。",
+      title: "配置发布到 QQ 空间",
+      detail: "在引导里扫码登录墙号 QQ 空间，确认登录态可用后即可开始审核发布。",
       done: publishReady,
     },
     {
-      title: "可选：绑定专属 host",
-      detail: "绑定后用户从该域名进入会固定到当前校园墙，渲染图右下角也会显示这个 host。",
+      title: "可选：绑定专属域名",
+      detail: "绑定后用户从该域名进入会固定到当前校园墙，渲染图右下角也会显示这个域名。",
       done: hostReady,
     },
   ];
@@ -865,10 +871,10 @@ function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelM
           <div>
             <p className="text-sm font-bold text-slate-950">{isSystemMode ? "平台交付流程" : "自助开墙流程"}</p>
             <p className="mt-1 text-sm leading-6 text-slate-500">
-              目标是让运营者不看文档也能完成：注册账号、创建校园墙、接入 NapCat、登录 QZone、开始审核发布。
+              目标是让运营者不看文档也能完成：注册账号、创建校园墙、接入墙号机器人、登录 QQ 空间、开始审核发布。
             </p>
             {!isSystemMode && hasTenants ? (
-              <p className="mt-1 text-xs font-bold text-blue-700">创建完成后，点击页面顶部“选择校园墙”，进入该墙的“管理 / 机器人”和“管理 / 发布”继续配置。</p>
+              <p className="mt-1 text-xs font-bold text-blue-700">创建完成后，点击校园墙的“作为管理员进入”，按页面引导一步步完成接入。</p>
             ) : null}
           </div>
           {selectedTenant ? <Badge variant="secondary">{selectedTenant.name}</Badge> : null}
