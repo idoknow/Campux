@@ -139,7 +139,7 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
               />
               <LineChartPanel
                 title={`${currentRangeLabel}用户数量`}
-                description={`${currentRangeLabel}累计租户用户与每日新增用户`}
+                description={`${currentRangeLabel}累计成员与每日新增用户`}
                 height={240}
                 series={[
                   { label: "累计用户", color: "#7c3aed", values: stats.posts.userDaily.map((day) => ({ label: formatDay(day.date), value: day.totalMembers })) },

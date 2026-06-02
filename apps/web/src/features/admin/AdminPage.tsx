@@ -2348,11 +2348,11 @@ function BotConfigEditor({
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
         <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-          Bot QQ <span className="font-normal text-slate-400">只读</span>
+          墙号 QQ
           <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
         </label>
         <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-          显示名 <span className="font-normal text-slate-400">卡片标题</span>
+          显示名
           <Input className="bg-white" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
           <span className="text-[11px] font-normal text-slate-400">建议填「1 号墙」这类名称，不要填 QQ 号。</span>
         </label>

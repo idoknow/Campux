@@ -1149,7 +1149,6 @@ function ReviewCard({
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-500">
           <span className="min-w-0 truncate text-slate-800">{authorName}</span>
           <span>QQ {authorQq}</span>
-          {post.author?.id ? <span className="hidden break-all sm:inline">账号 {shortId(post.author.id)}</span> : null}
         </div>
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact />
@@ -1162,7 +1161,6 @@ function ReviewCard({
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
             <span>{formatPostDate(post.createdAt)}</span>
-            <span className="hidden sm:inline">内部 {shortId(post.id)}</span>
           </div>
           {canReviewPost ? (
             <div className="flex gap-2">
@@ -1516,10 +1514,6 @@ function getPostImageUrl(image: PostImage) {
   }
 
   return image.url ?? "";
-}
-
-function shortId(id: string) {
-  return id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
 }
 
 function formatPostDate(value: string): string {
