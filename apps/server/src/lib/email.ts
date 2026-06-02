@@ -13,12 +13,12 @@ export function hashEmailCode(email: string, code: string) {
   return createHash("sha256").update(`${normalizeEmail(email)}:${code}`).digest("hex");
 }
 
-export async function sendVerificationEmail(config: CampuxConfig, options: { to: string; code: string }) {
+export async function sendEmail(config: CampuxConfig, options: { to: string; subject: string; html: string; text: string }) {
   if (!config.resend.apiKey) {
     if (config.nodeEnv === "development") {
       return { skipped: true as const };
     }
-    throw new Error("RESEND_API_KEY 未配置，无法发送验证码邮件");
+    throw new Error("RESEND_API_KEY 未配置，无法发送邮件");
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -31,16 +31,25 @@ export async function sendVerificationEmail(config: CampuxConfig, options: { to:
     body: JSON.stringify({
       from: config.resend.fromEmail,
       to: [options.to],
-      subject: "Campux 注册验证码",
-      html: `<p>你的 Campux 注册验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${options.code}</p><p>验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`,
-      text: `你的 Campux 注册验证码是：${options.code}\n验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
     }),
   });
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`验证码邮件发送失败：${response.status}${detail ? ` ${detail}` : ""}`);
+    throw new Error(`邮件发送失败：${response.status}${detail ? ` ${detail}` : ""}`);
   }
 
   return { skipped: false as const };
+}
+
+export async function sendVerificationEmail(config: CampuxConfig, options: { to: string; code: string }) {
+  return sendEmail(config, {
+    to: options.to,
+    subject: "Campux 注册验证码",
+    html: `<p>你的 Campux 注册验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${options.code}</p><p>验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`,
+    text: `你的 Campux 注册验证码是：${options.code}\n验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`,
+  });
 }

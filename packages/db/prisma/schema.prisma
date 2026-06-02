@@ -55,6 +55,8 @@ model Tenant {
   status         TenantStatus       @default(active)
   themeColor     String             @default("#e0574f")
   nextPostDisplayId Int                @default(1)
+  readyAt        DateTime?
+  archiveWarningAt DateTime?
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   memberships    TenantMembership[]
