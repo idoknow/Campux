@@ -13,6 +13,8 @@ function tenant(overrides: Partial<TenantSummary> & Pick<TenantSummary, "id" | "
     themeColor: overrides.themeColor ?? "#42a5f5",
     logoUrl: overrides.logoUrl ?? "",
     aiEnabled: overrides.aiEnabled ?? true,
+    ready: overrides.ready ?? true,
+    readyAt: overrides.readyAt ?? null,
     botAccountCount: overrides.botAccountCount ?? 0,
     pendingPostCount: overrides.pendingPostCount ?? 0,
   };
