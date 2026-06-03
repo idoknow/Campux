@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,11 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
 type OpsTab = "users" | "audit";
 type OpsPanelMode = "system" | "operations";
 type SystemUserRoleFilter = TenantRole | SystemRole;
+type OpsUserListPreferences = {
+  keyword: string;
+  tenantFilterId: string;
+  roleFilters: SystemUserRoleFilter[];
+};
 
 const userRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }> = [
   { value: "operations_admin", label: "运营管理员" },
@@ -72,6 +78,47 @@ function defaultPagination(): Pagination {
     total: 0,
     pageCount: 1,
   };
+}
+
+function opsUserPreferencesKey(mode: OpsPanelMode) {
+  return `ops.${mode}.users`;
+}
+
+function isSystemUserRoleFilter(value: unknown): value is SystemUserRoleFilter {
+  return value === "submitter"
+    || value === "reviewer"
+    || value === "admin"
+    || value === "operations_admin"
+    || value === "system_operator";
+}
+
+function isOpsUserListPreferences(value: unknown): value is OpsUserListPreferences {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<OpsUserListPreferences>;
+  return typeof candidate.keyword === "string"
+    && typeof candidate.tenantFilterId === "string"
+    && Array.isArray(candidate.roleFilters)
+    && candidate.roleFilters.every(isSystemUserRoleFilter);
+}
+
+function normalizeOpsUserPreferences(mode: OpsPanelMode, preferences: OpsUserListPreferences): OpsUserListPreferences {
+  return {
+    keyword: preferences.keyword,
+    tenantFilterId: preferences.tenantFilterId,
+    roleFilters: preferences.roleFilters.filter((role) => mode === "system" || (role !== "system_operator" && role !== "operations_admin")),
+  };
+}
+
+function readOpsUserListPreferences(mode: OpsPanelMode): OpsUserListPreferences {
+  const fallback: OpsUserListPreferences = { keyword: "", tenantFilterId: "", roleFilters: [] };
+  return normalizeOpsUserPreferences(
+    mode,
+    readListPreferences(opsUserPreferencesKey(mode), fallback, isOpsUserListPreferences),
+  );
+}
+
+function writeOpsUserListPreferences(mode: OpsPanelMode, preferences: OpsUserListPreferences) {
+  writeListPreferences(opsUserPreferencesKey(mode), normalizeOpsUserPreferences(mode, preferences));
 }
 
 // Operators shouldn't have to invent a URL slug. When left blank we generate a
@@ -96,10 +143,10 @@ export function OpsPanel({
   const [operationsAdmins, setOperationsAdmins] = useState<SystemUser[]>([]);
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
-  const [userKeyword, setUserKeyword] = useState("");
-  const [userKeywordDraft, setUserKeywordDraft] = useState("");
-  const [userTenantFilterId, setUserTenantFilterId] = useState("");
-  const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>([]);
+  const [userKeyword, setUserKeyword] = useState(() => readOpsUserListPreferences(mode).keyword);
+  const [userKeywordDraft, setUserKeywordDraft] = useState(() => readOpsUserListPreferences(mode).keyword);
+  const [userTenantFilterId, setUserTenantFilterId] = useState(() => readOpsUserListPreferences(mode).tenantFilterId);
+  const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>(() => readOpsUserListPreferences(mode).roleFilters);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
@@ -244,10 +291,29 @@ export function OpsPanel({
   }, []);
 
   useEffect(() => {
+    const preferences = readOpsUserListPreferences(mode);
+    setUserKeyword(preferences.keyword);
+    setUserKeywordDraft(preferences.keyword);
+    setUserTenantFilterId(preferences.tenantFilterId);
+    setSelectedUserRoleFilters(preferences.roleFilters);
+    setUserPage(1);
+  }, [mode]);
+
+  useEffect(() => {
     void refreshUsers(userPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取全局用户");
     });
   }, [userPage, userKeyword, userTenantFilterId, selectedUserRoleFilters]);
+
+  useEffect(() => {
+    if (!userTenantFilterId || tenants.length === 0 || tenants.some((tenant) => tenant.id === userTenantFilterId)) {
+      return;
+    }
+    setUserTenantFilterId("");
+    setSelectedUserRoleFilters([]);
+    writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: "", roleFilters: [] });
+    setUserPage(1);
+  }, [mode, tenants, userKeyword, userTenantFilterId]);
 
   useEffect(() => {
     void refreshAudit(auditPage).catch((caught) => {
@@ -364,13 +430,19 @@ export function OpsPanel({
   }
 
   function toggleUserRoleFilter(role: SystemUserRoleFilter) {
-    setSelectedUserRoleFilters((current) => (current.includes(role) ? current.filter((item) => item !== role) : [...current, role]));
+    setSelectedUserRoleFilters((current) => {
+      const next = current.includes(role) ? current.filter((item) => item !== role) : [...current, role];
+      writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: userTenantFilterId, roleFilters: next });
+      return next;
+    });
     setUserPage(1);
   }
 
   function changeUserTenantFilter(tenantId: string) {
-    setUserTenantFilterId(tenantId === "all" ? "" : tenantId);
+    const nextTenantId = tenantId === "all" ? "" : tenantId;
+    setUserTenantFilterId(nextTenantId);
     setSelectedUserRoleFilters([]);
+    writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: nextTenantId, roleFilters: [] });
     setUserPage(1);
   }
 
@@ -736,19 +808,23 @@ export function OpsPanel({
                 onKeywordChange={(keyword) => {
                   setUserKeywordDraft(keyword);
                   setUserKeyword(keyword);
+                  writeOpsUserListPreferences(mode, { keyword, tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
                   setUserPage(1);
                 }}
                 onKeywordSearch={() => {
                   setUserKeyword(userKeywordDraft);
+                  writeOpsUserListPreferences(mode, { keyword: userKeywordDraft, tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
                   setUserPage(1);
                 }}
                 onKeywordClear={() => {
                   setUserKeywordDraft("");
                   setUserKeyword("");
+                  writeOpsUserListPreferences(mode, { keyword: "", tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
                   setUserPage(1);
                 }}
                 onClearRoleFilters={() => {
                   setSelectedUserRoleFilters([]);
+                  writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: userTenantFilterId, roleFilters: [] });
                   setUserPage(1);
                 }}
                 onTenantFilterChange={changeUserTenantFilter}

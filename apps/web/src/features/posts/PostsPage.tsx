@@ -19,7 +19,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Pagination, PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
-import { readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
+import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
+import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,10 +110,43 @@ const reviewStatusOptions = [
 ] as const;
 
 type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"];
+type ReviewListPreferences = {
+  status: ReviewStatusFilter;
+  keyword: string;
+};
+
+const defaultReviewListPreferences: ReviewListPreferences = {
+  status: "pending_approval",
+  keyword: "",
+};
 
 function readReviewStatusQuery(): ReviewStatusFilter {
   const status = readQueryParam("status");
   return reviewStatusOptions.some((option) => option.value === status) ? (status as ReviewStatusFilter) : "pending_approval";
+}
+
+function reviewPreferencesKey(tenantId: string) {
+  return `tenant.${tenantId}.posts.review`;
+}
+
+function isReviewListPreferences(value: unknown): value is ReviewListPreferences {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ReviewListPreferences>;
+  return typeof candidate.keyword === "string" && reviewStatusOptions.some((option) => option.value === candidate.status);
+}
+
+function readReviewListPreferences(tenantId: string): ReviewListPreferences {
+  if (hasAnyQueryParam(["status", "q", "page", "post"])) {
+    return {
+      status: readReviewStatusQuery(),
+      keyword: readQueryParam("q"),
+    };
+  }
+  return readListPreferences(reviewPreferencesKey(tenantId), defaultReviewListPreferences, isReviewListPreferences);
+}
+
+function writeReviewListPreferences(tenantId: string, preferences: ReviewListPreferences) {
+  writeListPreferences(reviewPreferencesKey(tenantId), preferences);
 }
 
 export function PostsPage({
@@ -143,8 +177,8 @@ export function PostsPage({
   const [reviewPagination, setReviewPagination] = useState<Pagination>(() => defaultPagination());
   const [reviewLoading, setReviewLoading] = useState(false);
   const [pendingRecallLoading, setPendingRecallLoading] = useState(false);
-  const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewStatusQuery());
-  const [reviewKeyword, setReviewKeyword] = useState(() => readQueryParam("q"));
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewListPreferences(tenantId).status);
+  const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
@@ -195,11 +229,12 @@ export function PostsPage({
     if (activeTab !== "review") {
       return;
     }
-    setReviewStatus(readReviewStatusQuery());
-    setReviewKeyword(readQueryParam("q"));
+    const preferences = readReviewListPreferences(tenantId);
+    setReviewStatus(preferences.status);
+    setReviewKeyword(preferences.keyword);
     setReviewPage(readQueryInt("page", 1, { min: 1 }));
     setDetailPostId(readQueryParam("post"));
-  }, [activeTab]);
+  }, [activeTab, tenantId]);
 
   useEffect(() => {
     if (!canReview) {
@@ -487,14 +522,17 @@ export function PostsPage({
   function setReviewStatusWithQuery(value: ReviewStatusFilter) {
     setReviewStatus(value);
     setReviewPage(1);
+    writeReviewListPreferences(tenantId, { status: value, keyword: reviewKeyword });
     writeQueryParams({ status: value === "pending_approval" ? null : value, page: null, post: null });
     setDetailPostId("");
   }
 
   function applyReviewFilters() {
+    const keyword = reviewKeyword.trim();
     setReviewPage(1);
     setDetailPostId("");
-    writeQueryParams({ q: reviewKeyword.trim() || null, status: reviewStatus === "pending_approval" ? null : reviewStatus, page: null, post: null });
+    writeReviewListPreferences(tenantId, { status: reviewStatus, keyword });
+    writeQueryParams({ q: keyword || null, status: reviewStatus === "pending_approval" ? null : reviewStatus, page: null, post: null });
     void refreshReviewPosts(1);
   }
 
@@ -689,6 +727,7 @@ export function PostsPage({
                   setReviewKeyword("");
                   setReviewPage(1);
                   setDetailPostId("");
+                  writeReviewListPreferences(tenantId, defaultReviewListPreferences);
                   writeQueryParams({ status: null, q: null, page: null, post: null });
                 }}
               >

@@ -25,7 +25,8 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import { readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
+import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
+import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiOverview, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,15 @@ type MemberForm = {
 };
 
 type MemberSort = "joined_asc" | "joined_desc" | "qq_asc" | "qq_desc" | "name_asc" | "name_desc" | "role_asc" | "role_desc";
+type MemberListPreferences = {
+  keyword: string;
+  roleFilter: "all" | TenantRole;
+  sort: MemberSort;
+};
+type BanListPreferences = {
+  keyword: string;
+  onlyActive: boolean;
+};
 
 const memberSortLabels: Record<MemberSort, string> = {
   joined_asc: "加入时间 · 最早优先",
@@ -186,6 +196,74 @@ function readMemberSortQuery(): MemberSort {
   return sort in memberSortLabels ? sort as MemberSort : "joined_asc";
 }
 
+function defaultMemberListPreferences(): MemberListPreferences {
+  return {
+    keyword: "",
+    roleFilter: "all",
+    sort: "joined_asc",
+  };
+}
+
+function defaultBanListPreferences(): BanListPreferences {
+  return {
+    keyword: "",
+    onlyActive: true,
+  };
+}
+
+function memberListPreferencesKey(tenantId: string) {
+  return `tenant.${tenantId}.admin.members`;
+}
+
+function banListPreferencesKey(tenantId: string) {
+  return `tenant.${tenantId}.admin.bans`;
+}
+
+function isTenantRoleFilter(value: unknown): value is "all" | TenantRole {
+  return value === "all" || value === "submitter" || value === "reviewer" || value === "admin";
+}
+
+function isMemberListPreferences(value: unknown): value is MemberListPreferences {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<MemberListPreferences>;
+  return typeof candidate.keyword === "string" && isTenantRoleFilter(candidate.roleFilter) && Boolean(candidate.sort && candidate.sort in memberSortLabels);
+}
+
+function isBanListPreferences(value: unknown): value is BanListPreferences {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<BanListPreferences>;
+  return typeof candidate.keyword === "string" && typeof candidate.onlyActive === "boolean";
+}
+
+function readMemberListPreferences(tenantId: string): MemberListPreferences {
+  if (hasAnyQueryParam(["q", "role", "sort", "page", "user"])) {
+    return {
+      keyword: readQueryParam("q"),
+      roleFilter: readMemberRoleQuery(),
+      sort: readMemberSortQuery(),
+    };
+  }
+  return readListPreferences(memberListPreferencesKey(tenantId), defaultMemberListPreferences(), isMemberListPreferences);
+}
+
+function readBanListPreferences(tenantId: string): BanListPreferences {
+  if (hasAnyQueryParam(["q", "active", "page"])) {
+    return {
+      keyword: readQueryParam("q"),
+      onlyActive: readQueryParam("active", "1") !== "0",
+    };
+  }
+  return readListPreferences(banListPreferencesKey(tenantId), defaultBanListPreferences(), isBanListPreferences);
+}
+
+function writeMemberListPreferences(tenantId: string, preferences: MemberListPreferences) {
+  writeListPreferences(memberListPreferencesKey(tenantId), preferences);
+}
+
+function writeBanListPreferences(tenantId: string, preferences: BanListPreferences) {
+  writeListPreferences(banListPreferencesKey(tenantId), preferences);
+}
+
 export function AdminPage({
   activeTab,
   selectedTenant,
@@ -218,18 +296,18 @@ export function AdminPage({
   const [targets, setTargets] = useState<PublishTargetItem[]>([]);
   const [attempts, setAttempts] = useState<PublishAttemptItem[]>([]);
   const [bans, setBans] = useState<AdminBanRecord[]>([]);
-  const [memberKeyword, setMemberKeyword] = useState(() => readQueryParam("q"));
-  const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>(() => readMemberRoleQuery());
-  const [memberSort, setMemberSort] = useState<MemberSort>(() => readMemberSortQuery());
+  const [memberKeyword, setMemberKeyword] = useState(() => readMemberListPreferences(selectedTenant.id).keyword);
+  const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>(() => readMemberListPreferences(selectedTenant.id).roleFilter);
+  const [memberSort, setMemberSort] = useState<MemberSort>(() => readMemberListPreferences(selectedTenant.id).sort);
   const [memberPage, setMemberPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [memberPagination, setMemberPagination] = useState<Pagination>(() => defaultPagination());
   const [tenantMemberTotal, setTenantMemberTotal] = useState(0);
   const [membersLoading, setMembersLoading] = useState(false);
-  const [banKeyword, setBanKeyword] = useState(() => readQueryParam("q"));
+  const [banKeyword, setBanKeyword] = useState(() => readBanListPreferences(selectedTenant.id).keyword);
   const [banPage, setBanPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [banPagination, setBanPagination] = useState<Pagination>(() => defaultPagination());
   const [bansLoading, setBansLoading] = useState(false);
-  const [onlyActiveBans, setOnlyActiveBans] = useState(() => readQueryParam("active", "1") !== "0");
+  const [onlyActiveBans, setOnlyActiveBans] = useState(() => readBanListPreferences(selectedTenant.id).onlyActive);
   const [memberForm, setMemberForm] = useState<MemberForm>(() => defaultMemberForm());
   const [banForm, setBanForm] = useState<BanForm>(() => defaultBanForm());
   const [botForm, setBotForm] = useState<BotForm>(() => defaultBotForm());
@@ -256,18 +334,20 @@ export function AdminPage({
 
   useEffect(() => {
     if (activeTab === "users") {
-      setMemberKeyword(readQueryParam("q"));
-      setMemberRoleFilter(readMemberRoleQuery());
-      setMemberSort(readMemberSortQuery());
+      const preferences = readMemberListPreferences(selectedTenant.id);
+      setMemberKeyword(preferences.keyword);
+      setMemberRoleFilter(preferences.roleFilter);
+      setMemberSort(preferences.sort);
       setMemberPage(readQueryInt("page", 1, { min: 1 }));
       return;
     }
     if (activeTab === "bans") {
-      setBanKeyword(readQueryParam("q"));
-      setOnlyActiveBans(readQueryParam("active", "1") !== "0");
+      const preferences = readBanListPreferences(selectedTenant.id);
+      setBanKeyword(preferences.keyword);
+      setOnlyActiveBans(preferences.onlyActive);
       setBanPage(readQueryInt("page", 1, { min: 1 }));
     }
-  }, [activeTab]);
+  }, [activeTab, selectedTenant.id]);
 
   useEffect(() => {
     void refreshAdminData().catch((caught) => {
@@ -926,16 +1006,19 @@ export function AdminPage({
                 onKeywordChange={(value) => {
                   setMemberKeyword(value);
                   setMemberPage(1);
+                  writeMemberListPreferences(selectedTenant.id, { keyword: value, roleFilter: memberRoleFilter, sort: memberSort });
                   writeQueryParams({ q: value.trim() || null, page: null });
                 }}
                 onRoleFilterChange={(value) => {
                   setMemberRoleFilter(value);
                   setMemberPage(1);
+                  writeMemberListPreferences(selectedTenant.id, { keyword: memberKeyword, roleFilter: value, sort: memberSort });
                   writeQueryParams({ role: value === "all" ? null : value, page: null });
                 }}
                 onSortChange={(value) => {
                   setMemberSort(value);
                   setMemberPage(1);
+                  writeMemberListPreferences(selectedTenant.id, { keyword: memberKeyword, roleFilter: memberRoleFilter, sort: value });
                   writeQueryParams({ sort: value === "joined_asc" ? null : value, page: null });
                 }}
                 onPageChange={(page) => {
@@ -966,11 +1049,13 @@ export function AdminPage({
                 onKeywordChange={(value) => {
                   setBanKeyword(value);
                   setBanPage(1);
+                  writeBanListPreferences(selectedTenant.id, { keyword: value, onlyActive: onlyActiveBans });
                   writeQueryParams({ q: value.trim() || null, page: null });
                 }}
                 onOnlyActiveChange={(value) => {
                   setOnlyActiveBans(value);
                   setBanPage(1);
+                  writeBanListPreferences(selectedTenant.id, { keyword: banKeyword, onlyActive: value });
                   writeQueryParams({ active: value ? null : "0", page: null });
                 }}
                 onPageChange={(page) => {

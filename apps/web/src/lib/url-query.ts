@@ -2,6 +2,15 @@ export function readQueryParam(key: string, fallback = "") {
   return new URLSearchParams(window.location.search).get(key) ?? fallback;
 }
 
+export function hasQueryParam(key: string) {
+  return new URLSearchParams(window.location.search).has(key);
+}
+
+export function hasAnyQueryParam(keys: readonly string[]) {
+  const params = new URLSearchParams(window.location.search);
+  return keys.some((key) => params.has(key));
+}
+
 export function readQueryInt(key: string, fallback: number, options: { min?: number; allowed?: readonly number[] } = {}) {
   const raw = readQueryParam(key);
   const parsed = Number(raw);
