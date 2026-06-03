@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { buildQZoneVisitorDailySeries } from "../lib/qzone-visitor-stats";
+import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const postStatuses = ["pending_approval", "approved", "rejected", "cancelled", "publishing", "partially_failed", "failed", "published", "pending_recall", "recalled"];
@@ -185,6 +185,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
           date: { gte: sinceRange },
         },
         select: {
+          botAccountId: true,
           date: true,
           todayCount: true,
           totalCount: true,
@@ -328,6 +329,18 @@ export function registerStatsRoutes(app: FastifyInstance) {
       },
       qzoneVisitors: {
         daily: buildQZoneVisitorDailySeries(qzoneVisitorSnapshots, sinceRange, now),
+        targets: buildQZoneVisitorTargetSeries(
+          qzoneVisitorSnapshots,
+          publishTargets.map((target) => ({
+            id: target.id,
+            displayName: target.displayName,
+            botAccountId: target.botAccountId,
+            botDisplayName: target.botAccount.displayName,
+            botQqUin: target.botAccount.qqUin.toString(),
+          })),
+          sinceRange,
+          now,
+        ),
       },
       bots: bots.map((bot) => {
         const qzoneSession = bot.sessions[0] ?? null;
