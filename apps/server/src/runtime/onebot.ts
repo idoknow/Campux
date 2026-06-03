@@ -23,6 +23,7 @@ import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancel
 import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
+import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { selectReviewNotificationBot } from "./notification-routing";
@@ -48,6 +49,11 @@ type PendingAction = {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: Timer;
+};
+
+type QZoneProtocolAutoRefreshFailure = {
+  failedAt: number;
+  error: string;
 };
 
 type OneBotActionResponse = {
@@ -144,6 +150,8 @@ export class OneBotRuntime {
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
   private readonly pendingFriendRequestFlags = new Set<string>();
+  private readonly qzoneProtocolAutoRefreshFailures = new Map<string, QZoneProtocolAutoRefreshFailure>();
+  private readonly qzoneProtocolAutoRefreshInFlight = new Map<string, Promise<{ cookieNames: string[]; session: { id: string } }>>();
 
   constructor(
     private readonly queue: RuntimeQueue,
@@ -517,6 +525,30 @@ export class OneBotRuntime {
   }
 
   async refreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid") {
+    const cachedFailure = this.qzoneProtocolAutoRefreshFailures.get(botAccountId);
+    if (cachedFailure) {
+      const remainingMs = qzoneProtocolAutoRefreshFailureCooldownMs - (Date.now() - cachedFailure.failedAt);
+      if (remainingMs > 0) {
+        throw new QZoneProtocolAutoRefreshCooldownError(remainingMs, cachedFailure.error);
+      }
+      this.qzoneProtocolAutoRefreshFailures.delete(botAccountId);
+    }
+
+    const inFlight = this.qzoneProtocolAutoRefreshInFlight.get(botAccountId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const refresh = this.doRefreshQZoneCookiesByProtocol(botAccountId, reason);
+    this.qzoneProtocolAutoRefreshInFlight.set(botAccountId, refresh);
+    try {
+      return await refresh;
+    } finally {
+      this.qzoneProtocolAutoRefreshInFlight.delete(botAccountId);
+    }
+  }
+
+  private async doRefreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid") {
     const bot = await prisma.botAccount.findUnique({
       where: {
         id: botAccountId,
@@ -543,10 +575,16 @@ export class OneBotRuntime {
       if (checked?.healthStatus === "invalid") {
         throw new BotWorkflowError(`协议自动刷新后 cookies 仍不可用：${checked.healthMessage ?? "未知错误"}`, 502);
       }
+      this.qzoneProtocolAutoRefreshFailures.delete(bot.id);
       await this.notifyQZoneCookiesAutoRefreshed(bot.id, reason, result.cookieNames.length, checked?.healthMessage ?? null);
       await this.resumeWaitingPublishAttemptsForBot(bot.id);
       return result;
     } catch (error) {
+      const errorMessage = toErrorMessage(error);
+      this.qzoneProtocolAutoRefreshFailures.set(bot.id, {
+        failedAt: Date.now(),
+        error: errorMessage,
+      });
       await writeAuditLog({
         tenantId: bot.tenantId,
         actorId: null,
@@ -556,7 +594,8 @@ export class OneBotRuntime {
         detail: {
           reason,
           source: "protocol",
-          error: toErrorMessage(error),
+          error: errorMessage,
+          cooldownMs: qzoneProtocolAutoRefreshFailureCooldownMs,
         },
       });
       throw error;

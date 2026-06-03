@@ -9,6 +9,7 @@ import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
+import { isQZoneProtocolAutoRefreshCooldownError } from "../lib/qzone-auto-refresh";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -549,10 +550,17 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         await refreshAggregatePostStatus(attempt.postId);
         return;
       } catch (refreshError) {
-        const refreshMessage = refreshError instanceof Error ? refreshError.message : "协议自动刷新失败";
-        await notifier.notifyQZoneCookiesInvalid?.(attempt.publishTarget.botAccountId, message, { autoRefreshError: refreshMessage }).catch((error) => {
-          logger.warn({ error, botAccountId: attempt.publishTarget.botAccountId }, "failed to notify qzone cookies auto refresh failure");
-        });
+        if (isQZoneProtocolAutoRefreshCooldownError(refreshError)) {
+          logger.debug(
+            { botAccountId: attempt.publishTarget.botAccountId, postId: attempt.postId, publishTargetId: attempt.publishTargetId, remainingMs: refreshError.remainingMs },
+            "qzone cookies protocol auto refresh skipped during cooldown after publish login error",
+          );
+        } else {
+          const refreshMessage = refreshError instanceof Error ? refreshError.message : "协议自动刷新失败";
+          await notifier.notifyQZoneCookiesInvalid?.(attempt.publishTarget.botAccountId, message, { autoRefreshError: refreshMessage }).catch((error) => {
+            logger.warn({ error, botAccountId: attempt.publishTarget.botAccountId }, "failed to notify qzone cookies auto refresh failure");
+          });
+        }
       }
     }
     const shouldRetry = !needsLogin && currentAttempt.attempt < maxPublishAttempts;
@@ -645,10 +653,15 @@ async function resolveCookiesForPublish({
       }
       autoRefreshError = refreshedSession?.healthMessage ? `协议自动刷新后 cookies 仍不可用：${refreshedSession.healthMessage}` : "协议自动刷新后没有拿到可用 cookies";
     } catch (error) {
-      autoRefreshError = error instanceof Error ? error.message : "协议自动刷新失败";
-      await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
-        logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
-      });
+      if (isQZoneProtocolAutoRefreshCooldownError(error)) {
+        autoRefreshError = error.message;
+        logger.debug({ botAccountId, postId, publishTargetId, remainingMs: error.remainingMs }, "qzone cookies protocol auto refresh skipped during cooldown before publish");
+      } else {
+        autoRefreshError = error instanceof Error ? error.message : "协议自动刷新失败";
+        await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
+          logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
+        });
+      }
     }
   }
 
