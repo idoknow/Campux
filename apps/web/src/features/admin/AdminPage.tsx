@@ -2142,33 +2142,42 @@ function BotsPanel({
 
         <BotSetupGuide />
 
-        <div className="product-subsection mt-4 grid gap-3 p-3">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-              Bot QQ
-              <Input className="bg-white" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })} />
+        <details className="product-subsection mt-4 overflow-hidden" open={bots.length === 0}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">添加机器人</p>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">只在接入新墙号时展开填写。</p>
+            </div>
+            <Badge variant="outline">{bots.length === 0 ? "需要添加" : "展开"}</Badge>
+          </summary>
+          <div className="grid gap-3 border-t border-slate-200 p-3">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                墙号 QQ
+                <Input className="bg-white" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })} />
+              </label>
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                显示名
+                <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+              </label>
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                审核群号 <span className="font-normal text-slate-400">可选</span>
+                <Input className="bg-white" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value.replace(/\D/g, "") })} />
+              </label>
+              <Button className="font-medium" disabled={busy || !form.qqUin.trim() || !form.displayName.trim()} onClick={onAdd}>
+                <PlusIcon data-icon="inline-start" />
+                添加
+              </Button>
+            </div>
+            <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <span>
+                同时创建发布目标
+                <span className="block text-xs font-normal text-slate-500">添加墙号后自动创建一个对应的空间发布目标。</span>
+              </span>
+              <Switch checked={form.createPublishTarget} onCheckedChange={(checked) => onFormChange({ ...form, createPublishTarget: checked })} aria-label="同时创建发布目标" />
             </label>
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-              显示名
-              <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
-            </label>
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-              审核群号 <span className="font-normal text-slate-400">可选</span>
-              <Input className="bg-white" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value.replace(/\D/g, "") })} />
-            </label>
-            <Button className="font-medium" disabled={busy || !form.qqUin.trim() || !form.displayName.trim()} onClick={onAdd}>
-              <PlusIcon data-icon="inline-start" />
-              添加
-            </Button>
           </div>
-          <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-            <span>
-              同时创建发布目标
-              <span className="block text-xs font-normal text-slate-500">添加墙号后自动创建一个对应的空间发布目标。</span>
-            </span>
-            <Switch checked={form.createPublishTarget} onCheckedChange={(checked) => onFormChange({ ...form, createPublishTarget: checked })} aria-label="同时创建发布目标" />
-          </label>
-        </div>
+        </details>
 
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           {bots.length === 0 ? (
@@ -2176,9 +2185,8 @@ function BotsPanel({
           ) : (
             bots.map((bot) => (
               <div key={bot.id} className="product-row-card p-3">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-slate-500">显示名</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-2">
                       <p className="truncate text-base font-semibold text-slate-950">{bot.displayName}</p>
                       <Badge className={`rounded-full shadow-none ${bot.connection.online ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>
@@ -2186,24 +2194,21 @@ function BotsPanel({
                       </Badge>
                       {!bot.enabled ? <Badge className="rounded-full bg-red-50 text-red-700 ring-1 ring-red-200 shadow-none">停用</Badge> : null}
                     </div>
-                    <div className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
-                      <p>
-                        <span className="mr-1 text-xs font-semibold text-slate-400">Bot QQ</span>
-                        <span className="font-semibold">{bot.qqUin}</span>
-                      </p>
-                      <p>
-                        <span className="mr-1 text-xs font-semibold text-slate-400">审核群</span>
-                        <span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span>
-                      </p>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-600">
+                      <span><span className="mr-1 text-xs font-semibold text-slate-400">QQ</span><span className="font-semibold">{bot.qqUin}</span></span>
+                      <span><span className="mr-1 text-xs font-semibold text-slate-400">审核群</span><span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span></span>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => onDelete(bot.id)}>
-                    <Trash2Icon data-icon="inline-start" />
-                    删除
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <CopyBotUrlButton bot={bot} />
+                    <Button variant="outline" size="sm" disabled={busy} onClick={() => onDelete(bot.id)}>
+                      <Trash2Icon data-icon="inline-start" />
+                      删除
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="mt-3 grid gap-2 text-sm md:grid-cols-3">
+                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
                   <BotMetric icon={bot.connection.online ? WifiIcon : WifiOffIcon} label="连接" value={bot.connection.online ? `${bot.connection.connectionCount} 条` : "未连接"} />
                   <BotMetric label="最近心跳" value={bot.lastSeenAt ? formatDateTime(bot.lastSeenAt) : "暂无"} />
                   <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
@@ -2237,7 +2242,7 @@ function BotsPanel({
   );
 }
 
-function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
+function CopyBotUrlButton({ bot }: { bot: AdminBotAccount }) {
   const url = buildOneBotConnectionUrl(bot);
 
   async function copyUrl() {
@@ -2246,26 +2251,43 @@ function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
   }
 
   return (
-    <div className="product-subsection mt-3 p-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-slate-500">协议端连接</p>
-        <Button variant="outline" size="sm" onClick={() => void copyUrl()}>
-          <CopyIcon data-icon="inline-start" />
-          复制 URL
-        </Button>
+    <Button variant="outline" size="sm" onClick={() => void copyUrl()}>
+      <CopyIcon data-icon="inline-start" />
+      复制连接
+    </Button>
+  );
+}
+
+function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
+  const url = buildOneBotConnectionUrl(bot);
+
+  return (
+    <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">协议连接</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">只有接入或排查 NapCat 时需要查看。</p>
+        </div>
+        <Badge variant="outline">高级</Badge>
+      </summary>
+      <div className="border-t border-slate-200 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-500">OneBot 反向 WebSocket 地址</p>
+          <CopyBotUrlButton bot={bot} />
+        </div>
+        <div className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+          <p className="break-all font-mono text-xs leading-5 text-slate-700">{url}</p>
+        </div>
+        <p className="mt-2 text-xs font-semibold text-slate-500">
+          每个机器人都有独立 token，协议端用这个地址连接后会自动归属到当前校园墙。
+        </p>
+        <div className="mt-2 grid gap-1.5 text-xs font-semibold text-slate-500 sm:grid-cols-3">
+          <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">NapCat：添加反向 WebSocket 客户端。</p>
+          <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">地址：粘贴上方完整 URL。</p>
+          <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">QQ：协议端登录 QQ 必须是 {bot.qqUin}。</p>
+        </div>
       </div>
-      <div className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
-        <p className="break-all font-mono text-xs leading-5 text-slate-700">{url}</p>
-      </div>
-      <p className="mt-1 text-xs font-semibold text-slate-500">
-        每个机器人都有独立 token，协议端用这个地址连接后会自动归属到当前校园墙。
-      </p>
-      <div className="mt-2 grid gap-1.5 text-xs font-semibold text-slate-500 sm:grid-cols-3">
-        <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">NapCat：添加反向 WebSocket 客户端。</p>
-        <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">地址：粘贴上方完整 URL。</p>
-        <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">QQ：协议端登录 QQ 必须是 {bot.qqUin}。</p>
-      </div>
-    </div>
+    </details>
   );
 }
 
@@ -2354,96 +2376,114 @@ function BotConfigEditor({
     || trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply
     || reviewNotificationEnabled !== bot.reviewNotificationEnabled
     || enabled !== bot.enabled;
+  const canSave = !busy && Boolean(trimmedDisplayName) && Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply) && changed;
+
+  function saveConfig() {
+    onSave({
+      displayName: trimmedDisplayName,
+      reviewGroupId: trimmedReviewGroupId || null,
+      userMessageReply: trimmedUserMessageReply,
+      userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
+      reviewGroupMessageReply: trimmedReviewGroupMessageReply,
+      reviewNotificationEnabled,
+      enabled,
+    });
+  }
 
   return (
-    <div className="product-subsection mt-3 p-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold text-slate-500">基础配置</p>
-          <p className="mt-0.5 text-xs text-slate-400">修改机器人显示名、审核群和启用状态。</p>
+    <div className="mt-2 grid gap-2">
+      <details className="rounded-md border border-slate-200 bg-slate-50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">基础设置</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">显示名、审核群、启用状态。</p>
+          </div>
+          <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
+        </summary>
+        <div className="grid gap-3 border-t border-slate-200 p-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+              墙号 QQ
+              <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
+            </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+              显示名
+              <Input className="bg-white" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              <span className="text-[11px] font-normal text-slate-400">建议填「1 号墙」这类名称。</span>
+            </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+              审核群号 <span className="font-normal text-slate-400">可留空</span>
+              <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
+            </label>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <span>
+                启用机器人
+                <span className="block text-xs font-normal text-slate-500">关闭后不处理连接和消息。</span>
+              </span>
+              <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="启用机器人" />
+            </label>
+            <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <span>
+                发送审核通知
+                <span className="block text-xs font-normal leading-5 text-slate-500">新稿件、撤回等通知由这个墙号发送。</span>
+              </span>
+              <Switch checked={reviewNotificationEnabled} onCheckedChange={setReviewNotificationEnabled} aria-label="发送稿件审核通知" />
+            </label>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" disabled={!canSave} onClick={saveConfig}>
+              保存基础设置
+            </Button>
+          </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !trimmedDisplayName || !trimmedUserMessageReply || !trimmedReviewGroupMessageReply || !changed}
-          onClick={() =>
-            onSave({
-              displayName: trimmedDisplayName,
-              reviewGroupId: trimmedReviewGroupId || null,
-              userMessageReply: trimmedUserMessageReply,
-              userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
-              reviewGroupMessageReply: trimmedReviewGroupMessageReply,
-              reviewNotificationEnabled,
-              enabled,
-            })
-          }
-        >
-          保存配置
-        </Button>
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-          墙号 QQ
-          <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
-        </label>
-        <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-          显示名
-          <Input className="bg-white" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-          <span className="text-[11px] font-normal text-slate-400">建议填「1 号墙」这类名称，不要填 QQ 号。</span>
-        </label>
-        <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-          审核群号 <span className="font-normal text-slate-400">可留空</span>
-          <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
-        </label>
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <label className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-          <span>
-            启用机器人
-            <span className="block text-xs font-normal text-slate-500">关闭后不处理连接和消息。</span>
-          </span>
-          <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="启用机器人" />
-        </label>
-        <label className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-          <span>
-            发送稿件审核通知
-            <span className="block text-xs font-normal leading-5 text-slate-500">新稿件、撤回等全局通知由打开此项的墙号发送；保存后会自动关闭其他墙号。</span>
-          </span>
-          <Switch checked={reviewNotificationEnabled} onCheckedChange={setReviewNotificationEnabled} aria-label="发送稿件审核通知" />
-        </label>
-      </div>
-      <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
-        <div className="grid gap-2">
-          <label className="text-xs font-semibold text-slate-500">
-            私聊非命令自动回复
-            <Textarea
-              className="mt-1 min-h-24 bg-white"
-              value={userMessageReply}
-              onChange={(event) => setUserMessageReply(event.target.value)}
-              placeholder="用户没有发送命令时自动回复的消息"
+      </details>
+
+      <details className="rounded-md border border-slate-200 bg-slate-50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">自动回复</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">私聊提示、审核群提示和限速。</p>
+          </div>
+          <Badge variant="outline">低频</Badge>
+        </summary>
+        <div className="grid gap-3 border-t border-slate-200 p-3 lg:grid-cols-[minmax(0,1fr)_180px]">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-semibold text-slate-500">
+              私聊非命令自动回复
+              <Textarea
+                className="mt-1 min-h-28 bg-white"
+                value={userMessageReply}
+                onChange={(event) => setUserMessageReply(event.target.value)}
+                placeholder="用户没有发送命令时自动回复的消息"
+              />
+            </label>
+            <label className="text-xs font-semibold text-slate-500">
+              审核群 @ 非指令提示
+              <Textarea
+                className="mt-1 min-h-28 bg-white"
+                value={reviewGroupMessageReply}
+                onChange={(event) => setReviewGroupMessageReply(event.target.value)}
+                placeholder="审核群里 @ 机器人但没有发送指令时回复的提示"
+              />
+            </label>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-white p-2">
+            <p className="text-xs font-semibold text-slate-500">自动回复限速</p>
+            <Input
+              className="mt-2 bg-white"
+              inputMode="numeric"
+              value={userMessageReplyCooldownSeconds}
+              onChange={(event) => setUserMessageReplyCooldownSeconds(event.target.value.replace(/\D/g, ""))}
             />
-          </label>
-          <label className="text-xs font-semibold text-slate-500">
-            审核群 @ 非指令提示
-            <Textarea
-              className="mt-1 min-h-28 bg-white"
-              value={reviewGroupMessageReply}
-              onChange={(event) => setReviewGroupMessageReply(event.target.value)}
-              placeholder="审核群里 @ 机器人但没有发送指令时回复的提示"
-            />
-          </label>
+            <p className="mt-1 text-xs font-semibold text-slate-400">秒内不重复回复；填 0 表示不限速。</p>
+            <Button className="mt-3 w-full" variant="outline" size="sm" disabled={!canSave} onClick={saveConfig}>
+              保存自动回复
+            </Button>
+          </div>
         </div>
-        <div className="rounded-md border border-slate-200 bg-white p-2">
-          <p className="text-xs font-semibold text-slate-500">自动回复限速</p>
-          <Input
-            className="mt-2 bg-white"
-            inputMode="numeric"
-            value={userMessageReplyCooldownSeconds}
-            onChange={(event) => setUserMessageReplyCooldownSeconds(event.target.value.replace(/\D/g, ""))}
-          />
-          <p className="mt-1 text-xs font-semibold text-slate-400">秒内不重复回复；填 0 表示不限速。命令消息不受影响。</p>
-        </div>
-      </div>
+      </details>
     </div>
   );
 }
@@ -2490,55 +2530,61 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
     .join("\n") || "#12";
 
   return (
-    <div className="product-subsection mt-3 p-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
-          <p className="text-xs font-semibold text-slate-500">说说配文模板</p>
-          <p className="mt-0.5 text-xs text-slate-400">正文不直接发出，正文会在渲染图里；这里只配置说说上方的短配文。</p>
+          <p className="text-sm font-semibold text-slate-800">说说配文模板</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">正文在渲染图里，这里只改发布文案。</p>
         </div>
-        <Button variant="outline" size="sm" disabled={busy} onClick={saveTemplate}>
-          保存模板
-        </Button>
+        <Badge variant={dirty ? "secondary" : "outline"}>{dirty ? "有改动" : "低频"}</Badge>
+      </summary>
+      <div className="border-t border-slate-200 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold leading-5 text-slate-500">按目标长期配置，日常发布无需调整。</p>
+          <Button variant="outline" size="sm" disabled={busy || !dirty} onClick={saveTemplate}>
+            保存模板
+          </Button>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <label className="text-xs font-semibold text-slate-500">
+            固定前缀，可留空
+            <Textarea
+              className="mt-1 min-h-20 resize-y bg-white text-sm"
+              value={template.customText}
+              onChange={(event) => updateTemplate({ customText: event.target.value })}
+              placeholder="会显示在稿件编号和 @ 用户之前"
+            />
+          </label>
+          <label className="text-xs font-semibold text-slate-500">
+            固定后缀，可留空
+            <Textarea
+              className="mt-1 min-h-20 resize-y bg-white text-sm"
+              value={template.suffixText}
+              onChange={(event) => updateTemplate({ suffixText: event.target.value })}
+              placeholder="会另起一行显示在正文链接之后"
+            />
+          </label>
+        </div>
+        <div className="mt-2 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
+          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+            <input type="checkbox" checked={template.includePostId} onChange={(event) => updateTemplate({ includePostId: event.target.checked })} />
+            稿件编号
+          </label>
+          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+            <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => updateTemplate({ includeAuthorMention: event.target.checked })} />
+            非匿名时 @ 用户
+          </label>
+          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+            <input type="checkbox" checked={template.includeLinks} onChange={(event) => updateTemplate({ includeLinks: event.target.checked })} />
+            提取正文链接
+          </label>
+        </div>
+        <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+          <p className="text-[11px] font-bold text-slate-400">预览</p>
+          <p className="mt-1 whitespace-pre-wrap text-xs font-semibold text-slate-700">{preview}</p>
+        </div>
       </div>
-      <div className="mt-2 grid gap-2 md:grid-cols-2">
-        <label className="text-xs font-semibold text-slate-500">
-          固定前缀，可留空
-          <Textarea
-            className="mt-1 min-h-20 resize-y bg-white text-sm"
-            value={template.customText}
-            onChange={(event) => updateTemplate({ customText: event.target.value })}
-            placeholder="会显示在稿件编号和 @ 用户之前"
-          />
-        </label>
-        <label className="text-xs font-semibold text-slate-500">
-          固定后缀，可留空
-          <Textarea
-            className="mt-1 min-h-20 resize-y bg-white text-sm"
-            value={template.suffixText}
-            onChange={(event) => updateTemplate({ suffixText: event.target.value })}
-            placeholder="会另起一行显示在正文链接之后"
-          />
-        </label>
-      </div>
-      <div className="mt-2 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={template.includePostId} onChange={(event) => updateTemplate({ includePostId: event.target.checked })} />
-          稿件编号
-        </label>
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => updateTemplate({ includeAuthorMention: event.target.checked })} />
-          非匿名时 @ 用户
-        </label>
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={template.includeLinks} onChange={(event) => updateTemplate({ includeLinks: event.target.checked })} />
-          提取正文链接
-        </label>
-      </div>
-      <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
-        <p className="text-[11px] font-bold text-slate-400">预览</p>
-        <p className="mt-1 whitespace-pre-wrap text-xs font-semibold text-slate-700">{preview}</p>
-      </div>
-    </div>
+    </details>
   );
 }
 
@@ -2610,38 +2656,45 @@ function PublishPanel({
 
         <PublishSetupGuide hasBots={bots.length > 0} hasTargets={targets.length > 0} />
 
-        <div className="product-subsection mt-4 grid gap-2 p-3 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_110px_auto]">
-          <Select value={form.botAccountId || "none"} onValueChange={(botAccountId) => onFormChange({ ...form, botAccountId: botAccountId === "none" ? "" : botAccountId })}>
-            <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">选择机器人</SelectItem>
-              {bots.map((bot) => (
-                <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.qqUin}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input placeholder="目标名称，例如 1 号墙 QZone" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
-          <Input
-            inputMode="numeric"
-            placeholder="风控间隔秒"
-            value={form.publishDelaySeconds}
-            onChange={(event) => onFormChange({ ...form, publishDelaySeconds: event.target.value.replace(/\D/g, "") })}
-          />
-          <Button className="font-medium" disabled={busy || bots.length === 0 || form.displayName.trim().length === 0} onClick={onAdd}>
-            <PlusIcon data-icon="inline-start" />
-            添加
-          </Button>
-          <Select value={form.qzoneRefreshMode} onValueChange={(qzoneRefreshMode) => onFormChange({ ...form, qzoneRefreshMode: qzoneRefreshMode as "protocol" | "qr" })}>
-            <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="protocol">协议自动获取登录态</SelectItem>
-              <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
-            </SelectContent>
-          </Select>
-          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 md:col-span-3">
-            <input type="checkbox" checked={form.required} onChange={(event) => onFormChange({ ...form, required: event.target.checked })} />
-            作为必需发布目标，失败时阻塞稿件完成
-          </label>
+        <div className="product-subsection mt-4 grid gap-3 p-3">
+          <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+            <Select value={form.botAccountId || "none"} onValueChange={(botAccountId) => onFormChange({ ...form, botAccountId: botAccountId === "none" ? "" : botAccountId })}>
+              <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">选择机器人</SelectItem>
+                {bots.map((bot) => (
+                  <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.qqUin}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input placeholder="目标名称，例如 1 号墙 QZone" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+            <Button className="font-medium" disabled={busy || bots.length === 0 || form.displayName.trim().length === 0} onClick={onAdd}>
+              <PlusIcon data-icon="inline-start" />
+              添加发布目标
+            </Button>
+          </div>
+          <details>
+            <summary className="cursor-pointer text-xs font-bold text-slate-500">高级选项：风控间隔、登录刷新方式、必需目标</summary>
+            <div className="mt-2 grid gap-2 md:grid-cols-[150px_220px_minmax(0,1fr)] md:items-center">
+              <Input
+                inputMode="numeric"
+                placeholder="风控间隔秒"
+                value={form.publishDelaySeconds}
+                onChange={(event) => onFormChange({ ...form, publishDelaySeconds: event.target.value.replace(/\D/g, "") })}
+              />
+              <Select value={form.qzoneRefreshMode} onValueChange={(qzoneRefreshMode) => onFormChange({ ...form, qzoneRefreshMode: qzoneRefreshMode as "protocol" | "qr" })}>
+                <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="protocol">协议自动获取登录态</SelectItem>
+                  <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
+                </SelectContent>
+              </Select>
+              <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600">
+                <input type="checkbox" checked={form.required} onChange={(event) => onFormChange({ ...form, required: event.target.checked })} />
+                作为必需发布目标，失败时阻塞稿件完成
+              </label>
+            </div>
+          </details>
         </div>
 
         <div className="mt-3 flex flex-col gap-2">
@@ -2675,7 +2728,6 @@ function PublishPanel({
                     <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
                     <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测空间登录态可用性"}</p>
                   </div>
-                  <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button variant={target.enabled ? "secondary" : "outline"} size="sm" onClick={() => onToggleTarget(target)}>
                       {target.enabled ? "启用中" : "已停用"}
@@ -2696,6 +2748,7 @@ function PublishPanel({
                       查看登录态
                     </Button>
                   </div>
+                  <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
                   <BotPublishTemplateEditor
                     bot={{
                       id: target.botAccount.id,
@@ -2789,7 +2842,7 @@ function PublishSetupGuide({ hasBots, hasTargets }: { hasBots: boolean; hasTarge
     {
       icon: QrCodeIcon,
       title: "登录 QZone",
-      detail: "优先使用扫码登录；协议获取 cookies 只在协议端支持时使用。登录后点击检测确认 cookies 可用。",
+      detail: "优先使用扫码登录；协议获取登录态只在协议端支持时使用。登录后点击检测确认是否可用。",
       done: false,
     },
     {
@@ -2858,57 +2911,67 @@ function PublishTargetConfigEditor({
     || normalizedDelay !== target.publishDelaySeconds
     || qzoneRefreshMode !== target.qzoneRefreshMode;
 
+  function saveConfig() {
+    onSave({
+      displayName: normalizedName,
+      enabled,
+      required,
+      publishDelaySeconds: normalizedDelay,
+      qzoneRefreshMode,
+    });
+  }
+
   return (
-    <div className="product-subsection mt-3 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
-          <p className="text-xs font-semibold text-slate-500">目标配置</p>
-          <p className="mt-0.5 text-xs text-slate-400">调整这个发布目标的名称、启用状态、风控间隔和登录刷新方式。</p>
+          <p className="text-sm font-semibold text-slate-800">目标设置</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">名称、启用状态、风控间隔、登录方式。</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !changed || normalizedName.length === 0}
-          onClick={() => onSave({
-            displayName: normalizedName,
-            enabled,
-            required,
-            publishDelaySeconds: normalizedDelay,
-            qzoneRefreshMode,
-          })}
-        >
-          <SaveIcon data-icon="inline-start" />
-          保存配置
-        </Button>
+        <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
+      </summary>
+      <div className="border-t border-slate-200 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold leading-5 text-slate-500">这些参数通常在首次配置后很少改动。</p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !changed || normalizedName.length === 0}
+            onClick={saveConfig}
+          >
+            <SaveIcon data-icon="inline-start" />
+            保存目标设置
+          </Button>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_180px]">
+          <Input className="bg-white" placeholder="发布目标名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <Input
+            className="bg-white"
+            inputMode="numeric"
+            placeholder="风控间隔秒"
+            value={publishDelaySeconds}
+            onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
+          />
+          <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
+            <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="protocol">协议自动获取登录态</SelectItem>
+              <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
+          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+            启用这个发布目标
+          </label>
+          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
+            <input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} />
+            失败时阻塞稿件完成
+          </label>
+        </div>
       </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_180px]">
-        <Input className="bg-white" placeholder="发布目标名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-        <Input
-          className="bg-white"
-          inputMode="numeric"
-          placeholder="风控间隔秒"
-          value={publishDelaySeconds}
-          onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
-        />
-        <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
-          <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="protocol">协议自动获取登录态</SelectItem>
-            <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-          启用这个发布目标
-        </label>
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
-          <input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} />
-          失败时阻塞稿件完成
-        </label>
-      </div>
-    </div>
+    </details>
   );
 }
 
@@ -2954,7 +3017,7 @@ function PublishVerboseLog({ verbose }: { verbose: NonNullable<PublishAttemptIte
     <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge className="rounded-full bg-slate-100 text-slate-700 shadow-none">模式 {String(verbose.mode ?? "unknown")}</Badge>
-        <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none ring-1 ring-blue-200">cookies {String(verbose.cookieStatus ?? "unknown")}</Badge>
+        <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none ring-1 ring-blue-200">登录态 {String(verbose.cookieStatus ?? "unknown")}</Badge>
         <span className="text-xs font-bold text-slate-500">
           渲染图 {formatBytes(verbose.renderedBytes)} · 图片 {typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张
         </span>
@@ -2963,7 +3026,7 @@ function PublishVerboseLog({ verbose }: { verbose: NonNullable<PublishAttemptIte
       {verbose.note ? <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">{verbose.note}</p> : null}
       <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-500 md:grid-cols-2">
         <p>QQ：{verbose.uin ?? "未知"}</p>
-        <p className="break-all">Cookie：{verbose.cookieNames?.length ? verbose.cookieNames.join(", ") : "无"}</p>
+        <p className="break-all">Cookie 名称：{verbose.cookieNames?.length ? verbose.cookieNames.join(", ") : "无"}</p>
       </div>
 
       {httpLogs.length === 0 ? (
