@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { prisma } from "./prisma";
+import { isQZoneProtocolAutoRefreshCooldownError } from "./qzone-auto-refresh";
 import { decryptJson } from "./secret-json";
 import { parseQZoneVisitorCounts, qzoneVisitorSnapshotDate } from "./qzone-visitor-stats";
 
@@ -180,6 +181,13 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
               logger.info({ sessionId: session.id, botAccountId: session.botAccountId, cookieCount: result.cookieNames.length }, "qzone cookies auto refreshed after heartbeat invalid");
               continue;
             } catch (error) {
+              if (isQZoneProtocolAutoRefreshCooldownError(error)) {
+                logger.debug(
+                  { sessionId: session.id, botAccountId: session.botAccountId, remainingMs: error.remainingMs },
+                  "qzone cookies protocol auto refresh skipped during cooldown after heartbeat invalid",
+                );
+                continue;
+              }
               logger.warn({ error, sessionId: session.id, botAccountId: session.botAccountId }, "qzone cookies protocol auto refresh failed after heartbeat invalid");
               await markInvalidCookiesNotified(session.id);
               await notifier.notifyQZoneCookiesInvalid(session.botAccountId, updated.healthMessage ?? "QZone cookies 检测失败", {
