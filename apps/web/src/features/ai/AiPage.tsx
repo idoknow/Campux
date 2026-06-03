@@ -121,7 +121,7 @@ const floatingWindowDefaults: FloatingWindowLayout = {
   },
   minimized: {
     tools: false,
-    panel: false,
+    panel: true,
     entity: false,
   },
 };
@@ -449,7 +449,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
   }
 
   async function clearGraph() {
-    if (!window.confirm("确认清空当前租户的 AI 图谱、模型快照和历史分析结果？LLM 设置会保留，运行中的存量分析会被取消。")) {
+    if (!window.confirm("确认清空当前校园墙的 AI 图谱、模型快照和历史分析结果？LLM 设置会保留，运行中的存量分析会被取消。")) {
       return;
     }
     setBusy(true);
@@ -929,27 +929,27 @@ function SettingsPanel({
           </Select>
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
-          Provider
+          服务商
           <Input value={form.provider} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, provider: event.target.value })} />
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600 md:col-span-2">
-          Base URL
+          接口地址
           <Input value={form.baseUrl} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, baseUrl: event.target.value })} />
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
-          Model
+          模型
           <Input value={form.model} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, model: event.target.value })} />
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
-          API Key
+          API 密钥
           <Input type="password" value={form.apiKey} placeholder={overview.settings.apiKeyConfigured ? "保持不变" : "未配置"} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, apiKey: event.target.value, clearApiKey: false })} />
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
-          Temperature
+          随机度
           <Input type="number" step="0.1" min={0} max={1} value={form.temperature} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, temperature: Number(event.target.value) })} />
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
-          Timeout
+          超时秒数
           <Input type="number" min={5} max={120} value={form.timeoutSeconds} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, timeoutSeconds: Number(event.target.value) })} />
         </label>
       </div>
@@ -985,7 +985,7 @@ function SettingsPanel({
           {overview.settings.apiKeyConfigured ? (
             <Button type="button" variant="outline" disabled={busy || testing} onClick={() => onFormChange({ ...form, apiKey: "", clearApiKey: true })}>
               <KeyRoundIcon data-icon="inline-start" />
-              清除 Key
+              清除密钥
             </Button>
           ) : null}
           <Button type="button" variant="outline" disabled={busy || testing} onClick={() => void onTest()}>

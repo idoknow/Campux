@@ -31,8 +31,8 @@ const publishStatusLabels: Record<string, string> = {
 };
 
 const auditActionLabels: Record<string, string> = {
-  "bot.qzone.cookies.refresh": "刷新 cookies",
-  "bot.qzone.cookies.auto_refresh": "自动刷新 cookies",
+  "bot.qzone.cookies.refresh": "刷新登录态",
+  "bot.qzone.cookies.auto_refresh": "自动刷新登录态",
   "bot.qzone.cookies.auto_refresh_failed": "自动刷新失败",
   "bot.qzone.cookies.qr_login": "扫码登录",
   "bot_account.create": "创建机器人",
@@ -210,9 +210,12 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
             </section>
           </div>
 
-          <section className="product-surface min-w-0 p-4">
-            <SectionTitle icon={BotIcon} title="机器人与发布目标" />
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <details className="product-surface min-w-0 overflow-hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+              <SectionTitle icon={BotIcon} title="机器人与发布目标" />
+              <span className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500">展开</span>
+            </summary>
+            <div className="grid gap-2 border-t border-slate-100 px-4 pb-4 pt-3 md:grid-cols-2">
               {stats.bots.map((bot) => (
                 <div key={bot.id} className="product-row-card p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -226,17 +229,20 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                     <span>发布目标：{bot.publishTargetCount}</span>
                     <span>审核群：{bot.reviewGroupId ?? "未配置"}</span>
                     <span>最近连接：{bot.lastSeenAt ? formatDateTime(bot.lastSeenAt) : "未连接"}</span>
-                    <span>QZone：{bot.qzoneSession ? `${sessionStatusLabel(bot.qzoneSession.status)}，${bot.qzoneSession.checkedAt ? formatDateTime(bot.qzoneSession.checkedAt) : "未检测"}` : "无 cookies"}</span>
+                    <span>空间登录态：{bot.qzoneSession ? `${sessionStatusLabel(bot.qzoneSession.status)}，${bot.qzoneSession.checkedAt ? formatDateTime(bot.qzoneSession.checkedAt) : "未检测"}` : "未登录"}</span>
                   </div>
                 </div>
               ))}
               {stats.bots.length === 0 ? <EmptyCard title="还没有机器人" /> : null}
             </div>
-          </section>
+          </details>
 
-          <section className="product-surface min-w-0 p-4">
-            <SectionTitle icon={SparklesIcon} title="发布质量" />
-            <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <details className="product-surface min-w-0 overflow-hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+              <SectionTitle icon={SparklesIcon} title="发布质量" />
+              <span className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500">展开</span>
+            </summary>
+            <div className="grid min-w-0 gap-3 border-t border-slate-100 px-4 pb-4 pt-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <StatusGrid values={stats.publishing.byStatus} labels={publishStatusLabels} />
               <div className="grid gap-2">
                 {stats.publishing.targets.map((target) => (
@@ -255,12 +261,15 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                 ))}
               </div>
             </div>
-          </section>
+          </details>
 
           <div className="grid min-w-0 gap-3 lg:grid-cols-2">
-            <section className="product-surface min-w-0 p-4">
-              <SectionTitle icon={ShieldAlertIcon} title="最近发布失败" />
-              <div className="mt-3 grid gap-2">
+            <details className="product-surface min-w-0 overflow-hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                <SectionTitle icon={ShieldAlertIcon} title="最近发布失败" />
+                <span className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500">展开</span>
+              </summary>
+              <div className="grid gap-2 border-t border-slate-100 px-4 pb-4 pt-3">
                 {stats.publishing.recentFailures.map((failure) => (
                   <div key={failure.id} className="product-row-card p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -274,17 +283,20 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                 ))}
                 {stats.publishing.recentFailures.length === 0 ? <EmptyCard title="最近没有发布失败" /> : null}
               </div>
-            </section>
+            </details>
 
-            <section className="product-surface min-w-0 p-4">
-              <SectionTitle icon={ImageIcon} title="操作审计" />
-              <div className="mt-3 grid gap-2">
+            <details className="product-surface min-w-0 overflow-hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                <SectionTitle icon={ImageIcon} title="管理操作" />
+                <span className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500">展开</span>
+              </summary>
+              <div className="grid gap-2 border-t border-slate-100 px-4 pb-4 pt-3">
                 {stats.audit.actions30d.map((action) => (
                   <BarRow key={action.action} label={auditActionLabels[action.action] ?? action.action} value={action.count} max={Math.max(1, stats.audit.actions30d[0]?.count ?? 1)} detail="次" />
                 ))}
                 {stats.audit.actions30d.length === 0 ? <EmptyCard title="近 30 天没有管理操作" /> : null}
               </div>
-            </section>
+            </details>
           </div>
         </div>
       ) : null}

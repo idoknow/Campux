@@ -613,11 +613,15 @@ export function OpsPanel({
                 <Metric label="稿件" value={selectedTenant.postCount} />
               </div>
 
-              <div className="mt-4 rounded-md bg-slate-50 p-3">
-                <div className="flex items-center gap-2 font-bold">
-                  <ActivityIcon className="size-4" />
-                  生命周期状态
-                </div>
+              <details className="mt-4 rounded-md bg-slate-50">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-bold [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <ActivityIcon className="size-4" />
+                    生命周期状态
+                  </span>
+                  <span className="text-xs text-slate-400">展开</span>
+                </summary>
+                <div className="border-t border-slate-200 px-3 pb-3 pt-2">
                 <p className="mt-1 text-sm text-slate-500">{statusDescriptions[selectedTenant.status]}</p>
                 {selectedTenant.status === "active" && !selectedTenant.ready ? (
                   <p className="mt-1 text-sm font-semibold text-amber-700">墙号机器人尚未接入，校园墙未就绪。创建满 30 天仍未接入且成员不超过 2 人会被自动存档。</p>
@@ -641,13 +645,18 @@ export function OpsPanel({
                     );
                   })}
                 </div>
-              </div>
-
-              <div className="mt-4 rounded-md bg-slate-50 p-3">
-                <div className="flex items-center gap-2 font-bold">
-                  <Building2Icon className="size-4" />
-                  专属访问 host
                 </div>
+              </details>
+
+              <details className="mt-4 rounded-md bg-slate-50">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-bold [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <Building2Icon className="size-4" />
+                    专属访问域名
+                  </span>
+                  <span className="text-xs text-slate-400">展开</span>
+                </summary>
+                <div className="border-t border-slate-200 px-3 pb-3 pt-2">
                 <p className="mt-1 text-sm text-slate-500">
                   设置后，从这个域名进入的用户会被固定到当前校园墙，不再展示租户选择。
                 </p>
@@ -657,22 +666,25 @@ export function OpsPanel({
                     保存 host
                   </Button>
                 </div>
-              </div>
-
-              <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
-                <div className="flex items-center gap-2 font-bold">
-                  <BotIcon className="size-4" />
-                  Bot 与发布目标
-                  <span className="ml-auto text-xs font-bold text-slate-400">{selectedTenant.bots.length} 个墙号</span>
                 </div>
-                <div className="mt-3 grid gap-2">
+              </details>
+
+              <details className="mt-4 rounded-md border border-slate-200 bg-white">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-bold [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <BotIcon className="size-4" />
+                    机器人与发布目标
+                  </span>
+                  <span className="text-xs text-slate-400">{selectedTenant.bots.length} 个墙号</span>
+                </summary>
+                <div className="grid gap-2 border-t border-slate-100 p-3">
                   {selectedTenant.bots.length > 0 ? (
                     selectedTenant.bots.map((bot) => <TenantBotCard key={bot.id} bot={bot} />)
                   ) : (
-                    <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-500">当前租户还没有配置 Bot。</p>
+                    <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-500">当前校园墙还没有配置机器人。</p>
                   )}
                 </div>
-              </div>
+              </details>
 
               <p className="mt-4 text-sm text-slate-500">
                 校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护；专属 host 在这里维护。
@@ -865,21 +877,18 @@ function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelM
   ];
 
   return (
-    <Card className="mt-4 rounded-md border-slate-200 bg-white shadow-none">
-      <CardContent className="p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <details className="mt-4 rounded-md border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-sm font-bold text-slate-950">{isSystemMode ? "平台交付流程" : "自助开墙流程"}</p>
-            <p className="mt-1 text-sm leading-6 text-slate-500">
-              目标是让运营者不看文档也能完成：注册账号、创建校园墙、接入墙号机器人、登录 QQ 空间、开始审核发布。
-            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-500">首次交付或自助开墙时展开查看流程。</p>
             {!isSystemMode && hasTenants ? (
               <p className="mt-1 text-xs font-bold text-blue-700">创建完成后，点击校园墙的“作为管理员进入”，按页面引导一步步完成接入。</p>
             ) : null}
           </div>
-          {selectedTenant ? <Badge variant="secondary">{selectedTenant.name}</Badge> : null}
-        </div>
-        <div className="mt-3 grid gap-2 lg:grid-cols-5">
+          {selectedTenant ? <Badge variant="secondary">{selectedTenant.name}</Badge> : <Badge variant="outline">帮助</Badge>}
+      </summary>
+      <div className="grid gap-2 border-t border-slate-100 p-4 lg:grid-cols-5">
           {steps.map((step, index) => (
             <div key={step.title} className={`rounded-md border p-3 ${step.done ? "border-green-200 bg-green-50/70" : "border-slate-200 bg-slate-50"}`}>
               <div className="flex items-center gap-2">
@@ -891,9 +900,8 @@ function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelM
               <p className="mt-2 text-xs font-semibold leading-5 text-slate-500">{step.detail}</p>
             </div>
           ))}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </details>
   );
 }
 

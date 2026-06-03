@@ -18,14 +18,14 @@ export const defaultMetadata: TenantMetadata = {
   postRules: [
     "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
     "寻物招领请写清地点、时间和联系方式。",
-    "图片最多 9 张，单张 ≤ 10MB；审核通过后会同步到本校启用的 QQ 墙号。",
+    "图片最多 9 张，单张 ≤ 10MB；审核通过后会同步到本校启用的墙号。",
   ],
   pendingPostLimit: 1,
   services: [
-    { title: "修改名称", description: "账户资料" },
-    { title: "修改密码", description: "账号服务" },
-    { title: "投稿规则", description: "查看本墙规范" },
-    { title: "校园服务", description: "推荐入口" },
+    { title: "修改名称", description: "更新投稿时使用的显示名" },
+    { title: "修改密码", description: "保护你的校园墙账号" },
+    { title: "投稿规则", description: "查看本墙投稿规范" },
+    { title: "校园服务", description: "常用校园入口" },
   ],
   imageCompression: {
     enabled: true,
@@ -38,7 +38,7 @@ export const navItems = [
   { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },
   { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon, minRole: "submitter" },
   { value: "services", label: "服务", emoji: "🛠", icon: WrenchIcon, minRole: "submitter" },
-  { value: "ai", label: "AI", emoji: "AI", icon: SparklesIcon, minRole: "reviewer", badge: "实验性" },
+  { value: "ai", label: "AI 图谱", emoji: "AI", icon: SparklesIcon, minRole: "reviewer", badge: "实验" },
   { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "admin" },
   { value: "stats", label: "统计", emoji: "📊", icon: BarChart3Icon, minRole: "reviewer" },
 ] satisfies NavItem[];

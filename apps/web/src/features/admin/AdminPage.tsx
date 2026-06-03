@@ -428,9 +428,9 @@ export function AdminPage({
         }),
       });
       await onSaved();
-      toast.success("系统设置已保存。");
+      toast.success("墙面设置已保存。");
     } catch (caught) {
-      toast.error(caught instanceof SyntaxError ? "服务入口 JSON 格式不正确" : caught instanceof Error ? caught.message : "保存失败");
+      toast.error(caught instanceof SyntaxError ? "服务入口配置格式不正确" : caught instanceof Error ? caught.message : "保存失败");
     } finally {
       setBusy(false);
     }
@@ -799,14 +799,14 @@ export function AdminPage({
     try {
       if (mode === "protocol") {
         const data = await api<{ cookieNames: string[] }>(`/api/admin/bots/${botId}/qzone-cookies/protocol`, { method: "POST" });
-        toast.success(`QZone cookies 已刷新（${data.cookieNames.length} 项）。`);
+        toast.success(`空间登录态已刷新（${data.cookieNames.length} 项）。`);
         await refreshAdminData();
         return;
       }
       const data = await api<{ id: string; qrImage: string; status: string; message: string | null }>(`/api/admin/bots/${botId}/qzone-login`, { method: "POST" });
       setQzoneLogin({ open: true, botId, loginId: data.id, qrImage: data.qrImage, status: data.status, message: data.message ?? "等待扫码" });
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "刷新 QZone cookies 失败");
+      toast.error(caught instanceof Error ? caught.message : "刷新空间登录态失败");
     } finally {
       setBusy(false);
     }
@@ -816,10 +816,10 @@ export function AdminPage({
     setBusy(true);
     try {
       const data = await api<{ session: { status: string; message: string | null } | null }>(`/api/admin/bots/${botId}/qzone-cookies/check`, { method: "POST" });
-      toast.success(data.session ? `QZone cookies 检测完成：${sessionStatusLabel(data.session.status)}${data.session.message ? `，${data.session.message}` : ""}` : "这个 Bot 还没有 QZone cookies。");
+      toast.success(data.session ? `空间登录态检测完成：${sessionStatusLabel(data.session.status)}${data.session.message ? `，${data.session.message}` : ""}` : "这个机器人还没有空间登录态。");
       await refreshAdminData();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "检测 QZone cookies 失败");
+      toast.error(caught instanceof Error ? caught.message : "检测空间登录态失败");
     } finally {
       setBusy(false);
     }
@@ -845,7 +845,7 @@ export function AdminPage({
       });
     } catch (caught) {
       setCookieView((current) => ({ ...current, loading: false }));
-      toast.error(caught instanceof Error ? caught.message : "读取 QZone cookies 失败");
+      toast.error(caught instanceof Error ? caught.message : "读取空间登录态失败");
     }
   }
 
@@ -854,7 +854,7 @@ export function AdminPage({
       return;
     }
     await navigator.clipboard.writeText(cookieView.cookieHeader);
-    toast.success("cookies 已复制。");
+    toast.success("登录态已复制。");
   }
 
   async function pollQZoneLogin() {
@@ -862,7 +862,7 @@ export function AdminPage({
     const data = await api<{ status: string; message: string | null; cookieNames: string[] }>(`/api/admin/bots/${qzoneLogin.botId}/qzone-login/${qzoneLogin.loginId}`);
     setQzoneLogin((current) => ({ ...current, status: data.status, message: data.message ?? current.message }));
     if (data.status === "succeeded") {
-      toast.success(`扫码登录完成，QZone cookies 已刷新（${data.cookieNames.length} 项）。`);
+      toast.success(`扫码登录完成，空间登录态已刷新（${data.cookieNames.length} 项）。`);
       await refreshAdminData();
     }
   }
@@ -896,7 +896,7 @@ export function AdminPage({
             封禁
           </TabsTrigger>
           <TabsTrigger value="metadata" className={managementTabsTriggerClassName}>
-            系统设置
+            墙面设置
           </TabsTrigger>
           <TabsTrigger value="bots" className={managementTabsTriggerClassName}>
             机器人
@@ -987,16 +987,27 @@ export function AdminPage({
               <div className="flex flex-col gap-4">
                 <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} onUploaded={onSaved} />
                 {aiOverview && aiForm ? (
-                  <AdminAiSettingsPanel
-                    overview={aiOverview}
-                    form={aiForm}
-                    busy={busy}
-                    testing={aiTesting}
-                    testResult={aiTestResult}
-                    onFormChange={setAiForm}
-                    onSave={() => void saveAiSettings()}
-                    onTest={() => void testAiSettings()}
-                  />
+                  <details>
+                    <summary className="product-surface flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                      <div>
+                        <p className="text-base font-semibold text-slate-950">AI 实验功能</p>
+                        <p className="mt-1 text-sm text-slate-600">校园建模、文本分析规则和 LLM 配置。</p>
+                      </div>
+                      <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
+                    </summary>
+                    <div className="mt-3">
+                      <AdminAiSettingsPanel
+                        overview={aiOverview}
+                        form={aiForm}
+                        busy={busy}
+                        testing={aiTesting}
+                        testResult={aiTestResult}
+                        onFormChange={setAiForm}
+                        onSave={() => void saveAiSettings()}
+                        onTest={() => void testAiSettings()}
+                      />
+                    </div>
+                  </details>
                 ) : (
                   <Card className="rounded-md border-slate-200 bg-white shadow-none">
                     <CardContent className="p-4">
@@ -1004,17 +1015,28 @@ export function AdminPage({
                     </CardContent>
                   </Card>
                 )}
-                <OAuthPanel
-                  settings={oauthSettings}
-                  clients={oauthClients}
-                  busy={busy}
-                  loading={adminLoading}
-                  onSaveSettings={saveOAuthSettings}
-                  onCreateClient={(clientForm) => createOAuthClient(clientForm)}
-                  onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
-                  onRotateSecret={(id) => rotateOAuthClientSecret(id)}
-                  onDeleteClient={(id) => deleteOAuthClient(id)}
-                />
+                <details>
+                  <summary className="product-surface flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                    <div>
+                      <p className="text-base font-semibold text-slate-950">OAuth 服务</p>
+                      <p className="mt-1 text-sm text-slate-600">第三方应用授权、令牌有效期和应用密钥。</p>
+                    </div>
+                    <Badge className="rounded-full bg-slate-100 text-slate-600 shadow-none">按需展开</Badge>
+                  </summary>
+                  <div className="mt-3">
+                    <OAuthPanel
+                      settings={oauthSettings}
+                      clients={oauthClients}
+                      busy={busy}
+                      loading={adminLoading}
+                      onSaveSettings={saveOAuthSettings}
+                      onCreateClient={(clientForm) => createOAuthClient(clientForm)}
+                      onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
+                      onRotateSecret={(id) => rotateOAuthClientSecret(id)}
+                      onDeleteClient={(id) => deleteOAuthClient(id)}
+                    />
+                  </div>
+                </details>
               </div>
             </TabsContent>
 
@@ -1081,8 +1103,8 @@ export function AdminPage({
       <Dialog open={cookieView.open} onOpenChange={(open) => setCookieView((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(720px,calc(100vw-32px))]">
           <DialogHeader>
-            <DialogTitle>QZone cookies</DialogTitle>
-            <DialogDescription>{cookieView.botName || "读取当前发布目标的 QZone 登录态"}</DialogDescription>
+            <DialogTitle>空间登录态</DialogTitle>
+            <DialogDescription>{cookieView.botName || "读取当前发布目标的空间登录态"}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto px-5 pb-5">
             {cookieView.loading ? (
@@ -1090,14 +1112,14 @@ export function AdminPage({
             ) : (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(cookieView.status || "unchecked")}`}>cookies {sessionStatusLabel(cookieView.status || "unchecked")}</Badge>
+                  <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(cookieView.status || "unchecked")}`}>登录态 {sessionStatusLabel(cookieView.status || "unchecked")}</Badge>
                   <span className="text-xs font-bold text-slate-500">最近检测：{cookieView.checkedAt ? formatDateTime(cookieView.checkedAt) : "未检测"}</span>
                 </div>
                 <Textarea readOnly value={cookieView.cookieHeader} className="mt-3 min-h-28 resize-none bg-slate-50 font-mono text-xs" />
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button size="sm" onClick={() => void copyCookieHeader()} disabled={!cookieView.cookieHeader}>
                     <CopyIcon data-icon="inline-start" />
-                    复制 cookies
+                    复制登录态
                   </Button>
                 </div>
                 <div className="mt-3 rounded-md border border-slate-200">
@@ -1532,14 +1554,14 @@ function MetadataPanel({
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
-        <PanelTitle icon={MegaphoneIcon} title="系统设置" description="校园墙名称、公告、投稿规则和服务入口" color="product-accent-green" />
+        <PanelTitle icon={MegaphoneIcon} title="墙面设置" description="校园墙名称、公告、Logo、投稿规则和服务入口" color="product-accent-green" />
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="grid gap-1 text-sm font-medium">
             校园墙名称
             <Input value={form.tenantName} onChange={(event) => onFormChange({ ...form, tenantName: event.target.value })} />
           </label>
           <label className="grid gap-1 text-sm font-medium">
-            slug
+            访问标识
             <Input value={form.slug} onChange={(event) => onFormChange({ ...form, slug: event.target.value })} />
           </label>
           <label className="grid gap-1 text-sm font-medium">
@@ -1609,7 +1631,7 @@ function MetadataPanel({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-slate-900">图片压缩</p>
-                <p className="text-xs text-slate-500">投稿时服务端用 sharp 压缩，关闭后按原图存储。</p>
+                <p className="text-xs text-slate-500">投稿图片会自动压缩，关闭后按原图存储。</p>
               </div>
               <Switch
                 checked={form.imageCompressionEnabled}
@@ -1649,14 +1671,18 @@ function MetadataPanel({
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
           </label>
-          <label className="grid gap-1 text-sm font-medium md:col-span-2">
-            服务入口 JSON
-            <Textarea className="min-h-36 font-mono text-xs" value={form.servicesText} onChange={(event) => onFormChange({ ...form, servicesText: event.target.value })} />
-          </label>
+          <details className="rounded-md border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-700">高级：服务入口配置</summary>
+            <label className="mt-3 grid gap-1 text-sm font-medium">
+              服务入口 JSON
+              <Textarea className="min-h-36 font-mono text-xs" value={form.servicesText} onChange={(event) => onFormChange({ ...form, servicesText: event.target.value })} />
+              <span className="text-xs font-normal text-slate-500">用于批量配置服务页入口；普通账户设置入口会自动保留。</span>
+            </label>
+          </details>
         </div>
         <Button className="mt-4 px-5 font-medium" disabled={busy || logoUploading} onClick={onSave}>
           <SaveIcon data-icon="inline-start" />
-          保存系统设置
+          保存墙面设置
         </Button>
       </CardContent>
     </Card>
@@ -1714,19 +1740,19 @@ function AdminAiSettingsPanel({
               </Select>
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Provider
+              服务商
               <Input value={form.provider} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, provider: event.target.value })} />
             </label>
             <label className="grid gap-1 text-sm font-medium md:col-span-2">
-              Base URL
+              接口地址
               <Input value={form.baseUrl} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, baseUrl: event.target.value })} />
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Model
+              模型
               <Input value={form.model} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, model: event.target.value })} />
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              API Key
+              API 密钥
               <Input
                 type="password"
                 value={form.apiKey}
@@ -1736,11 +1762,11 @@ function AdminAiSettingsPanel({
               />
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Temperature
+              随机度
               <Input type="number" step="0.1" min={0} max={1} value={form.temperature} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, temperature: Number(event.target.value) })} />
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Timeout
+              超时秒数
               <Input type="number" min={5} max={120} value={form.timeoutSeconds} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, timeoutSeconds: Number(event.target.value) })} />
             </label>
           </div>
@@ -1775,7 +1801,7 @@ function AdminAiSettingsPanel({
             {overview.settings.apiKeyConfigured ? (
               <Button type="button" variant="outline" disabled={busy || testing} onClick={() => onFormChange({ ...form, apiKey: "", clearApiKey: true })}>
                 <KeyRoundIcon data-icon="inline-start" />
-                清除 Key
+                清除密钥
               </Button>
             ) : null}
             <Button type="button" variant="outline" disabled={busy || testing} onClick={onTest}>
@@ -2263,20 +2289,29 @@ function BotSetupGuide() {
   ];
 
   return (
-    <div className="mt-4 grid gap-2 md:grid-cols-3">
-      {steps.map((step) => {
-        const Icon = step.icon;
-        return (
-          <div key={step.title} className="rounded-md border border-violet-100 bg-violet-50/45 p-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-950">
-              <Icon className="size-4 text-violet-600" />
-              {step.title}
+    <details className="mt-4 rounded-md border border-violet-100 bg-violet-50/35">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+        <div>
+          <p className="text-sm font-bold text-slate-950">机器人接入步骤</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">首次接入时展开查看。</p>
+        </div>
+        <Badge className="rounded-full bg-white text-violet-700 ring-1 ring-violet-200 shadow-none">帮助</Badge>
+      </summary>
+      <div className="grid gap-2 border-t border-violet-100 p-3 md:grid-cols-3">
+        {steps.map((step) => {
+          const Icon = step.icon;
+          return (
+            <div key={step.title} className="rounded-md bg-white p-3 ring-1 ring-violet-100">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-950">
+                <Icon className="size-4 text-violet-600" />
+                {step.title}
+              </div>
+              <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{step.detail}</p>
             </div>
-            <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{step.detail}</p>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
@@ -2599,8 +2634,8 @@ function PublishPanel({
           <Select value={form.qzoneRefreshMode} onValueChange={(qzoneRefreshMode) => onFormChange({ ...form, qzoneRefreshMode: qzoneRefreshMode as "protocol" | "qr" })}>
             <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="protocol">协议自动获取 cookies</SelectItem>
-              <SelectItem value="qr">扫码登录刷新 cookies</SelectItem>
+              <SelectItem value="protocol">协议自动获取登录态</SelectItem>
+              <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
             </SelectContent>
           </Select>
           <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 md:col-span-3">
@@ -2620,8 +2655,8 @@ function PublishPanel({
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold">{target.displayName}</p>
                       <Badge className={`rounded-full shadow-none ${target.required ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200" : "bg-slate-100 text-slate-600"}`}>{target.required ? "必需" : "可选"}</Badge>
-                      <Badge className={`rounded-full shadow-none ${target.botAccount.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>{target.botAccount.enabled ? "Bot 启用" : "Bot 停用"}</Badge>
-                      <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(target.botAccount.qzoneSession?.status ?? "unchecked")}`}>cookies {sessionStatusLabel(target.botAccount.qzoneSession?.status ?? "unchecked")}</Badge>
+                      <Badge className={`rounded-full shadow-none ${target.botAccount.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>{target.botAccount.enabled ? "机器人启用" : "机器人停用"}</Badge>
+                      <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(target.botAccount.qzoneSession?.status ?? "unchecked")}`}>登录态 {sessionStatusLabel(target.botAccount.qzoneSession?.status ?? "unchecked")}</Badge>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
                       {target.botAccount.displayName} · QQ {target.botAccount.qqUin}
@@ -2636,9 +2671,9 @@ function PublishPanel({
                   <div className="grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-4">
                     <InfoPill label="刷新模式" value={target.qzoneRefreshMode === "qr" ? "扫码登录" : "协议获取"} />
                     <InfoPill label="风控间隔" value={`${target.publishDelaySeconds}s`} />
-                    <InfoPill label="最近刷新" value={target.botAccount.qzoneSession?.refreshedAt ? formatDateTime(target.botAccount.qzoneSession.refreshedAt) : "还没有 cookies"} />
+                    <InfoPill label="最近刷新" value={target.botAccount.qzoneSession?.refreshedAt ? formatDateTime(target.botAccount.qzoneSession.refreshedAt) : "还没有登录态"} />
                     <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
-                    <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测 QZone cookies 可用性"}</p>
+                    <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测空间登录态可用性"}</p>
                   </div>
                   <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -2652,13 +2687,13 @@ function PublishPanel({
                       切换登录模式
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => onCheckQZone(target.botAccount.id)}>
-                      检测 cookies
+                      检测登录态
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => onRefreshQZone(target.botAccount.id, target.qzoneRefreshMode)}>
                       重新登录
                     </Button>
                     <Button variant="outline" size="sm" disabled={!target.botAccount.qzoneSession} onClick={() => onViewCookies(target.botAccount.id)}>
-                      查看 cookies
+                      查看登录态
                     </Button>
                   </div>
                   <BotPublishTemplateEditor
@@ -2766,15 +2801,15 @@ function PublishSetupGuide({ hasBots, hasTargets }: { hasBots: boolean; hasTarge
   ];
 
   return (
-    <div className="mt-4 rounded-md border border-rose-100 bg-rose-50/35 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
+    <details className="mt-4 rounded-md border border-rose-100 bg-rose-50/35">
+      <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
           <p className="text-sm font-bold text-slate-950">从审核到发空间的配置顺序</p>
-          <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">新校园墙只要完成这几步，就能从网页审核或审核群命令进入自动发布队列。</p>
+          <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-500">首次配置发布目标时展开查看。</p>
         </div>
-        <Badge className="rounded-full bg-white text-rose-700 ring-1 ring-rose-200 shadow-none">建议逐项确认</Badge>
-      </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-4">
+        <Badge className="rounded-full bg-white text-rose-700 ring-1 ring-rose-200 shadow-none">帮助</Badge>
+      </summary>
+      <div className="grid gap-2 border-t border-rose-100 p-3 md:grid-cols-4">
         {steps.map((step) => {
           const Icon = step.icon;
           return (
@@ -2788,7 +2823,7 @@ function PublishSetupGuide({ hasBots, hasTargets }: { hasBots: boolean; hasTarge
           );
         })}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -2858,8 +2893,8 @@ function PublishTargetConfigEditor({
         <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
           <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="protocol">协议自动获取 cookies</SelectItem>
-            <SelectItem value="qr">扫码登录刷新 cookies</SelectItem>
+            <SelectItem value="protocol">协议自动获取登录态</SelectItem>
+            <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -3236,9 +3271,9 @@ function formatBotEventAction(action: string) {
     "bot.password.reset": "Bot 重置密码",
     "bot.review.approve": "群内通过",
     "bot.review.reject": "群内拒绝",
-    "bot.qzone.cookies.refresh": "刷新 QZone cookies",
-    "bot.qzone.cookies.auto_refresh": "自动刷新 QZone cookies",
-    "bot.qzone.cookies.auto_refresh_failed": "自动刷新 QZone cookies 失败",
+    "bot.qzone.cookies.refresh": "刷新空间登录态",
+    "bot.qzone.cookies.auto_refresh": "自动刷新空间登录态",
+    "bot.qzone.cookies.auto_refresh_failed": "自动刷新空间登录态失败",
     "publish_target.create": "创建发布目标",
     "publish_target.update": "更新发布目标",
     "publish_attempt.retry": "重试发布",

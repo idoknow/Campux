@@ -75,10 +75,17 @@ export function PostPage({
       ) : null}
 
       <section className="product-surface p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-950">写一条投稿</h2>
+            <p className="mt-1 text-sm leading-5 text-slate-500">审核通过后会发布到校园墙，匿名开关只影响对外展示。</p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{postText.length}/1000</span>
+        </div>
         <Textarea
           value={postText}
           maxLength={1000}
-          placeholder="有什么新鲜事？！"
+          placeholder="写下想投稿的内容，地点、时间、联系方式等信息尽量写清楚。"
           className="min-h-36 w-full resize-none rounded-none border-0 bg-white px-0 py-1 text-base leading-7 text-slate-900 shadow-none placeholder:text-slate-400 focus-visible:ring-0"
           onChange={(event) => onPostTextChange(event.target.value)}
           onPaste={pasteImages}
@@ -119,12 +126,15 @@ export function PostPage({
           ) : null}
           <input ref={inputRef} hidden multiple accept="image/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
-        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 张图片，单张 ≤ 10MB。点击投稿后开始上传。</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 张图片，单张 ≤ 10MB。可直接粘贴截图，提交时会一起上传。</p>
 
-        <div className="mt-3 w-fit rounded-md border px-3 py-2 text-sm product-accent-green">
-          <div className="flex items-center gap-3">
-            <span>匿名投稿</span>
-            <Switch checked={anonymous} onCheckedChange={onAnonymousChange} disabled={busy} aria-label="匿名投稿" />
+        <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-green">
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              <span className="block font-semibold">匿名展示</span>
+              <span className="block text-xs font-normal opacity-80">审核员仍可查看必要的投稿记录。</span>
+            </span>
+            <Switch checked={anonymous} onCheckedChange={onAnonymousChange} disabled={busy} aria-label="匿名展示" />
           </div>
         </div>
 
@@ -134,10 +144,10 @@ export function PostPage({
           <button className="campux-postbtn" disabled={busy || hasUploading || postText.trim().length === 0} onClick={onSubmit}>
             <span>
               <SendIcon className="mr-1 inline size-4" />
-              {busy ? "上传中" : "投稿"}
+              {busy ? "提交中" : "提交投稿"}
             </span>
           </button>
-          <span className="text-xs text-slate-500">{postText.length}/1000</span>
+          <span className="text-xs text-slate-500">{hasUploading ? "图片上传中，请稍候" : "提交后进入审核"}</span>
         </div>
       </section>
 
@@ -151,7 +161,7 @@ export function PostPage({
             </p>
           </div>
           <Badge variant="secondary" className="rounded-md shadow-none">
-            无阻塞
+            可投稿
           </Badge>
         </div>
       </section>
