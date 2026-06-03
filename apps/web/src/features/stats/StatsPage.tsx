@@ -15,7 +15,8 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import { readQueryInt, writeQueryParams } from "@/lib/url-query";
+import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
+import { hasAnyQueryParam, readQueryInt, writeQueryParams } from "@/lib/url-query";
 import type { TenantRole, TenantStats } from "@/types/app";
 import { EmptyCard, LoadingBlock } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -45,11 +46,33 @@ const auditActionLabels: Record<string, string> = {
 };
 
 const timeRanges = [7, 14, 30, 90] as const;
+type StatsListPreferences = {
+  rangeDays: (typeof timeRanges)[number];
+};
+
+function statsPreferencesKey(tenantId: string) {
+  return `tenant.${tenantId}.stats`;
+}
+
+function isStatsListPreferences(value: unknown): value is StatsListPreferences {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<StatsListPreferences>;
+  return timeRanges.some((days) => days === candidate.rangeDays);
+}
+
+function readStatsListPreferences(tenantId: string): StatsListPreferences {
+  if (hasAnyQueryParam(["days"])) {
+    return {
+      rangeDays: readQueryInt("days", 14, { allowed: timeRanges }) as (typeof timeRanges)[number],
+    };
+  }
+  return readListPreferences(statsPreferencesKey(tenantId), { rangeDays: 14 }, isStatsListPreferences);
+}
 
 export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: { tenantId: string; loading: boolean; currentRole: TenantRole; onOpenUserDetail: (userId: string) => void }) {
   const [stats, setStats] = useState<TenantStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
-  const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(() => readQueryInt("days", 14, { allowed: timeRanges }) as (typeof timeRanges)[number]);
+  const [rangeDays, setRangeDays] = useState<(typeof timeRanges)[number]>(() => readStatsListPreferences(tenantId).rangeDays);
 
   async function refreshStats(days = rangeDays) {
     setStatsLoading(true);
@@ -67,6 +90,10 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
     setStats(null);
     void refreshStats(rangeDays);
   }, [rangeDays, tenantId]);
+
+  useEffect(() => {
+    setRangeDays(readStatsListPreferences(tenantId).rangeDays);
+  }, [tenantId]);
 
   const maxHourly = useMemo(() => Math.max(1, ...(stats?.posts.hourly.map((hour) => hour.total) ?? [1])), [stats]);
   const currentRangeLabel = stats ? `近 ${stats.range.days} 天` : `近 ${rangeDays} 天`;
@@ -105,6 +132,7 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                     type="button"
                     onClick={() => {
                       setRangeDays(days);
+                      writeListPreferences(statsPreferencesKey(tenantId), { rangeDays: days });
                       writeQueryParams({ days: days === 14 ? null : days });
                     }}
                   >
