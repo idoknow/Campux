@@ -2151,7 +2151,7 @@ function BotsPanel({
             <Badge variant="outline">{bots.length === 0 ? "需要添加" : "展开"}</Badge>
           </summary>
           <div className="grid gap-3 border-t border-slate-200 p-3">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+            <div className="grid gap-3">
               <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
                 墙号 QQ
                 <Input className="bg-white" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })} />
@@ -2179,7 +2179,7 @@ function BotsPanel({
           </div>
         </details>
 
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="mt-3 grid gap-3">
           {bots.length === 0 ? (
             <p className="text-sm font-bold text-slate-500">还没有绑定机器人。</p>
           ) : (
@@ -2208,7 +2208,7 @@ function BotsPanel({
                   </div>
                 </div>
 
-                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                <div className="mt-3 grid gap-2 text-sm">
                   <BotMetric icon={bot.connection.online ? WifiIcon : WifiOffIcon} label="连接" value={bot.connection.online ? `${bot.connection.connectionCount} 条` : "未连接"} />
                   <BotMetric label="最近心跳" value={bot.lastSeenAt ? formatDateTime(bot.lastSeenAt) : "暂无"} />
                   <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
@@ -2281,7 +2281,7 @@ function OneBotConnectionBox({ bot }: { bot: AdminBotAccount }) {
         <p className="mt-2 text-xs font-semibold text-slate-500">
           每个机器人都有独立 token，协议端用这个地址连接后会自动归属到当前校园墙。
         </p>
-        <div className="mt-2 grid gap-1.5 text-xs font-semibold text-slate-500 sm:grid-cols-3">
+        <div className="mt-2 grid gap-1.5 text-xs font-semibold text-slate-500">
           <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">NapCat：添加反向 WebSocket 客户端。</p>
           <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">地址：粘贴上方完整 URL。</p>
           <p className="rounded-md bg-white px-2 py-1.5 ring-1 ring-slate-200">QQ：协议端登录 QQ 必须是 {bot.qqUin}。</p>
@@ -2319,7 +2319,7 @@ function BotSetupGuide() {
         </div>
         <Badge className="rounded-full bg-white text-violet-700 ring-1 ring-violet-200 shadow-none">帮助</Badge>
       </summary>
-      <div className="grid gap-2 border-t border-violet-100 p-3 md:grid-cols-3">
+      <div className="grid gap-2 border-t border-violet-100 p-3">
         {steps.map((step) => {
           const Icon = step.icon;
           return (
@@ -2401,7 +2401,7 @@ function BotConfigEditor({
           <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
         </summary>
         <div className="grid gap-3 border-t border-slate-200 p-3">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3">
             <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
               墙号 QQ
               <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
@@ -2416,7 +2416,7 @@ function BotConfigEditor({
               <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
             </label>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2">
             <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
               <span>
                 启用机器人
@@ -2448,8 +2448,8 @@ function BotConfigEditor({
           </div>
           <Badge variant="outline">低频</Badge>
         </summary>
-        <div className="grid gap-3 border-t border-slate-200 p-3 lg:grid-cols-[minmax(0,1fr)_180px]">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 border-t border-slate-200 p-3">
+          <div className="grid gap-3">
             <label className="text-xs font-semibold text-slate-500">
               私聊非命令自动回复
               <Textarea
