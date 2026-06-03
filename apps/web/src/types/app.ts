@@ -598,6 +598,9 @@ export type TenantStats = {
     activeBans: number;
     totalBans: number;
   };
+  qzoneVisitors: {
+    daily: Array<{ date: string; todayCount: number; totalCount: number }>;
+  };
   bots: Array<{
     id: string;
     qqUin: string;

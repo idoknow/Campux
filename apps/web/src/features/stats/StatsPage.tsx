@@ -125,8 +125,8 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
           </section>
 
           <section className="product-surface min-w-0 p-4">
-            <SectionTitle icon={BarChart3Icon} title="稿件与用户走势" />
-            <div className="mt-3 grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <SectionTitle icon={BarChart3Icon} title="稿件、用户与访客走势" />
+            <div className="mt-3 grid min-w-0 gap-3 xl:grid-cols-3">
               <LineChartPanel
                 title={`${currentRangeLabel}稿件数量`}
                 description={`${currentRangeLabel}每日新增稿件、已通过稿件与通过率`}
@@ -144,6 +144,15 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                 series={[
                   { label: "累计用户", color: "#7c3aed", values: stats.posts.userDaily.map((day) => ({ label: formatDay(day.date), value: day.totalMembers })) },
                   { label: "新增用户", color: "#f59e0b", values: stats.posts.userDaily.map((day) => ({ label: formatDay(day.date), value: day.newMembers })) },
+                ]}
+              />
+              <LineChartPanel
+                title={`${currentRangeLabel}QZone 访客`}
+                description={`${currentRangeLabel}每日访客与累计总访客（来自 cookies 检测接口）`}
+                height={240}
+                series={[
+                  { label: "每日访客", color: "#0ea5e9", values: stats.qzoneVisitors.daily.map((day) => ({ label: formatDay(day.date), value: day.todayCount })) },
+                  { label: "累计访客", color: "#ef4444", values: stats.qzoneVisitors.daily.map((day) => ({ label: formatDay(day.date), value: day.totalCount })) },
                 ]}
               />
             </div>
