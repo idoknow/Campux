@@ -600,6 +600,15 @@ export type TenantStats = {
   };
   qzoneVisitors: {
     daily: Array<{ date: string; todayCount: number; totalCount: number }>;
+    targets: Array<{
+      id: string;
+      displayName: string;
+      bot: {
+        displayName: string;
+        qqUin: string;
+      };
+      daily: Array<{ date: string; todayCount: number; totalCount: number }>;
+    }>;
   };
   bots: Array<{
     id: string;

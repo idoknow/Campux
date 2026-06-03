@@ -70,6 +70,19 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
 
   const maxHourly = useMemo(() => Math.max(1, ...(stats?.posts.hourly.map((hour) => hour.total) ?? [1])), [stats]);
   const currentRangeLabel = stats ? `近 ${stats.range.days} 天` : `近 ${rangeDays} 天`;
+  const qzoneVisitorCharts = useMemo(() => {
+    if (!stats) return [];
+    return stats.qzoneVisitors.targets.length > 0
+      ? stats.qzoneVisitors.targets
+      : [
+          {
+            id: "tenant-aggregate",
+            displayName: "QZone 访客",
+            bot: null,
+            daily: stats.qzoneVisitors.daily,
+          },
+        ];
+  }, [stats]);
 
   return (
     <div className="h-full min-w-0 overflow-x-hidden overflow-y-auto px-4 py-4 pb-24 md:pb-6">
@@ -146,15 +159,22 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                   { label: "新增用户", color: "#f59e0b", values: stats.posts.userDaily.map((day) => ({ label: formatDay(day.date), value: day.newMembers })) },
                 ]}
               />
-              <LineChartPanel
-                title={`${currentRangeLabel}QZone 访客`}
-                description={`${currentRangeLabel}每日访客与累计总访客（来自 cookies 检测接口）`}
-                height={240}
-                series={[
-                  { label: "每日访客", color: "#0ea5e9", values: stats.qzoneVisitors.daily.map((day) => ({ label: formatDay(day.date), value: day.todayCount })) },
-                  { label: "累计访客", color: "#ef4444", values: stats.qzoneVisitors.daily.map((day) => ({ label: formatDay(day.date), value: day.totalCount })) },
-                ]}
-              />
+              {qzoneVisitorCharts.map((chart) => (
+                <LineChartPanel
+                  key={chart.id}
+                  title={`${currentRangeLabel}${chart.displayName}`}
+                  description={
+                    chart.bot
+                      ? `${currentRangeLabel}每日访客与累计总访客（${chart.bot.displayName} / QQ ${chart.bot.qqUin}）`
+                      : `${currentRangeLabel}每日访客与累计总访客（来自 cookies 检测接口）`
+                  }
+                  height={240}
+                  series={[
+                    { label: "每日访客", color: "#0ea5e9", values: chart.daily.map((day) => ({ label: formatDay(day.date), value: day.todayCount })) },
+                    { label: "累计访客", color: "#ef4444", values: chart.daily.map((day) => ({ label: formatDay(day.date), value: day.totalCount })) },
+                  ]}
+                />
+              ))}
             </div>
           </section>
 

@@ -6,7 +6,16 @@ export type QZoneVisitorCounts = {
 };
 
 export type QZoneVisitorSnapshotInput = QZoneVisitorCounts & {
+  botAccountId?: string;
   date: Date;
+};
+
+export type QZoneVisitorTargetInput = {
+  id: string;
+  displayName: string;
+  botAccountId: string;
+  botDisplayName: string;
+  botQqUin: string;
 };
 
 export function parseQZoneVisitorCounts(data: unknown): QZoneVisitorCounts | null {
@@ -23,17 +32,7 @@ export function parseQZoneVisitorCounts(data: unknown): QZoneVisitorCounts | nul
 }
 
 export function buildQZoneVisitorDailySeries(snapshots: QZoneVisitorSnapshotInput[], start: Date, end: Date) {
-  const startDay = startOfDay(start);
-  const endDay = startOfDay(end);
-  const days = [];
-  for (let time = startDay.getTime(); time <= endDay.getTime(); time += dayMs) {
-    days.push({
-      date: formatDayKey(new Date(time)),
-      todayCount: 0,
-      totalCount: 0,
-    });
-  }
-
+  const days = buildEmptyQZoneVisitorDailySeries(start, end);
   const byDate = new Map(days.map((day) => [day.date, day]));
   for (const snapshot of snapshots) {
     const day = byDate.get(formatDayKey(snapshot.date));
@@ -44,8 +43,38 @@ export function buildQZoneVisitorDailySeries(snapshots: QZoneVisitorSnapshotInpu
   return days;
 }
 
+export function buildQZoneVisitorTargetSeries(snapshots: QZoneVisitorSnapshotInput[], targets: QZoneVisitorTargetInput[], start: Date, end: Date) {
+  return targets.map((target) => ({
+    id: target.id,
+    displayName: target.displayName,
+    bot: {
+      displayName: target.botDisplayName,
+      qqUin: target.botQqUin,
+    },
+    daily: buildQZoneVisitorDailySeries(
+      snapshots.filter((snapshot) => snapshot.botAccountId === target.botAccountId),
+      start,
+      end,
+    ),
+  }));
+}
+
 export function qzoneVisitorSnapshotDate(date: Date) {
   return startOfDay(date);
+}
+
+function buildEmptyQZoneVisitorDailySeries(start: Date, end: Date) {
+  const startDay = startOfDay(start);
+  const endDay = startOfDay(end);
+  const days = [];
+  for (let time = startDay.getTime(); time <= endDay.getTime(); time += dayMs) {
+    days.push({
+      date: formatDayKey(new Date(time)),
+      todayCount: 0,
+      totalCount: 0,
+    });
+  }
+  return days;
 }
 
 function toFiniteCount(value: unknown) {
