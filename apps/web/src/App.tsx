@@ -68,7 +68,7 @@ const postsTabTitles: Record<PostsTab, string> = {
 const adminTabTitles: Record<AdminTab, string> = {
   users: "用户管理",
   bans: "封禁管理",
-  metadata: "系统设置",
+  metadata: "墙面设置",
   bots: "机器人管理",
   publish: "发布管理",
 };
@@ -245,7 +245,7 @@ export function App() {
         }
       } catch (caught) {
         if (!ignore) {
-          setError(caught instanceof Error ? caught.message : "无法连接到 Campux API");
+          setError(caught instanceof Error ? caught.message : "暂时无法连接服务，请稍后再试");
           setMe({ authenticated: false });
         }
       }

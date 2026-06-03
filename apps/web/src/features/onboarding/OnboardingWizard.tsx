@@ -168,7 +168,7 @@ export function OnboardingWizard({
         const data = await api<{ status: string; message: string | null; cookieNames: string[] }>(`/api/admin/bots/${qrLogin.botId}/qzone-login/${qrLogin.loginId}`);
         setQrLogin((current) => ({ ...current, status: data.status, message: data.message ?? current.message }));
         if (data.status === "succeeded") {
-          toast.success(`扫码登录完成，已获取 QZone cookies（${data.cookieNames.length} 项）。`);
+          toast.success(`扫码登录完成，空间登录态已获取（${data.cookieNames.length} 项）。`);
           setQrLogin((current) => ({ ...current, open: false }));
           await refreshBots();
         }

@@ -133,16 +133,16 @@ export function LoginScreen({
         </div>
 
         <form className="product-surface px-4 py-5" onSubmit={handleSubmit}>
-          <p className="text-lg font-semibold text-slate-950">登录到 Campux</p>
+          <p className="text-lg font-semibold text-slate-950">登录到 {title}</p>
           <p className="mt-2 text-sm leading-6 text-slate-600">输入 QQ 号或邮箱，以及你的账号密码。</p>
           <div className="mt-5 grid gap-3">
             <Input value={account} name="username" autoComplete="username" placeholder="QQ 号 / 邮箱" onChange={(event) => handleAccountChange(event.target.value)} />
             <Input value={password} name="password" autoComplete="current-password" type="password" placeholder="密码" onChange={(event) => handlePasswordChange(event.target.value)} />
           </div>
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
             <Switch id="remember-credentials" checked={remember} onCheckedChange={handleRememberChange} size="sm" />
-            <label htmlFor="remember-credentials" className="cursor-pointer select-none text-sm text-slate-700">记住账号和密码</label>
-            <span className="text-xs text-slate-400">仅保存在当前浏览器。</span>
+            <label htmlFor="remember-credentials" className="cursor-pointer select-none text-sm text-slate-700">在此浏览器记住登录信息</label>
+            <span className="basis-full pl-9 text-xs text-slate-400 sm:basis-auto sm:pl-0">仅保存在当前浏览器。</span>
           </div>
           {displayError ? <p className="mt-3 text-sm font-medium text-red-600">{displayError}</p> : null}
           <Button className="mt-5 w-full font-medium" disabled={busy} type="submit">
@@ -151,7 +151,7 @@ export function LoginScreen({
           {allowTestAccounts ? (
             <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
               <summary className="cursor-pointer font-medium text-slate-600">开发测试账号</summary>
-              <p className="mt-2">密码均为 `campux123`。</p>
+              <p className="mt-2">密码均为 <code className="rounded bg-white px-1 py-0.5 font-mono text-slate-700">campux123</code>。</p>
               <p>10000 用户，20000 审核员，30000 多墙管理员，40000 系统运维，50000 运营管理员。</p>
             </details>
           ) : null}
@@ -170,11 +170,9 @@ export function LoginScreen({
                 {registerOpen ? "收起注册" : "注册"}
               </button>
             </div>
-            <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-600">
-              <p className="rounded-md bg-slate-50 px-3 py-2">运营者：邮箱验证码注册，进入运营面板创建校园墙。</p>
-              <p className="rounded-md bg-slate-50 px-3 py-2">校园墙成员：登录后只进入自己被授权的校园墙。</p>
-              <p className="rounded-md bg-slate-50 px-3 py-2">系统运维：继续使用已有运维账号进入全局运维面板。</p>
-            </div>
+            <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold leading-5 text-slate-600">
+              运营者可用邮箱验证码注册并创建校园墙；普通用户请通过对应校园墙机器人完成注册。
+            </p>
             {registerOpen ? <RegisterPanel logoUrl={logoUrl} selectedTenantName={registerTenantName} onRegistered={onRegistered} /> : null}
           </div>
         ) : null}

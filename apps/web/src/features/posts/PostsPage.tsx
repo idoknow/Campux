@@ -278,7 +278,7 @@ export function PostsPage({
       await api(`/api/posts/${id}/cancel`, {
         method: "POST",
       });
-      toast.success("已取消稿件，并通知审核群。");
+      toast.success("稿件已取消。");
       await refreshAll();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "取消失败");
@@ -412,7 +412,7 @@ export function PostsPage({
     if (!rejectDialog.postId) {
       return;
     }
-    await reviewPost(rejectDialog.postId, "reject", "无理由");
+    await reviewPost(rejectDialog.postId, "reject", "未填写具体理由");
     setRejectDialog({ open: false, postId: "", displayId: null, reason: "" });
   }
 
@@ -518,7 +518,7 @@ export function PostsPage({
             </TabsTrigger>
             {canReview ? (
               <TabsTrigger value="review" className={postTabsTriggerClassName}>
-                审核
+                审核稿件
               </TabsTrigger>
             ) : null}
           </TabsList>
@@ -558,7 +558,7 @@ export function PostsPage({
                 <span className="flex min-w-0 items-center gap-2">
                   <SlidersHorizontalIcon className="size-4 shrink-0 text-slate-500" />
                   <span className="shrink-0">{reviewStatusLabel}</span>
-                  <span className="min-w-0 truncate text-xs font-medium text-slate-500">{reviewKeyword.trim() ? reviewKeyword.trim() : "全部内容"}</span>
+                  <span className="min-w-0 truncate text-xs font-medium text-slate-500">{reviewKeyword.trim() ? reviewKeyword.trim() : "全部稿件"}</span>
                 </span>
                 <SearchIcon className="size-4 shrink-0 text-slate-400" />
               </button>
@@ -594,17 +594,17 @@ export function PostsPage({
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-                  <PendingRecallQueue
-                    posts={pendingRecallPosts}
-                    loading={pendingRecallLoading}
-                    busyPostId={busyPostId}
+              <PendingRecallQueue
+                posts={pendingRecallPosts}
+                loading={pendingRecallLoading}
+                busyPostId={busyPostId}
                 onPreview={(post) => void openRenderPreview(post)}
-                    onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
-                    onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
-                    onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
-                    onRecallIgnore={(post) => void ignoreRecallPost(post)}
-                    onDetail={(post) => openPostDetail(post.id)}
-                  />
+                onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+                onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
+                onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
+                onRecallIgnore={(post) => void ignoreRecallPost(post)}
+                onDetail={(post) => openPostDetail(post.id)}
+              />
               {reviewLoading ? (
                 <LoadingBlock title="正在加载审核稿件..." />
               ) : (
@@ -782,7 +782,7 @@ export function PostsPage({
                 取消
               </Button>
               <Button variant="outline" disabled={busyPostId === rejectDialog.postId} onClick={() => void rejectWithoutReason()}>
-                无理由拒绝
+                不填写理由
               </Button>
               <Button disabled={busyPostId === rejectDialog.postId || rejectDialog.reason.trim().length === 0} onClick={() => void submitReject()}>
                 确认拒绝
@@ -815,15 +815,15 @@ export function PostsPage({
             </DialogTitle>
             <DialogDescription>
               {recallConfirm.open && recallConfirm.mode === "approve"
-                ? `确认同意撤回稿件 #${recallConfirm.post.displayId} 吗？系统会逐个把已发表到 QQ 空间的说说设置为仅自己可见。`
+                ? `确认同意撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被设置为仅自己可见。`
                 : recallConfirm.open && recallConfirm.mode === "reject"
                   ? `确认拒绝稿件 #${recallConfirm.post.displayId} 的撤回申请吗？拒绝后稿件状态会恢复为已发表。`
                 : recallConfirm.open && recallConfirm.mode === "admin"
-                  ? `确认直接撤回稿件 #${recallConfirm.post.displayId} 吗？系统会逐个把已发表到 QQ 空间的说说设置为仅自己可见。无需作者申请。`
+                  ? `确认直接撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被设置为仅自己可见，无需作者申请。`
                 : recallConfirm.open && recallConfirm.mode === "admin-silent"
-                  ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？QQ 空间的说说会设置为仅自己可见，但不会私聊通知作者；审核群仍会收到记录。`
+                  ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被隐藏，但不会私聊通知作者；审核群仍会收到记录。`
                 : recallConfirm.open
-                  ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布到 QQ 空间的说说会被设置为仅自己可见。`
+                  ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
                   : ""}
             </DialogDescription>
           </DialogHeader>
@@ -1163,7 +1163,7 @@ function ReviewCard({
             <span>{formatPostDate(post.createdAt)}</span>
           </div>
           {canReviewPost ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
                 <CheckIcon data-icon="inline-start" />
                 通过
@@ -1227,7 +1227,7 @@ function PostList({
   onRecall: (post: PostItem) => void;
 }) {
   if (posts.length === 0) {
-    return <EmptyCard title="还没有稿件，先去投一条吧" />;
+    return <EmptyCard title="还没有稿件，可以先去投稿页写一条" />;
   }
 
   return (
@@ -1306,7 +1306,7 @@ function PostCard({
           </span>
           <span className="inline-flex items-center gap-1 text-slate-500">
             <SparklesIcon className="size-3.5" />
-            {post.status === "published" ? "已出现在墙上" : "等待下一步"}
+            {post.status === "published" ? "已发布到墙上" : statusLabels[post.status] ?? "处理中"}
           </span>
         </div>
       </CardContent>
@@ -1334,7 +1334,7 @@ function PostMetaHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-2 md:gap-3">
+    <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:gap-3">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
           <InfoPill icon={HashIcon}>{displayId}</InfoPill>
@@ -1343,7 +1343,7 @@ function PostMetaHeader({
         </div>
         {title ? <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-5 text-slate-950 md:mt-2 md:line-clamp-2 md:text-base md:leading-6">{title}</h3> : null}
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 md:gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:justify-end md:gap-2">
         {actions}
         <Badge className={`rounded-full px-2 py-0.5 text-xs font-semibold shadow-none md:px-2.5 md:py-1 ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
       </div>
