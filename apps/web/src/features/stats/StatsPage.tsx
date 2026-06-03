@@ -155,9 +155,9 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
 
           <section className="product-surface min-w-0 p-4">
             <SectionTitle icon={ActivityIcon} title="稿件概览" />
-            <div className="mt-3 grid min-w-0 gap-3">
+            <div className="mt-3 grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <StatusGrid values={stats.posts.byStatus} labels={statusLabels} />
-              <div className="grid gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <SmallFact label="匿名比例" value={formatPercent(stats.overview.anonymousRate)} detail={`${stats.overview.anonymousPosts} 条匿名稿件`} />
                 <SmallFact label="配图比例" value={formatPercent(stats.overview.imageRate)} detail={`${stats.overview.imagesTotal} 张图，均值 ${formatNullable(stats.overview.avgImagesPerPost)}`} />
                 <SmallFact label="封禁状态" value={`${stats.members.activeBans} 生效中`} detail={`历史封禁 ${stats.members.totalBans} 条`} />
@@ -565,7 +565,7 @@ function StatusGrid({ values, labels }: { values: Record<string, number>; labels
     return <EmptyCard title="暂无状态数据" />;
   }
   return (
-    <div className="grid gap-2">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-2">
       {entries.map(([key, value]) => (
         <div key={key} className="rounded-md border border-slate-200 bg-white px-3 py-2 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
           <p className="text-xs font-bold text-slate-500">{labels[key] ?? key}</p>

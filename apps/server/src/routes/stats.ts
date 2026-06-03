@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
 
 const dayMs = 24 * 60 * 60 * 1000;
+const chinaTimezoneOffsetHours = 8;
 const postStatuses = ["pending_approval", "approved", "rejected", "cancelled", "publishing", "partially_failed", "failed", "published", "pending_recall", "recalled"];
 const publishAttemptStatuses = ["queued", "running", "succeeded", "failed", "skipped"];
 
@@ -433,7 +434,8 @@ function buildUserDailySeries(memberships: Array<{ createdAt: Date }>, start: Da
 function buildHourlySeries(posts: Array<{ createdAt: Date }>) {
   const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, total: 0 }));
   for (const post of posts) {
-    const bucket = hours[post.createdAt.getHours()];
+    const chinaHour = (post.createdAt.getUTCHours() + chinaTimezoneOffsetHours) % 24;
+    const bucket = hours[chinaHour];
     if (bucket) {
       bucket.total += 1;
     }

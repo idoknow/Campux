@@ -59,6 +59,7 @@ const botCreateSchema = z.object({
   displayName: z.string().min(1).max(80),
   reviewGroupId: z.string().trim().max(40).optional(),
   reviewNotificationEnabled: z.boolean().default(false),
+  autoFriendRequestApprovalEnabled: z.boolean().default(false),
   enabled: z.boolean().default(true),
   createPublishTarget: z.boolean().default(true),
 });
@@ -76,6 +77,7 @@ const botPatchSchema = z.object({
   enabled: z.boolean().optional(),
   reviewGroupId: z.string().trim().max(40).nullable().optional(),
   reviewNotificationEnabled: z.boolean().optional(),
+  autoFriendRequestApprovalEnabled: z.boolean().optional(),
   userMessageReply: z.string().trim().min(1).max(1000).optional(),
   userMessageReplyCooldownSeconds: z.number().int().min(0).max(86_400).optional(),
   reviewGroupMessageReply: z.string().trim().min(1).max(1000).optional(),
@@ -600,6 +602,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           displayName: body.displayName,
           reviewGroupId: body.reviewGroupId?.trim() || null,
           reviewNotificationEnabled: body.reviewNotificationEnabled,
+          autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled,
           enabled: body.enabled,
           ...(body.createPublishTarget
             ? {
@@ -633,6 +636,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         displayName: body.displayName,
         reviewGroupId: body.reviewGroupId?.trim() || null,
         reviewNotificationEnabled: body.reviewNotificationEnabled,
+        autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled,
       },
     });
 
@@ -678,6 +682,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
           ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
           ...(body.reviewNotificationEnabled === undefined ? {} : { reviewNotificationEnabled: body.reviewNotificationEnabled }),
+          ...(body.autoFriendRequestApprovalEnabled === undefined ? {} : { autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled }),
           ...(body.userMessageReply === undefined ? {} : { userMessageReply: body.userMessageReply }),
           ...(body.userMessageReplyCooldownSeconds === undefined ? {} : { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds }),
           ...(body.reviewGroupMessageReply === undefined ? {} : { reviewGroupMessageReply: body.reviewGroupMessageReply }),
@@ -1230,6 +1235,7 @@ function toBotAccount(
     enabled: boolean;
     reviewGroupId: string | null;
     reviewNotificationEnabled: boolean;
+    autoFriendRequestApprovalEnabled: boolean;
     connectionToken: string;
     publishTextTemplate: Prisma.JsonValue;
     userMessageReply: string;
@@ -1264,6 +1270,7 @@ function toBotAccount(
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
     reviewNotificationEnabled: bot.reviewNotificationEnabled,
+    autoFriendRequestApprovalEnabled: bot.autoFriendRequestApprovalEnabled,
     connectionToken: bot.connectionToken,
     publishTextTemplate: normalizePublishTextTemplate(bot.publishTextTemplate),
     userMessageReply: bot.userMessageReply,

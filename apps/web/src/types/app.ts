@@ -297,6 +297,7 @@ export type AdminBotAccount = {
   enabled: boolean;
   reviewGroupId: string | null;
   reviewNotificationEnabled: boolean;
+  autoFriendRequestApprovalEnabled: boolean;
   connectionToken: string;
   publishTextTemplate: PublishTextTemplate;
   userMessageReply: string;
