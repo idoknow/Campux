@@ -780,7 +780,7 @@ export function AdminPage({
 
   async function updateBotConfig(
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) {
     setBusy(true);
     try {
@@ -2210,7 +2210,7 @@ function BotsPanel({
   onDelete: (id: string) => void;
   onUpdateConfig: (
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) => void;
   onRefresh: () => void;
 }) {
@@ -2429,7 +2429,7 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
@@ -2437,6 +2437,7 @@ function BotConfigEditor({
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
   const [reviewGroupMessageReply, setReviewGroupMessageReply] = useState(bot.reviewGroupMessageReply);
   const [reviewNotificationEnabled, setReviewNotificationEnabled] = useState(bot.reviewNotificationEnabled);
+  const [autoFriendRequestApprovalEnabled, setAutoFriendRequestApprovalEnabled] = useState(bot.autoFriendRequestApprovalEnabled);
   const [enabled, setEnabled] = useState(bot.enabled);
 
   useEffect(() => {
@@ -2446,8 +2447,9 @@ function BotConfigEditor({
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
     setReviewGroupMessageReply(bot.reviewGroupMessageReply);
     setReviewNotificationEnabled(bot.reviewNotificationEnabled);
+    setAutoFriendRequestApprovalEnabled(bot.autoFriendRequestApprovalEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
@@ -2460,6 +2462,7 @@ function BotConfigEditor({
     || normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds
     || trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply
     || reviewNotificationEnabled !== bot.reviewNotificationEnabled
+    || autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled
     || enabled !== bot.enabled;
   const canSave = !busy && Boolean(trimmedDisplayName) && Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply) && changed;
 
@@ -2471,6 +2474,7 @@ function BotConfigEditor({
       userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
       reviewGroupMessageReply: trimmedReviewGroupMessageReply,
       reviewNotificationEnabled,
+      autoFriendRequestApprovalEnabled,
       enabled,
     });
   }
@@ -2554,6 +2558,13 @@ function BotConfigEditor({
               />
             </label>
           </div>
+          <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <span>
+              自动通过好友申请
+              <span className="block text-xs font-normal leading-5 text-slate-500">收到好友申请后随机延时通过，降低 QQ 风控概率；每个墙号独立控制。</span>
+            </span>
+            <Switch checked={autoFriendRequestApprovalEnabled} onCheckedChange={setAutoFriendRequestApprovalEnabled} aria-label="自动通过好友申请" />
+          </label>
           <div className="rounded-md border border-slate-200 bg-white p-2">
             <p className="text-xs font-semibold text-slate-500">自动回复限速</p>
             <Input
@@ -2561,6 +2572,7 @@ function BotConfigEditor({
               inputMode="numeric"
               value={userMessageReplyCooldownSeconds}
               onChange={(event) => setUserMessageReplyCooldownSeconds(event.target.value.replace(/\D/g, ""))}
+
             />
             <p className="mt-1 text-xs font-semibold text-slate-400">秒内不重复回复；填 0 表示不限速。</p>
             <Button className="mt-3 w-full" variant="outline" size="sm" disabled={!canSave} onClick={saveConfig}>
@@ -2842,6 +2854,7 @@ function PublishPanel({
                       enabled: target.botAccount.enabled,
                       reviewGroupId: null,
                       reviewNotificationEnabled: false,
+                      autoFriendRequestApprovalEnabled: false,
                       connectionToken: target.botAccount.connectionToken,
                       publishTextTemplate: target.botAccount.publishTextTemplate,
                       userMessageReply: "",

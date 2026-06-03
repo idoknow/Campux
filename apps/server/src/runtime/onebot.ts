@@ -26,6 +26,7 @@ import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { selectReviewNotificationBot } from "./notification-routing";
+import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
 type OneBotConnection = {
   socket: WebSocketLike;
@@ -90,10 +91,13 @@ type PrivatePostPendingMode = {
 
 type OneBotMessageEvent = {
   post_type?: string;
+  request_type?: string;
   message_type?: "private" | "group";
   self_id?: number | string;
   user_id?: number | string;
   group_id?: number | string;
+  flag?: string;
+  comment?: string;
   message?: unknown;
   raw_message?: string;
   sender?: {
@@ -139,6 +143,7 @@ export class OneBotRuntime {
   private readonly privateAutoReplyAt = new Map<string, number>();
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
+  private readonly pendingFriendRequestFlags = new Set<string>();
 
   constructor(
     private readonly queue: RuntimeQueue,
@@ -713,6 +718,11 @@ export class OneBotRuntime {
       return;
     }
 
+    if ((event as OneBotMessageEvent).post_type === "request") {
+      await this.handleRequestEvent(connection, event as OneBotRequestEvent);
+      return;
+    }
+
     if ((event as OneBotMessageEvent).post_type !== "message") {
       return;
     }
@@ -723,6 +733,137 @@ export class OneBotRuntime {
     }
     if (messageEvent.message_type === "group") {
       await this.handleGroupMessage(messageEvent);
+    }
+  }
+
+  private async handleRequestEvent(connection: OneBotConnection, event: OneBotRequestEvent) {
+    if (event.request_type !== "friend") {
+      return;
+    }
+
+    const bot = await prisma.botAccount.findFirst({
+      where: {
+        id: connection.botAccountId,
+        tenantId: connection.tenantId,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        qqUin: true,
+        displayName: true,
+        enabled: true,
+        autoFriendRequestApprovalEnabled: true,
+      },
+    });
+    if (!bot) {
+      this.logger.warn({ botAccountId: connection.botAccountId, tenantId: connection.tenantId }, "onebot friend request ignored because bot account no longer exists");
+      return;
+    }
+
+    const plan = buildFriendRequestAutoApprovePlan(event, bot);
+    const userQqUin = normalizeId(event.user_id);
+    const flag = typeof event.flag === "string" ? event.flag : null;
+    if (!plan) {
+      this.logger.info(
+        {
+          botAccountId: bot.id,
+          tenantId: bot.tenantId,
+          botQqUin: bot.qqUin.toString(),
+          userQqUin,
+          autoFriendRequestApprovalEnabled: bot.autoFriendRequestApprovalEnabled,
+          botEnabled: bot.enabled,
+          hasFlag: Boolean(flag),
+        },
+        "onebot friend request received but auto approval is not scheduled",
+      );
+      return;
+    }
+
+    if (this.pendingFriendRequestFlags.has(plan.flag)) {
+      this.logger.info({ botAccountId: bot.id, botQqUin: bot.qqUin.toString(), userQqUin: plan.userQqUin }, "onebot friend request auto approval already scheduled");
+      return;
+    }
+
+    this.pendingFriendRequestFlags.add(plan.flag);
+    this.logger.info(
+      {
+        botAccountId: bot.id,
+        tenantId: bot.tenantId,
+        botQqUin: bot.qqUin.toString(),
+        userQqUin: plan.userQqUin,
+        delayMs: plan.delayMs,
+        comment: plan.comment,
+      },
+      "onebot friend request auto approval scheduled",
+    );
+
+    setTimeout(() => {
+      this.executeFriendRequestAutoApproval({
+        botAccountId: bot.id,
+        tenantId: bot.tenantId,
+        botQqUin: bot.qqUin.toString(),
+        userQqUin: plan.userQqUin,
+        flag: plan.flag,
+        delayMs: plan.delayMs,
+      }).catch((error) => {
+        this.logger.warn({ error, botAccountId: bot.id, botQqUin: bot.qqUin.toString(), userQqUin: plan.userQqUin }, "onebot friend request auto approval failed");
+      });
+    }, plan.delayMs);
+  }
+
+  private async executeFriendRequestAutoApproval(options: { botAccountId: string; tenantId: string; botQqUin: string; userQqUin: string; flag: string; delayMs: number }) {
+    try {
+      const bot = await prisma.botAccount.findFirst({
+        where: {
+          id: options.botAccountId,
+          tenantId: options.tenantId,
+        },
+        select: {
+          enabled: true,
+          autoFriendRequestApprovalEnabled: true,
+        },
+      });
+
+      if (!bot?.enabled || !bot.autoFriendRequestApprovalEnabled) {
+        this.logger.info(
+          {
+            botAccountId: options.botAccountId,
+            tenantId: options.tenantId,
+            botQqUin: options.botQqUin,
+            userQqUin: options.userQqUin,
+            botEnabled: bot?.enabled ?? false,
+            autoFriendRequestApprovalEnabled: bot?.autoFriendRequestApprovalEnabled ?? false,
+          },
+          "onebot friend request auto approval skipped before execution",
+        );
+        return;
+      }
+
+      await this.callAction(options.botQqUin, "set_friend_add_request", buildSetFriendAddRequestParams(options.flag), 12_000);
+      this.logger.info(
+        {
+          botAccountId: options.botAccountId,
+          tenantId: options.tenantId,
+          botQqUin: options.botQqUin,
+          userQqUin: options.userQqUin,
+          delayMs: options.delayMs,
+        },
+        "onebot friend request auto approved",
+      );
+      await writeAuditLog({
+        tenantId: options.tenantId,
+        actorId: null,
+        action: "bot.friend_request.auto_approve",
+        targetType: "bot_account",
+        targetId: options.botAccountId,
+        detail: {
+          botQqUin: options.botQqUin,
+          userQqUin: options.userQqUin,
+          delayMs: options.delayMs,
+        },
+      });
+    } finally {
+      this.pendingFriendRequestFlags.delete(options.flag);
     }
   }
 

@@ -271,6 +271,7 @@ model BotAccount {
   enabled        Boolean         @default(true)
   reviewGroupId  String?
   reviewNotificationEnabled Boolean @default(false)
+  autoFriendRequestApprovalEnabled Boolean @default(false)
   connectionToken String          @default(uuid())
   publishTextTemplate Json        @default("{\"includePostId\":true,\"includeAuthorMention\":false,\"includeLinks\":false,\"customText\":\"\"}")
   userMessageReply String         @default("发送 #注册账号 可以用当前 QQ 注册本校园墙账号。\n发送 #重置密码 可以重置你的登录密码。")
