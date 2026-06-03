@@ -74,6 +74,7 @@ model Tenant {
   schoolModelSnapshots SchoolModelSnapshot[]
   postAiAnalyses PostAiAnalysis[]
   aiBackfillBatches AiBackfillBatch[]
+  qzoneVisitorSnapshots QZoneVisitorSnapshot[]
 }
 
 model User {
@@ -280,6 +281,7 @@ model BotAccount {
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   publishTargets PublishTarget[]
   sessions       BotSession[]
+  qzoneVisitorSnapshots QZoneVisitorSnapshot[]
 
   @@unique([tenantId, qqUin])
   @@unique([qqUin])
@@ -306,6 +308,25 @@ model BotSession {
 
   @@unique([botAccountId, type, domain])
   @@index([botAccountId, refreshedAt])
+}
+
+model QZoneVisitorSnapshot {
+  id           String     @id @default(uuid())
+  tenantId     String
+  botAccountId String
+  sessionId    String?
+  date         DateTime
+  todayCount   Int
+  totalCount   Int
+  checkedAt    DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botAccount   BotAccount @relation(fields: [botAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([botAccountId, date])
+  @@index([tenantId, date])
+  @@index([botAccountId, checkedAt])
 }
 
 model PublishTarget {

@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { prisma } from "./prisma";
 import { decryptJson } from "./secret-json";
+import { parseQZoneVisitorCounts, qzoneVisitorSnapshotDate } from "./qzone-visitor-stats";
 
 type QZoneCookieNotifier = {
   notifyQZoneCookiesInvalid(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }): Promise<void>;
@@ -53,10 +54,12 @@ export async function checkQZoneCookieHealth(cookies: Record<string, string>, fa
 
     const payload = parseQZoneCallbackJson(text);
     const data = payload?.data;
-    if (data && typeof data === "object" && "todaycount" in data && "totalcount" in data) {
+    const visitorCounts = parseQZoneVisitorCounts(data);
+    if (visitorCounts) {
       return {
         status: "available" as const,
-        message: `可用，今日访客 ${String((data as { todaycount: unknown }).todaycount)}，总访客 ${String((data as { totalcount: unknown }).totalcount)}`,
+        message: `可用，今日访客 ${visitorCounts.todayCount}，总访客 ${visitorCounts.totalCount}`,
+        visitorCounts,
       };
     }
 
@@ -88,7 +91,7 @@ export async function checkAndUpdateQZoneSession(sessionId: string) {
 
   const cookies = toCookieRecord(decryptJson(session.cookies));
   const result = await checkQZoneCookieHealth(cookies, session.botAccount.qqUin.toString());
-  return prisma.botSession.update({
+  const updated = await prisma.botSession.update({
     where: {
       id: session.id,
     },
@@ -100,6 +103,34 @@ export async function checkAndUpdateQZoneSession(sessionId: string) {
       ...(result.status === "available" ? { healthInvalidNotifiedAt: null } : {}),
     },
   });
+
+  if (result.status === "available" && result.visitorCounts) {
+    await prisma.qZoneVisitorSnapshot.upsert({
+      where: {
+        botAccountId_date: {
+          botAccountId: session.botAccountId,
+          date: qzoneVisitorSnapshotDate(updated.healthCheckedAt ?? new Date()),
+        },
+      },
+      create: {
+        tenantId: session.botAccount.tenantId,
+        botAccountId: session.botAccountId,
+        sessionId: session.id,
+        date: qzoneVisitorSnapshotDate(updated.healthCheckedAt ?? new Date()),
+        todayCount: result.visitorCounts.todayCount,
+        totalCount: result.visitorCounts.totalCount,
+        checkedAt: updated.healthCheckedAt ?? new Date(),
+      },
+      update: {
+        sessionId: session.id,
+        todayCount: result.visitorCounts.todayCount,
+        totalCount: result.visitorCounts.totalCount,
+        checkedAt: updated.healthCheckedAt ?? new Date(),
+      },
+    });
+  }
+
+  return updated;
 }
 
 export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier?: QZoneCookieNotifier) {

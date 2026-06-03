@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
+import { buildQZoneVisitorDailySeries } from "../lib/qzone-visitor-stats";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const postStatuses = ["pending_approval", "approved", "rejected", "cancelled", "publishing", "partially_failed", "failed", "published", "pending_recall", "recalled"];
@@ -32,6 +33,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
       reviewLogs,
       auditGroups,
       memberships,
+      qzoneVisitorSnapshots,
     ] = await Promise.all([
       prisma.post.findMany({
         where: { tenantId },
@@ -177,6 +179,18 @@ export function registerStatsRoutes(app: FastifyInstance) {
         },
         orderBy: { createdAt: "asc" },
       }),
+      prisma.qZoneVisitorSnapshot.findMany({
+        where: {
+          tenantId,
+          date: { gte: sinceRange },
+        },
+        select: {
+          date: true,
+          todayCount: true,
+          totalCount: true,
+        },
+        orderBy: { date: "asc" },
+      }),
     ]);
 
     const postById = new Map(posts.map((post) => [post.id, post]));
@@ -311,6 +325,9 @@ export function registerStatsRoutes(app: FastifyInstance) {
         total: Object.values(roleCounts).reduce((sum, value) => sum + value, 0),
         activeBans: activeBanCount,
         totalBans: totalBanCount,
+      },
+      qzoneVisitors: {
+        daily: buildQZoneVisitorDailySeries(qzoneVisitorSnapshots, sinceRange, now),
       },
       bots: bots.map((bot) => {
         const qzoneSession = bot.sessions[0] ?? null;
