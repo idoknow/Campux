@@ -168,6 +168,13 @@ export type PostItem = {
       forwardCount: number | null;
       checkedAt: string | null;
       lastError: string | null;
+      comments?: Array<{
+        uin: string;
+        name: string;
+        content: string;
+        createdAt: string | null;
+        replies?: Array<{ uin: string; name: string; content: string; createdAt: string | null }>;
+      }>;
     }>;
     logs: Array<{
       targetName: string;

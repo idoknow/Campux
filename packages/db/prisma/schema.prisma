@@ -402,6 +402,7 @@ model QZonePostMetric {
   likeCount        Int?
   commentCount     Int?
   forwardCount     Int?
+  comments         Json?
   lastError        String?
   lastVerbose      Json?
   checkedAt        DateTime?

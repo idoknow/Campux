@@ -1,5 +1,46 @@
 import { describe, expect, test } from "bun:test";
-import { parseQZoneEmotionMetricsPayload } from "./qzone";
+import { parseQZoneCommentList, parseQZoneEmotionMetricsPayload } from "./qzone";
+
+describe("qzone comment list parsing", () => {
+  test("extracts commenter, content, time and nested replies (list_3)", () => {
+    const comments = parseQZoneCommentList({
+      code: 0,
+      commentlist: [
+        {
+          uin: 2040347161,
+          name: "攻玉",
+          content: "在墙上发这种东西何意味[em]e402210[/em]",
+          create_time: 1779608247,
+          replyNum: 1,
+          list_3: [
+            {
+              uin: 2777262813,
+              name: "纯真FIN",
+              content: "@{uin:3583282482,nick:合纵,who:1,auto:1}学到了",
+              create_time: 1779615643,
+            },
+          ],
+        },
+      ],
+    });
+    expect(comments).toHaveLength(1);
+    expect(comments[0].uin).toBe("2040347161");
+    expect(comments[0].name).toBe("攻玉");
+    expect(comments[0].content).toBe("在墙上发这种东西何意味[表情]");
+    expect(comments[0].createdAt).toBe(new Date(1779608247 * 1000).toISOString());
+    expect(comments[0].replies).toHaveLength(1);
+    expect(comments[0].replies[0].name).toBe("纯真FIN");
+    expect(comments[0].replies[0].content).toBe("@合纵学到了");
+  });
+
+  test("returns empty array when no commentlist", () => {
+    expect(parseQZoneCommentList({ code: 0 })).toEqual([]);
+  });
+
+  test("throws on non-zero code", () => {
+    expect(() => parseQZoneCommentList({ code: -3000, message: "no permission" })).toThrow("no permission");
+  });
+});
 
 describe("qzone emotion metric parsing (qz_opcnt2 appid=311 newdata)", () => {
   test("extracts like/view(PRD)/comment(CS)/forward(ZS) from newdata", () => {

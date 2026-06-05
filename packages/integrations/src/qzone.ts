@@ -109,6 +109,26 @@ export type QZoneEmotionMetricsResult = {
   verbose: QZoneEmotionMetricsVerbose;
 };
 
+export type QZoneCommentReply = {
+  uin: string;
+  name: string;
+  content: string;
+  createdAt: string | null;
+};
+
+export type QZoneComment = {
+  uin: string;
+  name: string;
+  content: string;
+  createdAt: string | null;
+  replies: QZoneCommentReply[];
+};
+
+export type QZoneEmotionCommentsResult = {
+  comments: QZoneComment[];
+  verbose: QZoneEmotionMetricsVerbose;
+};
+
 export class QZonePublishError extends Error {
   verbose: QZonePublishVerbose;
 
@@ -221,6 +241,77 @@ export async function getQZoneEmotionMetrics(input: QZoneEmotionMetricsInput): P
     opcntLog.durationMs = Date.now() - opcntStartedAt;
     opcntLog.error = caught instanceof Error ? caught.message : String(caught);
     throw new QZoneEmotionMetricsError(`QZone 互动数据获取失败：${opcntLog.error}`, verbose);
+  }
+}
+
+// 拉取单条说说的评论列表（emotion_cgi_msgdetail_v6，含楼中楼 list_3）。仅在已知有评论时调用，避免无谓请求。
+export async function getQZoneEmotionComments(input: QZoneEmotionMetricsInput & { num?: number }): Promise<QZoneEmotionCommentsResult> {
+  const cookieNames = input.cookies ? Object.keys(input.cookies).sort() : [];
+  const cookieHeader = input.cookies ? toCookieHeader(input.cookies) : "";
+  const verbose: QZoneEmotionMetricsVerbose = {
+    mode: "real-qzone-emotion-metrics",
+    uin: input.uin,
+    tid: input.tid,
+    cookieStatus: input.cookies && cookieNames.length > 0 ? "available" : "missing",
+    cookieNames,
+    checkedAt: null,
+    http: [],
+    note: "评论列表来自 emotion_cgi_msgdetail_v6 的 commentlist；楼中楼回复在每条评论的 list_3 中。",
+  };
+
+  if (!input.cookies || cookieNames.length === 0) {
+    throw new QZoneEmotionMetricsError("缺少 QZone cookies，无法获取评论列表", verbose);
+  }
+  const pSkey = input.cookies.p_skey || input.cookies.skey;
+  if (!pSkey) {
+    throw new QZoneEmotionMetricsError("QZone cookies 缺少 p_skey/skey，无法计算 g_tk", verbose);
+  }
+  const gtk = generateGtk(pSkey);
+  const referer = `https://user.qzone.qq.com/${input.uin}`;
+  const requestHeaders = {
+    cookie: redactCookieHeader(cookieHeader),
+    referer,
+    "user-agent": userAgent,
+  };
+  const timeoutMs = input.timeoutMs ?? 10_000;
+  const num = Math.min(Math.max(input.num ?? 20, 1), 100);
+  const random = Math.random().toString();
+  const url = `${emotionDetailEndpoint}?r=${encodeURIComponent(random)}&not_adapt_outpic=1&random=${encodeURIComponent(random)}&tid=${encodeURIComponent(input.tid)}&uin=${encodeURIComponent(input.uin)}&t1_source=1&not_trunc_con=1&need_right=1&pos=0&num=${num}&need_private_comment=1&g_tk=${encodeURIComponent(String(gtk))}`;
+  const log: QZoneHttpLog = {
+    label: "emotion_comments",
+    request: { method: "GET", url, headers: requestHeaders },
+  };
+  verbose.http.push(log);
+
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      headers: { ...requestHeaders, cookie: cookieHeader },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await response.text();
+    const parsed = parseQZoneResponse(text);
+    log.durationMs = Date.now() - startedAt;
+    log.response = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: pickResponseHeaders(response.headers),
+      body: truncate(text, 8_000),
+      parsed,
+    };
+    if (!response.ok) {
+      throw new QZoneEmotionMetricsError(`QZone 评论列表 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
+    }
+    const comments = parseQZoneCommentList(parsed);
+    verbose.checkedAt = new Date().toISOString();
+    return { comments, verbose };
+  } catch (caught) {
+    if (caught instanceof QZoneEmotionMetricsError) {
+      throw caught;
+    }
+    log.durationMs = Date.now() - startedAt;
+    log.error = caught instanceof Error ? caught.message : String(caught);
+    throw new QZoneEmotionMetricsError(`QZone 评论列表获取失败：${log.error}`, verbose);
   }
 }
 
@@ -869,6 +960,69 @@ function parseQZoneUploadResponse(text: string) {
   } catch {
     return parseQZoneResponse(text);
   }
+}
+
+// 解析 emotion_cgi_msgdetail_v6 的 commentlist：评论人、内容、时间、楼中楼回复（list_3）。
+export function parseQZoneCommentList(parsed: unknown): QZoneComment[] {
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("QZone 评论列表没有返回可解析的 JSON");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.code === "number" && record.code !== 0) {
+    throw new Error(String(record.message ?? record.msg ?? `QZone 评论列表返回错误码 ${record.code}`));
+  }
+  const list = Array.isArray(record.commentlist) ? record.commentlist : [];
+  const comments: QZoneComment[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+    const c = raw as Record<string, unknown>;
+    const replies: QZoneCommentReply[] = [];
+    const replyList = Array.isArray(c.list_3) ? c.list_3 : [];
+    for (const rawReply of replyList) {
+      if (!rawReply || typeof rawReply !== "object") {
+        continue;
+      }
+      const r = rawReply as Record<string, unknown>;
+      replies.push({
+        uin: r.uin !== undefined && r.uin !== null ? String(r.uin) : "",
+        name: typeof r.name === "string" ? r.name : "",
+        content: cleanQZoneCommentContent(r.content),
+        createdAt: qzoneCommentTime(r),
+      });
+    }
+    comments.push({
+      uin: c.uin !== undefined && c.uin !== null ? String(c.uin) : "",
+      name: typeof c.name === "string" ? c.name : "",
+      content: cleanQZoneCommentContent(c.content),
+      createdAt: qzoneCommentTime(c),
+      replies,
+    });
+  }
+  return comments;
+}
+
+function qzoneCommentTime(record: Record<string, unknown>): string | null {
+  const epoch = toNumber(record.create_time);
+  if (epoch !== null && epoch > 0) {
+    return new Date(epoch * 1000).toISOString();
+  }
+  if (typeof record.createTime2 === "string" && record.createTime2.trim()) {
+    return record.createTime2;
+  }
+  return null;
+}
+
+// QZone 评论里的表情码 [em]exxxx[/em] 与 @{uin:x,nick:名字,...} 提及需要清洗成可读文本。
+function cleanQZoneCommentContent(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value
+    .replace(/@\{uin:\d+,nick:([^,}]*)[^}]*\}/g, "@$1")
+    .replace(/\[em\]e\d+\[\/em\]/g, "[表情]")
+    .trim();
 }
 
 // qz_opcnt2（带 appid=311）返回 data[0].current.newdata = { LIKE, PRD, PVS, CS, ZS, ... }。
