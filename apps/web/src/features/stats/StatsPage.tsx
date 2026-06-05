@@ -110,6 +110,24 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
           },
         ];
   }, [stats]);
+  const botFriendCharts = useMemo(() => {
+    if (!stats) return [];
+    return stats.botFriends.bots.length > 0
+      ? stats.botFriends.bots.map((chart) => ({
+          id: chart.botAccountId,
+          displayName: chart.bot.displayName,
+          bot: chart.bot,
+          daily: chart.daily,
+        }))
+      : [
+          {
+            id: "tenant-aggregate-friends",
+            displayName: "好友总量",
+            bot: null,
+            daily: stats.botFriends.daily,
+          },
+        ];
+  }, [stats]);
 
   return (
     <div className="h-full min-w-0 overflow-x-hidden overflow-y-auto px-4 py-4 pb-24 md:pb-6">
@@ -200,6 +218,21 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
                   series={[
                     { label: "每日访客", color: "#0ea5e9", values: chart.daily.map((day) => ({ label: formatDay(day.date), value: day.todayCount })) },
                     { label: "累计访客", color: "#ef4444", values: chart.daily.map((day) => ({ label: formatDay(day.date), value: day.totalCount })) },
+                  ]}
+                />
+              ))}
+              {botFriendCharts.map((chart) => (
+                <LineChartPanel
+                  key={chart.id}
+                  title={`${currentRangeLabel}${chart.displayName}好友量`}
+                  description={
+                    chart.bot
+                      ? `${currentRangeLabel}每日好友总量（${chart.bot.displayName} / QQ ${chart.bot.qqUin}），每天自动采集`
+                      : `${currentRangeLabel}每日好友总量，每天自动采集`
+                  }
+                  height={240}
+                  series={[
+                    { label: "好友量", color: "#0d9488", values: chart.daily.map((day) => ({ label: formatDay(day.date), value: day.friendCount })) },
                   ]}
                 />
               ))}
