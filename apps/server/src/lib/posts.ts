@@ -1,8 +1,17 @@
+type PostQZoneComment = {
+  uin: string;
+  name: string;
+  content: string;
+  createdAt: string | null;
+  replies?: Array<{ uin: string; name: string; content: string; createdAt: string | null }>;
+};
+
 type PostQZoneMetric = {
   visitorCount: number | null;
   likeCount: number | null;
   commentCount: number | null;
   forwardCount?: number | null;
+  comments?: unknown;
   lastError: string | null;
   checkedAt: Date | null;
   qzoneTid: string;
@@ -93,6 +102,7 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
       forwardCount: metric.forwardCount ?? null,
       checkedAt: metric.checkedAt?.toISOString() ?? null,
       lastError: metric.lastError,
+      comments: normalizeQZoneComments(metric.comments),
     };
   });
 
@@ -114,4 +124,41 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
         checkedAt: target.checkedAt,
       })),
   };
+}
+
+function normalizeQZoneComments(value: unknown): PostQZoneComment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const comments: PostQZoneComment[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+    const c = raw as Record<string, unknown>;
+    const replies = Array.isArray(c.replies)
+      ? c.replies.flatMap((rawReply) => {
+          if (!rawReply || typeof rawReply !== "object") {
+            return [];
+          }
+          const r = rawReply as Record<string, unknown>;
+          return [
+            {
+              uin: typeof r.uin === "string" ? r.uin : String(r.uin ?? ""),
+              name: typeof r.name === "string" ? r.name : "",
+              content: typeof r.content === "string" ? r.content : "",
+              createdAt: typeof r.createdAt === "string" ? r.createdAt : null,
+            },
+          ];
+        })
+      : [];
+    comments.push({
+      uin: typeof c.uin === "string" ? c.uin : String(c.uin ?? ""),
+      name: typeof c.name === "string" ? c.name : "",
+      content: typeof c.content === "string" ? c.content : "",
+      createdAt: typeof c.createdAt === "string" ? c.createdAt : null,
+      replies,
+    });
+  }
+  return comments;
 }

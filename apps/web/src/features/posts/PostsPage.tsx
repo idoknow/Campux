@@ -1522,9 +1522,58 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
             {target.checkedAt ? (
               <p className="mt-1.5 text-[11px] font-semibold text-slate-500">更新 {formatFullDateTime(target.checkedAt)}</p>
             ) : null}
+            <QZoneCommentsList comments={target.comments ?? []} />
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]> }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!comments || comments.length === 0) {
+    return null;
+  }
+
+  const preview = expanded ? comments : comments.slice(0, 3);
+
+  return (
+    <div className="mt-2 border-t border-slate-100 pt-2">
+      <p className="mb-1.5 flex items-center gap-1 text-[11px] font-black text-slate-500">
+        <MessageCircleIcon className="size-3 shrink-0" />
+        评论 {comments.length}
+      </p>
+      <div className="grid gap-1.5">
+        {preview.map((comment, index) => (
+          <div key={`${comment.uin}-${index}`} className="rounded-md bg-slate-50 px-2 py-1.5">
+            <p className="flex items-baseline gap-1.5 text-[11px] leading-5">
+              <span className="shrink-0 font-black text-slate-700">{comment.name || comment.uin || "匿名"}</span>
+              {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-400">{formatFullDateTime(comment.createdAt)}</span> : null}
+            </p>
+            <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">{comment.content || "（空）"}</p>
+            {comment.replies && comment.replies.length > 0 ? (
+              <div className="mt-1 grid gap-1 border-l-2 border-slate-200 pl-2">
+                {comment.replies.map((reply, replyIndex) => (
+                  <div key={`${reply.uin}-${replyIndex}`}>
+                    <span className="text-[11px] font-bold text-slate-600">{reply.name || reply.uin || "匿名"}：</span>
+                    <span className="break-words text-[11px] leading-5 text-slate-700">{reply.content || "（空）"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {comments.length > 3 ? (
+        <button
+          type="button"
+          className="mt-1.5 text-[11px] font-bold text-blue-600 hover:underline"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "收起" : `展开全部 ${comments.length} 条`}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
-import { getQZoneEmotionMetrics, QZoneEmotionMetricsError } from "@campux/integrations";
+import { getQZoneEmotionComments, getQZoneEmotionMetrics, QZoneEmotionMetricsError } from "@campux/integrations";
+import type { QZoneComment } from "@campux/integrations";
 import { Prisma } from "@campux/db";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
@@ -147,6 +148,26 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
       cookies,
       timeoutMs: 10_000,
     });
+
+    // 仅当有评论时再拉评论列表，避免对无评论稿件浪费一次请求（风控）。
+    let comments: QZoneComment[] = [];
+    if (result.commentCount > 0) {
+      await sleep(400 + Math.floor(Math.random() * 600));
+      try {
+        const commentResult = await getQZoneEmotionComments({
+          uin: botQqUin,
+          tid: qzoneTid,
+          cookies,
+          num: 50,
+          timeoutMs: 10_000,
+        });
+        comments = commentResult.comments;
+      } catch (commentError) {
+        logger.warn({ commentError, attemptId, qzoneTid }, "qzone post comment fetch failed");
+      }
+    }
+    const commentsJson = toInputJson(comments);
+
     await prisma.qZonePostMetric.upsert({
       where: {
         publishAttemptId: attempt.id,
@@ -162,6 +183,7 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
         likeCount: result.likeCount,
         commentCount: result.commentCount,
         forwardCount: result.forwardCount,
+        comments: commentsJson,
         lastError: null,
         lastVerbose: Prisma.JsonNull,
         checkedAt: new Date(result.verbose.checkedAt ?? new Date().toISOString()),
@@ -174,6 +196,7 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
         likeCount: result.likeCount,
         commentCount: result.commentCount,
         forwardCount: result.forwardCount,
+        comments: commentsJson,
         lastError: null,
         lastVerbose: Prisma.JsonNull,
         checkedAt: new Date(result.verbose.checkedAt ?? new Date().toISOString()),
@@ -241,4 +264,8 @@ function toCookieRecord(value: unknown) {
 
 function toInputJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
