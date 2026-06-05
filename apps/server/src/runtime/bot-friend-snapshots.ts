@@ -84,7 +84,9 @@ export async function collectBotFriendSnapshots(caller: FriendListCaller, logger
     spacingIndex += 1;
 
     try {
-      const data = await caller.callAction(botQqUin, "get_friend_list", {}, 15_000);
+      // get_friend_list can be slow on some OneBot implementations (cold cache /
+      // large friend lists); this is a background daily job so use a generous timeout.
+      const data = await caller.callAction(botQqUin, "get_friend_list", {}, 45_000);
       const friendCount = parseFriendListCount(data);
       if (friendCount === null) {
         logger.warn({ botAccountId: bot.id, botQqUin }, "bot friend snapshot received invalid friend list");
