@@ -1,5 +1,6 @@
 import type { TenantSummary } from "@campux/domain";
 import { CheckIcon, LogOutIcon, ShuffleIcon } from "lucide-react";
+import { getTenantSelectionOptions } from "@/features/auth/tenant-selection-options";
 import type { AuthenticatedMe } from "@/types/app";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -32,8 +33,10 @@ export function AccountMenu({
   const isDesktop = variant === "desktop";
   const displayName = me.user.displayName ?? me.user.qqUin;
   const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${me.user.qqUin}&s=100`;
-  const switchableMemberships = me.memberships.filter((membership) => membership.tenant.status === "active" || membership.tenant.id === selectedTenant.id);
-  const canSwitchTenant = !me.hostLocked && switchableMemberships.length > 1;
+  const switchableTenants = getTenantSelectionOptions(me).filter(
+    (option) => option.tenant.status === "active" || option.tenantId === selectedTenant.id,
+  );
+  const canSwitchTenant = !me.hostLocked && switchableTenants.length > 1;
   const opsMenuLabel = me.user.systemRole === "operations_admin" ? "运营管理" : "系统运维";
 
   return (
@@ -80,20 +83,23 @@ export function AccountMenu({
               <ShuffleIcon className="size-3.5" />
               切换校园墙
             </DropdownMenuLabel>
-            {switchableMemberships.map((membership) => (
-              <DropdownMenuItem
-                key={membership.id}
-                disabled={membership.tenant.id === selectedTenant.id}
-                onSelect={() => {
-                  if (membership.tenant.id !== selectedTenant.id) {
-                    void onSelectTenant(membership.tenant.id);
-                  }
-                }}
-              >
-                {membership.tenant.id === selectedTenant.id ? <CheckIcon data-icon="inline-start" /> : <span className="w-4" />}
-                <span className="min-w-0 flex-1 truncate">{membership.tenant.name}</span>
-              </DropdownMenuItem>
-            ))}
+            <div className="max-h-60 overflow-y-auto">
+              {switchableTenants.map((option) => (
+                <DropdownMenuItem
+                  key={option.key}
+                  disabled={option.tenantId === selectedTenant.id}
+                  onSelect={() => {
+                    if (option.tenantId !== selectedTenant.id) {
+                      void onSelectTenant(option.tenantId);
+                    }
+                  }}
+                >
+                  {option.tenantId === selectedTenant.id ? <CheckIcon data-icon="inline-start" /> : <span className="w-4" />}
+                  <span className="min-w-0 flex-1 truncate">{option.tenant.name}</span>
+                  {option.syntheticSystemAccess ? <span className="shrink-0 text-xs text-slate-400">运维</span> : null}
+                </DropdownMenuItem>
+              ))}
+            </div>
             <DropdownMenuSeparator />
           </>
         ) : null}
