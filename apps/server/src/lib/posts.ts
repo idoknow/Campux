@@ -67,16 +67,18 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
     visitorCount: 0,
     likeCount: 0,
     commentCount: 0,
+    forwardCount: 0,
   };
   let hasCounts = false;
   let checkedAtTime: number | null = null;
   const targets = metrics.map((metric) => {
-    if (metric.visitorCount !== null || metric.likeCount !== null || metric.commentCount !== null) {
+    if (metric.likeCount !== null || metric.commentCount !== null || (metric.forwardCount ?? null) !== null) {
       hasCounts = true;
     }
     totals.visitorCount += metric.visitorCount ?? 0;
     totals.likeCount += metric.likeCount ?? 0;
     totals.commentCount += metric.commentCount ?? 0;
+    totals.forwardCount += metric.forwardCount ?? 0;
     if (metric.checkedAt && (checkedAtTime === null || metric.checkedAt.getTime() > checkedAtTime)) {
       checkedAtTime = metric.checkedAt.getTime();
     }
@@ -88,15 +90,18 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
       visitorCount: metric.visitorCount,
       likeCount: metric.likeCount,
       commentCount: metric.commentCount,
+      forwardCount: metric.forwardCount ?? null,
       checkedAt: metric.checkedAt?.toISOString() ?? null,
       lastError: metric.lastError,
     };
   });
 
   return {
-    visitorCount: hasCounts ? totals.visitorCount : null,
+    // QZone 已不再返回单条说说访客/浏览量，visitorCount 恒为 null。
+    visitorCount: null,
     likeCount: hasCounts ? totals.likeCount : null,
     commentCount: hasCounts ? totals.commentCount : null,
+    forwardCount: hasCounts ? totals.forwardCount : null,
     checkedAt: checkedAtTime === null ? null : new Date(checkedAtTime).toISOString(),
     targets,
     logs: targets

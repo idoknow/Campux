@@ -155,6 +155,7 @@ export type PostItem = {
     visitorCount: number | null;
     likeCount: number | null;
     commentCount: number | null;
+    forwardCount: number | null;
     checkedAt: string | null;
     targets: Array<{
       targetName: string;
@@ -164,6 +165,7 @@ export type PostItem = {
       visitorCount: number | null;
       likeCount: number | null;
       commentCount: number | null;
+      forwardCount: number | null;
       checkedAt: string | null;
       lastError: string | null;
     }>;
