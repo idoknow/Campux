@@ -659,6 +659,37 @@ export class OneBotRuntime {
     });
   }
 
+  /**
+   * Sends a private message to a user via the first online, enabled bot of the
+   * tenant that succeeds. Returns true if delivered. Used by the followed-post
+   * comment digest scheduler so a user with multiple walls/bots only gets one
+   * copy of each digest instead of one per bot.
+   */
+  async sendPrivateMessageViaTenantBots(tenantId: string, userQqUin: string | bigint, message: string): Promise<boolean> {
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId,
+        enabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+    for (const bot of bots) {
+      const status = this.getBotConnectionStatus(bot.qqUin.toString());
+      if (!status.online) {
+        continue;
+      }
+      try {
+        await this.sendPrivateMessage(bot.qqUin.toString(), userQqUin, message);
+        return true;
+      } catch (error) {
+        this.logger.warn({ error, botQqUin: bot.qqUin.toString(), tenantId }, "failed to send private message via tenant bot");
+      }
+    }
+    return false;
+  }
+
   async sendGroupMessage(botQqUin: string, groupId: string | bigint, message: unknown) {
     await this.callAction(botQqUin, "send_group_msg", {
       group_id: Number(groupId),

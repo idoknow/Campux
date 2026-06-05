@@ -151,6 +151,7 @@ export type PostItem = {
   createdAt: string;
   updatedAt: string;
   recallReason: string | null;
+  following?: boolean;
   qzoneStats: {
     visitorCount: number | null;
     likeCount: number | null;

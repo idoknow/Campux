@@ -44,6 +44,7 @@ export function toPostListItem(post: {
     createdAt: Date;
   }>;
   qzonePostMetrics?: PostQZoneMetric[];
+  follows?: Array<{ id: string }>;
 }) {
   const recallLog = post.logs
     ?.filter((log) => log.oldStatus === "published" && log.newStatus === "pending_recall")
@@ -63,6 +64,7 @@ export function toPostListItem(post: {
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     recallReason,
+    following: Boolean(post.follows && post.follows.length > 0),
     qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? []),
   };
 }

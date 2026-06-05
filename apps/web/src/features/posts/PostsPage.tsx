@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertCircleIcon,
+  BellIcon,
+  BellRingIcon,
   CheckIcon,
   ClockIcon,
   CopyIcon,
@@ -191,6 +193,7 @@ export function PostsPage({
   const [busyPostId, setBusyPostId] = useState("");
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [busyRecallPostId, setBusyRecallPostId] = useState("");
+  const [busyFollowPostId, setBusyFollowPostId] = useState("");
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
     open: false,
     postId: "",
@@ -325,6 +328,22 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "取消失败");
     } finally {
       setBusyCancelPostId("");
+    }
+  }
+
+  async function toggleFollowPost(post: PostItem) {
+    const next = !post.following;
+    setBusyFollowPostId(post.id);
+    try {
+      await api(`/api/posts/${post.id}/follow`, {
+        method: next ? "POST" : "DELETE",
+      });
+      toast.success(next ? "已关注，有新评论会每 12 小时私信提醒你。" : "已取消关注。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "操作失败");
+    } finally {
+      setBusyFollowPostId("");
     }
   }
 
@@ -579,6 +598,7 @@ export function PostsPage({
                 posts={posts}
                 busyCancelPostId={busyCancelPostId}
                 busyRecallPostId={busyRecallPostId}
+                busyFollowPostId={busyFollowPostId}
                 onPreview={(post) => void openRenderPreview(post)}
                 onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
                 onCancel={(post) => void cancelPost(post.id)}
@@ -586,6 +606,7 @@ export function PostsPage({
                   setRecallReason("");
                   setRecallConfirm({ open: true, mode: "request", post });
                 }}
+                onToggleFollow={(post) => void toggleFollowPost(post)}
               />
               <PaginationControls pagination={minePagination} busy={mineLoading} onPageChange={onMinePageChange} />
             </>
@@ -1260,18 +1281,22 @@ function PostList({
   posts,
   busyCancelPostId,
   busyRecallPostId,
+  busyFollowPostId,
   onPreview,
   onImagePreview,
   onCancel,
   onRecall,
+  onToggleFollow,
 }: {
   posts: PostItem[];
   busyCancelPostId: string;
   busyRecallPostId: string;
+  busyFollowPostId: string;
   onPreview: (post: PostItem) => void;
   onImagePreview: (post: PostItem, images: PostImage[], index: number) => void;
   onCancel: (post: PostItem) => void;
   onRecall: (post: PostItem) => void;
+  onToggleFollow: (post: PostItem) => void;
 }) {
   if (posts.length === 0) {
     return <EmptyCard title="还没有稿件，可以先去投稿页写一条" />;
@@ -1286,10 +1311,12 @@ function PostList({
           palette={postCardPalettes[index % postCardPalettes.length] ?? defaultPostCardPalette}
           cancelBusy={busyCancelPostId === post.id}
           recallBusy={busyRecallPostId === post.id}
+          followBusy={busyFollowPostId === post.id}
           onPreview={() => onPreview(post)}
           onImagePreview={(images, imageIndex) => onImagePreview(post, images, imageIndex)}
           onCancel={() => onCancel(post)}
           onRecall={() => onRecall(post)}
+          onToggleFollow={() => onToggleFollow(post)}
         />
       ))}
     </div>
@@ -1301,24 +1328,29 @@ function PostCard({
   palette,
   cancelBusy,
   recallBusy,
+  followBusy,
   onPreview,
   onImagePreview,
   onCancel,
   onRecall,
+  onToggleFollow,
 }: {
   post: PostItem;
   palette: string;
   cancelBusy: boolean;
   recallBusy: boolean;
+  followBusy: boolean;
   onPreview: () => void;
   onImagePreview: (images: PostImage[], index: number) => void;
   onCancel: () => void;
   onRecall: () => void;
+  onToggleFollow: () => void;
 }) {
   const images = getPostImages(post.attachments);
   const statusClassName = statusStyles[post.status] ?? "bg-white text-slate-600";
   const canCancel = post.status === "pending_approval";
   const canRecall = post.status === "published";
+  const canFollow = post.status === "published";
 
   return (
     <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
@@ -1334,6 +1366,7 @@ function PostCard({
           actions={
             <>
               <PreviewButton onClick={onPreview} />
+              {canFollow ? <FollowButton following={Boolean(post.following)} busy={followBusy} onClick={onToggleFollow} /> : null}
               {canCancel ? <CancelButton busy={cancelBusy} onClick={onCancel} /> : null}
               {canRecall ? <RecallRequestButton busy={recallBusy} onClick={onRecall} /> : null}
             </>
@@ -1423,6 +1456,22 @@ function RecallRequestButton({ busy, onClick }: { busy: boolean; onClick: () => 
     <Button variant="outline" size="sm" className="h-8 px-2 text-xs font-bold text-violet-700 hover:text-violet-700" disabled={busy} onClick={onClick}>
       <RotateCcwIcon data-icon="inline-start" />
       申请撤回
+    </Button>
+  );
+}
+
+function FollowButton({ following, busy, onClick }: { following: boolean; busy: boolean; onClick: () => void }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className={`h-8 px-2 text-xs font-bold ${following ? "border-blue-300 bg-blue-50 text-blue-700 hover:text-blue-700" : "text-slate-600 hover:text-slate-700"}`}
+      disabled={busy}
+      onClick={onClick}
+      title={following ? "已关注，每 12 小时私信推送新评论。点击取消关注" : "关注后，每 12 小时把新评论私信推送给你"}
+    >
+      {following ? <BellRingIcon data-icon="inline-start" /> : <BellIcon data-icon="inline-start" />}
+      {following ? "已关注" : "关注评论"}
     </Button>
   );
 }

@@ -11,6 +11,7 @@ import { recoverAiBackfillJobs, registerCampusModelingWorker } from "./runtime/c
 import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publishing";
 import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from "./runtime/qzone-post-metrics";
 import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapshots";
+import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-comments";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAiRoutes } from "./routes/ai";
@@ -98,12 +99,14 @@ const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
 const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: app.log, config });
 const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });
 const stopBotFriendSnapshotScheduler = registerBotFriendSnapshotScheduler({ caller: oneBot, logger: app.log });
+const stopFollowedPostCommentScheduler = registerFollowedPostCommentScheduler({ caller: oneBot, logger: app.log });
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();
   stopTenantLifecycleScheduler();
   stopQZonePostMetricScheduler();
   stopBotFriendSnapshotScheduler();
+  stopFollowedPostCommentScheduler();
 });
 
 await app.listen({
