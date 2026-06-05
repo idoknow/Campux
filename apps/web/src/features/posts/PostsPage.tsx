@@ -5,7 +5,6 @@ import {
   AlertCircleIcon,
   CheckIcon,
   ClockIcon,
-  EyeIcon,
   EyeOffIcon,
   FileTextIcon,
   HashIcon,
@@ -14,6 +13,7 @@ import {
   MessageCircleIcon,
   RotateCcwIcon,
   SearchIcon,
+  Share2Icon,
   SlidersHorizontalIcon,
   SparklesIcon,
   UserIcon,
@@ -1468,7 +1468,7 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
     return null;
   }
 
-  const hasCounts = stats.visitorCount !== null || stats.likeCount !== null || stats.commentCount !== null;
+  const hasCounts = stats.likeCount !== null || stats.commentCount !== null || stats.forwardCount !== null;
   const hasLogs = stats.logs.length > 0;
   if (!hasCounts && !hasLogs) {
     return null;
@@ -1478,9 +1478,9 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
     <div className="rounded-md border border-slate-100 bg-white px-2.5 py-2">
       {hasCounts ? (
         <div className="grid grid-cols-3 gap-1.5 text-xs">
-          <QZoneMetricItem icon={EyeIcon} label="访客" value={stats.visitorCount} />
           <QZoneMetricItem icon={HeartIcon} label="点赞" value={stats.likeCount} />
           <QZoneMetricItem icon={MessageCircleIcon} label="评论" value={stats.commentCount} />
+          <QZoneMetricItem icon={Share2Icon} label="转发" value={stats.forwardCount} />
         </div>
       ) : null}
       {stats.checkedAt ? <p className="mt-1.5 text-[11px] font-semibold text-slate-500">更新 {formatFullDateTime(stats.checkedAt)}</p> : null}

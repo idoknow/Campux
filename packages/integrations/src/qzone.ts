@@ -101,7 +101,8 @@ export type QZoneEmotionMetricsVerbose = {
 };
 
 export type QZoneEmotionMetricsResult = {
-  visitorCount: number;
+  // QZone 已不再为单条说说返回浏览/访客量（旧 PRD 字段下线），故 visitorCount 恒为 null。
+  visitorCount: number | null;
   likeCount: number;
   commentCount: number;
   forwardCount: number;
@@ -156,62 +157,122 @@ export async function getQZoneEmotionMetrics(input: QZoneEmotionMetricsInput): P
     cookieNames,
     checkedAt: null,
     http: [],
-    note: "互动数据来自 QZone qz_opcnt2；LIKE 为点赞，PRD 为浏览/访客，CS 为评论，ZS 为转发。",
+    note: "点赞/转发来自 QZone qz_opcnt2，评论数来自 emotion_cgi_msgdetail_v6；QZone 已不再返回单条说说访客/浏览量。",
   };
-  const url = `${emotionMetricsEndpoint}?_stp=${encodeURIComponent(String(Math.floor(Date.now() / 1000)))}&unikey=${encodeURIComponent(`http://user.qzone.qq.com/${input.uin}/mood/${input.tid}`)}&face=0&fupdate=1`;
-  const headers = {
-    cookie: cookieHeader ? redactCookieHeader(cookieHeader) : "",
-    referer: `https://user.qzone.qq.com/${input.uin}`,
+
+  // 互动数据接口要求登录态 + g_tk 签名，缺一不可（无 g_tk 会直接 HTTP 500，无 cookie 返回 login error）。
+  if (!input.cookies || cookieNames.length === 0) {
+    throw new QZoneEmotionMetricsError("缺少 QZone cookies，无法获取单条互动数据", verbose);
+  }
+  const pSkey = input.cookies.p_skey || input.cookies.skey;
+  if (!pSkey) {
+    throw new QZoneEmotionMetricsError("QZone cookies 缺少 p_skey/skey，无法计算 g_tk", verbose);
+  }
+  const gtk = generateGtk(pSkey);
+  const referer = `https://user.qzone.qq.com/${input.uin}`;
+  const requestHeaders = {
+    cookie: redactCookieHeader(cookieHeader),
+    referer,
     "user-agent": userAgent,
   };
-  const log: QZoneHttpLog = {
-    label: "emotion_metrics",
-    request: {
-      method: "GET",
-      url,
-      headers,
-    },
-  };
-  verbose.http.push(log);
+  const timeoutMs = input.timeoutMs ?? 10_000;
 
-  const startedAt = Date.now();
+  // 点赞 + 转发（qz_opcnt2）
+  const unikey = `http://user.qzone.qq.com/${input.uin}/mood/${input.tid}`;
+  const opcntUrl = `${emotionMetricsEndpoint}?g_tk=${encodeURIComponent(String(gtk))}&_stp=${encodeURIComponent(String(Math.floor(Date.now() / 1000)))}&unikey=${encodeURIComponent(unikey)}&face=0&fupdate=1`;
+  const opcntLog: QZoneHttpLog = {
+    label: "emotion_opcnt",
+    request: { method: "GET", url: opcntUrl, headers: requestHeaders },
+  };
+  verbose.http.push(opcntLog);
+
+  let likeCount = 0;
+  let forwardCount = 0;
+  const opcntStartedAt = Date.now();
   try {
-    const response = await fetch(url, {
-      headers: {
-        ...headers,
-        ...(cookieHeader ? { cookie: cookieHeader } : {}),
-      },
-      signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
+    const response = await fetch(opcntUrl, {
+      headers: { ...requestHeaders, cookie: cookieHeader },
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await response.text();
     const parsed = parseQZoneResponse(text);
-    log.durationMs = Date.now() - startedAt;
-    log.response = {
+    opcntLog.durationMs = Date.now() - opcntStartedAt;
+    opcntLog.response = {
       status: response.status,
       statusText: response.statusText,
       headers: pickResponseHeaders(response.headers),
       body: truncate(text, 8_000),
       parsed,
     };
-
     if (!response.ok) {
-      throw new QZoneEmotionMetricsError(`QZone 单条数据 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
+      throw new QZoneEmotionMetricsError(`QZone 互动数据 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
     }
-
-    const counts = parseQZoneEmotionMetricsPayload(parsed);
-    verbose.checkedAt = new Date().toISOString();
-    return {
-      ...counts,
-      verbose,
-    };
+    const counts = parseQZoneOpcntPayload(parsed);
+    likeCount = counts.likeCount;
+    forwardCount = counts.forwardCount;
   } catch (caught) {
     if (caught instanceof QZoneEmotionMetricsError) {
       throw caught;
     }
-    log.durationMs = Date.now() - startedAt;
-    log.error = caught instanceof Error ? caught.message : String(caught);
-    throw new QZoneEmotionMetricsError(`QZone 单条数据获取失败：${log.error}`, verbose);
+    opcntLog.durationMs = Date.now() - opcntStartedAt;
+    opcntLog.error = caught instanceof Error ? caught.message : String(caught);
+    throw new QZoneEmotionMetricsError(`QZone 互动数据获取失败：${opcntLog.error}`, verbose);
   }
+
+  // 评论数（emotion_cgi_msgdetail_v6）
+  // 同一条说说要打两个接口，两次请求之间加一点随机间隔，避免对单个 bot 形成密集突发（风控）。
+  await sleep(400 + Math.floor(Math.random() * 600));
+  const random = Math.random().toString();
+  const detailUrl = `${emotionDetailEndpoint}?r=${encodeURIComponent(random)}&not_adapt_outpic=1&random=${encodeURIComponent(random)}&tid=${encodeURIComponent(input.tid)}&uin=${encodeURIComponent(input.uin)}&t1_source=1&not_trunc_con=1&need_right=1&g_tk=${encodeURIComponent(String(gtk))}`;
+  const detailLog: QZoneHttpLog = {
+    label: "emotion_msgdetail",
+    request: { method: "GET", url: detailUrl, headers: requestHeaders },
+  };
+  verbose.http.push(detailLog);
+
+  let commentCount = 0;
+  const detailStartedAt = Date.now();
+  try {
+    const response = await fetch(detailUrl, {
+      headers: { ...requestHeaders, cookie: cookieHeader },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await response.text();
+    const parsed = parseQZoneResponse(text);
+    detailLog.durationMs = Date.now() - detailStartedAt;
+    detailLog.response = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: pickResponseHeaders(response.headers),
+      body: truncate(text, 8_000),
+      parsed,
+    };
+    if (!response.ok) {
+      throw new QZoneEmotionMetricsError(`QZone 评论数据 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
+    }
+    const detail = parseQZoneMsgDetailPayload(parsed);
+    commentCount = detail.commentCount;
+    if (detail.forwardCount > forwardCount) {
+      forwardCount = detail.forwardCount;
+    }
+  } catch (caught) {
+    if (caught instanceof QZoneEmotionMetricsError) {
+      throw caught;
+    }
+    detailLog.durationMs = Date.now() - detailStartedAt;
+    detailLog.error = caught instanceof Error ? caught.message : String(caught);
+    throw new QZoneEmotionMetricsError(`QZone 评论数据获取失败：${detailLog.error}`, verbose);
+  }
+
+  verbose.checkedAt = new Date().toISOString();
+  return {
+    // QZone 已下线单条说说浏览/访客量，恒为 null。
+    visitorCount: null,
+    likeCount,
+    commentCount,
+    forwardCount,
+    verbose,
+  };
 }
 
 export async function publishToQZone(input: QZonePublishInput): Promise<QZonePublishResult> {
@@ -861,58 +922,51 @@ function parseQZoneUploadResponse(text: string) {
   }
 }
 
-export function parseQZoneEmotionMetricsPayload(parsed: unknown) {
+// qz_opcnt2 现返回 data[0].current.cntdata = { like, forward, share, ... }（旧 newdata/LIKE/PRD/CS/ZS 已下线）。
+export function parseQZoneOpcntPayload(parsed: unknown): { likeCount: number; forwardCount: number } {
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("QZone 单条数据没有返回可解析的 JSON");
+    throw new Error("QZone 互动数据没有返回可解析的 JSON");
   }
   const record = parsed as Record<string, unknown>;
+  if (typeof record.code === "number" && record.code !== 0) {
+    throw new Error(String(record.message ?? record.msg ?? `QZone 互动数据返回错误码 ${record.code}`));
+  }
   const data = Array.isArray(record.data) ? record.data[0] : null;
   if (!data || typeof data !== "object") {
-    throw new Error(String(record.message ?? record.msg ?? "QZone 单条数据缺少 data"));
+    throw new Error(String(record.message ?? record.msg ?? "QZone 互动数据缺少 data"));
   }
   const current = (data as Record<string, unknown>).current;
   if (!current || typeof current !== "object") {
-    throw new Error("QZone 单条数据缺少 current");
+    throw new Error("QZone 互动数据缺少 current");
   }
-  const newdata = (current as Record<string, unknown>).newdata;
-  const counts = toQZoneMetricMap(newdata);
-  const likeCount = counts.get("LIKE");
-  const visitorCount = counts.get("PRD");
-  const commentCount = counts.get("CS");
-  const forwardCount = counts.get("ZS");
-  if (likeCount === undefined && visitorCount === undefined && commentCount === undefined && forwardCount === undefined) {
-    throw new Error("QZone 单条数据未返回 LIKE/PRD/CS/ZS，可能是 tid 无效或无权访问");
+  const cntdata = (current as Record<string, unknown>).cntdata;
+  if (!cntdata || typeof cntdata !== "object") {
+    throw new Error("QZone 互动数据缺少 cntdata，可能是 tid 无效或无权访问");
   }
+  const counts = cntdata as Record<string, unknown>;
+  const likeCount = toNumber(counts.like) ?? 0;
+  const forwardCount = (toNumber(counts.forward) ?? 0) + (toNumber(counts.share) ?? 0);
   return {
-    likeCount: likeCount ?? 0,
-    visitorCount: visitorCount ?? 0,
-    commentCount: commentCount ?? 0,
-    forwardCount: forwardCount ?? 0,
+    likeCount: likeCount >= 0 ? likeCount : 0,
+    forwardCount: forwardCount >= 0 ? forwardCount : 0,
   };
 }
 
-function toQZoneMetricMap(value: unknown) {
-  const map = new Map<string, number>();
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      if (Array.isArray(item) && item.length >= 2 && typeof item[0] === "string") {
-        const count = toNumber(item[1]);
-        if (count !== null && count >= 0) {
-          map.set(item[0], count);
-        }
-      }
-    }
-    return map;
+// emotion_cgi_msgdetail_v6 顶层返回 cmtnum（评论数）与 fwdnum（转发数）。
+export function parseQZoneMsgDetailPayload(parsed: unknown): { commentCount: number; forwardCount: number } {
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("QZone 评论数据没有返回可解析的 JSON");
   }
-  if (value && typeof value === "object") {
-    for (const [key, rawCount] of Object.entries(value)) {
-      const count = toNumber(rawCount);
-      if (count !== null && count >= 0) {
-        map.set(key, count);
-      }
-    }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.code === "number" && record.code !== 0) {
+    throw new Error(String(record.message ?? record.msg ?? `QZone 评论数据返回错误码 ${record.code}`));
   }
-  return map;
+  const commentCount = toNumber(record.cmtnum) ?? toNumber(record.total) ?? 0;
+  const forwardCount = toNumber(record.fwdnum) ?? 0;
+  return {
+    commentCount: commentCount >= 0 ? commentCount : 0,
+    forwardCount: forwardCount >= 0 ? forwardCount : 0,
+  };
 }
 
 function isPublishSuccess(response: Response, parsed: unknown): { ok: true; externalId: string; qzoneTid: string | null } | { ok: false; message: string } {
@@ -1028,6 +1082,10 @@ function toNumber(value: unknown) {
 
 function truncate(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}\n... <truncated ${value.length - maxLength} chars>` : value;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 function toBase64(value: Uint8Array) {
