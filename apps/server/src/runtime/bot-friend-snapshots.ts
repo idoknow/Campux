@@ -2,7 +2,8 @@ import type { FastifyBaseLogger } from "fastify";
 import { prisma } from "../lib/prisma";
 import { botFriendSnapshotDate, parseFriendListCount } from "../lib/bot-friend-stats";
 
-const collectIntervalMs = 60 * 60 * 1000; // re-scan hourly; one snapshot per bot per day
+const collectIntervalMs = 15 * 60 * 1000; // re-scan every 15 min; one snapshot per bot per day
+const initialDelayMs = 75 * 1000; // wait for OneBot WS connections to come up after boot before the first scan
 const perBotRequestSpacingMs = 5 * 1000;
 
 type FriendListCaller = {
@@ -12,9 +13,12 @@ type FriendListCaller = {
 
 /**
  * Collects each tenant bot's QQ friend count once per day so the stats page can
- * render a per-bot friend-count trend. Re-scans hourly and only collects for
- * bots that do not yet have a snapshot for the current day, so a restart or a
- * temporarily offline bot simply retries later in the day.
+ * render a per-bot friend-count trend. Re-scans every 15 minutes and only
+ * collects for bots that do not yet have a snapshot for the current day, so a
+ * restart or a temporarily offline bot simply retries soon after. The first
+ * scan is delayed so bot OneBot WebSocket connections have time to come up
+ * after boot (otherwise the boot scan races the connections and skips every
+ * bot as "offline", leaving the chart empty until the next interval).
  */
 export function registerBotFriendSnapshotScheduler({ caller, logger }: { caller: FriendListCaller; logger: FastifyBaseLogger }) {
   async function run() {
@@ -27,8 +31,13 @@ export function registerBotFriendSnapshotScheduler({ caller, logger }: { caller:
   const timer = setInterval(() => {
     void run().catch((error) => logger.warn({ error }, "bot friend snapshot scan failed"));
   }, collectIntervalMs);
-  void run().catch((error) => logger.warn({ error }, "bot friend snapshot scan failed"));
-  return () => clearInterval(timer);
+  const initialTimer = setTimeout(() => {
+    void run().catch((error) => logger.warn({ error }, "bot friend snapshot scan failed"));
+  }, initialDelayMs);
+  return () => {
+    clearInterval(timer);
+    clearTimeout(initialTimer);
+  };
 }
 
 export async function collectBotFriendSnapshots(caller: FriendListCaller, logger: FastifyBaseLogger) {
