@@ -75,6 +75,81 @@ function currentSlotStart(now: Date): Date {
   return new Date(shifted.getTime() - beijingOffsetMs);
 }
 
+const followDigestInclude = {
+  user: {
+    select: {
+      qqUin: true,
+    },
+  },
+  post: {
+    select: {
+      id: true,
+      displayId: true,
+      tenantId: true,
+      qzonePostMetrics: {
+        select: {
+          commentCount: true,
+          comments: true,
+        },
+      },
+    },
+  },
+} as const;
+
+type FollowDigestRow = {
+  id: string;
+  lastPushedCommentCount: number;
+  user: { qqUin: bigint };
+  post: {
+    id: string;
+    displayId: number;
+    tenantId: string;
+    qzonePostMetrics: { commentCount: number | null; comments: unknown }[];
+  };
+};
+
+/**
+ * Sends (or advances the marker for) a single follow's comment digest. Returns
+ * true only when a message was actually delivered. Shared by the twice-daily
+ * scheduler and the manual single-post push endpoint so both behave identically.
+ */
+async function processFollowDigest(follow: FollowDigestRow, caller: CommentDigestSender, logger: FastifyBaseLogger, now: Date): Promise<boolean> {
+  const metrics = follow.post.qzonePostMetrics;
+  const totalCommentCount = metrics.reduce((sum, metric) => sum + (metric.commentCount ?? 0), 0);
+  const previous = follow.lastPushedCommentCount;
+  const newCount = totalCommentCount - previous;
+
+  // Nothing new since last push (or comments were deleted): just advance the
+  // slot marker without messaging, so we don't recheck this follow until the
+  // next slot.
+  if (newCount <= 0) {
+    await prisma.postFollow.update({
+      where: { id: follow.id },
+      data: { lastPushedAt: now, lastPushedCommentCount: Math.max(totalCommentCount, 0) },
+    }).catch((error) => logger.warn({ error, followId: follow.id }, "failed to advance follow slot marker"));
+    return false;
+  }
+
+  const previews = collectCommentPreviews(metrics.map((metric) => metric.comments));
+  const message = buildDigestMessage(follow.post.displayId, totalCommentCount, newCount, previews);
+
+  try {
+    const delivered = await caller.sendPrivateMessageViaTenantBots(follow.post.tenantId, follow.user.qqUin, message);
+    if (delivered) {
+      await prisma.postFollow.update({
+        where: { id: follow.id },
+        data: { lastPushedAt: now, lastPushedCommentCount: totalCommentCount },
+      });
+      return true;
+    }
+    logger.debug({ followId: follow.id, postId: follow.post.id }, "followed post comment digest not delivered, no online bot");
+    return false;
+  } catch (error) {
+    logger.warn({ error, followId: follow.id, postId: follow.post.id }, "followed post comment digest send failed");
+    return false;
+  }
+}
+
 export async function pushFollowedPostCommentDigests(caller: CommentDigestSender, logger: FastifyBaseLogger, now: Date = new Date()) {
   const slotStart = currentSlotStart(now);
   const follows = await prisma.postFollow.findMany({
@@ -84,72 +159,56 @@ export async function pushFollowedPostCommentDigests(caller: CommentDigestSender
         status: "published",
       },
     },
-    include: {
-      user: {
-        select: {
-          qqUin: true,
-        },
-      },
-      post: {
-        select: {
-          id: true,
-          displayId: true,
-          tenantId: true,
-          qzonePostMetrics: {
-            select: {
-              commentCount: true,
-              comments: true,
-            },
-          },
-        },
-      },
-    },
+    include: followDigestInclude,
   });
 
   let pushed = 0;
   let spacingIndex = 0;
   for (const follow of follows) {
-    const metrics = follow.post.qzonePostMetrics;
-    const totalCommentCount = metrics.reduce((sum, metric) => sum + (metric.commentCount ?? 0), 0);
-    const previous = follow.lastPushedCommentCount;
-    const newCount = totalCommentCount - previous;
-
-    // Nothing new since last push (or comments were deleted): just advance the
-    // slot marker without messaging, so we don't recheck this follow until the
-    // next slot.
-    if (newCount <= 0) {
-      await prisma.postFollow.update({
-        where: { id: follow.id },
-        data: { lastPushedAt: now, lastPushedCommentCount: Math.max(totalCommentCount, 0) },
-      }).catch((error) => logger.warn({ error, followId: follow.id }, "failed to advance follow slot marker"));
-      continue;
-    }
-
-    const previews = collectCommentPreviews(metrics.map((metric) => metric.comments));
-    const message = buildDigestMessage(follow.post.displayId, totalCommentCount, newCount, previews);
-
     if (spacingIndex > 0) {
       await delay(perUserSpacingMs);
     }
     spacingIndex += 1;
-
-    try {
-      const delivered = await caller.sendPrivateMessageViaTenantBots(follow.post.tenantId, follow.user.qqUin, message);
-      if (delivered) {
-        await prisma.postFollow.update({
-          where: { id: follow.id },
-          data: { lastPushedAt: now, lastPushedCommentCount: totalCommentCount },
-        });
-        pushed += 1;
-      } else {
-        logger.debug({ followId: follow.id, postId: follow.post.id }, "followed post comment digest not delivered, no online bot");
-      }
-    } catch (error) {
-      logger.warn({ error, followId: follow.id, postId: follow.post.id }, "followed post comment digest send failed");
+    if (await processFollowDigest(follow, caller, logger, now)) {
+      pushed += 1;
     }
   }
 
   return pushed;
+}
+
+/**
+ * Manually pushes the comment digest for every follow on a single post,
+ * bypassing the twice-daily Beijing-hour gate. Used by the admin "立即推送评论
+ * 摘要" endpoint to notify an author on demand right after a comment collection.
+ * Reuses the same per-follow logic (baseline diff, marker advance, single online
+ * tenant bot) so a manual push and the scheduled push stay consistent and never
+ * double-report the same comments.
+ */
+export async function pushFollowedPostCommentDigestForPost(postId: string, caller: CommentDigestSender, logger: FastifyBaseLogger, now: Date = new Date()) {
+  const follows = await prisma.postFollow.findMany({
+    where: {
+      postId,
+      post: {
+        status: "published",
+      },
+    },
+    include: followDigestInclude,
+  });
+
+  let pushed = 0;
+  let spacingIndex = 0;
+  for (const follow of follows) {
+    if (spacingIndex > 0) {
+      await delay(perUserSpacingMs);
+    }
+    spacingIndex += 1;
+    if (await processFollowDigest(follow, caller, logger, now)) {
+      pushed += 1;
+    }
+  }
+
+  return { follows: follows.length, pushed };
 }
 
 export function collectCommentPreviews(rawColumns: unknown[]): string[] {
