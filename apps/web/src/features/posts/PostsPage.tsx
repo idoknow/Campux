@@ -5,6 +5,7 @@ import {
   AlertCircleIcon,
   CheckIcon,
   ClockIcon,
+  CopyIcon,
   EyeIcon,
   EyeOffIcon,
   FileTextIcon,
@@ -1547,16 +1548,19 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
       <div className="grid gap-1.5">
         {preview.map((comment, index) => (
           <div key={`${comment.uin}-${index}`} className="rounded-md bg-slate-50 px-2 py-1.5">
-            <p className="flex items-baseline gap-1.5 text-[11px] leading-5">
+            <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px] leading-5">
               <span className="shrink-0 font-black text-slate-700">{comment.name || comment.uin || "匿名"}</span>
+              <QQUinTag uin={comment.uin} />
               {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-400">{formatFullDateTime(comment.createdAt)}</span> : null}
             </p>
             <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">{comment.content || "（空）"}</p>
             {comment.replies && comment.replies.length > 0 ? (
               <div className="mt-1 grid gap-1 border-l-2 border-slate-200 pl-2">
                 {comment.replies.map((reply, replyIndex) => (
-                  <div key={`${reply.uin}-${replyIndex}`}>
-                    <span className="text-[11px] font-bold text-slate-600">{reply.name || reply.uin || "匿名"}：</span>
+                  <div key={`${reply.uin}-${replyIndex}`} className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                    <span className="text-[11px] font-bold text-slate-600">{reply.name || reply.uin || "匿名"}</span>
+                    <QQUinTag uin={reply.uin} />
+                    <span className="text-[11px] text-slate-400">：</span>
                     <span className="break-words text-[11px] leading-5 text-slate-700">{reply.content || "（空）"}</span>
                   </div>
                 ))}
@@ -1575,6 +1579,32 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
         </button>
       ) : null}
     </div>
+  );
+}
+
+function QQUinTag({ uin }: { uin?: string | null }) {
+  const value = uin?.trim();
+  if (!value) {
+    return null;
+  }
+  async function copyUin() {
+    try {
+      await navigator.clipboard.writeText(value!);
+      toast.success(`已复制 QQ 号 ${value}`);
+    } catch {
+      toast.error("复制失败，请手动选择复制");
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copyUin}
+      title="点击复制 QQ 号"
+      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-slate-200/70 px-1 py-0.5 font-mono text-[10px] font-bold text-slate-500 transition-colors hover:bg-blue-100 hover:text-blue-600"
+    >
+      {value}
+      <CopyIcon className="size-2.5" />
+    </button>
   );
 }
 
