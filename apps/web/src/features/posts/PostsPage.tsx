@@ -2,12 +2,16 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertCircleIcon,
   CheckIcon,
   ClockIcon,
+  EyeIcon,
   EyeOffIcon,
   FileTextIcon,
   HashIcon,
+  HeartIcon,
   ImageIcon,
+  MessageCircleIcon,
   RotateCcwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -1192,6 +1196,8 @@ function ReviewCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact />
 
+        <QZoneStatsBlock stats={post.qzoneStats} />
+
         {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
         {canApproveRecall && post.recallIgnored ? <IgnoredRecallBlock ignoredAt={post.recallIgnoredAt} /> : null}
 
@@ -1334,6 +1340,8 @@ function PostCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} compact />
 
+        <QZoneStatsBlock stats={post.qzoneStats} />
+
         {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
@@ -1455,6 +1463,56 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: 
   );
 }
 
+function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
+  if (!stats) {
+    return null;
+  }
+
+  const hasCounts = stats.visitorCount !== null || stats.likeCount !== null || stats.commentCount !== null;
+  const hasLogs = stats.logs.length > 0;
+  if (!hasCounts && !hasLogs) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-md border border-slate-100 bg-white px-2.5 py-2">
+      {hasCounts ? (
+        <div className="grid grid-cols-3 gap-1.5 text-xs">
+          <QZoneMetricItem icon={EyeIcon} label="访客" value={stats.visitorCount} />
+          <QZoneMetricItem icon={HeartIcon} label="点赞" value={stats.likeCount} />
+          <QZoneMetricItem icon={MessageCircleIcon} label="评论" value={stats.commentCount} />
+        </div>
+      ) : null}
+      {stats.checkedAt ? <p className="mt-1.5 text-[11px] font-semibold text-slate-500">更新 {formatFullDateTime(stats.checkedAt)}</p> : null}
+      {hasLogs ? (
+        <div className="mt-2 grid gap-1.5">
+          {stats.logs.map((log) => (
+            <div key={`${log.qzoneTid}-${log.targetName}`} className="flex gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold leading-5 text-amber-900">
+              <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 break-words">
+                {log.targetName}：{log.message}
+                {log.checkedAt ? `（${formatFullDateTime(log.checkedAt)}）` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function QZoneMetricItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number | null }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5">
+      <p className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+        <Icon className="size-3.5" />
+        {label}
+      </p>
+      <p className="mt-0.5 truncate text-sm font-black text-slate-900">{formatMetricCount(value)}</p>
+    </div>
+  );
+}
+
 function RecallReasonBlock({ reason }: { reason?: string | null }) {
   return (
     <div className="rounded-md border border-violet-200 bg-violet-50 p-3 dark:border-violet-900/60 dark:bg-violet-950/30">
@@ -1568,6 +1626,16 @@ function formatPostDate(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatMetricCount(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "--";
+  }
+  if (value >= 10000) {
+    return `${(value / 10000).toFixed(value >= 100000 ? 0 : 1)}万`;
+  }
+  return new Intl.NumberFormat("zh-CN").format(value);
 }
 
 function formatFullDateTime(value: string): string {

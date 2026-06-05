@@ -241,6 +241,7 @@ model Post {
   author          User             @relation(fields: [authorId], references: [id])
   logs            PostLog[]
   publishAttempts PublishAttempt[]
+  qzonePostMetrics QZonePostMetric[]
   aiAnalyses      PostAiAnalysis[]
   aiBackfillItems AiBackfillItem[]
 
@@ -364,9 +365,35 @@ model PublishAttempt {
   updatedAt       DateTime             @updatedAt
   post            Post                 @relation(fields: [postId], references: [id], onDelete: Cascade)
   publishTarget   PublishTarget        @relation(fields: [publishTargetId], references: [id], onDelete: Cascade)
+  qzonePostMetrics QZonePostMetric[]
 
   @@unique([postId, publishTargetId])
   @@index([tenantId, status, nextRunAt])
+}
+
+model QZonePostMetric {
+  id               String         @id @default(uuid())
+  tenantId         String
+  postId           String
+  publishAttemptId String         @unique
+  publishTargetId  String
+  botAccountId     String
+  qzoneTid         String
+  visitorCount     Int?
+  likeCount        Int?
+  commentCount     Int?
+  forwardCount     Int?
+  lastError        String?
+  lastVerbose      Json?
+  checkedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  post             Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  publishAttempt   PublishAttempt @relation(fields: [publishAttemptId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, postId])
+  @@index([tenantId, checkedAt])
+  @@index([botAccountId, checkedAt])
 }
 
 model BanRecord {

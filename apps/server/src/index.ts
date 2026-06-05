@@ -9,6 +9,7 @@ import { createRuntimeQueue } from "./runtime/queue";
 import { OneBotRuntime } from "./runtime/onebot";
 import { recoverAiBackfillJobs, registerCampusModelingWorker } from "./runtime/campus-modeling";
 import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publishing";
+import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from "./runtime/qzone-post-metrics";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAiRoutes } from "./routes/ai";
@@ -51,6 +52,7 @@ const queue = createRuntimeQueue({
 });
 const oneBot = new OneBotRuntime(queue, app.log, config);
 registerPublishingWorker(queue, app.log, config, oneBot);
+registerQZonePostMetricWorker(queue, app.log);
 registerCampusModelingWorker(queue, app.log);
 
 await registerOneBotRoutes(app, oneBot);
@@ -93,10 +95,12 @@ await recoverPublishAttempts(queue, app.log);
 await recoverAiBackfillJobs(queue, app.log);
 const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
 const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: app.log, config });
+const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();
   stopTenantLifecycleScheduler();
+  stopQZonePostMetricScheduler();
 });
 
 await app.listen({

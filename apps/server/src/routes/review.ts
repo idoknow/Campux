@@ -82,6 +82,25 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             },
             take: 1,
           },
+          qzonePostMetrics: {
+            include: {
+              publishAttempt: {
+                select: {
+                  publishTarget: {
+                    select: {
+                      displayName: true,
+                      botAccount: {
+                        select: {
+                          displayName: true,
+                          qqUin: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         orderBy: {
           createdAt: "desc",
