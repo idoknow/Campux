@@ -95,6 +95,7 @@ model User {
   oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
   aiBackfillBatches AiBackfillBatch[]
+  postFollows PostFollow[]
 }
 
 model EmailVerificationCode {
@@ -245,10 +246,28 @@ model Post {
   qzonePostMetrics QZonePostMetric[]
   aiAnalyses      PostAiAnalysis[]
   aiBackfillItems AiBackfillItem[]
+  follows         PostFollow[]
 
   @@unique([tenantId, displayId])
   @@unique([tenantId, legacyDisplayId])
   @@index([tenantId, status, createdAt])
+}
+
+model PostFollow {
+  id                     String   @id @default(uuid())
+  tenantId               String
+  postId                 String
+  userId                 String
+  lastPushedAt           DateTime?
+  lastPushedCommentCount Int      @default(0)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  post                   Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId])
+  @@index([postId])
 }
 
 model PostLog {

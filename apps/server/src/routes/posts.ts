@@ -427,6 +427,15 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             },
             take: 1,
           },
+          follows: {
+            where: {
+              userId: context.user.id,
+            },
+            select: {
+              id: true,
+            },
+            take: 1,
+          },
           qzonePostMetrics: {
             include: {
               publishAttempt: {
@@ -635,5 +644,60 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     return {
       post: toPostListItem(updated),
     };
+  });
+
+  app.post("/api/posts/:id/follow", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+        authorId: context.user.id,
+      },
+      select: {
+        id: true,
+        qzonePostMetrics: {
+          select: {
+            commentCount: true,
+          },
+        },
+      },
+    });
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在或不是你的稿件" });
+    }
+    const currentCommentCount = post.qzonePostMetrics.reduce((sum, metric) => sum + (metric.commentCount ?? 0), 0);
+    await prisma.postFollow.upsert({
+      where: {
+        postId_userId: {
+          postId: post.id,
+          userId: context.user.id,
+        },
+      },
+      create: {
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        userId: context.user.id,
+        // Seed the baseline at the current comment count so the first scheduled
+        // push only reports comments that arrive after the user starts following.
+        lastPushedCommentCount: currentCommentCount,
+      },
+      update: {},
+    });
+    return { following: true };
+  });
+
+  app.delete("/api/posts/:id/follow", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const params = postParamsSchema.parse(request.params);
+    await prisma.postFollow.deleteMany({
+      where: {
+        postId: params.id,
+        userId: context.user.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+    return { following: false };
   });
 }
