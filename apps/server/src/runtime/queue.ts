@@ -5,6 +5,7 @@ export type RuntimeJobName =
   | "notifyPostCancelled"
   | "notifyReviewResult"
   | "publishPost"
+  | "refreshQZonePostMetric"
   | "aiAnalyzePost"
   | "refreshSchoolModel"
   | "aiBackfillBatch"

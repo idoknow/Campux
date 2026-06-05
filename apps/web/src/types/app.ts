@@ -151,6 +151,31 @@ export type PostItem = {
   createdAt: string;
   updatedAt: string;
   recallReason: string | null;
+  qzoneStats: {
+    visitorCount: number | null;
+    likeCount: number | null;
+    commentCount: number | null;
+    checkedAt: string | null;
+    targets: Array<{
+      targetName: string;
+      botName: string | null;
+      botQqUin: string | null;
+      qzoneTid: string;
+      visitorCount: number | null;
+      likeCount: number | null;
+      commentCount: number | null;
+      checkedAt: string | null;
+      lastError: string | null;
+    }>;
+    logs: Array<{
+      targetName: string;
+      botName: string | null;
+      botQqUin: string | null;
+      qzoneTid: string;
+      message: string;
+      checkedAt: string | null;
+    }>;
+  } | null;
 };
 
 export type ReviewPostItem = PostItem & {
