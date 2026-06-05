@@ -856,6 +856,56 @@ async function updatePostAggregateStatus(postId: string, tenantId: string, oldSt
       },
     },
   });
+
+  if (newStatus === "published") {
+    await autoFollowOwnPostOnPublish(postId, tenantId).catch(() => undefined);
+  }
+}
+
+/**
+ * When a post first becomes published, auto-subscribe its author to comment
+ * digests if the author has the "自动关注对我的稿件评论" preference enabled
+ * (default true). Mirrors the manual follow endpoint: idempotent upsert keyed by
+ * (postId, userId), seeding the baseline at the current comment count so the
+ * first scheduled digest only reports comments arriving after publication.
+ */
+async function autoFollowOwnPostOnPublish(postId: string, tenantId: string) {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    select: {
+      id: true,
+      authorId: true,
+      author: {
+        select: {
+          autoFollowOwnPosts: true,
+        },
+      },
+      qzonePostMetrics: {
+        select: {
+          commentCount: true,
+        },
+      },
+    },
+  });
+  if (!post || !post.author.autoFollowOwnPosts) {
+    return;
+  }
+  const currentCommentCount = post.qzonePostMetrics.reduce((sum, metric) => sum + (metric.commentCount ?? 0), 0);
+  await prisma.postFollow.upsert({
+    where: {
+      postId_userId: {
+        postId: post.id,
+        userId: post.authorId,
+      },
+    },
+    create: {
+      tenantId,
+      postId: post.id,
+      userId: post.authorId,
+      lastPushedCommentCount: currentCommentCount,
+    },
+    update: {},
+  });
 }
 
 function getImageUrls(attachments: unknown) {

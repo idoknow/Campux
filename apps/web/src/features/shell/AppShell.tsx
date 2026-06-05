@@ -118,9 +118,11 @@ export function AppShell({
                 activeTab={postsTab}
                 minePagination={postsPagination}
                 mineLoading={dataLoading}
+                autoFollowOwnPosts={me.user.autoFollowOwnPosts}
                 onMinePageChange={onPostsPageChange}
                 onTabChange={onPostsTabChange}
                 onRefresh={onRefreshTenantData}
+                onRefreshMe={onRefreshMe}
               />
             </TabsContent>
 
