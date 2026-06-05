@@ -72,7 +72,7 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
   let hasCounts = false;
   let checkedAtTime: number | null = null;
   const targets = metrics.map((metric) => {
-    if (metric.likeCount !== null || metric.commentCount !== null || (metric.forwardCount ?? null) !== null) {
+    if (metric.visitorCount !== null || metric.likeCount !== null || metric.commentCount !== null || (metric.forwardCount ?? null) !== null) {
       hasCounts = true;
     }
     totals.visitorCount += metric.visitorCount ?? 0;
@@ -97,8 +97,7 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
   });
 
   return {
-    // QZone 已不再返回单条说说访客/浏览量，visitorCount 恒为 null。
-    visitorCount: null,
+    visitorCount: hasCounts ? totals.visitorCount : null,
     likeCount: hasCounts ? totals.likeCount : null,
     commentCount: hasCounts ? totals.commentCount : null,
     forwardCount: hasCounts ? totals.forwardCount : null,

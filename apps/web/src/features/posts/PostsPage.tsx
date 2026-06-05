@@ -5,6 +5,7 @@ import {
   AlertCircleIcon,
   CheckIcon,
   ClockIcon,
+  EyeIcon,
   EyeOffIcon,
   FileTextIcon,
   HashIcon,
@@ -1468,35 +1469,62 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
     return null;
   }
 
-  const hasCounts = stats.likeCount !== null || stats.commentCount !== null || stats.forwardCount !== null;
-  const hasLogs = stats.logs.length > 0;
-  if (!hasCounts && !hasLogs) {
+  const targets = stats.targets ?? [];
+  const hasAnything = targets.length > 0;
+  if (!hasAnything) {
     return null;
   }
 
+  const multi = targets.length > 1;
+
   return (
-    <div className="rounded-md border border-slate-100 bg-white px-2.5 py-2">
-      {hasCounts ? (
-        <div className="grid grid-cols-3 gap-1.5 text-xs">
-          <QZoneMetricItem icon={HeartIcon} label="点赞" value={stats.likeCount} />
-          <QZoneMetricItem icon={MessageCircleIcon} label="评论" value={stats.commentCount} />
-          <QZoneMetricItem icon={Share2Icon} label="转发" value={stats.forwardCount} />
-        </div>
-      ) : null}
-      {stats.checkedAt ? <p className="mt-1.5 text-[11px] font-semibold text-slate-500">更新 {formatFullDateTime(stats.checkedAt)}</p> : null}
-      {hasLogs ? (
-        <div className="mt-2 grid gap-1.5">
-          {stats.logs.map((log) => (
-            <div key={`${log.qzoneTid}-${log.targetName}`} className="flex gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold leading-5 text-amber-900">
+    <div className="grid gap-1.5">
+      {targets.map((target) => {
+        const hasCounts =
+          target.visitorCount !== null || target.likeCount !== null || target.commentCount !== null || target.forwardCount !== null;
+        const key = `${target.qzoneTid}-${target.targetName}`;
+
+        if (target.lastError) {
+          return (
+            <div
+              key={key}
+              className="flex gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold leading-5 text-amber-900"
+            >
               <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0 break-words">
-                {log.targetName}：{log.message}
-                {log.checkedAt ? `（${formatFullDateTime(log.checkedAt)}）` : ""}
+                {multi ? `${target.botName ?? target.targetName}：` : ""}
+                {target.lastError}
+                {target.checkedAt ? `（${formatFullDateTime(target.checkedAt)}）` : ""}
               </span>
             </div>
-          ))}
-        </div>
-      ) : null}
+          );
+        }
+
+        if (!hasCounts) {
+          return null;
+        }
+
+        return (
+          <div key={key} className="rounded-md border border-slate-100 bg-white px-2.5 py-2">
+            {multi ? (
+              <p className="mb-1.5 flex items-center gap-1 truncate text-[11px] font-black text-slate-600">
+                <Share2Icon className="size-3 shrink-0 text-slate-400" />
+                {target.botName ?? target.targetName}
+                {target.botQqUin ? <span className="font-medium text-slate-400">· {target.botQqUin}</span> : null}
+              </p>
+            ) : null}
+            <div className="grid grid-cols-4 gap-1.5 text-xs">
+              <QZoneMetricItem icon={EyeIcon} label="浏览" value={target.visitorCount} />
+              <QZoneMetricItem icon={HeartIcon} label="点赞" value={target.likeCount} />
+              <QZoneMetricItem icon={MessageCircleIcon} label="评论" value={target.commentCount} />
+              <QZoneMetricItem icon={Share2Icon} label="转发" value={target.forwardCount} />
+            </div>
+            {target.checkedAt ? (
+              <p className="mt-1.5 text-[11px] font-semibold text-slate-500">更新 {formatFullDateTime(target.checkedAt)}</p>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
