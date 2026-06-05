@@ -98,6 +98,7 @@ export function App() {
   const hostTenant = authContext.currentTenant;
   const selectedTenant = me?.authenticated ? me.currentTenant : (hostTenant ?? tenants[0]);
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
+  const defaultPostsTab: PostsTab = currentRole && canAccess(currentRole, "reviewer") ? "review" : "mine";
   const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
   const activeLogoUrl = (me?.authenticated ? selectedTenant?.logoUrl : hostTenant?.logoUrl)?.trim() || "/logo.svg";
   const availableNavItems = useMemo(() => {
@@ -570,7 +571,7 @@ export function App() {
       busy={busy}
       dataLoading={tenantDataLoading}
       postText={postText}
-      postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? "mine" : "mine"}
+      postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? defaultPostsTab : defaultPostsTab}
       postsPagination={postsPagination}
       anonymous={anonymous}
       pendingAttachments={pendingAttachments}
@@ -624,7 +625,10 @@ function routeFromPath(pathname: string): AppRoute {
     return { kind: "oauth", search: window.location.search };
   }
 
-  const matchedPostsTab = (Object.entries(postsTabPaths) as Array<[PostsTab, string]>).find(([, path]) => path === normalized)?.[0];
+  // Note: "/posts" (the bare posts path) intentionally resolves without an
+  // explicit subTab so the default tab can be role-aware (reviewers land on the
+  // review tab). Only the explicit "/posts/review" deep link forces a subTab.
+  const matchedPostsTab = (Object.entries(postsTabPaths) as Array<[PostsTab, string]>).find(([tab, path]) => path === normalized && tab !== "mine")?.[0];
   if (matchedPostsTab) {
     return { kind: "tenant", tab: "posts", subTab: matchedPostsTab };
   }

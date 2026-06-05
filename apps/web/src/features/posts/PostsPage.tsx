@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -164,9 +165,11 @@ export function PostsPage({
   activeTab,
   minePagination,
   mineLoading,
+  autoFollowOwnPosts,
   onMinePageChange,
   onTabChange,
   onRefresh,
+  onRefreshMe,
 }: {
   tenantId: string;
   posts: PostItem[];
@@ -174,9 +177,11 @@ export function PostsPage({
   activeTab: PostsTab;
   minePagination: Pagination;
   mineLoading: boolean;
+  autoFollowOwnPosts: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
+  onRefreshMe: () => Promise<void>;
 }) {
   const canReview = canAccess(currentRole, "reviewer");
   const isAdmin = canAccess(currentRole, "admin");
@@ -194,6 +199,7 @@ export function PostsPage({
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [busyRecallPostId, setBusyRecallPostId] = useState("");
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
+  const [autoFollowBusy, setAutoFollowBusy] = useState(false);
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
     open: false,
     postId: "",
@@ -344,6 +350,22 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "操作失败");
     } finally {
       setBusyFollowPostId("");
+    }
+  }
+
+  async function setAutoFollowOwnPosts(enabled: boolean) {
+    setAutoFollowBusy(true);
+    try {
+      await api("/api/me/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ autoFollowOwnPosts: enabled }),
+      });
+      toast.success(enabled ? "已开启：新稿件发出后会自动关注评论。" : "已关闭自动关注。");
+      await onRefreshMe();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "设置失败");
+    } finally {
+      setAutoFollowBusy(false);
     }
   }
 
@@ -576,18 +598,25 @@ export function PostsPage({
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="min-h-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <TabsList className={postTabsListClassName}>
-            <TabsTrigger value="mine" className={postTabsTriggerClassName}>
-              你的稿件
-            </TabsTrigger>
             {canReview ? (
               <TabsTrigger value="review" className={postTabsTriggerClassName}>
                 审核稿件
               </TabsTrigger>
             ) : null}
+            <TabsTrigger value="mine" className={postTabsTriggerClassName}>
+              你的稿件
+            </TabsTrigger>
           </TabsList>
-          <Button variant="outline" size="sm" disabled={mineLoading || reviewLoading || pendingRecallLoading} onClick={() => void refreshAll()}>
-            刷新
-          </Button>
+          <div className="flex items-center gap-3">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-500" title="开启后，你的每条稿件发布成功时会自动关注其评论，新评论每 12 小时私信提醒你">
+              <Switch checked={autoFollowOwnPosts} disabled={autoFollowBusy} onCheckedChange={(value) => void setAutoFollowOwnPosts(value)} />
+              <span className="hidden sm:inline">自动关注对我的稿件评论</span>
+              <span className="sm:hidden">自动关注</span>
+            </label>
+            <Button variant="outline" size="sm" disabled={mineLoading || reviewLoading || pendingRecallLoading} onClick={() => void refreshAll()}>
+              刷新
+            </Button>
+          </div>
         </div>
         <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           {mineLoading ? (

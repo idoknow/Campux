@@ -85,6 +85,7 @@ model User {
   displayName String?
   passwordHash String
   passwordChangeRequired Boolean @default(false)
+  autoFollowOwnPosts Boolean       @default(true)
   isTestAccount Boolean           @default(false)
   systemRole  SystemRole?
   createdAt   DateTime           @default(now())

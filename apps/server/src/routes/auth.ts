@@ -18,6 +18,10 @@ const loginSchema = z.object({
 
 const emailSchema = z.string().trim().email("邮箱格式不正确").max(255);
 
+const updateMeSettingsSchema = z.object({
+  autoFollowOwnPosts: z.boolean().optional(),
+});
+
 const requestRegisterCodeSchema = z.object({
   email: emailSchema,
 });
@@ -379,6 +383,22 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       needsTenantSelection,
       hostLocked: Boolean(context.hostTenant),
     };
+  });
+
+  app.patch("/api/me/settings", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const body = updateMeSettingsSchema.parse(request.body ?? {});
+    if (body.autoFollowOwnPosts === undefined) {
+      return { user: toPublicUser(context.user) };
+    }
+    const user = await prisma.user.update({
+      where: { id: context.user.id },
+      data: { autoFollowOwnPosts: body.autoFollowOwnPosts },
+    });
+    return { user: toPublicUser(user) };
   });
 
   app.post("/api/session/tenant", async (request, reply) => {
