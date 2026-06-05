@@ -7,6 +7,7 @@ import { decryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
 import { buildUserContainsSearch, findUserIdsByContainsSearch } from "../lib/user-search";
 import { defaultPublishIntervalSeconds, enqueueAttempt, resumePublishAttemptsWaitingForCookies, schedulePublishAttempt } from "../runtime/publishing";
+import { pushFollowedPostCommentDigestForPost } from "../runtime/followed-post-comments";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
 import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
@@ -1136,6 +1137,48 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
 
     return {
       ok: true,
+    };
+  });
+
+  // Manually push the followed-post comment digest to a post's author(s) right
+  // now, bypassing the twice-daily Beijing-hour scheduler gate. Use after a
+  // fresh comment collection to notify the author on demand. Idempotent against
+  // the baseline (lastPushedCommentCount), so calling it repeatedly won't
+  // re-report the same comments; delivery still requires an online tenant bot.
+  app.post("/api/admin/posts/:id/comment-digest/push", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+
+    if (!oneBot) {
+      return reply.code(503).send({ message: "OneBot 运行时不可用" });
+    }
+
+    const result = await pushFollowedPostCommentDigestForPost(post.id, oneBot, app.log);
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "post.comment_digest.push",
+      targetType: "post",
+      targetId: post.id,
+    });
+
+    return {
+      ok: true,
+      follows: result.follows,
+      pushed: result.pushed,
     };
   });
 }
