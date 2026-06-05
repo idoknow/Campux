@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
+import { buildBotFriendDailySeries, buildBotFriendTargetSeries } from "../lib/bot-friend-stats";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const chinaTimezoneOffsetHours = 8;
@@ -35,6 +36,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
       auditGroups,
       memberships,
       qzoneVisitorSnapshots,
+      botFriendSnapshots,
     ] = await Promise.all([
       prisma.post.findMany({
         where: { tenantId },
@@ -193,6 +195,18 @@ export function registerStatsRoutes(app: FastifyInstance) {
         },
         orderBy: { date: "asc" },
       }),
+      prisma.botFriendSnapshot.findMany({
+        where: {
+          tenantId,
+          date: { gte: sinceRange },
+        },
+        select: {
+          botAccountId: true,
+          date: true,
+          friendCount: true,
+        },
+        orderBy: { date: "asc" },
+      }),
     ]);
 
     const postById = new Map(posts.map((post) => [post.id, post]));
@@ -338,6 +352,19 @@ export function registerStatsRoutes(app: FastifyInstance) {
             botAccountId: target.botAccountId,
             botDisplayName: target.botAccount.displayName,
             botQqUin: target.botAccount.qqUin.toString(),
+          })),
+          sinceRange,
+          now,
+        ),
+      },
+      botFriends: {
+        daily: buildBotFriendDailySeries(botFriendSnapshots, sinceRange, now),
+        bots: buildBotFriendTargetSeries(
+          botFriendSnapshots,
+          bots.map((bot) => ({
+            botAccountId: bot.id,
+            botDisplayName: bot.displayName,
+            botQqUin: bot.qqUin.toString(),
           })),
           sinceRange,
           now,

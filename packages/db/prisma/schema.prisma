@@ -75,6 +75,7 @@ model Tenant {
   postAiAnalyses PostAiAnalysis[]
   aiBackfillBatches AiBackfillBatch[]
   qzoneVisitorSnapshots QZoneVisitorSnapshot[]
+  botFriendSnapshots BotFriendSnapshot[]
 }
 
 model User {
@@ -284,6 +285,7 @@ model BotAccount {
   publishTargets PublishTarget[]
   sessions       BotSession[]
   qzoneVisitorSnapshots QZoneVisitorSnapshot[]
+  friendSnapshots BotFriendSnapshot[]
 
   @@unique([tenantId, qqUin])
   @@unique([qqUin])
@@ -320,6 +322,23 @@ model QZoneVisitorSnapshot {
   date         DateTime
   todayCount   Int
   totalCount   Int
+  checkedAt    DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botAccount   BotAccount @relation(fields: [botAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([botAccountId, date])
+  @@index([tenantId, date])
+  @@index([botAccountId, checkedAt])
+}
+
+model BotFriendSnapshot {
+  id           String     @id @default(uuid())
+  tenantId     String
+  botAccountId String
+  date         DateTime
+  friendCount  Int
   checkedAt    DateTime   @default(now())
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt

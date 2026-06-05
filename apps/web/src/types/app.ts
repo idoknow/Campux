@@ -638,6 +638,17 @@ export type TenantStats = {
       daily: Array<{ date: string; todayCount: number; totalCount: number }>;
     }>;
   };
+  botFriends: {
+    daily: Array<{ date: string; friendCount: number }>;
+    bots: Array<{
+      botAccountId: string;
+      bot: {
+        displayName: string;
+        qqUin: string;
+      };
+      daily: Array<{ date: string; friendCount: number }>;
+    }>;
+  };
   bots: Array<{
     id: string;
     qqUin: string;
