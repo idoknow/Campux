@@ -113,6 +113,7 @@ export type QZoneCommentReply = {
   uin: string;
   name: string;
   content: string;
+  images: string[];
   createdAt: string | null;
 };
 
@@ -120,6 +121,7 @@ export type QZoneComment = {
   uin: string;
   name: string;
   content: string;
+  images: string[];
   createdAt: string | null;
   replies: QZoneCommentReply[];
 };
@@ -989,6 +991,7 @@ export function parseQZoneCommentList(parsed: unknown): QZoneComment[] {
         uin: r.uin !== undefined && r.uin !== null ? String(r.uin) : "",
         name: typeof r.name === "string" ? r.name : "",
         content: cleanQZoneCommentContent(r.content),
+        images: extractQZoneCommentImages(r),
         createdAt: qzoneCommentTime(r),
       });
     }
@@ -996,6 +999,7 @@ export function parseQZoneCommentList(parsed: unknown): QZoneComment[] {
       uin: c.uin !== undefined && c.uin !== null ? String(c.uin) : "",
       name: typeof c.name === "string" ? c.name : "",
       content: cleanQZoneCommentContent(c.content),
+      images: extractQZoneCommentImages(c),
       createdAt: qzoneCommentTime(c),
       replies,
     });
@@ -1023,6 +1027,49 @@ function cleanQZoneCommentContent(value: unknown): string {
     .replace(/@\{uin:\d+,nick:([^,}]*)[^}]*\}/g, "@$1")
     .replace(/\[em\]e\d+\[\/em\]/g, "[表情]")
     .trim();
+}
+
+// 图片评论的正文为空，图片在 pic[]（b_url/o_url/hd_url/s_url）或 rich_info[].burl 中。
+// 历史上解析器只取了 content，导致图片评论显示成「(空)」。这里把图片 URL 提取出来。
+function extractQZoneCommentImages(record: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  const pushUrl = (value: unknown) => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed && /^https?:\/\//i.test(trimmed) && !urls.includes(trimmed)) {
+        urls.push(trimmed);
+      }
+    }
+  };
+  const pics = Array.isArray(record.pic) ? record.pic : [];
+  for (const pic of pics) {
+    if (!pic || typeof pic !== "object") {
+      continue;
+    }
+    const p = pic as Record<string, unknown>;
+    // 优先大图，依次回退到高清/原图/缩略图。
+    const candidate = p.b_url ?? p.o_url ?? p.hd_url ?? p.url1 ?? p.url2 ?? p.url3 ?? p.smallurl ?? p.s_url;
+    if (candidate !== undefined) {
+      pushUrl(candidate);
+    } else {
+      // 兜底：取该 pic 对象里第一个 http(s) 字段。
+      for (const value of Object.values(p)) {
+        if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) {
+          pushUrl(value);
+          break;
+        }
+      }
+    }
+  }
+  // rich_info[].burl 作为补充来源（与 pic 去重）。
+  const richInfo = Array.isArray(record.rich_info) ? record.rich_info : [];
+  for (const item of richInfo) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    pushUrl((item as Record<string, unknown>).burl);
+  }
+  return urls;
 }
 
 // qz_opcnt2（带 appid=311）返回 data[0].current.newdata = { LIKE, PRD, PVS, CS, ZS, ... }。

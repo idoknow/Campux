@@ -33,6 +33,42 @@ describe("qzone comment list parsing", () => {
     expect(comments[0].replies[0].content).toBe("@合纵学到了");
   });
 
+  test("extracts image comments (empty content + pic[]/rich_info)", () => {
+    const comments = parseQZoneCommentList({
+      code: 0,
+      commentlist: [
+        {
+          uin: 2206891648,
+          name: "tear.",
+          content: "",
+          create_time: 1780204565,
+          pic: [
+            {
+              b_url: "https://photogzmaz.photo.store.qq.com/psc?/big.jpg",
+              o_url: "https://photogzmaz.photo.store.qq.com/psc?/orig.jpg",
+              s_url: "https://photogzmaz.photo.store.qq.com/psc?/small.jpg",
+            },
+          ],
+          rich_info: [{ burl: "https://photogzmaz.photo.store.qq.com/psc?/big.jpg", type: 1 }],
+          list_3: [
+            {
+              uin: 1623746337,
+              name: "好好学地理",
+              content: "了解详情后继续添加就好了",
+              create_time: 1780204862,
+              pic: [{ b_url: "https://photogzmaz.photo.store.qq.com/psc?/reply.jpg" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(comments).toHaveLength(1);
+    expect(comments[0].content).toBe("");
+    // 优先 b_url，并与 rich_info 去重。
+    expect(comments[0].images).toEqual(["https://photogzmaz.photo.store.qq.com/psc?/big.jpg"]);
+    expect(comments[0].replies[0].images).toEqual(["https://photogzmaz.photo.store.qq.com/psc?/reply.jpg"]);
+  });
+
   test("returns empty array when no commentlist", () => {
     expect(parseQZoneCommentList({ code: 0 })).toEqual([]);
   });
