@@ -61,6 +61,26 @@ export function LoadingBlock({ title = "正在加载..." }: { title?: string }) 
   );
 }
 
+function buildPageItems(current: number, pageCount: number): (number | "ellipsis-start" | "ellipsis-end")[] {
+  if (pageCount <= 7) {
+    return Array.from({ length: pageCount }, (_, i) => i + 1);
+  }
+  const items: (number | "ellipsis-start" | "ellipsis-end")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(pageCount - 1, current + 1);
+  if (start > 2) {
+    items.push("ellipsis-start");
+  }
+  for (let page = start; page <= end; page += 1) {
+    items.push(page);
+  }
+  if (end < pageCount - 1) {
+    items.push("ellipsis-end");
+  }
+  items.push(pageCount);
+  return items;
+}
+
 export function PaginationControls({
   pagination,
   busy,
@@ -70,16 +90,36 @@ export function PaginationControls({
   busy?: boolean;
   onPageChange: (page: number) => void;
 }) {
+  const { page, pageCount } = pagination;
+  const pageItems = pageCount > 1 ? buildPageItems(page, pageCount) : [];
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 pt-3 text-xs font-bold text-slate-500">
       <span>
-        第 {pagination.page} / {pagination.pageCount} 页，共 {pagination.total} 条
+        第 {page} / {pageCount} 页，共 {pagination.total} 条
       </span>
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" disabled={busy || pagination.page <= 1} onClick={() => onPageChange(pagination.page - 1)}>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button variant="outline" size="sm" disabled={busy || page <= 1} onClick={() => onPageChange(page - 1)}>
           上一页
         </Button>
-        <Button variant="outline" size="sm" disabled={busy || pagination.page >= pagination.pageCount} onClick={() => onPageChange(pagination.page + 1)}>
+        {pageItems.map((item) =>
+          typeof item === "number" ? (
+            <Button
+              key={item}
+              variant={item === page ? "default" : "outline"}
+              size="sm"
+              className="min-w-9 px-2"
+              disabled={busy || item === page}
+              onClick={() => onPageChange(item)}
+            >
+              {item}
+            </Button>
+          ) : (
+            <span key={item} className="px-1 text-slate-400 select-none">
+              …
+            </span>
+          ),
+        )}
+        <Button variant="outline" size="sm" disabled={busy || page >= pageCount} onClick={() => onPageChange(page + 1)}>
           下一页
         </Button>
       </div>
