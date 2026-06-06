@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
-import { uploadVideoToGif, downloadGifBlob, ScdnApiError, SCDN_MAX_VIDEO_SIZE } from "@/lib/scdn-api";
+import { uploadVideoToGif, ScdnApiError, SCDN_MAX_VIDEO_SIZE } from "@/lib/scdn-api";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
@@ -52,17 +52,16 @@ export function usePendingAttachments() {
         );
       });
 
-      // Step 2: Download the GIF blob from the returned URL
-      const gifBlob = await downloadGifBlob(uploadData.url);
+      // Step 2: Keep the GIF URL — the backend will download it from the CDN
+      // (browser fetch is blocked by CORS on the CloudFlare CN CDN domain)
+      const gifBlobUrl = uploadData.url;
 
-      // Create a File from the GIF blob
-      const gifFile = new File([gifBlob], file.name.replace(/\.[^.]+$/, ".gif"), {
+      // Create a placeholder file so the attachment is trackable
+      const gifFile = new File([""], file.name.replace(/\.[^.]+$/, ".gif"), {
         type: "image/gif",
       });
-      const gifBlobUrl = URL.createObjectURL(gifBlob);
-      blobUrlsRef.current.push(gifBlobUrl);
 
-      // Replace the attachment with the GIF version
+      // Replace the attachment with the GIF version (remote URL based)
       setPending((current) =>
         current.map((p) =>
           p.id === attachmentId
@@ -73,6 +72,7 @@ export function usePendingAttachments() {
                 status: "ready" as const,
                 progress: 100,
                 originalVideo: file,
+                remoteGifUrl: uploadData.url,
               }
             : p,
         ),

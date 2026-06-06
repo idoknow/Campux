@@ -39,6 +39,7 @@ export function createPostWithAttachments(
   anonymous: boolean,
   files: File[],
   onProgress?: (totalPercent: number) => void,
+  remoteGifUrls?: string[],
 ): Promise<CreatePostResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -82,6 +83,9 @@ export function createPostWithAttachments(
     formData.append("anonymous", String(anonymous));
     for (const file of files) {
       formData.append("images", file, file.name);
+    }
+    if (remoteGifUrls && remoteGifUrls.length > 0) {
+      formData.append("remoteGifUrls", JSON.stringify(remoteGifUrls));
     }
     xhr.send(formData);
   });

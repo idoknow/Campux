@@ -108,25 +108,8 @@ export async function uploadVideoToGif(
 }
 
 /**
- * 从 URL 下载 GIF Blob（用于将图床返回的 GIF 下载到本地后作为附件上传到 Campux 后端）
+ * GIF 下载由后端服务器完成（避免浏览器 CDN CORS 限制），
+ * 前端仅需将图床返回的 GIF URL 通过投稿接口传给后端。
+ *
+ * @see POST /api/posts — 使用 remoteGifUrls 字段
  */
-export async function downloadGifBlob(url: string): Promise<Blob> {
-  const response = await fetch(url, {
-    // 避免 CORS 限制，使用 no-cors 模式可能拿不到响应体，
-    // 故使用默认 same-origin 模式，依赖服务端允许跨域
-    mode: "cors",
-  });
-
-  if (!response.ok) {
-    throw new ScdnApiError(`下载 GIF 失败：${response.status} ${response.statusText}`);
-  }
-
-  const blob = await response.blob();
-
-  if (!blob.type.startsWith("image/") && !blob.type.startsWith("application/octet-stream")) {
-    // 允许 application/octet-stream，有些 CDN 返回该类型
-    throw new ScdnApiError(`下载内容不是图片类型：${blob.type}`);
-  }
-
-  return blob;
-}
