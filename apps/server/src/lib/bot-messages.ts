@@ -324,8 +324,10 @@ export function formatNewPostReviewNotification(
   qqUin: bigint | string,
   text: string,
   imageCount: number,
+  channel: "web" | "private" = "web",
 ): string[] {
   const attachmentSummary = imageCount > 0 ? `图片：${imageCount} 张` : "图片：0 张";
+  const channelLabel = channel === "private" ? "对话投稿" : "网页投稿";
   const authorLine = anonymous
     ? `投稿人：匿名（QQ ${qqUin.toString()}）`
     : `投稿人：${authorDisplay}（QQ ${qqUin.toString()}）`;
@@ -334,6 +336,7 @@ export function formatNewPostReviewNotification(
     `📮 ${tenantName} 新稿件`,
     `编号：#${displayId}`,
     authorLine,
+    `来源：${channelLabel}`,
     attachmentSummary,
     "",
     text,
