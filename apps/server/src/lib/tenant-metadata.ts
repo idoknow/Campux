@@ -63,6 +63,31 @@ export async function readTenantPendingPostLimit(client: MetadataClient, tenantI
   return normalizePendingPostLimit(entry?.value);
 }
 
+export const botStylishMessagesEnabledKey = "bot_stylish_messages_enabled";
+export const botStylishMessagesEnabledDefault = false;
+
+export function normalizeBotStylishMessagesEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return botStylishMessagesEnabledDefault;
+}
+
+export async function readTenantBotStylishMessagesEnabled(client: MetadataClient, tenantId: string): Promise<boolean> {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: botStylishMessagesEnabledKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizeBotStylishMessagesEnabled(entry?.value);
+}
+
 export async function readTenantImageCompression(client: MetadataClient, tenantId: string) {
   const entries = await client.tenantMetadata.findMany({
     where: {

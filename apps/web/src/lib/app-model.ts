@@ -32,6 +32,7 @@ export const defaultMetadata: TenantMetadata = {
     quality: 80,
     maxDimension: 2048,
   },
+  botStylishMessagesEnabled: false,
 };
 
 export const navItems = [

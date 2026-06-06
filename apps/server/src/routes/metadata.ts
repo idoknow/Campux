@@ -16,6 +16,8 @@ import {
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  botStylishMessagesEnabledKey,
+  normalizeBotStylishMessagesEnabled,
   readTenantImageCompression,
 } from "../lib/tenant-metadata";
 
@@ -29,6 +31,7 @@ const publicMetadataKeys = [
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  botStylishMessagesEnabledKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -50,6 +53,7 @@ const patchMetadataSchema = z.object({
   imageCompressionEnabled: z.boolean().optional(),
   imageCompressionQuality: z.number().int().min(40).max(95).optional(),
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
+  botStylishMessagesEnabled: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -77,6 +81,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
       quality: normalizeQuality(record[imageCompressionQualityKey]),
       maxDimension: normalizeMaxDimension(record[imageCompressionMaxDimensionKey]),
     },
+    botStylishMessagesEnabled: normalizeBotStylishMessagesEnabled(record[botStylishMessagesEnabledKey]),
   };
 }
 
@@ -292,6 +297,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.imageCompressionMaxDimension !== undefined) {
       updates.push({ key: imageCompressionMaxDimensionKey, value: body.imageCompressionMaxDimension });
+    }
+    if (body.botStylishMessagesEnabled !== undefined) {
+      updates.push({ key: botStylishMessagesEnabledKey, value: body.botStylishMessagesEnabled });
     }
 
     await prisma.$transaction(

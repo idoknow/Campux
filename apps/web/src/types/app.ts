@@ -115,6 +115,7 @@ export type TenantMetadata = {
     quality: number;
     maxDimension: number;
   };
+  botStylishMessagesEnabled: boolean;
 };
 
 export type PostAttachment = {

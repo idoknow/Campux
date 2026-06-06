@@ -20,13 +20,46 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
-import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
+import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { selectReviewNotificationBot } from "./notification-routing";
+import {
+  formatNewPostReviewNotification,
+  formatPostCancelled,
+  formatRecallRequestNotification,
+  formatPostRecalledGroup,
+  formatRecallSuccess,
+  formatRecallRejectedNotification,
+  formatRecallRejected,
+  formatRecallFailedNotification,
+  formatReviewApproved,
+  formatReviewRejected,
+  formatPublishSuccess,
+  formatPublishSuccessWithTarget,
+  formatPublishFailed,
+  publishFailedLoginHint,
+  formatPublishWaiting,
+  publishWaitingResumeHint,
+  formatCookiesInvalid,
+  formatCookiesAutoRefreshed,
+  formatCookiesRefreshed,
+  formatSubmissionSuccess,
+  formatRegisterSuccess,
+  formatRegisterAlready,
+  formatRegisterExtended,
+  formatResetPassword,
+  formatUndoText,
+  formatUndoImages,
+  formatQrLoginSuccess,
+  formatQrLoginTimeout,
+  formatReviewApprovedGroup,
+  formatReviewRejectedGroup,
+  formatRequeue,
+} from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
 type OneBotConnection = {
@@ -211,20 +244,15 @@ export class OneBotRuntime {
 
     const attachments = Array.isArray(post.attachments) ? post.attachments : [];
     const imageCount = attachments.filter((a: any) => a.kind === "image").length;
-    const attachmentSummary = imageCount > 0
-      ? `图片：${imageCount} 张`
-      : "图片：0 张";
-    const lines = [
-      `${post.tenant.name} 新稿件`,
-      `编号：#${post.displayId}`,
-      `投稿人：${post.anonymous ? `匿名（QQ ${post.author.qqUin.toString()}）` : `${post.author.displayName ?? "未命名"}（QQ ${post.author.qqUin.toString()}）`}`,
-      attachmentSummary,
-      "",
+    const lines = formatNewPostReviewNotification(
+      post.tenant.name,
+      post.displayId,
+      post.author.displayName ?? "未命名",
+      post.anonymous,
+      post.author.qqUin,
       post.text,
-      "",
-      `通过：#通过 ${post.displayId}`,
-      `拒绝：#拒绝 <理由> ${post.displayId}`,
-    ];
+      imageCount,
+    );
     const attachmentSegments = await this.loadPostAttachmentSegments(post.attachments);
     const message =
       attachmentSegments.length > 0
@@ -256,7 +284,8 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    await this.sendTenantReviewNotification(post.tenantId, `稿件已取消：#${post.displayId}`);
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    await this.sendTenantReviewNotification(post.tenantId, formatPostCancelled(post.displayId, stylishEnabled));
   }
 
   async notifyPostRecallRequested(postId: string) {
@@ -281,13 +310,15 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const lines = [
-      `稿件申请撤回：#${post.displayId}`,
-      `申请人：${post.author.displayName ?? "未命名用户"}（QQ ${post.author.qqUin.toString()}）`,
-      `理由：${readRecallReason(post.logs[0]?.comment) ?? "未填写"}`,
-      "审核员或管理员可在稿件页面同意撤回；同意后系统会把每个 QZone 发布目标设置为仅自己可见。",
-    ];
-    await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const message = formatRecallRequestNotification(
+      post.displayId,
+      post.author.displayName ?? "未命名用户",
+      post.author.qqUin,
+      readRecallReason(post.logs[0]?.comment) ?? "未填写",
+      stylishEnabled,
+    );
+    await this.sendTenantReviewNotification(post.tenantId, message);
   }
 
   async notifyPostRecalled(postId: string, targetCount: number, opts?: { skipAuthor?: boolean }) {
@@ -302,8 +333,9 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
     const groupSuffix = opts?.skipAuthor ? "\n（静默撤回，未通知作者）" : "";
-    await this.sendTenantReviewNotification(post.tenantId, `稿件已撤回：#${post.displayId}\n已处理发布目标：${targetCount} 个${groupSuffix}`);
+    await this.sendTenantReviewNotification(post.tenantId, formatPostRecalledGroup(post.displayId, targetCount, stylishEnabled) + groupSuffix);
 
     if (opts?.skipAuthor) {
       return;
@@ -319,7 +351,7 @@ export class OneBotRuntime {
       },
     });
     for (const bot of bots) {
-      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, `您的稿件 #${post.displayId} 已撤回。`).catch((error) => {
+      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, formatRecallSuccess(post.displayId, stylishEnabled)).catch((error) => {
         this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify post recalled");
       });
     }
@@ -337,7 +369,8 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    await this.sendTenantReviewNotification(post.tenantId, `撤回申请已拒绝：#${post.displayId}\n状态已恢复为已发表。\n理由：${reason}`);
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    await this.sendTenantReviewNotification(post.tenantId, formatRecallRejectedNotification(post.displayId, reason, stylishEnabled));
 
     const bots = await prisma.botAccount.findMany({
       where: {
@@ -349,7 +382,7 @@ export class OneBotRuntime {
       },
     });
     for (const bot of bots) {
-      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, `您的稿件 #${post.displayId} 撤回申请未通过。\n理由：${reason}`).catch((error) => {
+      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, formatRecallRejected(post.displayId, reason, stylishEnabled)).catch((error) => {
         this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify post recall rejected");
       });
     }
@@ -365,11 +398,13 @@ export class OneBotRuntime {
       return;
     }
     const failed = results.filter((result) => !result.ok);
-    const lines = [
-      `稿件撤回失败：#${post.displayId}`,
-      ...failed.map((result) => `${result.targetName}${result.qzoneTid ? ` / ${result.qzoneTid}` : ""}：${result.message}`),
-    ];
-    await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const message = formatRecallFailedNotification(post.displayId, failed.map((r) => ({
+      targetName: r.targetName,
+      qzoneTid: r.qzoneTid,
+      message: r.message,
+    })), stylishEnabled);
+    await this.sendTenantReviewNotification(post.tenantId, message);
   }
 
   async notifyReviewResult(postId: string, status: "approved" | "rejected", comment?: string | null) {
@@ -394,9 +429,10 @@ export class OneBotRuntime {
         createdAt: "asc",
       },
     });
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
     const message = status === "approved"
-      ? `您的稿件 #${post.displayId} 已通过审核`
-      : `您的稿件 #${post.displayId} 未通过审核，原因：${comment?.trim() || "审核拒绝"}`;
+      ? formatReviewApproved(post.displayId, stylishEnabled)
+      : formatReviewRejected(post.displayId, comment?.trim() || "审核拒绝", stylishEnabled);
 
     for (const bot of bots) {
       await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, message).catch((error) => {
@@ -425,11 +461,12 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
     if (!target) {
-      await this.sendTenantReviewNotification(post.tenantId, `已成功发表：#${post.displayId}\n外部 ID：${externalId}`);
+      await this.sendTenantReviewNotification(post.tenantId, formatPublishSuccess(post.displayId, externalId, stylishEnabled));
       return;
     }
-    await this.sendBotReviewGroupMessage(target.botAccount, `已成功发表：#${post.displayId}\n目标：${target.displayName}\n外部 ID：${externalId}`, "failed to notify publish succeeded");
+    await this.sendBotReviewGroupMessage(target.botAccount, formatPublishSuccessWithTarget(post.displayId, target.displayName, externalId, stylishEnabled), "failed to notify publish succeeded");
   }
 
   async notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }) {
@@ -452,11 +489,12 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
     const lines = [
-      options?.needsLogin ? `发表失败：#${post.displayId}，QZone cookies 未登录或已失效。` : `发表失败：#${post.displayId}`,
+      formatPublishFailed(post.displayId, !!options?.needsLogin, stylishEnabled),
       target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
       `原因：${message}`,
-      options?.needsLogin ? "请在群内发送 #登录 或 #扫码登录 重新登录后，再重试发布。" : null,
+      options?.needsLogin ? publishFailedLoginHint : null,
       options?.nextRunAt ? `下次重试：${formatDateTime(options.nextRunAt)}` : null,
     ].filter((line): line is string => Boolean(line));
     if (target) {
@@ -486,11 +524,12 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
     const lines = [
-      `发表等待：#${post.displayId}`,
+      formatPublishWaiting(post.displayId, stylishEnabled),
       target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
       `原因：${message}`,
-      "系统不会继续发布这条稿件，直到 QZone cookies 检测可用；重新登录或自动刷新成功后会自动恢复队列。",
+      publishWaitingResumeHint,
     ].filter((line): line is string => Boolean(line));
     if (target) {
       await this.sendBotReviewGroupMessage(target.botAccount, lines.join("\n"), "failed to notify publish waiting for cookies");
@@ -508,13 +547,12 @@ export class OneBotRuntime {
     if (!bot || !bot.reviewGroupId) {
       return;
     }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
     await this.sendGroupMessage(
       bot.qqUin.toString(),
       bot.reviewGroupId,
       [
-        options?.autoRefreshError
-          ? "QQ空间cookies已失效，协议自动刷新也失败了，请 @ 并发送 #登录 或 #扫码登录 命令进行重新登录。"
-          : "QQ空间cookies已失效，请 @ 并发送 #登录 或 #扫码登录 命令进行重新登录。",
+        formatCookiesInvalid(options?.autoRefreshError, stylishEnabled),
         `墙号：${bot.displayName} / QQ ${bot.qqUin.toString()}`,
         `检测结果：${message}`,
         options?.autoRefreshError ? `自动刷新失败：${options.autoRefreshError}` : null,
@@ -611,11 +649,12 @@ export class OneBotRuntime {
     if (!bot || !bot.reviewGroupId) {
       return;
     }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
     await this.sendGroupMessage(
       bot.qqUin.toString(),
       bot.reviewGroupId,
       [
-        "QZone cookies 已通过协议自动刷新。",
+        formatCookiesAutoRefreshed(stylishEnabled),
         `墙号：${bot.displayName} / QQ ${bot.qqUin.toString()}`,
         `触发原因：${formatQZoneAutoRefreshReason(reason)}`,
         `刷新结果：${cookieCount} 项 cookies`,
@@ -1034,11 +1073,12 @@ export class OneBotRuntime {
           userQqUin,
           displayName: event.sender?.card || event.sender?.nickname || null,
         });
+        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
         const message = result.password
-          ? `注册成功，初始密码：\n${result.password}`
+          ? formatRegisterSuccess(result.password, stylishEnabled)
           : result.alreadyHadTenantAccess
-            ? "这个 QQ 已经注册过啦。如果忘记密码，可以发 #重置密码。"
-            : "已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。忘记密码就发 #重置密码。";
+            ? formatRegisterAlready(stylishEnabled)
+            : formatRegisterExtended(stylishEnabled);
         await this.sendPrivateMessage(botQqUin, userQqUin, message);
         return;
       }
@@ -1047,7 +1087,8 @@ export class OneBotRuntime {
           botQqUin,
           userQqUin,
         });
-        await this.sendPrivateMessage(botQqUin, userQqUin, `已经重置好啦，新密码：\n${result.password}`);
+        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatResetPassword(result.password, stylishEnabled));
         return;
       }
 
@@ -1242,7 +1283,8 @@ export class OneBotRuntime {
     }
 
     this.privatePostDrafts.delete(draftKey);
-    await this.sendPrivateMessage(botQqUin, userQqUin, `投稿成功！当前稿件编号#${post.displayId}`);
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
     this.notifyNewPost(post.id).catch((error) => {
       this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
     });
@@ -1445,7 +1487,8 @@ export class OneBotRuntime {
     const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
-      const undone = await this.popPrivatePostHistoryEntry(draftKey, pending);
+      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
       if (!undone) {
         await this.sendPrivateMessage(botQqUin, userQqUin, privatePostModePrompt);
         return;
@@ -1460,7 +1503,8 @@ export class OneBotRuntime {
       return;
     }
 
-    const undone = await this.popPrivatePostHistoryEntry(draftKey, draft);
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const undone = await this.popPrivatePostHistoryEntry(draftKey, draft, stylishEnabled);
     if (!undone) {
       await this.sendPrivateMessage(botQqUin, userQqUin, privatePostDraftPrompt);
       return;
@@ -1468,7 +1512,7 @@ export class OneBotRuntime {
     await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
   }
 
-  private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode) {
+  private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode, stylishEnabled = false) {
     const entry = target.history.pop();
     if (!entry) {
       return null;
@@ -1477,7 +1521,7 @@ export class OneBotRuntime {
     if (entry.type === "text") {
       target.text = this.rebuildPrivatePostText(target.history);
       target.updatedAt = Date.now();
-      return "已撤回最近追加的一段文字。";
+      return formatUndoText(stylishEnabled);
     }
 
     target.attachments.splice(-entry.attachmentCount, entry.attachmentCount);
@@ -1486,7 +1530,7 @@ export class OneBotRuntime {
     await this.clearStagedPrivatePostAttachments(entry.uploadedKeys).catch((error) => {
       this.logger.warn({ error, draftKey }, "failed to cleanup undone private post attachments");
     });
-    return `已撤回最近追加的 ${entry.attachmentCount} 张图片。`;
+    return formatUndoImages(entry.attachmentCount, stylishEnabled);
   }
 
   private rebuildPrivatePostText(history: PrivatePostHistoryEntry[]) {
@@ -1638,6 +1682,8 @@ export class OneBotRuntime {
     }
 
     try {
+      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+
       if (command.name === "通过") {
         let displayId = parseDisplayId(command.args);
         // 尝试从引用消息解析稿件编号：仅在操作员 mention 机器人且存在引用时才解析
@@ -1656,7 +1702,7 @@ export class OneBotRuntime {
           displayId,
           action: "approve",
         });
-        await this.sendGroupMessage(botQqUin, groupId, `已通过 #${displayId}`);
+        await this.sendGroupMessage(botQqUin, groupId, formatReviewApprovedGroup(displayId, stylishEnabled));
         await this.notifyReviewResult(result.post.id, "approved").catch(() => undefined);
         return;
       }
@@ -1690,7 +1736,7 @@ export class OneBotRuntime {
           action: "reject",
           comment: parsed.comment,
         });
-        await this.sendGroupMessage(botQqUin, groupId, `已拒绝 #${parsed.displayId}，原因：${parsed.comment}`);
+        await this.sendGroupMessage(botQqUin, groupId, formatReviewRejectedGroup(parsed.displayId, parsed.comment, stylishEnabled));
         await this.notifyReviewResult(result.post.id, "rejected", parsed.comment).catch(() => undefined);
         return;
       }
@@ -1707,7 +1753,7 @@ export class OneBotRuntime {
         if (checked?.healthStatus === "available") {
           await this.resumeWaitingPublishAttemptsForBot(result.bot.id);
         }
-        await this.sendGroupMessage(botQqUin, groupId, `QZone cookies 已刷新（${result.cookieNames.length} 项）。`);
+        await this.sendGroupMessage(botQqUin, groupId, formatCookiesRefreshed(result.cookieNames.length, stylishEnabled));
         return;
       }
 
@@ -1749,7 +1795,7 @@ export class OneBotRuntime {
             if (checked?.healthStatus === "available") {
               await this.resumeWaitingPublishAttemptsForBot(bot.id);
             }
-            await this.sendGroupMessage(botQqUin, groupId, `扫码登录完成，QZone cookies 已刷新（${result.cookieNames.length} 项）。`);
+            await this.sendGroupMessage(botQqUin, groupId, formatQrLoginSuccess(result.cookieNames.length, stylishEnabled));
             return;
           }
           if (result.status === "expired" || result.status === "failed") {
@@ -1757,7 +1803,7 @@ export class OneBotRuntime {
             return;
           }
         }
-        await this.sendGroupMessage(botQqUin, groupId, "扫码登录超时，请重新发送 #扫码登录。");
+        await this.sendGroupMessage(botQqUin, groupId, formatQrLoginTimeout(stylishEnabled));
         return;
       }
 
@@ -1768,7 +1814,7 @@ export class OneBotRuntime {
           return;
         }
         await enqueuePublishFanoutByDisplayId(this.queue, bot.tenantId, displayId, operatorQqUin);
-        await this.sendGroupMessage(botQqUin, groupId, `已重新加入发布队列：#${displayId}`);
+        await this.sendGroupMessage(botQqUin, groupId, formatRequeue(displayId, stylishEnabled));
         return;
       }
 

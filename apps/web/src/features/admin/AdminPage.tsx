@@ -52,6 +52,7 @@ type TenantSettingsForm = {
   imageCompressionEnabled: boolean;
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
+  botStylishMessagesEnabled: boolean;
 };
 
 type BanForm = {
@@ -505,6 +506,7 @@ export function AdminPage({
           imageCompressionEnabled: form.imageCompressionEnabled,
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
+          botStylishMessagesEnabled: form.botStylishMessagesEnabled,
         }),
       });
       await onSaved();
@@ -1751,6 +1753,18 @@ function MetadataPanel({
                 <span className="text-xs font-normal text-slate-500">宽或高超过该值时按比例缩放，默认 2048。</span>
               </label>
             </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div>
+              <p className="text-sm font-medium text-slate-900">Bot 多彩消息</p>
+              <p className="text-xs text-slate-500">开启后机器人反馈消息将使用多风格随机语句，更具趣味性。</p>
+            </div>
+            <Switch
+              checked={form.botStylishMessagesEnabled}
+              disabled={busy}
+              onCheckedChange={(value) => onFormChange({ ...form, botStylishMessagesEnabled: value })}
+              aria-label="启用 Bot 多彩消息"
+            />
           </div>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
@@ -3249,6 +3263,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionEnabled: metadata.imageCompression.enabled,
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
+    botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
   };
 }
 
