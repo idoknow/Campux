@@ -500,3 +500,100 @@ export function formatQZoneAutoRefreshReason(reason: string): string {
   }
   return "定时检测发现登录态失效";
 }
+
+// ── 对话投稿提示 ──────────────────────────────────────
+
+const privatePostModeDefault =
+  "现在回复 #匿名 或 #实名 选择投稿方式。（取消本次投稿请发送 #取消）";
+
+const privatePostModeStylish = [
+  "✨ 好嘞！回复 #匿名 悄悄说，或者 #实名 光明正大发~（发 #取消 就不投了）",
+  "📝 选择投稿方式吧~ #匿名 还是 #实名？（要取消就发 #取消）",
+  privatePostModeDefault,
+];
+
+export function formatPrivatePostModePrompt(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostModeDefault;
+  return pick(privatePostModeStylish);
+}
+
+// ── 对话投稿草稿提示 ──────────────────────────────────
+
+const privatePostDraftDefault =
+  "继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）";
+
+const privatePostDraftStylish = [
+  "📎 继续发正文或图片吧~ 发 #撤回 删掉上一条，写完了发 #结束 提交！（发 #取消 就取消）",
+  "继续发送添加稿件正文及图片，发 #撤回 删除上一条，发 #结束 完成投稿。（取消请发 #取消）",
+  privatePostDraftDefault,
+];
+
+export function formatPrivatePostDraftPrompt(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostDraftDefault;
+  return pick(privatePostDraftStylish);
+}
+
+// ── 对话投稿继续编辑提示 ──────────────────────────────
+
+const privatePostContinueDefault = "继续发送添加稿件正文及图片";
+
+const privatePostContinueStylish = [
+  "📝 继续~ 可以再发正文或图片，发完记得 #结束 哦",
+  "继续发送添加稿件正文及图片，写好了发 #结束 提交~",
+  privatePostContinueDefault,
+];
+
+export function formatPrivatePostContinuePrompt(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostContinueDefault;
+  return pick(privatePostContinueStylish);
+}
+
+// ── 对话投稿取消提示 ──────────────────────────────────
+
+const privatePostCancelledDefault = "已取消发布";
+
+const privatePostCancelledStylish = [
+  "🗑️ 好的，已取消发布~",
+  "已取消 ✅ 这篇稿子不投啦",
+  privatePostCancelledDefault,
+];
+
+export function formatPrivatePostCancelled(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostCancelledDefault;
+  return pick(privatePostCancelledStylish);
+}
+
+// ── 对话投稿帮助 ──────────────────────────────────────
+
+const privateHelpDefault = [
+  "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
+  "可以发送 #重置密码，重置你的登录密码。",
+  "想投稿时先发 #投稿，然后回复 #匿名 或 #实名 选择投稿方式。",
+  "选择后继续发送添加稿件正文及图片，删除上一句话请发送 #撤回，结束投稿并发布请发送 #结束。",
+  "取消本次投稿请发送 #取消。",
+].join("\n");
+
+const privateHelpStylish = [
+  [
+    "📋 我可以帮你做这些事：",
+    "",
+    "#注册账号 — 用当前 QQ 开通本墙账号",
+    "#重置密码 — 重置登录密码",
+    "#投稿 正文 — 开始对话投稿",
+    "#取消 — 取消本次投稿",
+  ].join("\n"),
+  [
+    "✨ 试试这些命令吧：",
+    "",
+    "• #注册账号 — 开通本墙账号",
+    "• #重置密码 — 重置密码",
+    "• #投稿 正文/图片 — 开始投稿",
+    "• #取消 — 取消投稿",
+  ].join("\n"),
+  privateHelpDefault,
+];
+
+export function formatPrivateHelp(stylishEnabled = false): string {
+  if (!stylishEnabled) return privateHelpDefault;
+  return pick(privateHelpStylish);
+}

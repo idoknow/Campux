@@ -116,6 +116,7 @@ export type TenantMetadata = {
     maxDimension: number;
   };
   botStylishMessagesEnabled: boolean;
+  botPrivatePostStylishEnabled: boolean;
 };
 
 export type PostAttachment = {
@@ -374,6 +375,8 @@ export type AiRules = {
   allowedCategories?: string[];
   modelingKeywords?: string[];
   modelingNotes?: string;
+  /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"] */
+  postTriggerKeywords?: string[];
 };
 
 export type TenantAiSettings = {

@@ -46,6 +46,27 @@ describe("private posting command parsing", () => {
     expect(isPrivatePostUndoText("撤回")).toBe(false);
     expect(isPrivatePostUndoText("#撤回一下")).toBe(false);
   });
+
+  test("accepts extra trigger keywords", () => {
+    const extra = ["发帖", "吐槽", "表白"];
+    expect(parsePrivatePostStartText("#发帖 你好", extra)).toBe("你好");
+    expect(parsePrivatePostStartText("＃发帖 你好", extra)).toBe("你好");
+    expect(parsePrivatePostStartText("#吐槽 今天好烦", extra)).toBe("今天好烦");
+    expect(parsePrivatePostStartText("#表白 隔壁班的同学", extra)).toBe("隔壁班的同学");
+    expect(parsePrivatePostStartText("#发帖", extra)).toBe("");
+  });
+
+  test("extra keywords never override default #投稿", () => {
+    expect(parsePrivatePostStartText("#投稿 正文", [])).toBe("正文");
+    expect(parsePrivatePostStartText("＃投稿 正文", undefined)).toBe("正文");
+    expect(parsePrivatePostStartText("#投稿", ["发帖"])).toBe("");
+  });
+
+  test("does not match extra keywords when input has no matching prefix", () => {
+    expect(parsePrivatePostStartText("发帖", ["发帖"])).toBeNull();
+    expect(parsePrivatePostStartText("随便说点什么", ["发帖", "吐槽"])).toBeNull();
+    expect(parsePrivatePostStartText("#其他命令", ["发帖"])).toBeNull();
+  });
 });
 
 describe("onebot message helpers", () => {

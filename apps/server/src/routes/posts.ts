@@ -88,7 +88,8 @@ const MAX_VIDEO_DURATION_SEC = 60;
 
 /**
  * Convert video buffer to GIF using ffmpeg.
- * Output: 320px wide, 10fps, palette-based for quality.
+ * Uses original resolution and framerate with full 256-color palette
+ * for maximum quality (every frame, original dimensions).
  *
  * Note: The web frontend now converts videos to GIF in-browser, so this
  * server-side path is only hit by API clients. If ffmpeg is not available,
@@ -134,13 +135,13 @@ async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Pro
       throw new Error(`视频时长 ${Math.round(duration)}s 超过限制 (${MAX_VIDEO_DURATION_SEC}s)`);
     }
 
-    // Convert to GIF: 320px wide, 10fps, high quality palette
+    // Convert to GIF: original resolution & framerate, full 256-color palette
     await new Promise<void>((resolve, reject) => {
       const ffmpeg = spawn("ffmpeg", [
         "-y", "-i", inputPath,
-        "-vf", "fps=10,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+        "-vf", "fps=source,split[s0][s1];[s0]palettegen=stats_mode=full:max_colors=256[p];[s1][p]paletteuse=dither=floyd_steinberg",
         "-loop", "0", outputPath,
-      ], { timeout: 30000 });
+      ], { timeout: 60000 });
       let stderr = "";
       ffmpeg.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
       ffmpeg.on("close", (code) => {
