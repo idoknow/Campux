@@ -3,8 +3,6 @@ import gifWorkerUrl from "gif.js/dist/gif.worker.js?url";
 
 export const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100MB
 export const MAX_VIDEO_DURATION_SEC = 60;
-export const GIF_FPS = 10;
-export const GIF_MAX_WIDTH = 320;
 
 export class VideoConversionError extends Error {
   constructor(message: string) {
@@ -73,29 +71,51 @@ function captureFrame(
 }
 
 /**
- * Get the natural video dimensions, scaled so the width fits GIF_MAX_WIDTH
- * while preserving aspect ratio.
+ * Detect the native framerate of a video by playing a short segment
+ * and counting frames via requestVideoFrameCallback API.
+ * Falls back to 30fps if detection is unavailable.
  */
-function getScaledDimensions(
-  videoWidth: number,
-  videoHeight: number,
-): { width: number; height: number } {
-  const scale = Math.min(GIF_MAX_WIDTH / videoWidth, 1);
-  return {
-    width: Math.round(videoWidth * scale),
-    height: Math.round(videoHeight * scale),
-  };
+function detectFrameRate(video: HTMLVideoElement): Promise<number> {
+  return new Promise((resolve) => {
+    if (typeof video.requestVideoFrameCallback !== "function") {
+      resolve(30);
+      return;
+    }
+
+    let frameCount = 0;
+    const startTime = performance.now();
+    const DETECTION_DURATION = 1000; // 1 second
+
+    const callback = (_now: DOMHighResTimeStamp, _metadata: unknown) => {
+      frameCount++;
+      const elapsed = performance.now() - startTime;
+      if (elapsed >= DETECTION_DURATION) {
+        video.pause();
+        video.currentTime = 0;
+        const fps = Math.round(frameCount / (elapsed / 1000));
+        resolve(Math.max(1, Math.min(fps, 120))); // cap at 120fps sanity
+      } else {
+        video.requestVideoFrameCallback(callback);
+      }
+    };
+
+    video.requestVideoFrameCallback(callback);
+    video.play().catch(() => resolve(30));
+  });
 }
 
 /**
  * Convert a video File to a GIF Blob entirely in the browser.
  *
+ * Uses the video's native framerate and original resolution for
+ * maximum quality (every frame, original dimensions).
+ *
  * Steps:
  * 1. Validate duration (≤ MAX_VIDEO_DURATION_SEC).
  * 2. Load video into a <video> element to get dimensions.
- * 3. Calculate frame count and interval based on GIF_FPS.
- * 4. Seek through video, capture frames to canvas.
- * 5. Encode frames into GIF using gif.js.
+ * 3. Detect native framerate via requestVideoFrameCallback.
+ * 4. Seek through video at native frame intervals, capture each frame to canvas.
+ * 5. Encode frames into GIF using gif.js with best quality settings.
  * 6. Return the resulting Blob.
  *
  * @param file - The video File to convert.
@@ -138,23 +158,26 @@ export async function convertVideoToGif(
     video.load();
   });
 
-  const { width, height } = getScaledDimensions(
-    video.videoWidth || 320,
-    video.videoHeight || 240,
-  );
+  // Use original video dimensions (原画质 — no downscaling)
+  const width = video.videoWidth || 320;
+  const height = video.videoHeight || 240;
 
-  // 4. Calculate frames
-  const totalFrames = Math.max(1, Math.ceil(duration * GIF_FPS));
+  // 4. Detect native framerate
+  const fps = await detectFrameRate(video);
+
+  // 5. Calculate frames at native fps (每一帧都转)
+  const totalFrames = Math.max(1, Math.ceil(duration * fps));
   const frameInterval = duration / totalFrames;
 
-  // 5. Encode with gif.js
+  // 6. Encode with gif.js at best quality settings
   const gif = new GIF({
     workers: 2,
-    quality: 10,
+    quality: 1, // lowest sample rate = best quality
     width,
     height,
     repeat: 0, // loop forever
     workerScript: gifWorkerUrl,
+    dither: true, // enable dithering for smoother color transitions
   });
 
   gif.on("progress", (p: number) => {
@@ -174,12 +197,12 @@ export async function convertVideoToGif(
       reject(new VideoConversionError("GIF 编码被中断"));
     });
 
-    // Capture frames
+    // Capture frames at native framerate
     for (let i = 0; i < totalFrames; i++) {
       const time = i * frameInterval;
       const canvas = captureFrame(video, time, width, height);
       gif.addFrame(canvas, {
-        delay: Math.round(1000 / GIF_FPS),
+        delay: Math.round(1000 / fps),
         copy: true,
         dispose: 1,
       });
