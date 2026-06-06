@@ -2,8 +2,9 @@ type PostQZoneComment = {
   uin: string;
   name: string;
   content: string;
+  images: string[];
   createdAt: string | null;
-  replies?: Array<{ uin: string; name: string; content: string; createdAt: string | null }>;
+  replies?: Array<{ uin: string; name: string; content: string; images: string[]; createdAt: string | null }>;
 };
 
 type PostQZoneMetric = {
@@ -149,6 +150,7 @@ function normalizeQZoneComments(value: unknown): PostQZoneComment[] {
               uin: typeof r.uin === "string" ? r.uin : String(r.uin ?? ""),
               name: typeof r.name === "string" ? r.name : "",
               content: typeof r.content === "string" ? r.content : "",
+              images: normalizeQZoneCommentImages(r.images),
               createdAt: typeof r.createdAt === "string" ? r.createdAt : null,
             },
           ];
@@ -158,9 +160,26 @@ function normalizeQZoneComments(value: unknown): PostQZoneComment[] {
       uin: typeof c.uin === "string" ? c.uin : String(c.uin ?? ""),
       name: typeof c.name === "string" ? c.name : "",
       content: typeof c.content === "string" ? c.content : "",
+      images: normalizeQZoneCommentImages(c.images),
       createdAt: typeof c.createdAt === "string" ? c.createdAt : null,
       replies,
     });
   }
   return comments;
+}
+
+function normalizeQZoneCommentImages(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const images: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      const trimmed = item.trim();
+      if (trimmed && !images.includes(trimmed)) {
+        images.push(trimmed);
+      }
+    }
+  }
+  return images;
 }

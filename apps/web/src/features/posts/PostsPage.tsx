@@ -1631,15 +1631,25 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
               <QQUinTag uin={comment.uin} />
               {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-400">{formatFullDateTime(comment.createdAt)}</span> : null}
             </p>
-            <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">{comment.content || "（空）"}</p>
+            {comment.content ? (
+              <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">{comment.content}</p>
+            ) : comment.images && comment.images.length > 0 ? null : (
+              <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">（空）</p>
+            )}
+            <QZoneCommentImages images={comment.images} />
             {comment.replies && comment.replies.length > 0 ? (
               <div className="mt-1 grid gap-1 border-l-2 border-slate-200 pl-2">
                 {comment.replies.map((reply, replyIndex) => (
-                  <div key={`${reply.uin}-${replyIndex}`} className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
-                    <span className="text-[11px] font-bold text-slate-600">{reply.name || reply.uin || "匿名"}</span>
-                    <QQUinTag uin={reply.uin} />
-                    <span className="text-[11px] text-slate-400">：</span>
-                    <span className="break-words text-[11px] leading-5 text-slate-700">{reply.content || "（空）"}</span>
+                  <div key={`${reply.uin}-${replyIndex}`} className="flex flex-col gap-0.5">
+                    <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                      <span className="text-[11px] font-bold text-slate-600">{reply.name || reply.uin || "匿名"}</span>
+                      <QQUinTag uin={reply.uin} />
+                      <span className="text-[11px] text-slate-400">：</span>
+                      <span className="break-words text-[11px] leading-5 text-slate-700">
+                        {reply.content || (reply.images && reply.images.length > 0 ? "" : "（空）")}
+                      </span>
+                    </div>
+                    <QZoneCommentImages images={reply.images} />
                   </div>
                 ))}
               </div>
@@ -1656,6 +1666,33 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
           {expanded ? "收起" : `展开全部 ${comments.length} 条`}
         </button>
       ) : null}
+    </div>
+  );
+}
+
+function QZoneCommentImages({ images }: { images?: string[] | undefined }) {
+  if (!images || images.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {images.map((src, index) => (
+        <a
+          key={`${src}-${index}`}
+          href={src}
+          target="_blank"
+          rel="noreferrer"
+          className="block size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100"
+        >
+          <img
+            src={src}
+            alt="评论图片"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="size-full object-cover"
+          />
+        </a>
+      ))}
     </div>
   );
 }

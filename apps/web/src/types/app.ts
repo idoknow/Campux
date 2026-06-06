@@ -175,8 +175,9 @@ export type PostItem = {
         uin: string;
         name: string;
         content: string;
+        images?: string[];
         createdAt: string | null;
-        replies?: Array<{ uin: string; name: string; content: string; createdAt: string | null }>;
+        replies?: Array<{ uin: string; name: string; content: string; images?: string[]; createdAt: string | null }>;
       }>;
     }>;
     logs: Array<{
