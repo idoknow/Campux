@@ -601,25 +601,53 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     }
 
     if (!recallRequiresReason) {
-      const pendingRecall = await prisma.post.update({
-        where: {
-          id: post.id,
-        },
-        data: {
-          status: "pending_recall",
-          recallIgnored: false,
-          recallIgnoredAt: null,
-          logs: {
-            create: {
-              tenantId: context.selectedTenant.id,
-              actorId: context.user.id,
-              oldStatus: post.status,
-              newStatus: "pending_recall",
-              comment: reason ? `用户直接撤回：${reason}` : "用户直接撤回",
-            },
+      const pendingRecall = await prisma.$transaction(async (tx) => {
+        const updated = await tx.post.updateMany({
+          where: {
+            id: post.id,
+            tenantId: context.selectedTenant.id,
+            authorId: context.user.id,
+            status: "published",
           },
-        },
+          data: {
+            status: "pending_recall",
+            recallIgnored: false,
+            recallIgnoredAt: null,
+          },
+        });
+        const current = await tx.post.findFirst({
+          where: {
+            id: post.id,
+            tenantId: context.selectedTenant.id,
+            authorId: context.user.id,
+          },
+        });
+        if (!current) {
+          return null;
+        }
+        if (updated.count === 0) {
+          return current;
+        }
+        await tx.postLog.create({
+          data: {
+            tenantId: context.selectedTenant.id,
+            postId: post.id,
+            actorId: context.user.id,
+            oldStatus: "published",
+            newStatus: "pending_recall",
+            comment: reason ? `用户直接撤回：${reason}` : "用户直接撤回",
+          },
+        });
+        return current;
       });
+      if (!pendingRecall) {
+        return reply.code(404).send({ message: "稿件不存在" });
+      }
+      if (pendingRecall.status !== "pending_recall") {
+        return {
+          post: toPostListItem(pendingRecall),
+        };
+      }
       await writeAuditLog({
         tenantId: context.selectedTenant.id,
         actorId: context.user.id,
