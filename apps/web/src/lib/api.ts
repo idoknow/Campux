@@ -81,11 +81,7 @@ export function createPostWithAttachments(
     formData.append("text", text);
     formData.append("anonymous", String(anonymous));
     for (const file of files) {
-      if (file.type.startsWith("video/")) {
-        formData.append("videos", file, file.name);
-      } else {
-        formData.append("images", file, file.name);
-      }
+      formData.append("images", file, file.name);
     }
     xhr.send(formData);
   });

@@ -13,7 +13,7 @@ export type ImageCompressionConfig = {
 };
 
 export type PostAttachment = {
-  kind: "image" | "video";
+  kind: "image";
   key: string;
   url: string;
   fileName: string;
@@ -86,7 +86,7 @@ export async function uploadAttachmentBytes({
 }: {
   config: CampuxConfig;
   tenantId: string;
-  kind: "image" | "video";
+  kind: "image";
   contentType: string;
   fileName: string;
   body: Buffer;
@@ -108,9 +108,7 @@ export async function uploadAttachmentBytes({
   return {
     kind,
     key,
-    url: kind === "video"
-      ? `/api/uploads/post-file?key=${encodeURIComponent(key)}`
-      : `/api/uploads/post-image?key=${encodeURIComponent(key)}`,
+    url: `/api/uploads/post-image?key=${encodeURIComponent(key)}`,
     fileName,
     contentType,
     size: body.byteLength,

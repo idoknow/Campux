@@ -65,27 +65,86 @@ const IMAGE_MIME_TYPES = new Set([
   "image/svg+xml",
 ]);
 
-const VIDEO_MIME_TYPES = new Set([
+const VIDEO_CONVERT_MIME_TYPES = new Set([
   "video/mp4",
   "video/webm",
-  "video/ogg",
   "video/quicktime",
   "video/x-msvideo",
   "video/x-matroska",
   "video/3gpp",
-  "video/mpeg",
 ]);
 
 function isAllowedImageType(contentType: string): boolean {
   return IMAGE_MIME_TYPES.has(contentType);
 }
 
-function isAllowedVideoType(contentType: string): boolean {
-  return VIDEO_MIME_TYPES.has(contentType);
+function isConvertibleVideoType(contentType: string): boolean {
+  return VIDEO_CONVERT_MIME_TYPES.has(contentType);
 }
 
 const IMAGE_SIZE_CAP = 10 * 1024 * 1024; // 10MB
-const VIDEO_SIZE_CAP = 500 * 1024 * 1024; // 500MB
+const VIDEO_SIZE_CAP = 100 * 1024 * 1024; // 100MB
+const MAX_VIDEO_DURATION_SEC = 60;
+
+/**
+ * Convert video buffer to GIF using ffmpeg.
+ * Output: 320px wide, 10fps, palette-based for quality.
+ */
+async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Promise<{ buffer: Buffer }> {
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+
+  const tmpDir = mkdtempSync(join(tmpdir(), "campux-video-"));
+  const inputPath = join(tmpDir, "input.mp4");
+  const outputPath = join(tmpDir, "output.gif");
+
+  try {
+    writeFileSync(inputPath, videoBuffer);
+
+    // Check duration
+    const duration = await new Promise<number>((resolve, reject) => {
+      const proc = spawn("ffprobe", [
+        "-v", "quiet", "-print_format", "json", "-show_format", inputPath,
+      ], { timeout: 10000 });
+      let stdout = "";
+      proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+      proc.on("close", (code) => {
+        if (code !== 0) { reject(new Error("无法解析视频信息")); return; }
+        try {
+          const info = JSON.parse(stdout);
+          resolve(parseFloat(info.format?.duration || "0"));
+        } catch { reject(new Error("无法解析视频时长")); }
+      });
+      proc.on("error", reject);
+    });
+
+    if (duration > MAX_VIDEO_DURATION_SEC) {
+      throw new Error(`视频时长 ${Math.round(duration)}s 超过限制 (${MAX_VIDEO_DURATION_SEC}s)`);
+    }
+
+    // Convert to GIF: 320px wide, 10fps, high quality palette
+    await new Promise<void>((resolve, reject) => {
+      const ffmpeg = spawn("ffmpeg", [
+        "-y", "-i", inputPath,
+        "-vf", "fps=10,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+        "-loop", "0", outputPath,
+      ], { timeout: 30000 });
+      let stderr = "";
+      ffmpeg.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+      ffmpeg.on("close", (code) => {
+        if (code !== 0) { reject(new Error(`ffmpeg 转换失败: ${stderr.slice(-200)}`)); return; }
+        resolve();
+      });
+      ffmpeg.on("error", reject);
+    });
+
+    return { buffer: readFileSync(outputPath) };
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
 
 function headerIncludes(value: string | string[] | undefined, expected: string): boolean {
   return Array.isArray(value) ? value.some((item) => item.includes(expected)) : Boolean(value?.includes(expected));
@@ -149,34 +208,6 @@ function isTransactionSerializationFailure(value: unknown) {
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
-  app.get("/api/uploads/post-file", async (request, reply) => {
-    const context = await requireTenantContext(request, reply);
-    const query = fileQuerySchema.parse(request.query);
-    const allowedPrefixes = [
-      `tenants/${context.selectedTenant.id}/uploads/`,
-      `tenants/${context.selectedTenant.id}/legacy/`,
-    ];
-    if (!allowedPrefixes.some((prefix) => query.key.startsWith(prefix))) {
-      return reply.code(403).send({ message: "没有访问该文件的权限" });
-    }
-
-    const s3 = await ensureBucket(config);
-    const object = await s3.send(
-      new GetObjectCommand({
-        Bucket: config.s3.bucket,
-        Key: query.key,
-      }),
-    );
-
-    if (object.ContentType) {
-      reply.header("Content-Type", object.ContentType);
-    }
-    const isVideo = object.ContentType?.startsWith("video/");
-    reply.header("Cache-Control", isVideo ? "private, max-age=86400" : "private, max-age=3600");
-    return reply.send(object.Body);
-  });
-
-  // Keep the old route for backward compatibility
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
@@ -242,8 +273,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         }
 
         const isImage = part.fieldname === "images";
-        const isVideo = part.fieldname === "videos";
-        if (!isImage && !isVideo) {
+        if (!isImage) {
           part.file.destroy();
           continue;
         }
@@ -252,44 +282,59 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           part.file.destroy();
           throw {
             status: 400,
-            message: isImage ? "最多 9 张图片" : "最多 9 个文件",
+            message: "最多 9 个文件",
             fileIndex,
           };
         }
 
         const mime = part.mimetype || "application/octet-stream";
 
-        if (isImage && !isAllowedImageType(mime)) {
+        if (!isAllowedImageType(mime) && !isConvertibleVideoType(mime)) {
           part.file.destroy();
           throw {
             status: 415,
-            message: "仅支持图片格式",
-            fileIndex,
-          };
-        }
-        if (isVideo && !isAllowedVideoType(mime)) {
-          part.file.destroy();
-          throw {
-            status: 415,
-            message: "不支持的视频格式，请使用 MP4、WebM 等常见格式",
+            message: "仅支持图片和视频格式",
             fileIndex,
           };
         }
 
+        const isVideo = isConvertibleVideoType(mime);
         const cap = isVideo ? VIDEO_SIZE_CAP : IMAGE_SIZE_CAP;
 
         // Read file with size cap using Transform
         const buf = await readPartCapped(part.file, cap, fileIndex);
 
-        const finalBuf = isImage ? await compressImageBuffer(buf, mime, compression) : buf;
+        let finalBuf: Buffer;
+        let finalMime: string;
+        let finalFileName: string;
+
+        if (isVideo) {
+          // Convert video to GIF
+          try {
+            const converted = await convertVideoToGif(buf, part.filename || "video");
+            finalBuf = converted.buffer;
+            finalMime = "image/gif";
+            finalFileName = (part.filename || "video").replace(/\.[^.]+$/, ".gif");
+          } catch (convErr) {
+            throw {
+              status: 400,
+              message: `视频转换失败：${convErr instanceof Error ? convErr.message : "未知错误"}`,
+              fileIndex,
+            };
+          }
+        } else {
+          finalBuf = await compressImageBuffer(buf, mime, compression);
+          finalMime = mime;
+          finalFileName = part.filename || "attachment.jpg";
+        }
 
         // Upload to S3
         const att = await uploadAttachmentBytes({
           config,
           tenantId: context.selectedTenant.id,
-          kind: isVideo ? "video" : "image",
-          contentType: mime,
-          fileName: part.filename || (isVideo ? "attachment.mp4" : "attachment.jpg"),
+          kind: "image",
+          contentType: finalMime,
+          fileName: finalFileName,
           body: finalBuf,
         });
         uploadedKeys.push(att.key);

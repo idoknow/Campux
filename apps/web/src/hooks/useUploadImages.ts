@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-const MAX_VIDEO_SIZE = 500 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 
 export function usePendingAttachments() {
   const [pending, setPending] = useState<PendingAttachment[]>([]);
@@ -39,7 +39,7 @@ export function usePendingAttachments() {
           continue;
         }
         if (isVideo && file.size > MAX_VIDEO_SIZE) {
-          toast.error(`${file.name || "视频"} 超过 500MB 限制`);
+          toast.error(`${file.name || "视频"} 超过 100MB 限制`);
           continue;
         }
         if (!isVideo && file.size > MAX_IMAGE_SIZE) {
@@ -52,7 +52,7 @@ export function usePendingAttachments() {
           id: crypto.randomUUID(),
           file,
           blobUrl,
-          kind: isVideo ? "video" : "image",
+          kind: "image",
           sortOrder: baseSort + nextIndex,
           progress: 0,
           status: "ready",

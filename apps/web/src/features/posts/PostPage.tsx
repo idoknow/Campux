@@ -46,7 +46,7 @@ export function PostPage({
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.items)
-      .filter((item) => item.kind === "file" && (item.type.startsWith("image/") || item.type.startsWith("video/")))
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file));
     if (files.length === 0) {
@@ -99,20 +99,7 @@ export function PostPage({
               disabled={item.status === "uploading"}
               onClick={() => setAttachmentToRemove(item)}
             >
-              {item.kind === "video" ? (
-                <>
-                  <video src={item.blobUrl} className="h-full w-full object-cover" muted preload="metadata" />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="flex size-6 items-center justify-center rounded-full bg-black/50">
-                      <svg className="size-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <img src={item.blobUrl} alt={item.file.name} className="h-full w-full object-cover" />
-              )}
+              <img src={item.blobUrl} alt={item.file.name} className="h-full w-full object-cover" />
               {item.status === "uploading" ? (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-200">
                   <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.max(item.progress, 2)}%` }} />
@@ -139,7 +126,7 @@ export function PostPage({
           ) : null}
           <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
-        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 个文件。图片 ≤ 10MB，视频 ≤ 500MB。可直接粘贴截图。</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 个文件。图片 ≤ 10MB，视频 ≤ 100MB（自动转为 GIF）。可直接粘贴截图。</p>
 
         <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-green">
           <div className="flex items-center justify-between gap-3">
