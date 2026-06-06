@@ -133,6 +133,20 @@ type PrivatePostPendingMode = {
   history: PrivatePostHistoryEntry[];
 };
 
+type PrivateForwardEntry = {
+  time: number;
+  text: string;
+};
+
+type PrivateForwardBuffer = {
+  tenantId: string;
+  botQqUin: string;
+  userQqUin: string;
+  userNickname: string;
+  messages: PrivateForwardEntry[];
+  timer: Timer | null;
+};
+
 type OneBotMessageEvent = {
   post_type?: string;
   request_type?: string;
@@ -174,6 +188,7 @@ export class OneBotRuntime {
   private readonly connections = new Set<OneBotConnection>();
   private readonly pendingActions = new Map<string, PendingAction>();
   private readonly privateAutoReplyAt = new Map<string, number>();
+  private readonly privateForwardBuffers = new Map<string, PrivateForwardBuffer>();
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
   private readonly pendingFriendRequestFlags = new Set<string>();
@@ -1072,6 +1087,18 @@ export class OneBotRuntime {
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
+        // 非投稿、非命令消息：缓存到缓冲区，1 分钟无新消息后合并转发到审核群
+        if (bot.reviewGroupId) {
+          this.bufferPrivateForwardMessage({
+            bot,
+            botQqUin,
+            userQqUin,
+            userNickname: event.sender?.card || event.sender?.nickname || userQqUin,
+            text: plainText || event.raw_message || "（不支持的消息类型）",
+          });
+        }
+
+        // 保留原有自动回复
         if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
           const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
           await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(stylishEnabled)).catch(() => undefined);
@@ -1885,6 +1912,119 @@ export class OneBotRuntime {
 
       this.logger.warn({ error, botQqUin }, "onebot get_cookies failed; using development mock cookies");
       return `uin=o${botQqUin}; skey=matcha-dev-skey; p_skey=matcha-dev-pskey; pt4_token=matcha-dev-token`;
+    }
+  }
+
+  private bufferPrivateForwardMessage({
+    bot,
+    botQqUin,
+    userQqUin,
+    userNickname,
+    text,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null };
+    botQqUin: string;
+    userQqUin: string;
+    userNickname: string;
+    text: string;
+  }) {
+    const key = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    let buffer = this.privateForwardBuffers.get(key);
+    if (!buffer) {
+      buffer = {
+        tenantId: bot.tenantId,
+        botQqUin,
+        userQqUin,
+        userNickname,
+        messages: [],
+        timer: null,
+      };
+      this.privateForwardBuffers.set(key, buffer);
+    }
+
+    buffer.messages.push({
+      time: Math.floor(Date.now() / 1000),
+      text,
+    });
+
+    // 重置计时器：最后一条消息后等待 1 分钟
+    if (buffer.timer) {
+      clearTimeout(buffer.timer);
+    }
+    buffer.timer = setTimeout(() => {
+      this.flushPrivateForwardBuffer(key).catch((error) => {
+        this.logger.warn({ error, botQqUin, userQqUin }, "合并转发私聊消息到审核群失败");
+      });
+    }, 60_000);
+  }
+
+  private async flushPrivateForwardBuffer(key: string) {
+    const buffer = this.privateForwardBuffers.get(key);
+    if (!buffer || buffer.messages.length === 0) {
+      this.privateForwardBuffers.delete(key);
+      return;
+    }
+
+    // 清除定时器
+    if (buffer.timer) {
+      clearTimeout(buffer.timer);
+    }
+
+    // 提前从 Map 删除，防止重复触发
+    this.privateForwardBuffers.delete(key);
+
+    try {
+      // 重新获取 bot 信息以获取最新的 reviewGroupId
+      const bot = await findEnabledBot(buffer.botQqUin).catch(() => null);
+      if (!bot?.reviewGroupId) {
+        return;
+      }
+
+      // 构建合并转发消息节点
+      const nodes: Array<{
+        type: "node";
+        data: {
+          name: string;
+          uin: string;
+          time?: number;
+          content: Array<{ type: "text"; data: { text: string } }>;
+        };
+      }> = [];
+
+      for (const entry of buffer.messages) {
+        nodes.push({
+          type: "node",
+          data: {
+            name: buffer.userNickname,
+            uin: buffer.userQqUin,
+            time: entry.time,
+            content: [
+              {
+                type: "text",
+                data: {
+                  text: entry.text,
+                },
+              },
+            ],
+          },
+        });
+      }
+
+      // 使用合并转发发送
+      await this.callAction(buffer.botQqUin, "send_group_forward_msg", {
+        group_id: Number(bot.reviewGroupId),
+        messages: nodes,
+      }).catch(async (error) => {
+        // 合并转发失败时降级为普通消息
+        this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "合并转发失败，降级为普通消息发送");
+        const lines = [
+          `📩 ${buffer.userNickname}（${buffer.userQqUin}）发来私聊消息：`,
+          ...buffer.messages.map((entry, i) => `${i + 1}. ${entry.text}`),
+        ];
+        await this.sendGroupMessage(buffer.botQqUin, bot.reviewGroupId!, lines.join("\n"));
+      });
+    } catch (error) {
+      this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "转发私聊消息到审核群失败");
     }
   }
 
