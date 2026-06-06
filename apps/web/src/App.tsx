@@ -453,10 +453,22 @@ export function App() {
     setBusy(true);
     markUploading();
     try {
-      const files = pendingAttachments.map((p) => p.file);
-      await createPostWithAttachments(postText, anonymous, files, (totalPercent) => {
-        setProgress(totalPercent);
-      });
+      // Local image files only (remote GIF URLs are sent separately)
+      const files = pendingAttachments
+        .filter((p) => !p.remoteGifUrl)
+        .map((p) => p.file);
+      const remoteGifUrls = pendingAttachments
+        .map((p) => p.remoteGifUrl)
+        .filter((url): url is string => Boolean(url));
+      await createPostWithAttachments(
+        postText,
+        anonymous,
+        files,
+        (totalPercent) => {
+          setProgress(totalPercent);
+        },
+        remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
+      );
       clearAttachments();
       setPostText("");
       setAnonymous(false);

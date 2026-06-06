@@ -141,6 +141,8 @@ export type PendingAttachment = {
   errorMessage?: string;
   /** Original video file before GIF conversion (if attachment started as video) */
   originalVideo: File | undefined;
+  /** Remote GIF URL from 失控图床 API (if converted via external API) */
+  remoteGifUrl?: string;
 };
 
 export type PostItem = {

@@ -276,6 +276,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     let text = "";
     let anonymous = false;
     const staged: PostAttachment[] = [];
+    const remoteGifUrls: string[] = [];
 
     try {
       let fileIndex = 0;
@@ -285,6 +286,16 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             text = String(part.value ?? "");
           } else if (part.fieldname === "anonymous") {
             anonymous = part.value === "true" || part.value === true;
+          } else if (part.fieldname === "remoteGifUrls") {
+            // Accept JSON array of GIF URLs from 失控图床 API conversion
+            try {
+              const parsed = JSON.parse(String(part.value ?? "[]"));
+              if (Array.isArray(parsed)) {
+                remoteGifUrls.push(...parsed.filter((u): u is string => typeof u === "string" && u.length > 0));
+              }
+            } catch {
+              // ignore malformed JSON
+            }
           }
           continue;
         }
@@ -357,6 +368,36 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         uploadedKeys.push(att.key);
         staged.push(att);
         fileIndex += 1;
+      }
+
+      // Process remote GIF URLs (from 失控图床 API conversion)
+      for (const gifUrl of remoteGifUrls) {
+        if (staged.length >= 9) {
+          break;
+        }
+        try {
+          const response = await fetch(gifUrl);
+          if (!response.ok) {
+            app.log.warn({ url: gifUrl, status: response.status }, "failed to fetch remote GIF");
+            continue;
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const buf = Buffer.from(arrayBuffer);
+
+          const att = await uploadAttachmentBytes({
+            config,
+            tenantId: context.selectedTenant.id,
+            kind: "image",
+            contentType: "image/gif",
+            fileName: "video.gif",
+            body: buf,
+          });
+          uploadedKeys.push(att.key);
+          staged.push(att);
+        } catch (fetchErr) {
+          app.log.warn({ error: fetchErr, url: gifUrl }, "failed to process remote GIF");
+          // Skip failed URLs rather than failing the entire post
+        }
       }
 
       // Validate text
