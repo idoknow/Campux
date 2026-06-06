@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ActivityIcon,
@@ -446,12 +446,36 @@ type ChartSeries = {
   values: ChartPoint[];
 };
 
+function useElementWidth<T extends HTMLElement>(fallback: number) {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(fallback);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+    const update = () => {
+      const next = element.clientWidth;
+      if (next > 0) {
+        setWidth(next);
+      }
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
+
 function LineChartPanel({ title, description, series, height, footer }: { title: string; description: string; series: ChartSeries[]; height: number; footer?: ReactNode }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [chartRef, measuredWidth] = useElementWidth<HTMLDivElement>(640);
   const allValues = series.flatMap((item) => item.values.map((point) => point.value));
   const maxValue = Math.max(1, ...allValues);
   const minValue = Math.min(0, ...allValues);
-  const chartWidth = 640;
+  // 用容器实测宽度作为 viewBox 宽度，1:1 对应渲染宽度——图表始终撑满区域且不会横向滚动/拉伸变形。
+  const chartWidth = Math.max(280, Math.round(measuredWidth));
   const chartHeight = height;
   const padding = { top: 18, right: 18, bottom: 36, left: 42 };
   const innerWidth = chartWidth - padding.left - padding.right;
@@ -484,8 +508,8 @@ function LineChartPanel({ title, description, series, height, footer }: { title:
           ))}
         </div>
       </div>
-      <div className="mt-3 max-w-full overflow-x-auto">
-        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="min-w-[560px] w-full touch-pan-x" style={{ height }}>
+      <div ref={chartRef} className="mt-3 w-full">
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="block w-full" style={{ height }}>
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
             const y = padding.top + ratio * innerHeight;
             const value = Math.round(maxValue - ratio * (maxValue - minValue));
