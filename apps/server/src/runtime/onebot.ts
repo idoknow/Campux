@@ -219,11 +219,7 @@ export class OneBotRuntime {
     const attachmentSummary = imageCount > 0
       ? `图片：${imageCount} 张`
       : "图片：0 张";
-    const channelLabel = post.submissionChannel
-      ? post.submissionChannel === "private"
-        ? "对话"
-        : "网页"
-      : (post.logs?.[0]?.comment && typeof post.logs[0].comment === "string" && post.logs[0].comment.includes("私聊") ? "对话" : "网页");
+    const channelLabel = post.logs?.[0]?.comment.includes("私聊") ? "对话" : "网页";
     const lines = [
       `${post.tenant.name} 新稿件`,
       `编号：#${post.displayId}`,
@@ -1568,7 +1564,6 @@ export class OneBotRuntime {
                 text,
                 anonymous: draft.anonymous,
                 attachments: draft.attachments,
-                submissionChannel: "private",
                 status: "pending_approval",
                 logs: {
                   create: {
