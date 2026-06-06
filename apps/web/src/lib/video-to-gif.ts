@@ -1,4 +1,5 @@
 import GIF from "gif.js";
+import gifWorkerUrl from "gif.js/dist/gif.worker.js?url";
 
 export const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100MB
 export const MAX_VIDEO_DURATION_SEC = 60;
@@ -66,7 +67,7 @@ function captureFrame(
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   ctx.drawImage(video, 0, 0, width, height);
   return canvas;
 }
@@ -153,6 +154,7 @@ export async function convertVideoToGif(
     width,
     height,
     repeat: 0, // loop forever
+    workerScript: gifWorkerUrl,
   });
 
   gif.on("progress", (p: number) => {
