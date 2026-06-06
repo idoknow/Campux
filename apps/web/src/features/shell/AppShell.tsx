@@ -119,7 +119,6 @@ export function AppShell({
                 minePagination={postsPagination}
                 mineLoading={dataLoading}
                 autoFollowOwnPosts={me.user.autoFollowOwnPosts}
-                recallRequiresReason={metadata.recallRequiresReason}
                 onMinePageChange={onPostsPageChange}
                 onTabChange={onPostsTabChange}
                 onRefresh={onRefreshTenantData}

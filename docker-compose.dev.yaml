@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: campux
       POSTGRES_DB: campux_next
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - campux-next-postgres:/var/lib/postgresql/data
 

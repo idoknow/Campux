@@ -12,9 +12,8 @@ import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
-import { readTenantPendingPostLimit, readTenantImageCompression, readTenantRecallRequiresReason } from "../lib/tenant-metadata";
+import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
-import { executePostRecall, PostRecallExecutionError } from "../lib/post-recall";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -34,7 +33,7 @@ const listQuerySchema = z.object({
 });
 
 const recallRequestSchema = z.object({
-  reason: z.string().trim().max(500).optional(),
+  reason: z.string().trim().min(1, "请填写撤回理由").max(500),
 });
 
 class PendingPostLimitError extends Error {
@@ -66,8 +65,85 @@ const IMAGE_MIME_TYPES = new Set([
   "image/svg+xml",
 ]);
 
+const VIDEO_CONVERT_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+  "video/3gpp",
+]);
+
 function isAllowedImageType(contentType: string): boolean {
   return IMAGE_MIME_TYPES.has(contentType);
+}
+
+function isConvertibleVideoType(contentType: string): boolean {
+  return VIDEO_CONVERT_MIME_TYPES.has(contentType);
+}
+
+const IMAGE_SIZE_CAP = 10 * 1024 * 1024; // 10MB
+const VIDEO_SIZE_CAP = 100 * 1024 * 1024; // 100MB
+const MAX_VIDEO_DURATION_SEC = 60;
+
+/**
+ * Convert video buffer to GIF using ffmpeg.
+ * Output: 320px wide, 10fps, palette-based for quality.
+ */
+async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Promise<{ buffer: Buffer }> {
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+
+  const tmpDir = mkdtempSync(join(tmpdir(), "campux-video-"));
+  const inputPath = join(tmpDir, "input.mp4");
+  const outputPath = join(tmpDir, "output.gif");
+
+  try {
+    writeFileSync(inputPath, videoBuffer);
+
+    // Check duration
+    const duration = await new Promise<number>((resolve, reject) => {
+      const proc = spawn("ffprobe", [
+        "-v", "quiet", "-print_format", "json", "-show_format", inputPath,
+      ], { timeout: 10000 });
+      let stdout = "";
+      proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+      proc.on("close", (code) => {
+        if (code !== 0) { reject(new Error("无法解析视频信息")); return; }
+        try {
+          const info = JSON.parse(stdout);
+          resolve(parseFloat(info.format?.duration || "0"));
+        } catch { reject(new Error("无法解析视频时长")); }
+      });
+      proc.on("error", reject);
+    });
+
+    if (duration > MAX_VIDEO_DURATION_SEC) {
+      throw new Error(`视频时长 ${Math.round(duration)}s 超过限制 (${MAX_VIDEO_DURATION_SEC}s)`);
+    }
+
+    // Convert to GIF: 320px wide, 10fps, high quality palette
+    await new Promise<void>((resolve, reject) => {
+      const ffmpeg = spawn("ffmpeg", [
+        "-y", "-i", inputPath,
+        "-vf", "fps=10,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+        "-loop", "0", outputPath,
+      ], { timeout: 30000 });
+      let stderr = "";
+      ffmpeg.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+      ffmpeg.on("close", (code) => {
+        if (code !== 0) { reject(new Error(`ffmpeg 转换失败: ${stderr.slice(-200)}`)); return; }
+        resolve();
+      });
+      ffmpeg.on("error", reject);
+    });
+
+    return { buffer: readFileSync(outputPath) };
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
 }
 
 function headerIncludes(value: string | string[] | undefined, expected: string): boolean {
@@ -196,7 +272,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           continue;
         }
 
-        if (part.fieldname !== "images") {
+        const isImage = part.fieldname === "images";
+        if (!isImage) {
           part.file.destroy();
           continue;
         }
@@ -205,35 +282,59 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           part.file.destroy();
           throw {
             status: 400,
-            message: "最多 9 张图片",
+            message: "最多 9 个文件",
             fileIndex,
           };
         }
 
         const mime = part.mimetype || "application/octet-stream";
-        if (!isAllowedImageType(mime)) {
+
+        if (!isAllowedImageType(mime) && !isConvertibleVideoType(mime)) {
           part.file.destroy();
           throw {
             status: 415,
-            message: "仅支持图片格式",
+            message: "仅支持图片和视频格式",
             fileIndex,
           };
         }
 
-        const cap = 10 * 1024 * 1024;
+        const isVideo = isConvertibleVideoType(mime);
+        const cap = isVideo ? VIDEO_SIZE_CAP : IMAGE_SIZE_CAP;
 
         // Read file with size cap using Transform
         const buf = await readPartCapped(part.file, cap, fileIndex);
 
-        const finalBuf = await compressImageBuffer(buf, mime, compression);
+        let finalBuf: Buffer;
+        let finalMime: string;
+        let finalFileName: string;
+
+        if (isVideo) {
+          // Convert video to GIF
+          try {
+            const converted = await convertVideoToGif(buf, part.filename || "video");
+            finalBuf = converted.buffer;
+            finalMime = "image/gif";
+            finalFileName = (part.filename || "video").replace(/\.[^.]+$/, ".gif");
+          } catch (convErr) {
+            throw {
+              status: 400,
+              message: `视频转换失败：${convErr instanceof Error ? convErr.message : "未知错误"}`,
+              fileIndex,
+            };
+          }
+        } else {
+          finalBuf = await compressImageBuffer(buf, mime, compression);
+          finalMime = mime;
+          finalFileName = part.filename || "attachment.jpg";
+        }
 
         // Upload to S3
         const att = await uploadAttachmentBytes({
           config,
           tenantId: context.selectedTenant.id,
           kind: "image",
-          contentType: mime,
-          fileName: part.filename || "attachment.jpg",
+          contentType: finalMime,
+          fileName: finalFileName,
           body: finalBuf,
         });
         uploadedKeys.push(att.key);
@@ -593,101 +694,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (post.status !== "published") {
       return reply.code(409).send({ message: "只有已发表稿件可以申请撤回" });
     }
-    const recallRequiresReason = await readTenantRecallRequiresReason(prisma, context.selectedTenant.id);
     const body = recallRequestSchema.parse(request.body ?? {});
-    const reason = body.reason?.trim() ?? "";
-    if (recallRequiresReason && reason.length === 0) {
-      return reply.code(400).send({ message: "请填写撤回理由" });
-    }
-
-    if (!recallRequiresReason) {
-      const pendingRecall = await prisma.$transaction(async (tx) => {
-        const updated = await tx.post.updateMany({
-          where: {
-            id: post.id,
-            tenantId: context.selectedTenant.id,
-            authorId: context.user.id,
-            status: "published",
-          },
-          data: {
-            status: "pending_recall",
-            recallIgnored: false,
-            recallIgnoredAt: null,
-          },
-        });
-        const current = await tx.post.findFirst({
-          where: {
-            id: post.id,
-            tenantId: context.selectedTenant.id,
-            authorId: context.user.id,
-          },
-        });
-        if (!current) {
-          return null;
-        }
-        if (updated.count === 0) {
-          return current;
-        }
-        await tx.postLog.create({
-          data: {
-            tenantId: context.selectedTenant.id,
-            postId: post.id,
-            actorId: context.user.id,
-            oldStatus: "published",
-            newStatus: "pending_recall",
-            comment: reason ? `用户直接撤回：${reason}` : "用户直接撤回",
-          },
-        });
-        return current;
-      });
-      if (!pendingRecall) {
-        return reply.code(404).send({ message: "稿件不存在" });
-      }
-      if (pendingRecall.status !== "pending_recall") {
-        return {
-          post: toPostListItem(pendingRecall),
-        };
-      }
-      await writeAuditLog({
-        tenantId: context.selectedTenant.id,
-        actorId: context.user.id,
-        action: "post.recall.request",
-        targetType: "post",
-        targetId: post.id,
-        detail: {
-          displayId: post.displayId,
-          immediate: true,
-          reason: reason || null,
-        },
-      });
-      try {
-        const result = await executePostRecall({
-          tenantId: context.selectedTenant.id,
-          postId: pendingRecall.id,
-          actorId: context.user.id,
-          logger: app.log,
-        });
-        oneBot?.notifyPostRecalled(result.post.id, result.results.length).catch((error) => {
-          app.log.warn({ error, postId: result.post.id }, "failed to notify post recalled");
-        });
-        return {
-          post: toPostListItem(result.post),
-          results: result.results,
-          recalled: true,
-        };
-      } catch (error) {
-        if (error instanceof PostRecallExecutionError) {
-          oneBot?.notifyPostRecallFailed(pendingRecall.id, error.results).catch((caught) => {
-            app.log.warn({ error: caught, postId: pendingRecall.id }, "failed to notify post recall failure");
-          });
-          return reply.code(502).send({
-            message: "部分发布目标撤回失败，请联系管理员检查日志后重试",
-            results: error.results,
-          });
-        }
-        throw error;
-      }
-    }
+    const reason = body.reason.trim();
 
     const updated = await prisma.post.update({
       where: {

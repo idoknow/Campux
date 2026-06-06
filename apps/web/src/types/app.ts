@@ -105,7 +105,6 @@ export type TenantMetadata = {
   logoUrl: string;
   postRules: string[];
   pendingPostLimit: number;
-  recallRequiresReason: boolean;
   services: Array<{
     title: string;
     description?: string;
@@ -116,6 +115,7 @@ export type TenantMetadata = {
     quality: number;
     maxDimension: number;
   };
+  botStylishMessagesEnabled: boolean;
 };
 
 export type PostAttachment = {
@@ -154,7 +154,6 @@ export type PostItem = {
   updatedAt: string;
   recallReason: string | null;
   following?: boolean;
-  submissionChannel?: "web" | "private";
   qzoneStats: {
     visitorCount: number | null;
     likeCount: number | null;

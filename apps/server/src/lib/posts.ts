@@ -33,7 +33,6 @@ export function toPostListItem(post: {
   attachments: unknown;
   anonymous: boolean;
   status: string;
-  submissionChannel?: string | null;
   recallIgnored?: boolean;
   recallIgnoredAt?: Date | null;
   createdAt: Date;
@@ -47,8 +46,6 @@ export function toPostListItem(post: {
   qzonePostMetrics?: PostQZoneMetric[];
   follows?: Array<{ id: string }>;
 }) {
-  const fallbackSubmissionChannel = post.logs?.some((log) => log.comment.includes("私聊")) ? "private" : "web";
-  const submissionChannel = post.submissionChannel === "private" || post.submissionChannel === "web" ? post.submissionChannel : fallbackSubmissionChannel;
   const recallLog = post.logs
     ?.filter((log) => log.oldStatus === "published" && log.newStatus === "pending_recall")
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
@@ -69,7 +66,6 @@ export function toPostListItem(post: {
     recallReason,
     following: Boolean(post.follows && post.follows.length > 0),
     qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? []),
-    submissionChannel,
   };
 }
 
