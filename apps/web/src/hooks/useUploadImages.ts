@@ -43,7 +43,7 @@ export function usePendingAttachments() {
         ),
       );
 
-      // Step 1: Upload video to 失控图床 API → get GIF URL
+      // Step 1: Upload video to API → get GIF URL
       const uploadData = await uploadVideoToGif(file, (percent) => {
         setPending((current) =>
           current.map((p) =>
@@ -124,7 +124,7 @@ export function usePendingAttachments() {
             continue;
           }
           if (isVideo && file.size > SCDN_MAX_VIDEO_SIZE) {
-            toast.error(`${file.name || "视频"} 超过 15MB 限制（失控图床限制）`);
+            toast.error(`${file.name || "视频"} 超过 15MB 限制`);
             continue;
           }
           if (!isVideo && file.size > MAX_IMAGE_SIZE) {
