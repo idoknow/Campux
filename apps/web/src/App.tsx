@@ -558,7 +558,7 @@ export function App() {
       <WallStatusScreen
         variant="archived"
         wallName={me.currentTenant.name}
-        onBackToTenants={me.memberships.length > 1 || canOpenOps(me) ? () => navigate({ kind: "tenants" }) : undefined}
+        onBackToTenants={me.memberships.length > 1 || (showOpsUi && canOpenOps(me)) ? () => navigate({ kind: "tenants" }) : undefined}
         onLogout={logout}
       />
     );
@@ -575,7 +575,7 @@ export function App() {
           operatorName={me.user.displayName}
           onRefreshMe={refreshMe}
           onEnterWorkspace={() => setActiveTab("post")}
-          onBackToTenants={me.memberships.length > 1 || canOpenOps(me) ? () => navigate({ kind: "tenants" }) : undefined}
+          onBackToTenants={me.memberships.length > 1 || (showOpsUi && canOpenOps(me)) ? () => navigate({ kind: "tenants" }) : undefined}
           onLogout={logout}
         />
       );
@@ -584,7 +584,7 @@ export function App() {
       <WallStatusScreen
         variant="pending"
         wallName={me.currentTenant.name}
-        onBackToTenants={me.memberships.length > 1 || canOpenOps(me) ? () => navigate({ kind: "tenants" }) : undefined}
+        onBackToTenants={me.memberships.length > 1 || (showOpsUi && canOpenOps(me)) ? () => navigate({ kind: "tenants" }) : undefined}
         onLogout={logout}
       />
     );
