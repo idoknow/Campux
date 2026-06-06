@@ -21,7 +21,6 @@ export const defaultMetadata: TenantMetadata = {
     "图片最多 9 张，单张 ≤ 10MB；审核通过后会同步到本校启用的墙号。",
   ],
   pendingPostLimit: 1,
-  recallRequiresReason: true,
   services: [
     { title: "修改名称", description: "更新投稿时使用的显示名" },
     { title: "修改密码", description: "保护你的校园墙账号" },
@@ -33,6 +32,7 @@ export const defaultMetadata: TenantMetadata = {
     quality: 80,
     maxDimension: 2048,
   },
+  botStylishMessagesEnabled: false,
 };
 
 export const navItems = [
