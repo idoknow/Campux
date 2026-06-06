@@ -198,6 +198,11 @@ export class OneBotRuntime {
       include: {
         author: true,
         tenant: true,
+        logs: {
+          where: { newStatus: "pending_approval" },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
       },
     });
     if (!post) {
@@ -214,9 +219,15 @@ export class OneBotRuntime {
     const attachmentSummary = imageCount > 0
       ? `图片：${imageCount} 张`
       : "图片：0 张";
+    const channelLabel = post.submissionChannel
+      ? post.submissionChannel === "private"
+        ? "对话"
+        : "网页"
+      : (post.logs?.[0]?.comment && typeof post.logs[0].comment === "string" && post.logs[0].comment.includes("私聊") ? "对话" : "网页");
     const lines = [
       `${post.tenant.name} 新稿件`,
       `编号：#${post.displayId}`,
+      `投稿方式：${channelLabel}`,
       `投稿人：${post.anonymous ? `匿名（QQ ${post.author.qqUin.toString()}）` : `${post.author.displayName ?? "未命名"}（QQ ${post.author.qqUin.toString()}）`}`,
       attachmentSummary,
       "",
@@ -1557,6 +1568,7 @@ export class OneBotRuntime {
                 text,
                 anonymous: draft.anonymous,
                 attachments: draft.attachments,
+                submissionChannel: "private",
                 status: "pending_approval",
                 logs: {
                   create: {
