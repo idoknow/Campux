@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
-import { ImagePlusIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +42,7 @@ export function PostPage({
   const [attachmentToRemove, setAttachmentToRemove] = useState<PendingAttachment | null>(null);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
+  const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
@@ -96,10 +97,30 @@ export function PostPage({
             <button
               key={item.id}
               className="relative h-[70px] w-[70px] overflow-hidden rounded-md border border-slate-200 bg-slate-100"
-              disabled={item.status === "uploading"}
+              disabled={item.status === "uploading" || item.status === "converting"}
               onClick={() => setAttachmentToRemove(item)}
             >
-              <img src={item.blobUrl} alt={item.file.name} className="h-full w-full object-cover" />
+              {item.originalVideo && item.status === "converting" ? (
+                <video src={item.blobUrl} className="h-full w-full object-cover" muted />
+              ) : (
+                <img src={item.blobUrl} alt={item.file.name} className="h-full w-full object-cover" />
+              )}
+              {item.status === "converting" ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40">
+                  <LoaderIcon className="size-5 animate-spin text-white" />
+                  <span className="mt-0.5 text-[10px] font-medium text-white/90">
+                    {item.progress > 0 ? `转换中 ${item.progress}%` : "解析中"}
+                  </span>
+                  <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-200/50">
+                    <div className="h-full bg-green-400 transition-all" style={{ width: `${Math.max(item.progress, 2)}%` }} />
+                  </div>
+                </div>
+              ) : null}
+              {item.originalVideo && item.status === "ready" ? (
+                <div className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-black/50 px-1 py-0.5 text-[9px] font-medium text-white">
+                  GIF
+                </div>
+              ) : null}
               {item.status === "uploading" ? (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-200">
                   <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.max(item.progress, 2)}%` }} />
@@ -107,7 +128,7 @@ export function PostPage({
               ) : null}
               {item.status === "failed" ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-500/35 px-1 text-center text-[11px] font-medium leading-tight text-red-900">
-                  <span>上传失败</span>
+                  <span>转换失败</span>
                   <span className="line-clamp-2 max-w-full break-words font-normal">{item.errorMessage || "请重试"}</span>
                 </div>
               ) : null}
@@ -117,7 +138,7 @@ export function PostPage({
             <Button
               variant="outline"
               className="h-16 w-16 rounded-md border border-dashed border-slate-300 bg-white p-0 text-slate-500 shadow-none hover:bg-slate-50"
-              disabled={busy}
+              disabled={busy || hasConverting}
               aria-label="添加图片或视频"
               onClick={() => inputRef.current?.click()}
             >
@@ -126,7 +147,13 @@ export function PostPage({
           ) : null}
           <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
-        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 个文件。图片 ≤ 10MB，视频 ≤ 100MB（自动转为 GIF）。可直接粘贴截图。</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          最多 9 个文件。图片 ≤ 10MB，视频 ≤ 100MB（前端自动转为 GIF，时长 ≤ 60s）。
+          {hasConverting ? (
+            <span className="ml-1 text-amber-600">视频转换中，请稍候…</span>
+          ) : null}
+          可直接粘贴截图。
+        </p>
 
         <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-green">
           <div className="flex items-center justify-between gap-3">
@@ -141,13 +168,15 @@ export function PostPage({
         <PostRulesAction rules={rules} />
 
         <div className="mt-4 flex items-center gap-3">
-          <button className="campux-postbtn" disabled={busy || hasUploading || postText.trim().length === 0} onClick={onSubmit}>
+          <button className="campux-postbtn" disabled={busy || hasUploading || hasConverting || postText.trim().length === 0} onClick={onSubmit}>
             <span>
               <SendIcon className="mr-1 inline size-4" />
               {busy ? "提交中" : "提交投稿"}
             </span>
           </button>
-          <span className="text-xs text-slate-500">{hasUploading ? "图片上传中，请稍候" : "提交后进入审核"}</span>
+          <span className="text-xs text-slate-500">
+            {hasConverting ? "视频转换中，请稍候" : hasUploading ? "图片上传中，请稍候" : "提交后进入审核"}
+          </span>
         </div>
       </section>
 

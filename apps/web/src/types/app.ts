@@ -136,8 +136,10 @@ export type PendingAttachment = {
   kind: "image";
   sortOrder: number;
   progress: number;
-  status: "ready" | "uploading" | "failed";
+  status: "ready" | "converting" | "uploading" | "failed";
   errorMessage?: string;
+  /** Original video file before GIF conversion (if attachment started as video) */
+  originalVideo: File | undefined;
 };
 
 export type PostItem = {
