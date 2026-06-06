@@ -22,6 +22,7 @@ const aiSettingsSchema = z.object({
     allowedCategories: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
     modelingKeywords: z.array(z.string().trim().min(1).max(60)).max(80).optional(),
     modelingNotes: z.string().max(300).optional(),
+    postTriggerKeywords: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
   }).optional(),
 });
 

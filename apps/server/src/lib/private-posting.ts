@@ -3,13 +3,34 @@ export type OneBotMessageSegment = {
   data?: Record<string, unknown>;
 };
 
-export function parsePrivatePostStartText(input: string) {
+/**
+ * 检查 input 是否以指定的关键词开头（支持半角 # 和全角 ＃ 前缀）。
+ * 关键词本身不应包含 # 前缀。
+ */
+function matchKeyword(input: string, keyword: string): string | null {
+  const half = `#${keyword}`;
+  const full = `＃${keyword}`;
+  const prefix = input.startsWith(half) ? half : input.startsWith(full) ? full : null;
+  if (!prefix) return null;
+  return input.slice(prefix.length).trimStart();
+}
+
+export function parsePrivatePostStartText(input: string, extraKeywords?: string[] | undefined) {
   const trimmed = input.trim();
-  const prefix = trimmed.startsWith("#投稿") ? "#投稿" : trimmed.startsWith("＃投稿") ? "＃投稿" : null;
-  if (!prefix) {
-    return null;
+
+  // 默认支持 #投稿
+  const defaultMatch = matchKeyword(trimmed, "投稿");
+  if (defaultMatch !== null) return defaultMatch;
+
+  // 额外的触发关键词
+  if (extraKeywords && extraKeywords.length > 0) {
+    for (const kw of extraKeywords) {
+      const match = matchKeyword(trimmed, kw);
+      if (match !== null) return match;
+    }
   }
-  return trimmed.slice(prefix.length).trimStart();
+
+  return null;
 }
 
 export function isPrivatePostFinishText(input: string) {

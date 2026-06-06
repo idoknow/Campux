@@ -53,6 +53,7 @@ type TenantSettingsForm = {
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
   botStylishMessagesEnabled: boolean;
+  botPrivatePostStylishEnabled: boolean;
 };
 
 type BanForm = {
@@ -134,6 +135,7 @@ type AiSettingsForm = {
   allowedCategoriesText: string;
   modelingKeywordsText: string;
   modelingNotes: string;
+  postTriggerKeywordsText: string;
 };
 
 type LlmTestResult = {
@@ -507,6 +509,7 @@ export function AdminPage({
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
           botStylishMessagesEnabled: form.botStylishMessagesEnabled,
+          botPrivatePostStylishEnabled: form.botPrivatePostStylishEnabled,
         }),
       });
       await onSaved();
@@ -542,6 +545,7 @@ export function AdminPage({
       allowedCategories: lines(aiForm.allowedCategoriesText),
       modelingKeywords: lines(aiForm.modelingKeywordsText),
       modelingNotes: aiForm.modelingNotes.trim(),
+      postTriggerKeywords: lines(aiForm.postTriggerKeywordsText),
     };
     return {
       enabled: aiForm.enabled,
@@ -1766,6 +1770,18 @@ function MetadataPanel({
               aria-label="启用 Bot 多彩消息"
             />
           </div>
+          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div>
+              <p className="text-sm font-medium text-slate-900">对话投稿多彩消息</p>
+              <p className="text-xs text-slate-500">开启后对话框投稿流程中的提示语将使用多风格随机语句。</p>
+            </div>
+            <Switch
+              checked={form.botPrivatePostStylishEnabled}
+              disabled={busy}
+              onCheckedChange={(value) => onFormChange({ ...form, botPrivatePostStylishEnabled: value })}
+              aria-label="启用对话投稿多彩消息"
+            />
+          </div>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
@@ -1886,6 +1902,17 @@ function AdminAiSettingsPanel({
             <label className="grid gap-1 text-sm font-medium">
               建模关键词
               <Textarea className="min-h-24" value={form.modelingKeywordsText} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, modelingKeywordsText: event.target.value })} />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              投稿触发关键词
+              <Textarea
+                className="min-h-24"
+                value={form.postTriggerKeywordsText}
+                disabled={busy || testing}
+                onChange={(event) => onFormChange({ ...form, postTriggerKeywordsText: event.target.value })}
+                placeholder="每行一个关键词，如 发帖、吐槽、表白"
+              />
+              <span className="text-xs text-muted-foreground">发送 #关键词 即可开始对话投稿。默认 #投稿 始终生效。</span>
             </label>
           </div>
 
@@ -3264,6 +3291,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
     botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
+    botPrivatePostStylishEnabled: metadata.botPrivatePostStylishEnabled,
   };
 }
 
@@ -3283,6 +3311,7 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     allowedCategoriesText: (settings.rules.allowedCategories ?? []).join("\n"),
     modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
     modelingNotes: settings.rules.modelingNotes ?? "",
+    postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
   };
 }
 

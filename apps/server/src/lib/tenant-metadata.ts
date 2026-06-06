@@ -88,6 +88,31 @@ export async function readTenantBotStylishMessagesEnabled(client: MetadataClient
   return normalizeBotStylishMessagesEnabled(entry?.value);
 }
 
+export const botPrivatePostStylishEnabledKey = "bot_private_post_stylish_enabled";
+export const botPrivatePostStylishEnabledDefault = false;
+
+export function normalizeBotPrivatePostStylishEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return botPrivatePostStylishEnabledDefault;
+}
+
+export async function readTenantBotPrivatePostStylishEnabled(client: MetadataClient, tenantId: string): Promise<boolean> {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: botPrivatePostStylishEnabledKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizeBotPrivatePostStylishEnabled(entry?.value);
+}
+
 export async function readTenantImageCompression(client: MetadataClient, tenantId: string) {
   const entries = await client.tenantMetadata.findMany({
     where: {
