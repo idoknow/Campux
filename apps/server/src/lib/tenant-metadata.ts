@@ -6,6 +6,7 @@ type MetadataClient = typeof prisma | Prisma.TransactionClient;
 export const defaultPendingPostLimit = 1;
 export const maxPendingPostLimit = 50;
 export const pendingPostLimitMetadataKey = "pending_post_limit";
+export const recallRequiresReasonMetadataKey = "recall_requires_reason";
 
 export const imageCompressionEnabledKey = "image_compression_enabled";
 export const imageCompressionQualityKey = "image_compression_quality";
@@ -23,6 +24,12 @@ export function normalizePendingPostLimit(value: unknown) {
     return defaultPendingPostLimit;
   }
   return Math.max(0, Math.min(maxPendingPostLimit, Math.floor(numeric)));
+}
+
+export function normalizeRecallRequiresReason(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return true;
 }
 
 export function normalizeImageCompressionEnabled(value: unknown) {
@@ -61,6 +68,22 @@ export async function readTenantPendingPostLimit(client: MetadataClient, tenantI
   });
 
   return normalizePendingPostLimit(entry?.value);
+}
+
+export async function readTenantRecallRequiresReason(client: MetadataClient, tenantId: string) {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: recallRequiresReasonMetadataKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizeRecallRequiresReason(entry?.value);
 }
 
 export async function readTenantImageCompression(client: MetadataClient, tenantId: string) {

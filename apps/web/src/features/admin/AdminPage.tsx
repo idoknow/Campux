@@ -47,6 +47,7 @@ type TenantSettingsForm = {
   banner: string;
   logoUrl: string;
   pendingPostLimit: number;
+  recallRequiresReason: boolean;
   postRulesText: string;
   servicesText: string;
   imageCompressionEnabled: boolean;
@@ -330,7 +331,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.recallRequiresReason, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -500,6 +501,7 @@ export function AdminPage({
           banner: form.banner,
           logoUrl: form.logoUrl.trim(),
           pendingPostLimit: form.pendingPostLimit,
+          recallRequiresReason: form.recallRequiresReason,
           postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
           services: JSON.parse(form.servicesText) as TenantMetadata["services"],
           imageCompressionEnabled: form.imageCompressionEnabled,
@@ -1712,6 +1714,20 @@ function MetadataPanel({
             />
             <span className="text-xs font-normal text-slate-500">0 表示不限制，默认建议 1 条。</span>
           </label>
+          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">普通用户撤回理由</p>
+                <p className="text-xs text-slate-500">开启后，用户申请撤回时必须填写理由并等待审核；关闭后，用户提交撤回会直接开始撤回稿件。</p>
+              </div>
+              <Switch
+                checked={form.recallRequiresReason}
+                disabled={busy}
+                onCheckedChange={(value) => onFormChange({ ...form, recallRequiresReason: value })}
+                aria-label="普通用户撤回需要填写理由"
+              />
+            </div>
+          </div>
           <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -3244,6 +3260,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     banner: metadata.banner,
     logoUrl: metadata.logoUrl,
     pendingPostLimit: metadata.pendingPostLimit,
+    recallRequiresReason: metadata.recallRequiresReason,
     postRulesText: metadata.postRules.join("\n"),
     servicesText: JSON.stringify(metadata.services, null, 2),
     imageCompressionEnabled: metadata.imageCompression.enabled,
