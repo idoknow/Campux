@@ -65,9 +65,27 @@ const IMAGE_MIME_TYPES = new Set([
   "image/svg+xml",
 ]);
 
+const VIDEO_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+  "video/3gpp",
+  "video/mpeg",
+]);
+
 function isAllowedImageType(contentType: string): boolean {
   return IMAGE_MIME_TYPES.has(contentType);
 }
+
+function isAllowedVideoType(contentType: string): boolean {
+  return VIDEO_MIME_TYPES.has(contentType);
+}
+
+const IMAGE_SIZE_CAP = 10 * 1024 * 1024; // 10MB
+const VIDEO_SIZE_CAP = 500 * 1024 * 1024; // 500MB
 
 function headerIncludes(value: string | string[] | undefined, expected: string): boolean {
   return Array.isArray(value) ? value.some((item) => item.includes(expected)) : Boolean(value?.includes(expected));
@@ -131,6 +149,34 @@ function isTransactionSerializationFailure(value: unknown) {
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
+  app.get("/api/uploads/post-file", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const query = fileQuerySchema.parse(request.query);
+    const allowedPrefixes = [
+      `tenants/${context.selectedTenant.id}/uploads/`,
+      `tenants/${context.selectedTenant.id}/legacy/`,
+    ];
+    if (!allowedPrefixes.some((prefix) => query.key.startsWith(prefix))) {
+      return reply.code(403).send({ message: "没有访问该文件的权限" });
+    }
+
+    const s3 = await ensureBucket(config);
+    const object = await s3.send(
+      new GetObjectCommand({
+        Bucket: config.s3.bucket,
+        Key: query.key,
+      }),
+    );
+
+    if (object.ContentType) {
+      reply.header("Content-Type", object.ContentType);
+    }
+    const isVideo = object.ContentType?.startsWith("video/");
+    reply.header("Cache-Control", isVideo ? "private, max-age=86400" : "private, max-age=3600");
+    return reply.send(object.Body);
+  });
+
+  // Keep the old route for backward compatibility
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
@@ -195,7 +241,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           continue;
         }
 
-        if (part.fieldname !== "images") {
+        const isImage = part.fieldname === "images";
+        const isVideo = part.fieldname === "videos";
+        if (!isImage && !isVideo) {
           part.file.destroy();
           continue;
         }
@@ -204,13 +252,14 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           part.file.destroy();
           throw {
             status: 400,
-            message: "最多 9 张图片",
+            message: isImage ? "最多 9 张图片" : "最多 9 个文件",
             fileIndex,
           };
         }
 
         const mime = part.mimetype || "application/octet-stream";
-        if (!isAllowedImageType(mime)) {
+
+        if (isImage && !isAllowedImageType(mime)) {
           part.file.destroy();
           throw {
             status: 415,
@@ -218,21 +267,29 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             fileIndex,
           };
         }
+        if (isVideo && !isAllowedVideoType(mime)) {
+          part.file.destroy();
+          throw {
+            status: 415,
+            message: "不支持的视频格式，请使用 MP4、WebM 等常见格式",
+            fileIndex,
+          };
+        }
 
-        const cap = 10 * 1024 * 1024;
+        const cap = isVideo ? VIDEO_SIZE_CAP : IMAGE_SIZE_CAP;
 
         // Read file with size cap using Transform
         const buf = await readPartCapped(part.file, cap, fileIndex);
 
-        const finalBuf = await compressImageBuffer(buf, mime, compression);
+        const finalBuf = isImage ? await compressImageBuffer(buf, mime, compression) : buf;
 
         // Upload to S3
         const att = await uploadAttachmentBytes({
           config,
           tenantId: context.selectedTenant.id,
-          kind: "image",
+          kind: isVideo ? "video" : "image",
           contentType: mime,
-          fileName: part.filename || "attachment.jpg",
+          fileName: part.filename || (isVideo ? "attachment.mp4" : "attachment.jpg"),
           body: finalBuf,
         });
         uploadedKeys.push(att.key);

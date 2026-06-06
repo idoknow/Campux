@@ -46,7 +46,7 @@ export function PostPage({
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.items)
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .filter((item) => item.kind === "file" && (item.type.startsWith("image/") || item.type.startsWith("video/")))
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file));
     if (files.length === 0) {
@@ -99,7 +99,20 @@ export function PostPage({
               disabled={item.status === "uploading"}
               onClick={() => setAttachmentToRemove(item)}
             >
-              <img src={item.blobUrl} alt={item.file.name} className="h-full w-full object-cover" />
+              {item.kind === "video" ? (
+                <>
+                  <video src={item.blobUrl} className="h-full w-full object-cover" muted preload="metadata" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="flex size-6 items-center justify-center rounded-full bg-black/50">
+                      <svg className="size-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <img src={item.blobUrl} alt={item.file.name} className="h-full w-full object-cover" />
+              )}
               {item.status === "uploading" ? (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-200">
                   <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.max(item.progress, 2)}%` }} />
@@ -118,15 +131,15 @@ export function PostPage({
               variant="outline"
               className="h-16 w-16 rounded-md border border-dashed border-slate-300 bg-white p-0 text-slate-500 shadow-none hover:bg-slate-50"
               disabled={busy}
-              aria-label="添加图片"
+              aria-label="添加图片或视频"
               onClick={() => inputRef.current?.click()}
             >
               <ImagePlusIcon className="!size-7 stroke-[1.8]" />
             </Button>
           ) : null}
-          <input ref={inputRef} hidden multiple accept="image/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
+          <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
-        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 张图片，单张 ≤ 10MB。可直接粘贴截图，提交时会一起上传。</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 个文件。图片 ≤ 10MB，视频 ≤ 500MB。可直接粘贴截图。</p>
 
         <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-green">
           <div className="flex items-center justify-between gap-3">

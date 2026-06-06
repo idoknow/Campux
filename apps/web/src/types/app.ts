@@ -132,7 +132,7 @@ export type PendingAttachment = {
   id: string;
   file: File;
   blobUrl: string;
-  kind: "image";
+  kind: "image" | "video";
   sortOrder: number;
   progress: number;
   status: "ready" | "uploading" | "failed";

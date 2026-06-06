@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 500 * 1024 * 1024;
 
 export function usePendingAttachments() {
   const [pending, setPending] = useState<PendingAttachment[]>([]);
@@ -25,18 +26,23 @@ export function usePendingAttachments() {
       const remaining = Math.max(9 - current.length, 0);
       const candidates = Array.from(files).slice(0, remaining);
       if (Array.from(files).length > remaining) {
-        toast.error("最多只能添加 9 张图片");
+        toast.error("最多只能添加 9 个文件");
       }
 
       const accepted: PendingAttachment[] = [];
       const baseSort = current.length > 0 ? Math.max(...current.map((p) => p.sortOrder)) + 1 : 0;
       let nextIndex = 0;
       for (const file of candidates) {
-        if (!file.type.startsWith("image/")) {
-          toast.error(`${file.name || "文件"} 不是图片格式`);
+        const isVideo = file.type.startsWith("video/");
+        if (!file.type.startsWith("image/") && !isVideo) {
+          toast.error(`${file.name || "文件"} 不是图片或视频格式`);
           continue;
         }
-        if (file.size > MAX_IMAGE_SIZE) {
+        if (isVideo && file.size > MAX_VIDEO_SIZE) {
+          toast.error(`${file.name || "视频"} 超过 500MB 限制`);
+          continue;
+        }
+        if (!isVideo && file.size > MAX_IMAGE_SIZE) {
           toast.error(`${file.name || "图片"} 超过 10MB 限制`);
           continue;
         }
@@ -46,7 +52,7 @@ export function usePendingAttachments() {
           id: crypto.randomUUID(),
           file,
           blobUrl,
-          kind: "image",
+          kind: isVideo ? "video" : "image",
           sortOrder: baseSort + nextIndex,
           progress: 0,
           status: "ready",

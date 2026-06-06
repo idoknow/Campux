@@ -40,7 +40,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 type PostImage = {
-  kind?: "image";
+  kind?: "image" | "video";
   key?: string;
   url?: string;
   fileName?: string;
@@ -835,11 +835,22 @@ export function PostsPage({
             {activePreviewImage ? (
               <div className="grid gap-3">
                 <div className="grid max-h-[70dvh] place-items-center overflow-auto rounded-md border border-slate-200 bg-slate-50">
-                  <img
-                    src={getPostImageUrl(activePreviewImage)}
-                    alt={activePreviewImage.fileName ?? imagePreview.title}
-                    className="max-h-[70dvh] w-auto max-w-full object-contain"
-                  />
+                  {activePreviewImage.kind === "video" ? (
+                    <video
+                      src={getPostImageUrl(activePreviewImage)}
+                      controls
+                      className="max-h-[70dvh] w-auto max-w-full"
+                      preload="metadata"
+                    >
+                      您的浏览器不支持视频播放
+                    </video>
+                  ) : (
+                    <img
+                      src={getPostImageUrl(activePreviewImage)}
+                      alt={activePreviewImage.fileName ?? imagePreview.title}
+                      className="max-h-[70dvh] w-auto max-w-full object-contain"
+                    />
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="min-w-0 truncate text-xs font-bold text-slate-500">{activePreviewImage.fileName ?? "上传图片"}</p>
@@ -1017,7 +1028,7 @@ function PostDetailDialog({
               <Badge variant="outline">#{post.displayId}</Badge>
               <Badge variant="secondary">{statusLabels[post.status] ?? post.status}</Badge>
               {post.anonymous ? <Badge variant="outline">匿名展示</Badge> : <Badge variant="outline">实名展示</Badge>}
-              <Badge variant="outline">{images.length} 张图片</Badge>
+              <Badge variant="outline">{images.length} 个附件</Badge>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="whitespace-pre-wrap text-sm font-semibold text-slate-800">{post.text}</p>
@@ -1033,7 +1044,16 @@ function PostDetailDialog({
               <div className="flex flex-wrap gap-2">
                 {images.map((image, index) => (
                   <button key={`${image.key ?? image.url ?? index}`} type="button" className="relative size-16 overflow-hidden rounded-md border border-slate-200 bg-white" onClick={() => onImagePreview(post, images, index)}>
-                    <img src={getPostImageUrl(image)} alt={image.fileName ?? `稿件图片 ${index + 1}`} className="h-full w-full object-cover" />
+                    <img src={getPostImageUrl(image)} alt={image.fileName ?? `稿件附件 ${index + 1}`} className="h-full w-full object-cover" />
+                    {image.kind === "video" ? (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="flex size-6 items-center justify-center rounded-full bg-black/50">
+                          <svg className="size-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        </div>
+                      </div>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -1450,7 +1470,7 @@ function PostMetaHeader({
         <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
           <InfoPill icon={HashIcon}>{displayId}</InfoPill>
           <VisibilityPill anonymous={anonymous}>{anonymousLabel}</VisibilityPill>
-          <InfoPill icon={ImageIcon}>{imageCount} 张图</InfoPill>
+          <InfoPill icon={ImageIcon}>{imageCount} 个附件</InfoPill>
         </div>
         {title ? <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-5 text-slate-950 md:mt-2 md:line-clamp-2 md:text-base md:leading-6">{title}</h3> : null}
       </div>
@@ -1752,6 +1772,15 @@ function ImageGallery({ images, reviewMode = false, compact = false, onImageClic
             aria-label={`查看图片 ${index + 1}`}
           >
             <img src={getPostImageUrl(image)} alt={image.fileName ?? "稿件图片"} className="h-full w-full object-cover" loading="lazy" />
+            {image.kind === "video" ? (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex size-6 items-center justify-center rounded-full bg-black/50">
+                  <svg className="size-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </div>
+              </div>
+            ) : null}
             {index === 4 && images.length > 5 ? <div className="absolute inset-0 grid place-items-center bg-slate-950/45 text-sm font-black text-white">+{images.length - 5}</div> : null}
           </button>
         ))}
@@ -1770,6 +1799,15 @@ function ImageGallery({ images, reviewMode = false, compact = false, onImageClic
           aria-label={`查看图片 ${index + 1}`}
         >
           <img src={getPostImageUrl(image)} alt={image.fileName ?? "稿件图片"} className="h-full w-full object-cover" loading="lazy" />
+          {image.kind === "video" ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex size-10 items-center justify-center rounded-full bg-black/50">
+                <svg className="size-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            </div>
+          ) : null}
           {image.fileName && reviewMode ? (
             <div className="absolute inset-x-0 bottom-0 truncate bg-slate-950/55 px-2 py-1 text-[10px] font-bold text-white">{image.fileName}</div>
           ) : null}
@@ -1792,7 +1830,8 @@ function getPostImages(attachments: unknown): PostImage[] {
 
 function getPostImageUrl(image: PostImage) {
   if (image.key) {
-    return `/api/uploads/post-image?key=${encodeURIComponent(image.key)}`;
+    const endpoint = image.kind === "video" ? "/api/uploads/post-file" : "/api/uploads/post-image";
+    return `${endpoint}?key=${encodeURIComponent(image.key)}`;
   }
 
   return image.url ?? "";

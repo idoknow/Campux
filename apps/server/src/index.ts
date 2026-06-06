@@ -47,7 +47,7 @@ await app.register(cors, {
   credentials: true,
 });
 await app.register(fastifyMultipart, {
-  limits: { fileSize: 50 * 1024 * 1024, files: 9, fields: 10 },
+  limits: { fileSize: 500 * 1024 * 1024, files: 9, fields: 10 },
 });
 
 const queue = createRuntimeQueue({
