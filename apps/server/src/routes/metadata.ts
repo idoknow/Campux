@@ -18,6 +18,8 @@ import {
   imageCompressionMaxDimensionKey,
   botStylishMessagesEnabledKey,
   normalizeBotStylishMessagesEnabled,
+  botPrivatePostStylishEnabledKey,
+  normalizeBotPrivatePostStylishEnabled,
   readTenantImageCompression,
 } from "../lib/tenant-metadata";
 
@@ -32,6 +34,7 @@ const publicMetadataKeys = [
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
   botStylishMessagesEnabledKey,
+  botPrivatePostStylishEnabledKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -54,6 +57,7 @@ const patchMetadataSchema = z.object({
   imageCompressionQuality: z.number().int().min(40).max(95).optional(),
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
   botStylishMessagesEnabled: z.boolean().optional(),
+  botPrivatePostStylishEnabled: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -82,6 +86,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
       maxDimension: normalizeMaxDimension(record[imageCompressionMaxDimensionKey]),
     },
     botStylishMessagesEnabled: normalizeBotStylishMessagesEnabled(record[botStylishMessagesEnabledKey]),
+    botPrivatePostStylishEnabled: normalizeBotPrivatePostStylishEnabled(record[botPrivatePostStylishEnabledKey]),
   };
 }
 
@@ -300,6 +305,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.botStylishMessagesEnabled !== undefined) {
       updates.push({ key: botStylishMessagesEnabledKey, value: body.botStylishMessagesEnabled });
+    }
+    if (body.botPrivatePostStylishEnabled !== undefined) {
+      updates.push({ key: botPrivatePostStylishEnabledKey, value: body.botPrivatePostStylishEnabled });
     }
 
     await prisma.$transaction(

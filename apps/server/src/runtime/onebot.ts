@@ -20,7 +20,7 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
-import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled } from "../lib/tenant-metadata";
+import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
@@ -59,6 +59,11 @@ import {
   formatReviewApprovedGroup,
   formatReviewRejectedGroup,
   formatRequeue,
+  formatPrivatePostModePrompt,
+  formatPrivatePostDraftPrompt,
+  formatPrivatePostContinuePrompt,
+  formatPrivatePostCancelled,
+  formatPrivateHelp,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -147,17 +152,6 @@ type OneBotMessageEvent = {
   // Some OneBot implementations include reply metadata in the message segments
   // but we treat them as part of `message` / `raw_message` as fallback.
 };
-
-const privateHelp = [
-  "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
-  "可以发送 #重置密码，重置你的登录密码。",
-  "想投稿时先发 #投稿，然后回复 #匿名 或 #实名 选择投稿方式。",
-  "选择后继续发送添加稿件正文及图片，删除上一句话请发送 #撤回，结束投稿并发布请发送 #结束。",
-  "取消本次投稿请发送 #取消。",
-].join("\n");
-
-const privatePostModePrompt = "现在回复 #匿名 或 #实名 选择投稿方式。（取消本次投稿请发送 #取消）";
-const privatePostDraftPrompt = "继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）";
 
 const reviewHelp = [
   "审核命令：",
@@ -986,7 +980,15 @@ export class OneBotRuntime {
     try {
       const bot = await findEnabledBot(botQqUin);
       const plainText = extractOneBotPlainText(event.message, event.raw_message).trim();
-      const startBody = parsePrivatePostStartText(plainText);
+
+      // 读取租户配置的额外投稿触发关键词
+      const aiRulesRecord = await prisma.tenantAiSettings.findUnique({
+        where: { tenantId: bot.tenantId },
+        select: { rules: true },
+      });
+      const extraKeywords = (aiRulesRecord?.rules as { postTriggerKeywords?: string[] } | null)?.postTriggerKeywords;
+
+      const startBody = parsePrivatePostStartText(plainText, extraKeywords);
       if (startBody !== null) {
         await this.startPrivatePostDraft({
           bot,
@@ -1019,8 +1021,9 @@ export class OneBotRuntime {
 
       const pendingMode = this.privatePostPendingModes.get(draftKey);
       if (pendingMode) {
+        const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
         if (isPrivatePostFinishText(plainText)) {
-          await this.sendPrivateMessage(botQqUin, userQqUin, privatePostModePrompt);
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
           return;
         }
 
@@ -1035,7 +1038,7 @@ export class OneBotRuntime {
           return;
         }
 
-        await this.sendPrivateMessage(botQqUin, userQqUin, privatePostModePrompt);
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
         return;
       }
 
@@ -1052,7 +1055,8 @@ export class OneBotRuntime {
       if (draft) {
           const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft });
           if (appended) {
-            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
+            const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled));
             return;
           }
 
@@ -1062,7 +1066,8 @@ export class OneBotRuntime {
       const command = parsePrivateCommand(plainText);
       if (!command) {
         if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
-          await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp).catch(() => undefined);
+          const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+          await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(stylishEnabled)).catch(() => undefined);
         }
         return;
       }
@@ -1092,7 +1097,8 @@ export class OneBotRuntime {
         return;
       }
 
-      await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || privateHelp);
+      const generalStylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled));
     } catch (error) {
       await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
     }
@@ -1144,7 +1150,8 @@ export class OneBotRuntime {
       history,
     });
 
-    const summary = this.formatPrivatePostPendingSummary(text, attachments.length);
+    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+    const summary = this.formatPrivatePostPendingSummary(text, attachments.length, privateStylishEnabled);
     await this.sendPrivateMessage(botQqUin, userQqUin, summary);
   }
 
@@ -1229,7 +1236,8 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       await this.clearPrivatePostPending(draftKey);
-      await this.sendPrivateMessage(botQqUin, userQqUin, "已取消发布");
+      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
       return;
     }
 
@@ -1240,7 +1248,8 @@ export class OneBotRuntime {
     }
 
     await this.clearPrivatePostDraft(draftKey);
-    await this.sendPrivateMessage(botQqUin, userQqUin, "已取消发布");
+    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
   }
 
   private async finishPrivatePostDraft({
@@ -1426,17 +1435,17 @@ export class OneBotRuntime {
     throw new BotWorkflowError("无法读取图片附件，请重新发送图片", 400);
   }
 
-  private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean) {
+  private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean, stylishEnabled = false) {
     void text;
     void attachmentCount;
     void anonymous;
-    return privatePostDraftPrompt;
+    return formatPrivatePostDraftPrompt(stylishEnabled);
   }
 
-  private formatPrivatePostPendingSummary(text: string, attachmentCount: number) {
+  private formatPrivatePostPendingSummary(text: string, attachmentCount: number, stylishEnabled = false) {
     void text;
     void attachmentCount;
-    return privatePostModePrompt;
+    return formatPrivatePostModePrompt(stylishEnabled);
   }
 
   private async selectPrivatePostMode({
@@ -1470,7 +1479,8 @@ export class OneBotRuntime {
       history: pending.history,
     });
 
-    await this.sendPrivateMessage(botQqUin, userQqUin, "继续发送添加稿件正文及图片");
+    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostContinuePrompt(privateStylishEnabled));
   }
 
   private async undoPrivatePostDraftEntry({
@@ -1488,12 +1498,13 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-    const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
+      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
       if (!undone) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, privatePostModePrompt);
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
         return;
       }
-      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length));
+      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, privateStylishEnabled));
       return;
     }
 
@@ -1504,12 +1515,13 @@ export class OneBotRuntime {
     }
 
     const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
     const undone = await this.popPrivatePostHistoryEntry(draftKey, draft, stylishEnabled);
     if (!undone) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, privatePostDraftPrompt);
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(privateStylishEnabled));
       return;
     }
-    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous));
+    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled));
   }
 
   private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode, stylishEnabled = false) {

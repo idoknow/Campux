@@ -22,6 +22,8 @@ export type AiRules = {
   allowedCategories?: string[] | undefined;
   modelingKeywords?: string[] | undefined;
   modelingNotes?: string | undefined;
+  /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
+  postTriggerKeywords?: string[] | undefined;
 };
 
 type ExtractedEntity = {
