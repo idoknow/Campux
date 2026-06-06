@@ -89,6 +89,10 @@ const MAX_VIDEO_DURATION_SEC = 60;
 /**
  * Convert video buffer to GIF using ffmpeg.
  * Output: 320px wide, 10fps, palette-based for quality.
+ *
+ * Note: The web frontend now converts videos to GIF in-browser, so this
+ * server-side path is only hit by API clients. If ffmpeg is not available,
+ * a clear error is thrown.
  */
 async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Promise<{ buffer: Buffer }> {
   const { spawn } = await import("node:child_process");
@@ -117,7 +121,13 @@ async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Pro
           resolve(parseFloat(info.format?.duration || "0"));
         } catch { reject(new Error("无法解析视频时长")); }
       });
-      proc.on("error", reject);
+      proc.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT") {
+          reject(new Error("服务端未安装 ffprobe，请使用 Web 前端投稿"));
+        } else {
+          reject(err);
+        }
+      });
     });
 
     if (duration > MAX_VIDEO_DURATION_SEC) {
@@ -137,7 +147,13 @@ async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Pro
         if (code !== 0) { reject(new Error(`ffmpeg 转换失败: ${stderr.slice(-200)}`)); return; }
         resolve();
       });
-      ffmpeg.on("error", reject);
+      ffmpeg.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT") {
+          reject(new Error("服务端未安装 ffmpeg，请使用 Web 前端投稿"));
+        } else {
+          reject(err);
+        }
+      });
     });
 
     return { buffer: readFileSync(outputPath) };
