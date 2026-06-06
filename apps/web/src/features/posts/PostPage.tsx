@@ -109,7 +109,7 @@ export function PostPage({
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40">
                   <LoaderIcon className="size-5 animate-spin text-white" />
                   <span className="mt-0.5 text-[10px] font-medium text-white/90">
-                    {item.progress > 0 ? `转换中 ${item.progress}%` : "解析中"}
+                    {item.progress > 0 ? `上传转码中 ${item.progress}%` : "准备中"}
                   </span>
                   <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-200/50">
                     <div className="h-full bg-green-400 transition-all" style={{ width: `${Math.max(item.progress, 2)}%` }} />
@@ -148,9 +148,9 @@ export function PostPage({
           <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          最多 9 个文件。图片 ≤ 10MB，视频 ≤ 100MB（前端自动转为 GIF，时长 ≤ 60s）。
+          最多 9 个文件。图片 ≤ 10MB，视频 ≤ 15MB（通过失控图床 API 转为 GIF）。
           {hasConverting ? (
-            <span className="ml-1 text-amber-600">视频转换中，请稍候…</span>
+            <span className="ml-1 text-amber-600">视频上传至图床转换中，请稍候…</span>
           ) : null}
           可直接粘贴截图。
         </p>
@@ -175,7 +175,7 @@ export function PostPage({
             </span>
           </button>
           <span className="text-xs text-slate-500">
-            {hasConverting ? "视频转换中，请稍候" : hasUploading ? "图片上传中，请稍候" : "提交后进入审核"}
+            {hasConverting ? "视频上传转码中，请稍候" : hasUploading ? "图片上传中，请稍候" : "提交后进入审核"}
           </span>
         </div>
       </section>
