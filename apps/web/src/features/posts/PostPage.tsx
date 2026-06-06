@@ -148,9 +148,9 @@ export function PostPage({
           <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          最多 9 个文件。图片 ≤ 10MB，视频 ≤ 15MB（通过失控图床 API 转为 GIF）。
+          最多 9 个文件。图片 ≤ 10MB，视频 ≤ 15MB（上传后自动转为 GIF）。
           {hasConverting ? (
-            <span className="ml-1 text-amber-600">视频上传至图床转换中，请稍候…</span>
+            <span className="ml-1 text-amber-600">视频转换中，请稍候…</span>
           ) : null}
           可直接粘贴截图。
         </p>
