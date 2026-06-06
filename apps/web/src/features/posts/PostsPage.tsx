@@ -166,7 +166,6 @@ export function PostsPage({
   minePagination,
   mineLoading,
   autoFollowOwnPosts,
-  recallRequiresReason,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -179,7 +178,6 @@ export function PostsPage({
   minePagination: Pagination;
   mineLoading: boolean;
   autoFollowOwnPosts: boolean;
-  recallRequiresReason: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -378,7 +376,7 @@ export function PostsPage({
         method: "POST",
         body: JSON.stringify({ reason }),
       });
-      toast.success(recallRequiresReason ? "已提交撤回申请，等待审核处理。" : "已提交撤回，正在处理已发布内容。");
+      toast.success("已提交撤回申请，等待审核处理。");
       await refreshAll();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "申请撤回失败");
@@ -457,7 +455,7 @@ export function PostsPage({
     }
     const { mode, post } = recallConfirm;
     const reason = recallReason.trim();
-    if (mode === "request" && recallRequiresReason && reason.length === 0) {
+    if (mode === "request" && reason.length === 0) {
       toast.error("请填写撤回理由。");
       return;
     }
@@ -920,18 +918,15 @@ export function PostsPage({
                 : recallConfirm.open && recallConfirm.mode === "admin-silent"
                   ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被隐藏，但不会私聊通知作者；审核群仍会收到记录。`
                 : recallConfirm.open
-                  ? recallRequiresReason
-                    ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
-                    : `确认撤回稿件 #${recallConfirm.post.displayId} 吗？提交后会直接开始撤回已发布内容。`
+                  ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
                   : ""}
             </DialogDescription>
           </DialogHeader>
-          {recallConfirm.open && recallConfirm.mode === "request" && recallRequiresReason ? (
+          {recallConfirm.open && recallConfirm.mode === "request" ? (
             <div className="px-5 pb-2">
               <Textarea
                 className="min-h-24 bg-white"
                 value={recallReason}
-                placeholder="填写撤回理由，方便审核员判断。"
                 onChange={(event) => setRecallReason(event.target.value)}
               />
             </div>
@@ -954,7 +949,7 @@ export function PostsPage({
                   (recallConfirm.mode === "reject" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin-silent" && busyPostId === recallConfirm.post.id) ||
-                  (recallConfirm.mode === "request" && recallRequiresReason && recallReason.trim().length === 0))
+                  (recallConfirm.mode === "request" && recallReason.trim().length === 0))
               }
               onClick={() => void confirmRecallAction()}
             >
@@ -966,9 +961,7 @@ export function PostsPage({
                     ? "确认撤回"
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "确认静默撤回"
-                      : recallRequiresReason
-                        ? "提交申请"
-                        : "确认撤回"}
+                      : "提交申请"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1040,7 +1033,7 @@ function PostDetailDialog({
               <div className="flex flex-wrap gap-2">
                 {images.map((image, index) => (
                   <button key={`${image.key ?? image.url ?? index}`} type="button" className="relative size-16 overflow-hidden rounded-md border border-slate-200 bg-white" onClick={() => onImagePreview(post, images, index)}>
-                    <img src={getPostImageUrl(image)} alt={image.fileName ?? `稿件图片 ${index + 1}`} className="h-full w-full object-cover" />
+                    <img src={getPostImageUrl(image)} alt={image.fileName ?? `稿件附件 ${index + 1}`} className="h-full w-full object-cover" />
                   </button>
                 ))}
               </div>
@@ -1240,7 +1233,6 @@ function ReviewCard({
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
-          submissionChannel={post.submissionChannel}
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={onDetail}>详情</Button>
@@ -1399,7 +1391,6 @@ function PostCard({
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
-          submissionChannel={post.submissionChannel}
           title={post.title || "未命名稿件"}
           actions={
             <>
@@ -1441,7 +1432,6 @@ function PostMetaHeader({
   imageCount,
   status,
   statusClassName,
-  submissionChannel,
   title,
   actions,
 }: {
@@ -1451,7 +1441,6 @@ function PostMetaHeader({
   imageCount: number;
   status: string;
   statusClassName: string;
-  submissionChannel?: "web" | "private" | undefined;
   title?: string;
   actions?: ReactNode;
 }) {
@@ -1461,10 +1450,7 @@ function PostMetaHeader({
         <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
           <InfoPill icon={HashIcon}>{displayId}</InfoPill>
           <VisibilityPill anonymous={anonymous}>{anonymousLabel}</VisibilityPill>
-          <InfoPill icon={ImageIcon}>{imageCount} 张图</InfoPill>
-          {submissionChannel ? (
-            <InfoPill icon={MessageCircleIcon}>{submissionChannel === "private" ? "对话投稿" : "网页投稿"}</InfoPill>
-          ) : null}
+          <InfoPill icon={ImageIcon}>{imageCount} 个附件</InfoPill>
         </div>
         {title ? <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-5 text-slate-950 md:mt-2 md:line-clamp-2 md:text-base md:leading-6">{title}</h3> : null}
       </div>

@@ -13,11 +13,11 @@ import {
   maxPendingPostLimit,
   normalizePendingPostLimit,
   pendingPostLimitMetadataKey,
-  normalizeRecallRequiresReason,
-  recallRequiresReasonMetadataKey,
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  botStylishMessagesEnabledKey,
+  normalizeBotStylishMessagesEnabled,
   readTenantImageCompression,
 } from "../lib/tenant-metadata";
 
@@ -28,10 +28,10 @@ const publicMetadataKeys = [
   "post_rules",
   "services",
   pendingPostLimitMetadataKey,
-  recallRequiresReasonMetadataKey,
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  botStylishMessagesEnabledKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -43,7 +43,6 @@ const patchMetadataSchema = z.object({
   logoUrl: z.string().trim().max(1000).refine((value) => value === "" || /^https?:\/\//i.test(value) || value.startsWith("/"), "Logo URL 必须是 http(s) 或站内路径").optional(),
   postRules: z.array(z.string().min(1)).optional(),
   pendingPostLimit: z.number().int().min(0).max(maxPendingPostLimit).optional(),
-  recallRequiresReason: z.boolean().optional(),
   services: z.array(
     z.object({
       title: z.string().min(1),
@@ -54,6 +53,7 @@ const patchMetadataSchema = z.object({
   imageCompressionEnabled: z.boolean().optional(),
   imageCompressionQuality: z.number().int().min(40).max(95).optional(),
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
+  botStylishMessagesEnabled: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -75,13 +75,13 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     logoUrl: typeof record.logo_url === "string" ? record.logo_url : "",
     postRules: Array.isArray(record.post_rules) ? record.post_rules.filter((rule) => typeof rule === "string") : [],
     pendingPostLimit: normalizePendingPostLimit(record[pendingPostLimitMetadataKey]),
-    recallRequiresReason: normalizeRecallRequiresReason(record[recallRequiresReasonMetadataKey]),
     services: Array.isArray(record.services) ? record.services : [],
     imageCompression: {
       enabled: normalizeEnabled(record[imageCompressionEnabledKey]),
       quality: normalizeQuality(record[imageCompressionQualityKey]),
       maxDimension: normalizeMaxDimension(record[imageCompressionMaxDimensionKey]),
     },
+    botStylishMessagesEnabled: normalizeBotStylishMessagesEnabled(record[botStylishMessagesEnabledKey]),
   };
 }
 
@@ -286,9 +286,6 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     if (body.pendingPostLimit !== undefined) {
       updates.push({ key: pendingPostLimitMetadataKey, value: body.pendingPostLimit });
     }
-    if (body.recallRequiresReason !== undefined) {
-      updates.push({ key: recallRequiresReasonMetadataKey, value: body.recallRequiresReason });
-    }
     if (body.services !== undefined) {
       updates.push({ key: "services", value: body.services });
     }
@@ -300,6 +297,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.imageCompressionMaxDimension !== undefined) {
       updates.push({ key: imageCompressionMaxDimensionKey, value: body.imageCompressionMaxDimension });
+    }
+    if (body.botStylishMessagesEnabled !== undefined) {
+      updates.push({ key: botStylishMessagesEnabledKey, value: body.botStylishMessagesEnabled });
     }
 
     await prisma.$transaction(
