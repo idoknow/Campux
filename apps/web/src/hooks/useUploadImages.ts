@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
-import { convertVideoToGif, VideoConversionError, MAX_VIDEO_SIZE } from "@/lib/video-to-gif";
+import { uploadVideoToGif, downloadGifBlob, ScdnApiError, SCDN_MAX_VIDEO_SIZE } from "@/lib/scdn-api";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
@@ -43,13 +43,17 @@ export function usePendingAttachments() {
         ),
       );
 
-      const gifBlob = await convertVideoToGif(file, (percent) => {
+      // Step 1: Upload video to 失控图床 API → get GIF URL
+      const uploadData = await uploadVideoToGif(file, (percent) => {
         setPending((current) =>
           current.map((p) =>
             p.id === attachmentId ? { ...p, progress: percent } : p,
           ),
         );
       });
+
+      // Step 2: Download the GIF blob from the returned URL
+      const gifBlob = await downloadGifBlob(uploadData.url);
 
       // Create a File from the GIF blob
       const gifFile = new File([gifBlob], file.name.replace(/\.[^.]+$/, ".gif"), {
@@ -75,7 +79,7 @@ export function usePendingAttachments() {
       );
     } catch (error) {
       const message =
-        error instanceof VideoConversionError
+        error instanceof ScdnApiError
           ? error.message
           : "视频转换失败";
       toast.error(`视频转换失败：${message}`);
@@ -119,8 +123,8 @@ export function usePendingAttachments() {
             toast.error(`${file.name || "文件"} 不是图片或视频格式`);
             continue;
           }
-          if (isVideo && file.size > MAX_VIDEO_SIZE) {
-            toast.error(`${file.name || "视频"} 超过 100MB 限制`);
+          if (isVideo && file.size > SCDN_MAX_VIDEO_SIZE) {
+            toast.error(`${file.name || "视频"} 超过 15MB 限制（失控图床限制）`);
             continue;
           }
           if (!isVideo && file.size > MAX_IMAGE_SIZE) {
