@@ -153,6 +153,7 @@ export type PostItem = {
   updatedAt: string;
   recallReason: string | null;
   following?: boolean;
+  submissionChannel?: "web" | "private";
   qzoneStats: {
     visitorCount: number | null;
     likeCount: number | null;
