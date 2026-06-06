@@ -537,14 +537,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         where,
         include: {
           logs: {
-            where: {
-              oldStatus: "published",
-              newStatus: "pending_recall",
-            },
             orderBy: {
-              createdAt: "desc",
+              createdAt: "asc",
             },
-            take: 1,
           },
           follows: {
             where: {

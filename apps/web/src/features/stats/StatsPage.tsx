@@ -178,6 +178,7 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <SmallFact label="匿名比例" value={formatPercent(stats.overview.anonymousRate)} detail={`${stats.overview.anonymousPosts} 条匿名稿件`} />
                 <SmallFact label="配图比例" value={formatPercent(stats.overview.imageRate)} detail={`${stats.overview.imagesTotal} 张图，均值 ${formatNullable(stats.overview.avgImagesPerPost)}`} />
+                <SmallFact label="投稿来源" value={`对话 ${stats.posts.bySource.private} / 网页 ${stats.posts.bySource.web}`} detail={`共 ${stats.overview.totalPosts} 条稿件`} />
                 <SmallFact label="封禁状态" value={`${stats.members.activeBans} 生效中`} detail={`历史封禁 ${stats.members.totalBans} 条`} />
               </div>
             </div>
