@@ -225,6 +225,11 @@ export class OneBotRuntime {
       include: {
         author: true,
         tenant: true,
+        logs: {
+          orderBy: { createdAt: "asc" },
+          take: 1,
+          select: { comment: true },
+        },
       },
     });
     if (!post) {
@@ -238,6 +243,7 @@ export class OneBotRuntime {
 
     const attachments = Array.isArray(post.attachments) ? post.attachments : [];
     const imageCount = attachments.filter((a: any) => a.kind === "image").length;
+    const channel = post.logs?.some((log) => log.comment.includes("私聊")) ? "private" : "web";
     const lines = formatNewPostReviewNotification(
       post.tenant.name,
       post.displayId,
@@ -246,6 +252,7 @@ export class OneBotRuntime {
       post.author.qqUin,
       post.text,
       imageCount,
+      channel,
     );
     const attachmentSegments = await this.loadPostAttachmentSegments(post.attachments);
     const message =

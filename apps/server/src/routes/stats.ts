@@ -37,6 +37,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
       memberships,
       qzoneVisitorSnapshots,
       botFriendSnapshots,
+      sourceLogCount,
     ] = await Promise.all([
       prisma.post.findMany({
         where: { tenantId },
@@ -207,6 +208,13 @@ export function registerStatsRoutes(app: FastifyInstance) {
         },
         orderBy: { date: "asc" },
       }),
+      prisma.postLog.count({
+        where: {
+          tenantId,
+          oldStatus: null,
+          comment: { contains: "私聊" },
+        },
+      }),
     ]);
 
     const postById = new Map(posts.map((post) => [post.id, post]));
@@ -309,6 +317,10 @@ export function registerStatsRoutes(app: FastifyInstance) {
       },
       posts: {
         byStatus: statusCounts,
+        bySource: {
+          private: sourceLogCount,
+          web: totalPosts - sourceLogCount,
+        },
         daily: buildDailySeries(rangePosts, sinceRange, now),
         userDaily: buildUserDailySeries(memberships, sinceRange, now),
         hourly: buildHourlySeries(rangePosts),

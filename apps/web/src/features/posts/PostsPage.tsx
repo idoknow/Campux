@@ -1233,6 +1233,7 @@ function ReviewCard({
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
+          submissionChannel={post.submissionChannel}
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={onDetail}>详情</Button>
@@ -1391,6 +1392,7 @@ function PostCard({
           imageCount={images.length}
           status={post.status}
           statusClassName={statusClassName}
+          submissionChannel={post.submissionChannel}
           title={post.title || "未命名稿件"}
           actions={
             <>
@@ -1425,6 +1427,11 @@ function PostCard({
   );
 }
 
+const submissionChannelLabels: Record<string, { label: string; className: string }> = {
+  web: { label: "网页", className: "bg-sky-100 text-sky-700" },
+  private: { label: "对话", className: "bg-amber-100 text-amber-700" },
+};
+
 function PostMetaHeader({
   displayId,
   anonymous,
@@ -1432,6 +1439,7 @@ function PostMetaHeader({
   imageCount,
   status,
   statusClassName,
+  submissionChannel,
   title,
   actions,
 }: {
@@ -1441,6 +1449,7 @@ function PostMetaHeader({
   imageCount: number;
   status: string;
   statusClassName: string;
+  submissionChannel?: "web" | "private";
   title?: string;
   actions?: ReactNode;
 }) {
@@ -1450,6 +1459,11 @@ function PostMetaHeader({
         <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
           <InfoPill icon={HashIcon}>{displayId}</InfoPill>
           <VisibilityPill anonymous={anonymous}>{anonymousLabel}</VisibilityPill>
+          {submissionChannel ? (
+            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold leading-4 ${submissionChannelLabels[submissionChannel]?.className ?? "bg-slate-100 text-slate-600"}`}>
+              {submissionChannelLabels[submissionChannel]?.label ?? submissionChannel}
+            </span>
+          ) : null}
           <InfoPill icon={ImageIcon}>{imageCount} 个附件</InfoPill>
         </div>
         {title ? <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-5 text-slate-950 md:mt-2 md:line-clamp-2 md:text-base md:leading-6">{title}</h3> : null}

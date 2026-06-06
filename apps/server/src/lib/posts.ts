@@ -26,6 +26,18 @@ type PostQZoneMetric = {
   };
 };
 
+/**
+ * 从稿件日志中推断投稿来源渠道。
+ * - 日志 comment 包含 "私聊" → 对话投稿（bot 私聊）
+ * - 否则 → 网页投稿
+ */
+function inferSubmissionChannel(logs?: Array<{ comment: string }>): "private" | "web" {
+  if (logs && logs.some((log) => log.comment.includes("私聊"))) {
+    return "private";
+  }
+  return "web";
+}
+
 export function toPostListItem(post: {
   id: string;
   displayId: number;
@@ -65,6 +77,7 @@ export function toPostListItem(post: {
     updatedAt: post.updatedAt.toISOString(),
     recallReason,
     following: Boolean(post.follows && post.follows.length > 0),
+    submissionChannel: inferSubmissionChannel(post.logs),
     qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? []),
   };
 }
