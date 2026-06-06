@@ -9,6 +9,7 @@ import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
 import { findManagementHostByRequest, findTenantByRequestHost } from "../lib/tenant-host";
+import { getDeployMode, resolveSingleModeTenantId } from "../lib/deploy-mode";
 
 const loginSchema = z.object({
   account: z.string().trim().min(1).optional(),
@@ -52,10 +53,15 @@ const requiredPasswordChangeSchema = z.object({
 
 export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
   app.get("/api/auth/context", async (request) => {
-    const [managementHost, hostTenant] = await Promise.all([findManagementHostByRequest(request), findTenantByRequestHost(request)]);
+    const [managementHost, hostTenant, deployMode] = await Promise.all([
+      findManagementHostByRequest(request),
+      findTenantByRequestHost(request),
+      getDeployMode(),
+    ]);
     return {
       managementHost: Boolean(managementHost),
       currentTenant: hostTenant ? toTenantSummary(hostTenant) : null,
+      deployMode,
     };
   });
 
@@ -148,10 +154,47 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const systemAccessibleTenants = await listSystemAccessibleTenants(user.systemRole);
-    const onlyMembership = user.systemRole === "system_operator" ? undefined : user.memberships.length === 1 ? user.memberships[0] : undefined;
-    const selectedTenantId = onlyMembership?.tenantId ?? null;
+    // Single-mode: bind directly to the sole wall so the operator never sees a
+    // wall picker (mirrors getSessionContext's auto-selection).
+    const singleModeTenantId = await resolveSingleModeTenantId();
+    const singleModeMembership = singleModeTenantId
+      ? resolveEffectiveTenantMembership({
+          userId: user.id,
+          systemRole: user.systemRole,
+          tenantId: singleModeTenantId,
+          memberships: user.memberships,
+        })
+      : null;
+    const onlyMembership = singleModeTenantId
+      ? user.memberships.find((membership) => membership.tenantId === singleModeTenantId)
+        ?? (singleModeMembership ? user.memberships[0] : undefined)
+      : user.systemRole === "system_operator" ? undefined : user.memberships.length === 1 ? user.memberships[0] : undefined;
+    const selectedTenantId = singleModeTenantId && singleModeMembership ? singleModeTenantId : onlyMembership?.tenantId ?? null;
     const token = await createSession(user.id, selectedTenantId);
     setSessionCookie(reply, token);
+
+    if (singleModeTenantId && singleModeMembership) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: singleModeTenantId },
+        include: {
+          metadata: { where: { key: "logo_url" } },
+          aiSettings: { select: { enabled: true } },
+          _count: { select: { botAccounts: true, posts: { where: { status: "pending_approval" } } } },
+        },
+      });
+      const ban = user.memberships.some((m) => m.tenantId === singleModeTenantId) ? await findActiveBan(singleModeTenantId, user.id) : null;
+      return {
+        authenticated: true,
+        user: toPublicUser(user),
+        memberships: user.memberships.map(toMembership),
+        systemAccessibleTenants,
+        currentTenant: tenant ? toTenantSummary(tenant) : null,
+        currentMembership: { id: singleModeMembership.id, role: singleModeMembership.role },
+        activeBan: toActiveBan(ban),
+        needsTenantSelection: false,
+        hostLocked: false,
+      };
+    }
 
     return {
       authenticated: true,

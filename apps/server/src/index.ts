@@ -23,6 +23,7 @@ import { registerOAuthRoutes } from "./routes/oauth";
 import { registerOneBotRoutes } from "./routes/onebot";
 import { registerPostRoutes } from "./routes/posts";
 import { registerReviewRoutes } from "./routes/review";
+import { registerSetupRoutes } from "./routes/setup";
 import { registerStatsRoutes } from "./routes/stats";
 import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
@@ -59,6 +60,7 @@ registerCampusModelingWorker(queue, app.log);
 
 await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
+registerSetupRoutes(app);
 registerAuthRoutes(app, config);
 registerTenantRoutes(app);
 registerMetadataRoutes(app, config);

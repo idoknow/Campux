@@ -14,6 +14,7 @@ import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
 import { OAuthAuthorizeScreen } from "@/features/oauth/OAuthAuthorizeScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
+import { SetupWizard } from "@/features/onboarding/SetupWizard";
 import { WallStatusScreen } from "@/features/onboarding/WallStatusScreen";
 import { AppShell } from "@/features/shell/AppShell";
 
@@ -76,7 +77,8 @@ const adminTabTitles: Record<AdminTab, string> = {
 export function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
-  const [authContext, setAuthContext] = useState<{ managementHost: boolean; currentTenant: TenantSummary | null }>({ managementHost: false, currentTenant: null });
+  const [authContext, setAuthContext] = useState<{ managementHost: boolean; currentTenant: TenantSummary | null; deployMode: "single" | "multi" }>({ managementHost: false, currentTenant: null, deployMode: "multi" });
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [route, setRoute] = useState<AppRoute>(() => routeFromPath(window.location.pathname));
   const [activeTab, setActiveTabState] = useState<MainTab>(() => {
     const initialRoute = routeFromPath(window.location.pathname);
@@ -96,6 +98,10 @@ export function App() {
   const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments();
 
   const hostTenant = authContext.currentTenant;
+  // In single-wall deployments tenant mechanics are hidden: no ops-panel entry,
+  // no wall switcher. The operator just uses their one wall like a normal admin.
+  const singleMode = authContext.deployMode === "single";
+  const showOpsUi = !singleMode;
   const selectedTenant = me?.authenticated ? me.currentTenant : (hostTenant ?? tenants[0]);
   const currentRole = me?.authenticated ? me.currentMembership?.role : undefined;
   const defaultPostsTab: PostsTab = currentRole && canAccess(currentRole, "reviewer") ? "review" : "mine";
@@ -232,10 +238,19 @@ export function App() {
     let ignore = false;
     async function boot() {
       try {
+        // Probe first-run setup before anything else. On a fresh instance this
+        // short-circuits to the SetupWizard and we skip the authed bootstrap.
+        const setupStatus = await api<{ needsSetup: boolean }>("/api/setup/status").catch(() => ({ needsSetup: false }));
+        if (!ignore) setNeedsSetup(setupStatus.needsSetup);
+        if (setupStatus.needsSetup) {
+          if (!ignore) setMe({ authenticated: false });
+          return;
+        }
+
         const [meData, tenantData] = await Promise.all([
           api<MeResponse>("/api/me"),
           api<{ tenants: TenantSummary[] }>("/api/tenants"),
-          api<{ managementHost: boolean; currentTenant: TenantSummary | null }>("/api/auth/context").then((data) => {
+          api<{ managementHost: boolean; currentTenant: TenantSummary | null; deployMode: "single" | "multi" }>("/api/auth/context").then((data) => {
             if (!ignore) setAuthContext(data);
             return data;
           }),
@@ -468,6 +483,21 @@ export function App() {
     return <LoadingScreen />;
   }
 
+  if (needsSetup) {
+    return (
+      <SetupWizard
+        onComplete={(data, mode) => {
+          setNeedsSetup(false);
+          setAuthContext((current) => ({ ...current, deployMode: mode }));
+          setMe(data);
+          if (data.authenticated) {
+            navigate(canOpenOps(data) && mode === "multi" ? { kind: "ops" } : data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: "post" }, "replace");
+          }
+        }}
+      />
+    );
+  }
+
   if (!me.authenticated) {
     return <LoginScreen hostTenant={hostTenant ?? undefined} logoUrl={activeLogoUrl} error={error} managementHost={authContext.managementHost} onLogin={login} onRegistered={completeRegistration} />;
   }
@@ -580,7 +610,7 @@ export function App() {
       onAnonymousChange={setAnonymous}
       onFilesSelected={handleUploadFiles}
       onLogout={logout}
-      onOpenOps={canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}
+      onOpenOps={showOpsUi && canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}
       onSelectTenant={selectTenant}
       onPostTextChange={setPostText}
       onPostsTabChange={setPostsSubTab}

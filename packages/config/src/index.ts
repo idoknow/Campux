@@ -17,6 +17,14 @@ const configSchema = z.object({
   S3_PUBLIC_BASE_URL: z.string().default("http://localhost:9000/campux-next"),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().default("Campux <noreply@campux.top>"),
+  // Required in production (see ensureBotSessionSecretConfigured); used to
+  // encrypt stored bot session cookies. Read here so it is validated/visible
+  // centrally even though secret-json.ts also reads process.env directly.
+  CAMPUX_BOT_SESSION_SECRET: z.string().optional(),
+  // Skip the automatic `prisma migrate deploy` on boot when "true"/"1".
+  CAMPUX_SKIP_AUTO_MIGRATE: z.string().optional(),
+  // Container Chromium path for QZone rendering, e.g. /usr/bin/chromium-browser.
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: z.string().optional(),
 });
 
 export type CampuxConfig = ReturnType<typeof loadConfig>;

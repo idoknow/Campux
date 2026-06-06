@@ -28,6 +28,12 @@
 
 ## 功能
 
+- **投稿到发布闭环**：网页/私聊投稿 → 网页或审核群审核 → QQ 空间自动发布，失败可重试，发布日志可追溯。
+- **OneBot v11 机器人接入**：墙号机器人私聊注册、重置密码、审核群命令、扫码登录、cookies 健康检查。
+- **两种部署模式**：自用单墙（隐藏多租户，开箱即用）或多租户运营平台（多个运营者自助开墙）。
+- **引导式初始化**：全新实例首次打开走「初始化向导」创建管理员，无需手动改库。
+- **统计看板**：稿件量、好友量、空间互动数据采集与展示。
+- **自托管友好**：PostgreSQL + S3/MinIO + Docker Compose + 启动自动迁移。
 
 ## 文档
 
@@ -45,10 +51,14 @@
 
 ```bash
 cp .env.example .env
+# 必填：生成并写入 Bot session 密钥，否则容器拒绝启动
+echo "CAMPUX_BOT_SESSION_SECRET=$(openssl rand -hex 32)" >> .env
 docker compose up -d
 ```
 
 默认地址：Web 与 API `:8989`、PostgreSQL `:5432`、MinIO API `:9000`、MinIO Console `:9001`。
+
+**首次打开会进入初始化向导**：选择部署模式（自用单墙 / 多租户）、创建第一个管理员账号，无需手动改数据库。详见 [部署与快速开始](https://docs.campux.top/getting-started)。
 
 开发模式（只起基础设施，前后端分别启动）：
 
