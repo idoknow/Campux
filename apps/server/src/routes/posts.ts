@@ -12,8 +12,9 @@ import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
-import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
+import { readTenantPendingPostLimit, readTenantImageCompression, readTenantRecallRequiresReason } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
+import { executePostRecall, PostRecallExecutionError } from "../lib/post-recall";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -33,7 +34,7 @@ const listQuerySchema = z.object({
 });
 
 const recallRequestSchema = z.object({
-  reason: z.string().trim().min(1, "请填写撤回理由").max(500),
+  reason: z.string().trim().max(500).optional(),
 });
 
 class PendingPostLimitError extends Error {
@@ -592,8 +593,73 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (post.status !== "published") {
       return reply.code(409).send({ message: "只有已发表稿件可以申请撤回" });
     }
+    const recallRequiresReason = await readTenantRecallRequiresReason(prisma, context.selectedTenant.id);
     const body = recallRequestSchema.parse(request.body ?? {});
-    const reason = body.reason.trim();
+    const reason = body.reason?.trim() ?? "";
+    if (recallRequiresReason && reason.length === 0) {
+      return reply.code(400).send({ message: "请填写撤回理由" });
+    }
+
+    if (!recallRequiresReason) {
+      const pendingRecall = await prisma.post.update({
+        where: {
+          id: post.id,
+        },
+        data: {
+          status: "pending_recall",
+          recallIgnored: false,
+          recallIgnoredAt: null,
+          logs: {
+            create: {
+              tenantId: context.selectedTenant.id,
+              actorId: context.user.id,
+              oldStatus: post.status,
+              newStatus: "pending_recall",
+              comment: reason ? `用户直接撤回：${reason}` : "用户直接撤回",
+            },
+          },
+        },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.recall.request",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          immediate: true,
+          reason: reason || null,
+        },
+      });
+      try {
+        const result = await executePostRecall({
+          tenantId: context.selectedTenant.id,
+          postId: pendingRecall.id,
+          actorId: context.user.id,
+          logger: app.log,
+        });
+        oneBot?.notifyPostRecalled(result.post.id, result.results.length).catch((error) => {
+          app.log.warn({ error, postId: result.post.id }, "failed to notify post recalled");
+        });
+        return {
+          post: toPostListItem(result.post),
+          results: result.results,
+          recalled: true,
+        };
+      } catch (error) {
+        if (error instanceof PostRecallExecutionError) {
+          oneBot?.notifyPostRecallFailed(pendingRecall.id, error.results).catch((caught) => {
+            app.log.warn({ error: caught, postId: pendingRecall.id }, "failed to notify post recall failure");
+          });
+          return reply.code(502).send({
+            message: "部分发布目标撤回失败，请联系管理员检查日志后重试",
+            results: error.results,
+          });
+        }
+        throw error;
+      }
+    }
 
     const updated = await prisma.post.update({
       where: {

@@ -166,6 +166,7 @@ export function PostsPage({
   minePagination,
   mineLoading,
   autoFollowOwnPosts,
+  recallRequiresReason,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -178,6 +179,7 @@ export function PostsPage({
   minePagination: Pagination;
   mineLoading: boolean;
   autoFollowOwnPosts: boolean;
+  recallRequiresReason: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -376,7 +378,7 @@ export function PostsPage({
         method: "POST",
         body: JSON.stringify({ reason }),
       });
-      toast.success("已提交撤回申请，等待审核处理。");
+      toast.success(recallRequiresReason ? "已提交撤回申请，等待审核处理。" : "已提交撤回，正在处理已发布内容。");
       await refreshAll();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "申请撤回失败");
@@ -455,7 +457,7 @@ export function PostsPage({
     }
     const { mode, post } = recallConfirm;
     const reason = recallReason.trim();
-    if (mode === "request" && reason.length === 0) {
+    if (mode === "request" && recallRequiresReason && reason.length === 0) {
       toast.error("请填写撤回理由。");
       return;
     }
@@ -918,15 +920,18 @@ export function PostsPage({
                 : recallConfirm.open && recallConfirm.mode === "admin-silent"
                   ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被隐藏，但不会私聊通知作者；审核群仍会收到记录。`
                 : recallConfirm.open
-                  ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
+                  ? recallRequiresReason
+                    ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
+                    : `确认撤回稿件 #${recallConfirm.post.displayId} 吗？提交后会直接开始撤回已发布内容。`
                   : ""}
             </DialogDescription>
           </DialogHeader>
-          {recallConfirm.open && recallConfirm.mode === "request" ? (
+          {recallConfirm.open && recallConfirm.mode === "request" && recallRequiresReason ? (
             <div className="px-5 pb-2">
               <Textarea
                 className="min-h-24 bg-white"
                 value={recallReason}
+                placeholder="填写撤回理由，方便审核员判断。"
                 onChange={(event) => setRecallReason(event.target.value)}
               />
             </div>
@@ -949,7 +954,7 @@ export function PostsPage({
                   (recallConfirm.mode === "reject" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin-silent" && busyPostId === recallConfirm.post.id) ||
-                  (recallConfirm.mode === "request" && recallReason.trim().length === 0))
+                  (recallConfirm.mode === "request" && recallRequiresReason && recallReason.trim().length === 0))
               }
               onClick={() => void confirmRecallAction()}
             >
@@ -961,7 +966,9 @@ export function PostsPage({
                     ? "确认撤回"
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "确认静默撤回"
-                      : "提交申请"}
+                      : recallRequiresReason
+                        ? "提交申请"
+                        : "确认撤回"}
             </Button>
           </DialogFooter>
         </DialogContent>

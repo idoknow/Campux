@@ -105,6 +105,7 @@ export type TenantMetadata = {
   logoUrl: string;
   postRules: string[];
   pendingPostLimit: number;
+  recallRequiresReason: boolean;
   services: Array<{
     title: string;
     description?: string;
