@@ -157,6 +157,7 @@ export type PostItem = {
   updatedAt: string;
   recallReason: string | null;
   following?: boolean;
+  submissionChannel: "web" | "private";
   qzoneStats: {
     visitorCount: number | null;
     likeCount: number | null;
@@ -588,6 +589,10 @@ export type TenantStats = {
   };
   posts: {
     byStatus: Record<string, number>;
+    bySource: {
+      private: number;
+      web: number;
+    };
     daily: Array<{ date: string; total: number; approved: number; rejected: number; published: number }>;
     userDaily: Array<{ date: string; newMembers: number; totalMembers: number }>;
     hourly: Array<{ hour: number; total: number }>;
