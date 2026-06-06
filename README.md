@@ -45,7 +45,7 @@
 ## 自托管部署
 
 <details>
-<summary>Docker Compose 一键启动、开发模式与部署注意事项</summary>
+<summary>Docker Compose 一键启动与部署注意事项</summary>
 
 生产或演示环境直接用 Docker Compose：
 
@@ -60,7 +60,19 @@ docker compose up -d
 
 **首次打开会进入初始化向导**：选择部署模式（自用单墙 / 多租户）、创建第一个管理员账号，无需手动改数据库。详见 [部署与快速开始](https://docs.campux.top/getting-started)。
 
-开发模式（只起基础设施，前后端分别启动）：
+部署注意事项：
+
+- 生产环境必须设置 `CAMPUX_BOT_SESSION_SECRET`，用于加密机器人 cookies。
+- 生产环境请使用 HTTPS，session cookie 在 `NODE_ENV=production` 下会带 `Secure`。
+- 应用启动默认执行 Prisma migration，跳过可设 `CAMPUX_SKIP_AUTO_MIGRATE=true`。
+- QZone 发布依赖有效 cookies，建议配置 cookies 健康检查和可人工介入的扫码登录。
+
+</details>
+
+## 参与开发
+
+<details>
+<summary>本地开发环境（只起基础设施，前后端分别启动）</summary>
 
 ```bash
 docker compose -f docker-compose.dev.yaml up -d
@@ -72,14 +84,7 @@ bun run dev:server
 bun run dev:web
 ```
 
-开发前端默认 `:5180`，后端默认 `:8989`。
-
-部署注意事项：
-
-- 生产环境必须设置 `CAMPUX_BOT_SESSION_SECRET`，用于加密机器人 cookies。
-- 生产环境请使用 HTTPS，session cookie 在 `NODE_ENV=production` 下会带 `Secure`。
-- 应用启动默认执行 Prisma migration，跳过可设 `CAMPUX_SKIP_AUTO_MIGRATE=true`。
-- QZone 发布依赖有效 cookies，建议配置 cookies 健康检查和可人工介入的扫码登录。
+开发前端默认 `:5180`，后端默认 `:8989`。`bun run db:seed` 会植入测试账号（密码均为 `campux123`），详见 [本地开发](https://docs.campux.top/contributing/local-development)。
 
 </details>
 

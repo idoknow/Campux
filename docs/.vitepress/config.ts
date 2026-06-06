@@ -75,6 +75,12 @@ export default defineConfig({
           { text: "故障排查", link: "/admin/troubleshooting" },
         ],
       },
+      {
+        text: "参与开发",
+        items: [
+          { text: "本地开发", link: "/contributing/local-development" },
+        ],
+      },
     ],
     socialLinks: [{ icon: "github", link: "https://github.com/idoknow/Campux" }],
     search: {
