@@ -118,15 +118,15 @@ export function PostPage({
               variant="outline"
               className="h-16 w-16 rounded-md border border-dashed border-slate-300 bg-white p-0 text-slate-500 shadow-none hover:bg-slate-50"
               disabled={busy}
-              aria-label="添加图片"
+              aria-label="添加图片或视频"
               onClick={() => inputRef.current?.click()}
             >
               <ImagePlusIcon className="!size-7 stroke-[1.8]" />
             </Button>
           ) : null}
-          <input ref={inputRef} hidden multiple accept="image/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
+          <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
-        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 张图片，单张 ≤ 10MB。可直接粘贴截图，提交时会一起上传。</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">最多 9 个文件。图片 ≤ 10MB，视频 ≤ 100MB（自动转为 GIF）。可直接粘贴截图。</p>
 
         <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-green">
           <div className="flex items-center justify-between gap-3">
