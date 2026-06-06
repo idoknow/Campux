@@ -15,6 +15,7 @@
     "@vitejs/plugin-react": "5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "gif.js": "^0.2.0",
     "lucide-react": "^1.14.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.6",
@@ -28,6 +29,7 @@
     "vite": "^6.3.5"
   },
   "devDependencies": {
+    "@types/gif.js": "^0.2.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "typescript": "^5.8.3"
