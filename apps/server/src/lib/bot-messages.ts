@@ -9,7 +9,7 @@
  */
 
 function pick<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)];
+  return items[Math.floor(Math.random() * items.length)]!;
 }
 
 // ── 投稿成功 ──────────────────────────────────────────
