@@ -38,6 +38,11 @@ enum PostStatus {
   recalled
 }
 
+enum SubmissionChannel {
+  web
+  private
+}
+
 enum PublishAttemptStatus {
   queued
   running
@@ -238,6 +243,7 @@ model Post {
   status          PostStatus       @default(pending_approval)
   recallIgnored   Boolean          @default(false)
   recallIgnoredAt DateTime?
+  submissionChannel SubmissionChannel @default(web)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)

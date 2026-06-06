@@ -297,6 +297,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   text,
                   anonymous,
                   attachments: staged,
+                  submissionChannel: "web",
                   status: "pending_approval",
                   logs: {
                     create: {
