@@ -13,6 +13,16 @@ Campux 通过环境变量配置。可以写在 `.env`，也可以由容器平台
 | `CAMPUX_WEB_ORIGIN` | `http://localhost:5180` | 前端访问源，影响 CORS 和 cookie |
 | `CAMPUX_WEB_DIST_DIR` | `apps/web/dist` | 生产模式静态文件目录 |
 | `CAMPUX_SKIP_AUTO_MIGRATE` | `false` | 设置为 `true` 或 `1` 时跳过启动自动迁移 |
+| `CAMPUX_ALLOW_SEED` | 空 | `NODE_ENV=production` 下 `bun run db:seed` 默认拒绝执行；设为 `true` 才允许在生产库植入弱密码演示账号 |
+
+## 部署模式与初始化
+
+部署模式不是环境变量，而是在**首次初始化向导**里选择并保存在数据库（`SystemSetting`）中：
+
+- `single`（自用单墙）：隐藏多租户，登录直达唯一校园墙。自部署推荐。
+- `multi`（多租户运营平台）：暴露校园墙选择、管理端注册和运维面板，和官方服务一致。
+
+初始化会创建第一个系统运维账号，并把当前访问域名自动设为管理端 host。该流程只能执行一次（实例已有系统运维后接口拒绝重放）。详见[部署与快速开始](/getting-started)。
 
 ## 安全
 

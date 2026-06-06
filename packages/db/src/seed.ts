@@ -1,6 +1,18 @@
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "./password";
 
+// Guard: the demo seed creates well-known accounts with a shared weak password
+// ("campux123"), including a system_operator. That is fine for local dev but a
+// security hazard if it ever runs against a production database. Refuse unless
+// explicitly forced.
+if (process.env.NODE_ENV === "production" && process.env.CAMPUX_ALLOW_SEED !== "true") {
+  console.error(
+    "Refusing to run the demo seed in production (it creates weak-password test accounts).\n" +
+      "Set CAMPUX_ALLOW_SEED=true only if you really intend to seed demo data.",
+  );
+  process.exit(1);
+}
+
 const prisma = new PrismaClient();
 
 const passwordHash = await hashPassword("campux123");

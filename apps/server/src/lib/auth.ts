@@ -4,6 +4,7 @@ import type { SystemRole, TenantRole } from "@campux/db";
 import { prisma } from "./prisma";
 import { isSyntheticSystemOperatorMembership, resolveEffectiveTenantMembership } from "./tenant-access";
 import { findTenantByRequestHost } from "./tenant-host";
+import { resolveSingleModeTenantId } from "./deploy-mode";
 
 export const sessionCookieName = "campux_session";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 7;
@@ -166,6 +167,33 @@ export async function getSessionContext(request: FastifyRequest) {
       activeBan,
       hostTenant,
     };
+  }
+
+  // Single-mode auto-selection: when this instance runs in "single" deploy mode
+  // there is exactly one wall and no wall picker should ever appear. If the
+  // session hasn't picked a tenant yet, transparently bind it to the sole wall
+  // so login, /api/me and every tenant-scoped route land directly inside it.
+  if (!session.selectedTenantId) {
+    const singleTenantId = await resolveSingleModeTenantId();
+    if (singleTenantId) {
+      const effective = resolveEffectiveTenantMembership({
+        userId: session.user.id,
+        systemRole: session.user.systemRole,
+        tenantId: singleTenantId,
+        memberships: session.user.memberships,
+      });
+      if (effective) {
+        await prisma.accountSession.update({
+          where: { id: session.id },
+          data: { selectedTenantId: singleTenantId },
+        });
+        const tenant = await prisma.tenant.findUnique({ where: { id: singleTenantId }, include: tenantSummaryInclude });
+        if (tenant) {
+          session.selectedTenantId = singleTenantId;
+          session.selectedTenant = tenant;
+        }
+      }
+    }
   }
 
   const selectedMembership = session.selectedTenantId

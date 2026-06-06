@@ -15,10 +15,13 @@ export function hashEmailCode(email: string, code: string) {
 
 export async function sendEmail(config: CampuxConfig, options: { to: string; subject: string; html: string; text: string }) {
   if (!config.resend.apiKey) {
-    if (config.nodeEnv === "development") {
-      return { skipped: true as const };
-    }
-    throw new Error("RESEND_API_KEY 未配置，无法发送邮件");
+    // Without a configured mail provider we cannot deliver the message. Rather
+    // than hard-fail (which used to lock self-hosters out of registration when
+    // they had no Resend key), we skip sending and let the caller surface the
+    // verification code directly in the API response. This keeps email-free
+    // self-hosting usable; production deployments that DO want real email just
+    // set RESEND_API_KEY.
+    return { skipped: true as const };
   }
 
   const response = await fetch("https://api.resend.com/emails", {

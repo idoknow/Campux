@@ -15,15 +15,19 @@ services:
       DATABASE_URL: postgresql://campux:campux@postgres:5432/campux_next
       CAMPUX_SERVER_HOST: 0.0.0.0
       CAMPUX_SERVER_PORT: 8989
-      CAMPUX_WEB_ORIGIN: http://localhost:8989
+      CAMPUX_WEB_ORIGIN: ${CAMPUX_WEB_ORIGIN:-http://localhost:8989}
       CAMPUX_WEB_DIST_DIR: /app/apps/web/dist
-      CAMPUX_BOT_SESSION_SECRET: change-me-in-production
+      # REQUIRED: encrypts stored bot session cookies. Generate with
+      # `openssl rand -hex 32` and put it in a .env next to this compose file.
+      # The `:?` guard makes `docker compose up` fail loudly if it is unset
+      # instead of silently shipping the insecure placeholder.
+      CAMPUX_BOT_SESSION_SECRET: ${CAMPUX_BOT_SESSION_SECRET:?set CAMPUX_BOT_SESSION_SECRET in your .env (openssl rand -hex 32)}
       S3_ENDPOINT: http://minio:9000
       S3_REGION: auto
       S3_BUCKET: campux-next
-      S3_ACCESS_KEY_ID: campux
-      S3_SECRET_ACCESS_KEY: campux-secret
-      S3_PUBLIC_BASE_URL: http://localhost:9000/campux-next
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-campux}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-campux-secret}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-http://localhost:9000/campux-next}
       PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: /usr/bin/chromium-browser
     ports:
       - "8989:8989"
@@ -58,8 +62,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: campux
-      MINIO_ROOT_PASSWORD: campux-secret
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-campux}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-campux-secret}
     ports:
       - "9000:9000"
       - "9001:9001"
