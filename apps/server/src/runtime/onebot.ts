@@ -2302,7 +2302,7 @@ export class OneBotRuntime {
   private extractReplyMessageId(event: OneBotMessageEvent): string | null {
     if (typeof event.raw_message === "string") {
       const m = event.raw_message.match(/\[CQ:reply,id=(\d+)(?:,.*)?\]/);
-      if (m) return m[1];
+      if (m) return m[1] ?? null;
     }
     if (Array.isArray(event.message)) {
       for (const seg of event.message as any[]) {

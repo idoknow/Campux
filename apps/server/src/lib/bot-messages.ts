@@ -641,5 +641,5 @@ const privateReplyNoTargetStylish = [
 
 export function formatPrivateReplyNoTarget(stylishEnabled = false): string {
   if (!stylishEnabled) return privateReplyNoTargetDefault();
-  return pick(privateReplyNoTargetStylish);
+  return pick(privateReplyNoTargetStylish)();
 }
