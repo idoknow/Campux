@@ -1093,8 +1093,8 @@ export class OneBotRuntime {
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
-        // 跳过好友请求系统消息，不转发
-        if (this.isFriendRequestMessage(plainText || event.raw_message || "")) {
+        // 跳过好友请求、「我是XXX」等系统消息，不转发
+        if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
           return;
         }
 
@@ -1738,6 +1738,11 @@ export class OneBotRuntime {
       return;
     }
 
+    // 如果消息 @ 了其他 bot 但不是当前 bot，跳过（对应 bot 会处理）
+    if (this.isMentioningOtherBot(event, botQqUin)) {
+      return;
+    }
+
     try {
       const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
 
@@ -2291,8 +2296,31 @@ export class OneBotRuntime {
     return null;
   }
 
-  private isFriendRequestMessage(text: string): boolean {
-    return /请求添加(你为)?好友/.test(text);
+  private isSkippablePrivateMessage(text: string): boolean {
+    return /请求添加(你为)?好友/.test(text) || /^我是/.test(text);
+  }
+
+  /**
+   * 检查消息中是否 @ 了其他 bot（有 @ 但不是当前 bot）。
+   * 如果 @ 了别的 bot，当前 bot 应跳过处理。
+   */
+  private isMentioningOtherBot(event: OneBotMessageEvent, botQqUin: string): boolean {
+    if (typeof event.raw_message === "string" && /\[CQ:at,qq=\d+\]/.test(event.raw_message)) {
+      // 有 @ 且不是当前 bot
+      return !new RegExp(`\\[CQ:at,qq=${escapeRegex(botQqUin)}\\]`).test(event.raw_message);
+    }
+    if (Array.isArray(event.message)) {
+      const atSegments = event.message.filter((seg) => {
+        const item = seg as { type?: string };
+        return item.type === "at";
+      });
+      if (atSegments.length === 0) return false;
+      return atSegments.every((seg) => {
+        const item = seg as { data?: { qq?: string | number } };
+        return normalizeId(item.data?.qq) !== botQqUin;
+      });
+    }
+    return false;
   }
 
   private async loadPostAttachmentSegments(attachments: unknown) {
