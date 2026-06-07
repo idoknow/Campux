@@ -600,3 +600,46 @@ export function formatPrivateHelp(stylishEnabled = false): string {
   if (!stylishEnabled) return privateHelpDefault;
   return pick(privateHelpStylish);
 }
+
+// ── 私信回复 ──────────────────────────────────────────
+
+const privateReplySentDefault = (nickname: string, qqUin: string) =>
+  `已回复 ${nickname}（${qqUin}）`;
+
+const privateReplySentStylish = [
+  (nickname: string, qqUin: string) => `✅ 已回复 ${nickname}（${qqUin}）`,
+  (nickname: string, qqUin: string) => `💬 回复已送达 ${nickname}（${qqUin}）`,
+  privateReplySentDefault,
+];
+
+export function formatPrivateReplySent(nickname: string, qqUin: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return privateReplySentDefault(nickname, qqUin);
+  return pick(privateReplySentStylish)(nickname, qqUin);
+}
+
+const privateReplyReceivedDefault = (text: string) =>
+  `📩 管理员回复：\n${text}`;
+
+const privateReplyReceivedStylish = [
+  (text: string) => `📬 管理员给你回信啦：\n${text}`,
+  (text: string) => `💬 来自管理员的回复：\n${text}`,
+  privateReplyReceivedDefault,
+];
+
+export function formatPrivateReplyReceived(text: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return privateReplyReceivedDefault(text);
+  return pick(privateReplyReceivedStylish)(text);
+}
+
+const privateReplyNoTargetDefault = () => `请引用转发的私信消息后发送 #回复 <内容> 来回复用户。`;
+
+const privateReplyNoTargetStylish = [
+  () => `🤔 请先引用转发的私信消息，再发 #回复 <内容> 来回复对方~`,
+  () => `💡 引用一条转发的私信消息，发送 #回复 <内容> 即可回复用户。`,
+  privateReplyNoTargetDefault,
+];
+
+export function formatPrivateReplyNoTarget(stylishEnabled = false): string {
+  if (!stylishEnabled) return privateReplyNoTargetDefault();
+  return pick(privateReplyNoTargetStylish);
+}
