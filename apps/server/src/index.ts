@@ -1,5 +1,13 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+
+// Campux only operates in China. Pin the process timezone to Beijing (UTC+8) so
+// that every Date method (daily/hourly stats buckets, schedulers) resolves in
+// UTC+8 regardless of the host/container timezone. The Dockerfile also sets this
+// via ENV; this guards local/dev runs where TZ may be unset or UTC.
+if (!process.env.TZ) {
+  process.env.TZ = "Asia/Shanghai";
+}
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyMultipart from "@fastify/multipart";
