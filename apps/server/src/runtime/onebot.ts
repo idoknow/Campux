@@ -2240,42 +2240,17 @@ export class OneBotRuntime {
     }
 
     const target = this.privateForwardMsgIdMap.get(replyToMsgId);
-    if (!target || target.botQqUin !== botQqUin) {
-      // 尝试从 get_msg 解析转发消息中的发送者信息
-      const resolvedTarget = await this.tryResolvePrivateForwardTarget(botQqUin, replyToMsgId);
-      if (!resolvedTarget) {
-        await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
-        return;
-      }
-      await this.sendPrivateMessage(botQqUin, resolvedTarget.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
-      await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(resolvedTarget.userNickname, resolvedTarget.userQqUin, stylishEnabled));
+    if (!target) {
+      await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
+      return;
+    }
+    if (target.botQqUin !== botQqUin) {
+      // 不是当前 bot 转发的消息，跳过；对应 bot 也会收到此命令并处理
       return;
     }
 
     await this.sendPrivateMessage(botQqUin, target.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
     await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(target.userNickname, target.userQqUin, stylishEnabled));
-  }
-
-  private async tryResolvePrivateForwardTarget(botQqUin: string, messageId: string): Promise<{ userQqUin: string; userNickname: string } | null> {
-    try {
-      const data = await this.callAction(botQqUin, "get_msg", { message_id: Number(messageId) }).catch(() => null);
-      if (!data || typeof data !== "object") {
-        return null;
-      }
-
-      // 尝试从转发消息节点的 sender 信息中提取用户 QQ
-      const d = data as Record<string, unknown>;
-      const sender = d.sender as Record<string, unknown> | undefined;
-      const userId = sender ? normalizeId(sender.user_id as string | number | undefined) : null;
-      const nickname = (sender?.nickname as string | undefined) ?? (sender?.card as string | undefined) ?? "";
-      if (userId) {
-        return { userQqUin: userId, userNickname: nickname || userId };
-      }
-
-      return null;
-    } catch {
-      return null;
-    }
   }
 
   private storePrivateForwardMapping(msgId: string, userQqUin: string, userNickname: string, botQqUin: string) {
