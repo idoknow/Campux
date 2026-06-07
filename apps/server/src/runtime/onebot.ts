@@ -64,6 +64,9 @@ import {
   formatPrivatePostContinuePrompt,
   formatPrivatePostCancelled,
   formatPrivateHelp,
+  formatPrivateReplySent,
+  formatPrivateReplyReceived,
+  formatPrivateReplyNoTarget,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -172,6 +175,7 @@ const reviewHelp = [
   "#通过 <稿件id>",
   "#拒绝 <理由> <稿件id>",
   "#重发 <稿件id>",
+  "#回复 <内容> （引用转发私信后使用）",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
 ].join("\n");
@@ -192,6 +196,8 @@ export class OneBotRuntime {
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
   private readonly pendingFriendRequestFlags = new Set<string>();
+  private readonly privateForwardMsgIdMap = new Map<string, { userQqUin: string; userNickname: string; botQqUin: string }>();
+  private static readonly MAX_FORWARD_MSG_ID_MAP_SIZE = 500;
   private readonly qzoneProtocolAutoRefreshFailures = new Map<string, QZoneProtocolAutoRefreshFailure>();
   private readonly qzoneProtocolAutoRefreshInFlight = new Map<string, Promise<{ cookieNames: string[]; session: { id: string } }>>();
 
@@ -1087,6 +1093,11 @@ export class OneBotRuntime {
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
+        // 跳过好友请求系统消息，不转发
+        if (this.isFriendRequestMessage(plainText || event.raw_message || "")) {
+          return;
+        }
+
         // 非投稿、非命令消息：缓存到缓冲区，1 分钟无新消息后合并转发到审核群
         if (bot.reviewGroupId) {
           this.bufferPrivateForwardMessage({
@@ -1864,6 +1875,18 @@ export class OneBotRuntime {
         return;
       }
 
+      if (command.name === "回复") {
+        await this.handlePrivateReply({
+          bot,
+          botQqUin,
+          groupId,
+          event,
+          replyText: command.args,
+          stylishEnabled,
+        });
+        return;
+      }
+
       await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
     } catch (error) {
       await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
@@ -2011,18 +2034,30 @@ export class OneBotRuntime {
       }
 
       // 使用合并转发发送
-      await this.callAction(buffer.botQqUin, "send_group_forward_msg", {
-        group_id: Number(bot.reviewGroupId),
-        messages: nodes,
-      }).catch(async (error) => {
+      let msgId: string | null = null;
+      try {
+        const data = await this.callAction(buffer.botQqUin, "send_group_forward_msg", {
+          group_id: Number(bot.reviewGroupId),
+          messages: nodes,
+        });
+        msgId = this.extractMessageId(data);
+      } catch (error) {
         // 合并转发失败时降级为普通消息
         this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "合并转发失败，降级为普通消息发送");
         const lines = [
           `📩 ${buffer.userNickname}（${buffer.userQqUin}）发来私聊消息：`,
           ...buffer.messages.map((entry, i) => `${i + 1}. ${entry.text}`),
         ];
-        await this.sendGroupMessage(buffer.botQqUin, bot.reviewGroupId!, lines.join("\n"));
-      });
+        const fallbackData = await this.callAction(buffer.botQqUin, "send_group_msg", {
+          group_id: Number(bot.reviewGroupId),
+          message: lines.join("\n"),
+        });
+        msgId = this.extractMessageId(fallbackData);
+      }
+
+      if (msgId) {
+        this.storePrivateForwardMapping(msgId, buffer.userQqUin, buffer.userNickname, buffer.botQqUin);
+      }
     } catch (error) {
       this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "转发私聊消息到审核群失败");
     }
@@ -2175,6 +2210,114 @@ export class OneBotRuntime {
         data: { archiveWarningAt: null },
       });
     }
+  }
+
+  private async handlePrivateReply({
+    bot,
+    botQqUin,
+    groupId,
+    event,
+    replyText,
+    stylishEnabled,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null };
+    botQqUin: string;
+    groupId: string;
+    event: OneBotMessageEvent;
+    replyText: string;
+    stylishEnabled: boolean;
+  }) {
+    const text = replyText.trim();
+    if (!text) {
+      await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
+      return;
+    }
+
+    const replyToMsgId = this.extractReplyMessageId(event);
+    if (!replyToMsgId) {
+      await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
+      return;
+    }
+
+    const target = this.privateForwardMsgIdMap.get(replyToMsgId);
+    if (!target || target.botQqUin !== botQqUin) {
+      // 尝试从 get_msg 解析转发消息中的发送者信息
+      const resolvedTarget = await this.tryResolvePrivateForwardTarget(botQqUin, replyToMsgId);
+      if (!resolvedTarget) {
+        await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
+        return;
+      }
+      await this.sendPrivateMessage(botQqUin, resolvedTarget.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
+      await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(resolvedTarget.userNickname, resolvedTarget.userQqUin, stylishEnabled));
+      return;
+    }
+
+    await this.sendPrivateMessage(botQqUin, target.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
+    await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(target.userNickname, target.userQqUin, stylishEnabled));
+  }
+
+  private async tryResolvePrivateForwardTarget(botQqUin: string, messageId: string): Promise<{ userQqUin: string; userNickname: string } | null> {
+    try {
+      const data = await this.callAction(botQqUin, "get_msg", { message_id: Number(messageId) }).catch(() => null);
+      if (!data || typeof data !== "object") {
+        return null;
+      }
+
+      // 尝试从转发消息节点的 sender 信息中提取用户 QQ
+      const d = data as Record<string, unknown>;
+      const sender = d.sender as Record<string, unknown> | undefined;
+      const userId = sender ? normalizeId(sender.user_id as string | number | undefined) : null;
+      const nickname = (sender?.nickname as string | undefined) ?? (sender?.card as string | undefined) ?? "";
+      if (userId) {
+        return { userQqUin: userId, userNickname: nickname || userId };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private storePrivateForwardMapping(msgId: string, userQqUin: string, userNickname: string, botQqUin: string) {
+    if (this.privateForwardMsgIdMap.size >= OneBotRuntime.MAX_FORWARD_MSG_ID_MAP_SIZE) {
+      // 删除最早的一条记录
+      const firstKey = this.privateForwardMsgIdMap.keys().next().value;
+      if (firstKey !== undefined) {
+        this.privateForwardMsgIdMap.delete(firstKey);
+      }
+    }
+    this.privateForwardMsgIdMap.set(msgId, { userQqUin, userNickname, botQqUin });
+  }
+
+  private extractMessageId(data: unknown): string | null {
+    if (data && typeof data === "object") {
+      const d = data as Record<string, unknown>;
+      if (d.message_id !== undefined) {
+        return String(d.message_id);
+      }
+    }
+    return null;
+  }
+
+  private extractReplyMessageId(event: OneBotMessageEvent): string | null {
+    if (typeof event.raw_message === "string") {
+      const m = event.raw_message.match(/\[CQ:reply,id=(\d+)(?:,.*)?\]/);
+      if (m) return m[1];
+    }
+    if (Array.isArray(event.message)) {
+      for (const seg of event.message as any[]) {
+        if (!seg || typeof seg !== "object") continue;
+        if (seg.type === "reply") {
+          const id = seg.data?.id ?? seg.data?.msg_id ?? seg.data?.message_id;
+          if (id) return String(id);
+        }
+      }
+    }
+    return null;
+  }
+
+  private isFriendRequestMessage(text: string): boolean {
+    return /请求添加(你为)?好友/.test(text);
   }
 
   private async loadPostAttachmentSegments(attachments: unknown) {
