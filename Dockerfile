@@ -18,9 +18,12 @@ RUN bun run build
 FROM oven/bun:${BUN_VERSION}-alpine AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates chromium font-noto-cjk font-noto-emoji openssl
+RUN apk add --no-cache ca-certificates chromium font-noto-cjk font-noto-emoji openssl tzdata
 
 ENV NODE_ENV=production
+# Campux only operates in China; pin the whole process to Beijing time so every
+# Date method (daily/hourly stats buckets, schedulers) resolves in UTC+8.
+ENV TZ=Asia/Shanghai
 ENV CAMPUX_SERVER_HOST=0.0.0.0
 ENV CAMPUX_SERVER_PORT=8989
 ENV CAMPUX_WEB_DIST_DIR=/app/apps/web/dist
