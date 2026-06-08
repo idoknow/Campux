@@ -96,12 +96,31 @@ const postCardPalettes = [
 const defaultPostCardPalette = "border-slate-200 bg-white";
 
 const statusStyles: Record<string, string> = {
-  pending_approval: "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
-  approved: "bg-green-50 text-green-800 ring-1 ring-green-200",
-  rejected: "bg-red-50 text-red-700 ring-1 ring-red-200",
-  published: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
-  pending_recall: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
-  recalled: "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200",
+  pending_approval: "bg-amber-100 text-amber-900 ring-1 ring-amber-300",
+  approved: "bg-green-100 text-green-900 ring-1 ring-green-300",
+  rejected: "bg-red-100 text-red-800 ring-1 ring-red-300",
+  cancelled: "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-300",
+  publishing: "bg-blue-100 text-blue-900 ring-1 ring-blue-300",
+  partially_failed: "bg-orange-100 text-orange-900 ring-1 ring-orange-300",
+  failed: "bg-red-100 text-red-800 ring-1 ring-red-300",
+  waiting_cookies: "bg-amber-100 text-amber-900 ring-1 ring-amber-300",
+  published: "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400",
+  pending_recall: "bg-violet-100 text-violet-900 ring-1 ring-violet-300",
+  recalled: "bg-zinc-200 text-zinc-700 ring-1 ring-zinc-300",
+};
+
+const statusDotStyles: Record<string, string> = {
+  pending_approval: "bg-amber-500",
+  approved: "bg-green-500",
+  rejected: "bg-red-500",
+  cancelled: "bg-zinc-400",
+  publishing: "bg-blue-500 animate-pulse",
+  partially_failed: "bg-orange-500",
+  failed: "bg-red-500",
+  waiting_cookies: "bg-amber-500 animate-pulse",
+  published: "bg-emerald-500",
+  pending_recall: "bg-violet-500 animate-pulse",
+  recalled: "bg-zinc-400",
 };
 
 const postTabsListClassName = "product-tabs-list";
@@ -1483,7 +1502,10 @@ function PostMetaHeader({
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:justify-end md:gap-2">
         {actions}
-        <Badge className={`rounded-full px-2 py-0.5 text-xs font-semibold shadow-none md:px-2.5 md:py-1 ${statusClassName}`}>{statusLabels[status] ?? status}</Badge>
+        <Badge className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-none md:px-3 ${statusClassName}`}>
+          <span className={`size-1.5 shrink-0 rounded-full ${statusDotStyles[status] ?? "bg-slate-400"}`} />
+          {statusLabels[status] ?? status}
+        </Badge>
       </div>
     </div>
   );
