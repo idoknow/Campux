@@ -127,6 +127,16 @@ async function renderPostHtml(input: RenderPostCardInput) {
       color: #666
     }
 
+    #post-id-tag {
+      flex: none;
+      font-weight: bold;
+      color: #1E88E5;
+      background: #E8F2FD;
+      padding: 0.2rem 1.1rem;
+      border-radius: 999px;
+      letter-spacing: 0.05rem;
+    }
+
     #bg-fixed-br {
       position: fixed;
       top: -120px;
@@ -142,7 +152,6 @@ async function renderPostHtml(input: RenderPostCardInput) {
     <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
   </div>
   <div style="padding: 2.5rem; min-height: 550px; position: relative;">
-    ${postIdTag ? `<span id="post-id-tag" style="position: absolute; top: 2.5rem; right: 2.5rem; font-size: 2.6rem; font-weight: bold; color: #1E88E5; background: #E3F2FD; padding: 0.4rem 1.4rem; border-radius: 999px; letter-spacing: 0.1rem;">${escapeHtml(postIdTag)}</span>` : ""}
     <div style="display: flex;">
       <img id="avatar" src="${avatar}" />
       <div style="margin-left: 32px; margin-top: 32px">
@@ -152,7 +161,10 @@ async function renderPostHtml(input: RenderPostCardInput) {
     </div>
   </div>
   <div id="footer">
-    <span>${escapeHtml(footer)}</span>
+    <span style="display: flex; align-items: center; gap: 1.2rem;">
+      ${postIdTag ? `<span id="post-id-tag">${escapeHtml(postIdTag)}</span>` : ""}
+      <span>${escapeHtml(footer)}</span>
+    </span>
     <span>${escapeHtml(displayHost)}</span>
   </div>
   <img id="bg-fixed-br" src="${corner}">
