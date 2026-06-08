@@ -312,6 +312,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
               { key: "post_rules", value: defaultPostRules },
               { key: "pending_post_limit", value: 1 },
               { key: "services", value: defaultServices },
+              { key: "publish_mode", value: "single" },
             ],
           },
         },

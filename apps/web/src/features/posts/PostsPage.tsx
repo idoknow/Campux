@@ -1234,6 +1234,7 @@ function ReviewCard({
           status={post.status}
           statusClassName={statusClassName}
           submissionChannel={post.submissionChannel}
+          batch={post.batch}
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={onDetail}>详情</Button>
@@ -1393,6 +1394,7 @@ function PostCard({
           status={post.status}
           statusClassName={statusClassName}
           submissionChannel={post.submissionChannel}
+          batch={post.batch}
           title={post.title || "未命名稿件"}
           actions={
             <>
@@ -1440,6 +1442,7 @@ function PostMetaHeader({
   status,
   statusClassName,
   submissionChannel,
+  batch,
   title,
   actions,
 }: {
@@ -1450,6 +1453,7 @@ function PostMetaHeader({
   status: string;
   statusClassName: string;
   submissionChannel?: "web" | "private";
+  batch?: { postCount: number; otherDisplayIds: number[] } | null | undefined;
   title?: string;
   actions?: ReactNode;
 }) {
@@ -1462,6 +1466,14 @@ function PostMetaHeader({
           {submissionChannel ? (
             <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold leading-4 ${submissionChannelLabels[submissionChannel]?.className ?? "bg-slate-100 text-slate-600"}`}>
               {submissionChannelLabels[submissionChannel]?.label ?? submissionChannel}
+            </span>
+          ) : null}
+          {batch && batch.postCount > 1 ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-1.5 py-0.5 text-xs font-semibold leading-4 text-violet-700"
+              title={batch.otherDisplayIds.length > 0 ? `与 ${batch.otherDisplayIds.map((id) => `#${id}`).join(" ")} 合并为一条说说` : "凑批发布"}
+            >
+              凑批 · 同说说 {batch.postCount} 条
             </span>
           ) : null}
           <InfoPill icon={ImageIcon}>{imageCount} 个附件</InfoPill>

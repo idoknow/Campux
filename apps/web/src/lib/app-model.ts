@@ -34,6 +34,12 @@ export const defaultMetadata: TenantMetadata = {
   },
   botStylishMessagesEnabled: false,
   botPrivatePostStylishEnabled: false,
+  publishMode: "single",
+  publishAccumulate: {
+    minImages: 6,
+    maxImages: 9,
+    staleMinutes: 30,
+  },
 };
 
 export const navItems = [

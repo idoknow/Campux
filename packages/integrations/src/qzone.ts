@@ -4,7 +4,8 @@ export type QZonePublishInput = {
   targetId: string;
   targetName: string;
   text: string;
-  renderedCard: Uint8Array;
+  renderedCard?: Uint8Array;
+  renderedCards?: Uint8Array[];
   imageUrls: string[];
   images?: Array<{
     name: string;
@@ -317,15 +318,30 @@ export async function getQZoneEmotionComments(input: QZoneEmotionMetricsInput & 
   }
 }
 
+export type QZoneUploadImage = { name: string; bytes: Uint8Array };
+
+/**
+ * 构造一条说说要上传的图片序列：先所有渲染卡片图（按顺序），再所有投稿原图。
+ * 单条模式渲染卡片只有 1 张；凑批模式可有多张（每条稿件一张卡片）。
+ */
+export function buildPublishImageList(renderedCards: Uint8Array[], images?: QZoneUploadImage[]): QZoneUploadImage[] {
+  return [
+    ...renderedCards.map((bytes, index) => ({ name: `rendered-card-${index + 1}.jpg`, bytes })),
+    ...(images ?? []),
+  ];
+}
+
 export async function publishToQZone(input: QZonePublishInput): Promise<QZonePublishResult> {
   const cookieNames = input.cookies ? Object.keys(input.cookies).sort() : [];
   const uin = normalizeUin(input.cookies);
+  const renderedCards = input.renderedCards ?? (input.renderedCard ? [input.renderedCard] : []);
+  const renderedBytes = renderedCards.reduce((sum, card) => sum + card.byteLength, 0);
   const verbose: QZonePublishVerbose = {
     mode: "real-qzone",
     targetName: input.targetName,
-    renderedBytes: input.renderedCard.byteLength,
-    imageCount: (input.images?.length ?? input.imageUrls.length) + 1,
-    renderedImageIncluded: true,
+    renderedBytes,
+    imageCount: renderedCards.length + (input.images?.length ?? input.imageUrls.length),
+    renderedImageIncluded: renderedCards.length > 0,
     uploadedImages: [],
     cookieStatus: input.cookies && cookieNames.length > 0 ? "available" : "missing",
     cookieNames,
@@ -360,10 +376,7 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
     referer,
     "user-agent": userAgent,
   };
-  const imagesToUpload = [
-    { name: "rendered-card.jpg", bytes: input.renderedCard },
-    ...(input.images ?? []),
-  ];
+  const imagesToUpload = buildPublishImageList(renderedCards, input.images);
   const uploadResults = [];
   for (const image of imagesToUpload) {
     uploadResults.push(await uploadQZoneImage({ image, cookies: input.cookies, cookieHeader, headers: requestHeaders, gtk, uin, verbose }));

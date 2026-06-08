@@ -1,5 +1,32 @@
 import { describe, expect, test } from "bun:test";
-import { parseQZoneCommentList, parseQZoneEmotionMetricsPayload } from "./qzone";
+import { buildPublishImageList, parseQZoneCommentList, parseQZoneEmotionMetricsPayload } from "./qzone";
+
+describe("buildPublishImageList (batch multi-card ordering)", () => {
+  const card1 = new Uint8Array([1]);
+  const card2 = new Uint8Array([2]);
+  const orig1 = { name: "o1.jpg", bytes: new Uint8Array([10]) };
+  const orig2 = { name: "o2.jpg", bytes: new Uint8Array([20]) };
+
+  test("orders all rendered cards first, then original images", () => {
+    const result = buildPublishImageList([card1, card2], [orig1, orig2]);
+    expect(result.map((image) => image.name)).toEqual([
+      "rendered-card-1.jpg",
+      "rendered-card-2.jpg",
+      "o1.jpg",
+      "o2.jpg",
+    ]);
+    expect(result[0].bytes).toBe(card1);
+    expect(result[1].bytes).toBe(card2);
+  });
+
+  test("single card with no original images yields just the card", () => {
+    expect(buildPublishImageList([card1]).map((image) => image.name)).toEqual(["rendered-card-1.jpg"]);
+  });
+
+  test("no cards (defensive) yields only original images", () => {
+    expect(buildPublishImageList([], [orig1]).map((image) => image.name)).toEqual(["o1.jpg"]);
+  });
+});
 
 describe("qzone comment list parsing", () => {
   test("extracts commenter, content, time and nested replies (list_3)", () => {

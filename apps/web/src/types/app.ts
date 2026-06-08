@@ -117,6 +117,12 @@ export type TenantMetadata = {
   };
   botStylishMessagesEnabled: boolean;
   botPrivatePostStylishEnabled: boolean;
+  publishMode: "single" | "accumulate";
+  publishAccumulate: {
+    minImages: number;
+    maxImages: number;
+    staleMinutes: number;
+  };
 };
 
 export type PostAttachment = {
@@ -194,6 +200,11 @@ export type PostItem = {
       message: string;
       checkedAt: string | null;
     }>;
+  } | null;
+  batch?: {
+    postCount: number;
+    displayIds: number[];
+    otherDisplayIds: number[];
   } | null;
 };
 

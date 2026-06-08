@@ -10,6 +10,7 @@ import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { isQZoneProtocolAutoRefreshCooldownError } from "../lib/qzone-auto-refresh";
+import { joinBatchCaptions } from "./publish-batching";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -160,6 +161,107 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
   return attempts;
 }
 
+/**
+ * 凑批模式：把一个已凑齐的批次 fan out 到每个启用的发布目标。
+ * 每个 target 一个 batch attempt（渲染批次内全部稿件的卡片，合成一条说说）。
+ */
+export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: string, batchId: string, actorId?: string | null) {
+  const batch = await prisma.publishBatch.findUnique({
+    where: { id: batchId },
+    include: {
+      items: {
+        orderBy: { position: "asc" },
+        select: { postId: true },
+      },
+    },
+  });
+
+  if (!batch || batch.items.length === 0) {
+    return [];
+  }
+
+  const anchorItem = batch.items[0];
+  if (!anchorItem) {
+    return [];
+  }
+  const anchorPostId = anchorItem.postId;
+  const postIds = batch.items.map((item) => item.postId);
+
+  const targets = await prisma.publishTarget.findMany({
+    where: {
+      tenantId,
+      enabled: true,
+      botAccount: {
+        enabled: true,
+      },
+    },
+    orderBy: {
+      displayName: "asc",
+    },
+  });
+
+  // 标记批次进入发布阶段。
+  await prisma.publishBatch.update({
+    where: { id: batch.id },
+    data: { status: targets.length === 0 ? "published" : "publishing", flushedAt: new Date() },
+  });
+
+  if (targets.length === 0) {
+    for (const postId of postIds) {
+      await prisma.post.update({
+        where: { id: postId },
+        data: {
+          status: "published",
+          logs: {
+            create: {
+              tenantId,
+              actorId: actorId ?? null,
+              oldStatus: "publishing",
+              newStatus: "published",
+              comment: "没有启用发布目标，批量稿件自动完成发布",
+            },
+          },
+        },
+      });
+    }
+    return [];
+  }
+
+  for (const postId of postIds) {
+    await prisma.post.update({
+      where: { id: postId },
+      data: {
+        status: "publishing",
+        logs: {
+          create: {
+            tenantId,
+            actorId: actorId ?? null,
+            oldStatus: "publishing",
+            newStatus: "publishing",
+            comment: `批量发布：已生成 ${targets.length} 个发布任务（与其他 ${postIds.length - 1} 条稿件合并为一条说说）`,
+          },
+        },
+      },
+    });
+  }
+
+  const attempts = [];
+  for (const target of targets) {
+    const { attempt, nextRunAt } = await schedulePublishAttempt({
+      tenantId,
+      postId: anchorPostId,
+      publishTargetId: target.id,
+      botAccountId: target.botAccountId,
+      batchId: batch.id,
+      intervalSeconds: target.publishDelaySeconds,
+    });
+    attempts.push(attempt);
+    enqueueAttempt(queue, tenantId, attempt.id, nextRunAt);
+  }
+
+  return attempts;
+}
+
 export function effectivePublishIntervalSeconds(value: number | null | undefined) {
   return Math.max(value ?? defaultPublishIntervalSeconds, 0);
 }
@@ -215,6 +317,7 @@ export async function schedulePublishAttempt(options: {
   postId: string;
   publishTargetId: string;
   botAccountId: string;
+  batchId?: string | null;
   intervalSeconds?: number | null;
   excludeAttemptId?: string;
   resetAttempt?: boolean;
@@ -227,13 +330,11 @@ export async function schedulePublishAttempt(options: {
       ...(options.intervalSeconds === undefined ? {} : { intervalSeconds: options.intervalSeconds }),
       ...(options.excludeAttemptId === undefined ? {} : { excludeAttemptId: options.excludeAttemptId }),
     }, tx);
+    const whereUnique = options.batchId
+      ? { batchId_publishTargetId: { batchId: options.batchId, publishTargetId: options.publishTargetId } }
+      : { postId_publishTargetId: { postId: options.postId, publishTargetId: options.publishTargetId } };
     const attempt = await tx.publishAttempt.upsert({
-      where: {
-        postId_publishTargetId: {
-          postId: options.postId,
-          publishTargetId: options.publishTargetId,
-        },
-      },
+      where: whereUnique,
       update: {
         status: "queued",
         ...(options.resetAttempt ? { attempt: 0 } : {}),
@@ -247,6 +348,7 @@ export async function schedulePublishAttempt(options: {
         tenantId: options.tenantId,
         postId: options.postId,
         publishTargetId: options.publishTargetId,
+        batchId: options.batchId ?? null,
         status: "queued",
         nextRunAt,
       },
@@ -314,7 +416,7 @@ export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue
       },
     });
     enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
-    await refreshAggregatePostStatus(attempt.postId);
+    await refreshAttemptPostStatuses(attempt);
   }
 
   logger?.info({ botAccountId, count: attempts.length }, "waiting publish attempts resumed after qzone cookies became available");
@@ -394,6 +496,21 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           author: true,
         },
       },
+      batch: {
+        include: {
+          items: {
+            orderBy: { position: "asc" },
+            include: {
+              post: {
+                include: {
+                  tenant: true,
+                  author: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
 
@@ -411,7 +528,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         lastError: "发布目标已停用",
       },
     });
-    await refreshAggregatePostStatus(attempt.postId);
+    await refreshAttemptPostStatuses(attempt);
     return;
   }
 
@@ -430,7 +547,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       notifier,
     });
     if (!cookies) {
-      await refreshAggregatePostStatus(attempt.postId);
+      await refreshAttemptPostStatuses(attempt);
       return;
     }
     await prisma.publishAttempt.update({
@@ -444,32 +561,50 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       },
     });
 
-    const renderedCard = await renderPostCard({
-      tenantName: attempt.post.tenant.name,
-      displayHost: attempt.post.tenant.host,
-      authorName: attempt.post.author.displayName ?? attempt.post.author.qqUin.toString(),
-      authorQq: attempt.post.author.qqUin.toString(),
-      cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
-      text: attempt.post.text,
-      createdAt: attempt.post.createdAt,
-      anonymous: attempt.post.anonymous,
-    });
-    const captionText = renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
-      postId: attempt.post.displayId,
-      text: attempt.post.text,
-      anonymous: attempt.post.anonymous,
-      authorQq: attempt.post.author.qqUin.toString(),
-    });
-    const postImages = await loadPostImages(config, attempt.tenantId, attempt.post.attachments);
+    // 凑批 attempt：渲染批次内每条稿件的卡片，拼接配文，合成一条说说；
+    // 单稿 attempt：渲染单条稿件的卡片。
+    const postsToPublish = attempt.batch
+      ? attempt.batch.items.map((item) => item.post)
+      : [attempt.post];
+
+    const renderedCards: Uint8Array[] = [];
+    const aggregatedImages: Array<{ name: string; bytes: Uint8Array }> = [];
+    const aggregatedImageUrls: string[] = [];
+    const captionParts: string[] = [];
+    for (const target of postsToPublish) {
+      renderedCards.push(
+        await renderPostCard({
+          tenantName: target.tenant.name,
+          displayHost: target.tenant.host,
+          authorName: target.author.displayName ?? target.author.qqUin.toString(),
+          authorQq: target.author.qqUin.toString(),
+          cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
+          text: target.text,
+          createdAt: target.createdAt,
+          anonymous: target.anonymous,
+        }),
+      );
+      captionParts.push(
+        renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
+          postId: target.displayId,
+          text: target.text,
+          anonymous: target.anonymous,
+          authorQq: target.author.qqUin.toString(),
+        }),
+      );
+      aggregatedImages.push(...(await loadPostImages(config, attempt.tenantId, target.attachments)));
+      aggregatedImageUrls.push(...getImageUrls(target.attachments));
+    }
+    const captionText = joinBatchCaptions(captionParts);
     const result = await publishToQZone({
       tenantId: attempt.tenantId,
       postId: attempt.postId,
       targetId: attempt.publishTargetId,
       targetName: attempt.publishTarget.displayName,
       text: captionText,
-      renderedCard,
-      imageUrls: getImageUrls(attempt.post.attachments),
-      images: postImages,
+      renderedCards,
+      imageUrls: aggregatedImageUrls,
+      images: aggregatedImages,
       cookies,
     });
 
@@ -487,17 +622,19 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       },
     });
 
-    await prisma.postLog.create({
-      data: {
-        tenantId: attempt.tenantId,
-        postId: attempt.postId,
-        newStatus: "publishing",
-        comment: `${attempt.publishTarget.displayName} 发布成功：${result.externalId}`,
-      },
-    });
-    await notifier?.notifyPublishSucceeded(attempt.postId, attempt.publishTargetId, result.externalId).catch((error) => {
-      logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish success");
-    });
+    for (const target of postsToPublish) {
+      await prisma.postLog.create({
+        data: {
+          tenantId: attempt.tenantId,
+          postId: target.id,
+          newStatus: "publishing",
+          comment: `${attempt.publishTarget.displayName} 发布成功：${result.externalId}`,
+        },
+      });
+      await notifier?.notifyPublishSucceeded(target.id, attempt.publishTargetId, result.externalId).catch((error) => {
+        logger.warn({ error, postId: target.id, publishTargetId: attempt.publishTargetId }, "failed to notify publish success");
+      });
+    }
   } catch (caught) {
     const currentAttempt = await prisma.publishAttempt.findUniqueOrThrow({
       where: {
@@ -547,7 +684,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         await notifier.notifyPublishFailed(attempt.postId, attempt.publishTargetId, `QZone cookies 已通过协议自动刷新，将自动重试发布。原始错误：${message}`, { nextRunAt }).catch((error) => {
           logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish auto refresh retry");
         });
-        await refreshAggregatePostStatus(attempt.postId);
+        await refreshAttemptPostStatuses(attempt);
         return;
       } catch (refreshError) {
         if (isQZoneProtocolAutoRefreshCooldownError(refreshError)) {
@@ -603,7 +740,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     }
   }
 
-  await refreshAggregatePostStatus(attempt.postId);
+  await refreshAttemptPostStatuses(attempt);
 }
 
 async function resolveCookiesForPublish({
@@ -780,6 +917,51 @@ function isQZoneLoginRequiredError(message: string) {
   );
 }
 
+type AggregateAttempt = {
+  status: string;
+  nextRunAt: Date | null;
+  publishTarget: { required: boolean };
+};
+
+/**
+ * 纯逻辑：根据一组发布 attempt 推导稿件/批次的聚合状态。
+ * 单稿模式 attempts = 该 post 的 attempts；凑批模式 attempts = 该 batch 的 attempts。
+ */
+export function deriveAggregateStatus(attempts: AggregateAttempt[]): { status: PostStatus; comment: string } | null {
+  if (attempts.length === 0) {
+    return null;
+  }
+
+  const requiredAttempts = attempts.filter((attempt) => attempt.publishTarget.required);
+  const optionalAttempts = attempts.filter((attempt) => !attempt.publishTarget.required);
+  const completedRequiredAttempts = requiredAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
+  const completedOptionalAttempts = optionalAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
+  const completedAttempts = [...completedRequiredAttempts, ...completedOptionalAttempts];
+  const allRequiredAttemptsCompleted = completedRequiredAttempts.length === requiredAttempts.length;
+  const allAttemptsCompleted = completedAttempts.length === attempts.length;
+  if (allRequiredAttemptsCompleted && (allAttemptsCompleted || completedRequiredAttempts.length > 0)) {
+    return { status: "published", comment: allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成" };
+  }
+
+  const hasPendingAttempt = requiredAttempts.some(
+    (attempt) => attempt.status === "queued" || attempt.status === "running" || attempt.status === "waiting_cookies" || (attempt.status === "failed" && attempt.nextRunAt !== null),
+  );
+  if (hasPendingAttempt) {
+    return { status: "publishing", comment: "发布任务仍在进行" };
+  }
+
+  const terminalFailures = requiredAttempts.filter((attempt) => attempt.status === "failed" && attempt.nextRunAt === null);
+  if (terminalFailures.length > 0) {
+    const hasCompletedAttempt = completedAttempts.length > 0;
+    return {
+      status: hasCompletedAttempt ? "partially_failed" : "failed",
+      comment: "发布目标失败，请在管理页查看详情",
+    };
+  }
+
+  return null;
+}
+
 async function refreshAggregatePostStatus(postId: string) {
   const post = await prisma.post.findUnique({
     where: {
@@ -798,41 +980,76 @@ async function refreshAggregatePostStatus(postId: string) {
     },
   });
 
-  if (!post || post.publishAttempts.length === 0) {
+  if (!post) {
     return;
   }
 
-  const requiredAttempts = post.publishAttempts.filter((attempt) => attempt.publishTarget.required);
-  const optionalAttempts = post.publishAttempts.filter((attempt) => !attempt.publishTarget.required);
-  const completedRequiredAttempts = requiredAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
-  const completedOptionalAttempts = optionalAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
-  const completedAttempts = [...completedRequiredAttempts, ...completedOptionalAttempts];
-  const allRequiredAttemptsCompleted = completedRequiredAttempts.length === requiredAttempts.length;
-  const allAttemptsCompleted = completedAttempts.length === post.publishAttempts.length;
-  if (allRequiredAttemptsCompleted && (allAttemptsCompleted || completedRequiredAttempts.length > 0)) {
-    await updatePostAggregateStatus(post.id, post.tenantId, post.status, "published", allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成");
+  const derived = deriveAggregateStatus(post.publishAttempts);
+  if (!derived) {
+    return;
+  }
+  await updatePostAggregateStatus(post.id, post.tenantId, post.status, derived.status, derived.comment);
+}
+
+const batchStatusFromPostStatus: Record<string, "publishing" | "published" | "partially_failed" | "failed"> = {
+  publishing: "publishing",
+  published: "published",
+  partially_failed: "partially_failed",
+  failed: "failed",
+};
+
+/**
+ * 凑批模式：批次内每条稿件共享同一组 batch attempt 的结果。
+ * 据 batch.attempts 推导聚合状态，应用到批次内每条 post，并同步推进 PublishBatch.status。
+ */
+async function refreshBatchPostStatuses(batchId: string) {
+  const batch = await prisma.publishBatch.findUnique({
+    where: { id: batchId },
+    include: {
+      items: {
+        include: {
+          post: { select: { id: true, status: true, tenantId: true } },
+        },
+      },
+      attempts: {
+        include: {
+          publishTarget: { select: { required: true } },
+        },
+      },
+    },
+  });
+
+  if (!batch) {
     return;
   }
 
-  const hasPendingAttempt = requiredAttempts.some(
-    (attempt) => attempt.status === "queued" || attempt.status === "running" || attempt.status === "waiting_cookies" || (attempt.status === "failed" && attempt.nextRunAt !== null),
-  );
-  if (hasPendingAttempt) {
-    await updatePostAggregateStatus(post.id, post.tenantId, post.status, "publishing", "发布任务仍在进行");
+  const derived = deriveAggregateStatus(batch.attempts);
+  if (!derived) {
     return;
   }
 
-  const terminalFailures = requiredAttempts.filter((attempt) => attempt.status === "failed" && attempt.nextRunAt === null);
-  if (terminalFailures.length > 0) {
-    const hasCompletedAttempt = completedAttempts.length > 0;
-    await updatePostAggregateStatus(
-      post.id,
-      post.tenantId,
-      post.status,
-      hasCompletedAttempt ? "partially_failed" : "failed",
-      "发布目标失败，请在管理页查看详情",
-    );
+  for (const item of batch.items) {
+    await updatePostAggregateStatus(item.post.id, item.post.tenantId, item.post.status, derived.status, derived.comment);
   }
+
+  const batchStatus = batchStatusFromPostStatus[derived.status];
+  if (batchStatus && batchStatus !== batch.status) {
+    await prisma.publishBatch.update({
+      where: { id: batch.id },
+      data: { status: batchStatus },
+    });
+  }
+}
+
+/**
+ * 刷新一个 attempt 影响到的所有稿件状态：凑批 attempt 刷新整批，单稿 attempt 刷新单稿。
+ */
+async function refreshAttemptPostStatuses(attempt: { postId: string; batchId: string | null }) {
+  if (attempt.batchId) {
+    await refreshBatchPostStatuses(attempt.batchId);
+    return;
+  }
+  await refreshAggregatePostStatus(attempt.postId);
 }
 
 async function updatePostAggregateStatus(postId: string, tenantId: string, oldStatus: PostStatus, newStatus: PostStatus, comment: string) {

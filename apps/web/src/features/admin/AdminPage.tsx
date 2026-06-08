@@ -54,6 +54,10 @@ type TenantSettingsForm = {
   imageCompressionMaxDimension: number;
   botStylishMessagesEnabled: boolean;
   botPrivatePostStylishEnabled: boolean;
+  publishMode: "single" | "accumulate";
+  publishAccumulateMinImages: number;
+  publishAccumulateMaxImages: number;
+  publishAccumulateStaleMinutes: number;
 };
 
 type BanForm = {
@@ -510,6 +514,10 @@ export function AdminPage({
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
           botStylishMessagesEnabled: form.botStylishMessagesEnabled,
           botPrivatePostStylishEnabled: form.botPrivatePostStylishEnabled,
+          publishMode: form.publishMode,
+          publishAccumulateMinImages: form.publishAccumulateMinImages,
+          publishAccumulateMaxImages: form.publishAccumulateMaxImages,
+          publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
         }),
       });
       await onSaved();
@@ -1757,6 +1765,90 @@ function MetadataPanel({
                 <span className="text-xs font-normal text-slate-500">宽或高超过该值时按比例缩放，默认 2048。</span>
               </label>
             </div>
+          </div>
+          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">发布模式</p>
+                <p className="text-xs text-slate-500">控制审核通过的稿件如何发到 QQ 空间说说。</p>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onFormChange({ ...form, publishMode: "single" })}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  form.publishMode === "single"
+                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
+                    : "border-slate-200 bg-white hover:border-slate-300"
+                }`}
+              >
+                <p className="text-sm font-semibold text-slate-900">逐条发布</p>
+                <p className="text-xs text-slate-500">每条稿件单独发一条说说（默认）。</p>
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onFormChange({ ...form, publishMode: "accumulate" })}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  form.publishMode === "accumulate"
+                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
+                    : "border-slate-200 bg-white hover:border-slate-300"
+                }`}
+              >
+                <p className="text-sm font-semibold text-slate-900">凑批发布</p>
+                <p className="text-xs text-slate-500">攒够设定的图片数量，把多条稿件合并成一条说说发出。</p>
+              </button>
+            </div>
+            {form.publishMode === "accumulate" ? (
+              <div className="grid gap-3">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="grid gap-1 text-sm font-medium">
+                    图片数量下限
+                    <Input
+                      type="number"
+                      min={1}
+                      max={9}
+                      value={form.publishAccumulateMinImages}
+                      disabled={busy}
+                      onChange={(event) => onFormChange({ ...form, publishAccumulateMinImages: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium">
+                    图片数量上限
+                    <Input
+                      type="number"
+                      min={1}
+                      max={9}
+                      value={form.publishAccumulateMaxImages}
+                      disabled={busy}
+                      onChange={(event) => onFormChange({ ...form, publishAccumulateMaxImages: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium">
+                    停滞自动发出（分钟）
+                    <Input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={form.publishAccumulateStaleMinutes}
+                      disabled={busy}
+                      onChange={(event) => onFormChange({ ...form, publishAccumulateStaleMinutes: Number(event.target.value) })}
+                    />
+                  </label>
+                </div>
+                <p className="text-xs text-slate-500">
+                  每条稿件图片数 = 1 张稿件渲染图 + 配图数。攒够下限即可发出；达到上限会尽快发出。停滞超过设定分钟数（默认 30）即使未到批量也会把已达下限的稿件发掉。
+                </p>
+                {form.publishAccumulateMaxImages < form.publishAccumulateMinImages ? (
+                  <p className="text-xs font-semibold text-rose-600">上限不能小于下限，保存时会自动校正为下限值。</p>
+                ) : null}
+                <p className="text-xs font-semibold text-amber-600">
+                  注意：QQ 空间单条说说图片上限约 9 张，下限/上限请勿超过 9；凑批模式下的稿件不支持程序撤回。
+                </p>
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <div>
@@ -3292,6 +3384,10 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
     botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
     botPrivatePostStylishEnabled: metadata.botPrivatePostStylishEnabled,
+    publishMode: metadata.publishMode,
+    publishAccumulateMinImages: metadata.publishAccumulate.minImages,
+    publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,
+    publishAccumulateStaleMinutes: metadata.publishAccumulate.staleMinutes,
   };
 }
 
