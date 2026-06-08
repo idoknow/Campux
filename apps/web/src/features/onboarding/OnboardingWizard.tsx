@@ -335,7 +335,7 @@ export function OnboardingWizard({
                       publishMode === "accumulate" ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200" : "border-slate-200 bg-white hover:border-slate-300"
                     }`}
                   >
-                    <p className="text-sm font-semibold text-slate-900">凑批发布</p>
+                    <p className="text-sm font-semibold text-slate-900">批量发布</p>
                     <p className="text-xs text-slate-500">攒够图片数量，把多条稿件合并成一条说说。</p>
                   </button>
                 </div>
@@ -351,7 +351,7 @@ export function OnboardingWizard({
                         <Input type="number" min={1} max={9} value={accumulateMax} onChange={(event) => setAccumulateMax(Number(event.target.value))} />
                       </label>
                     </div>
-                    <p className="text-xs font-semibold text-amber-600">QQ 空间单条说说图片上限约 9 张；凑批模式下的稿件不支持程序撤回。</p>
+                    <p className="text-xs font-semibold text-amber-600">QQ 空间单条说说图片上限约 9 张；批量模式下的稿件不支持程序撤回。</p>
                   </div>
                 ) : null}
               </div>
