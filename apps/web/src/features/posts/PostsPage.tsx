@@ -15,6 +15,7 @@ import {
   HeartIcon,
   ImageIcon,
   MessageCircleIcon,
+  ChevronDownIcon,
   RotateCcwIcon,
   SearchIcon,
   Share2Icon,
@@ -1250,12 +1251,12 @@ function ReviewCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact />
 
+        {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
+
         <QZoneStatsBlock stats={post.qzoneStats} />
 
         {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
         {canApproveRecall && post.recallIgnored ? <IgnoredRecallBlock ignoredAt={post.recallIgnoredAt} /> : null}
-
-        {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
@@ -1408,11 +1409,11 @@ function PostCard({
 
         <PostTextBlock text={post.text} createdAt={post.createdAt} compact />
 
+        {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
+
         <QZoneStatsBlock stats={post.qzoneStats} />
 
         {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
-
-        {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
           <span className="inline-flex items-center gap-1">
@@ -1611,22 +1612,23 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
 
         return (
           <div key={key} className="rounded-md border border-slate-100 bg-white px-2.5 py-2">
-            {multi ? (
-              <p className="mb-1.5 flex items-center gap-1 truncate text-[11px] font-black text-slate-600">
-                <Share2Icon className="size-3 shrink-0 text-slate-400" />
-                {target.botName ?? target.targetName}
-                {target.botQqUin ? <span className="font-medium text-slate-400">· {target.botQqUin}</span> : null}
-              </p>
-            ) : null}
-            <div className="grid grid-cols-4 gap-1.5 text-xs">
-              <QZoneMetricItem icon={EyeIcon} label="浏览" value={target.visitorCount} />
-              <QZoneMetricItem icon={HeartIcon} label="点赞" value={target.likeCount} />
-              <QZoneMetricItem icon={MessageCircleIcon} label="评论" value={target.commentCount} />
-              <QZoneMetricItem icon={Share2Icon} label="转发" value={target.forwardCount} />
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {multi ? (
+                <span className="flex min-w-0 items-center gap-1 truncate text-[11px] font-black text-slate-600">
+                  <Share2Icon className="size-3 shrink-0 text-slate-400" />
+                  {target.botName ?? target.targetName}
+                </span>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <QZoneMetricItem icon={EyeIcon} label="浏览" value={target.visitorCount} />
+                <QZoneMetricItem icon={HeartIcon} label="点赞" value={target.likeCount} />
+                <QZoneMetricItem icon={MessageCircleIcon} label="评论" value={target.commentCount} />
+                <QZoneMetricItem icon={Share2Icon} label="转发" value={target.forwardCount} />
+              </div>
+              {target.checkedAt ? (
+                <span className="ml-auto text-[11px] font-semibold text-slate-400">更新 {formatFullDateTime(target.checkedAt)}</span>
+              ) : null}
             </div>
-            {target.checkedAt ? (
-              <p className="mt-1.5 text-[11px] font-semibold text-slate-500">更新 {formatFullDateTime(target.checkedAt)}</p>
-            ) : null}
             <QZoneCommentsList comments={target.comments ?? []} />
           </div>
         );
@@ -1636,20 +1638,29 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
 }
 
 function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]> }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   if (!comments || comments.length === 0) {
     return null;
   }
 
-  const preview = expanded ? comments : comments.slice(0, 3);
+  const preview = showAll ? comments : comments.slice(0, 3);
 
   return (
     <div className="mt-2 border-t border-slate-100 pt-2">
-      <p className="mb-1.5 flex items-center gap-1 text-[11px] font-black text-slate-500">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1 text-[11px] font-black text-slate-500 hover:text-slate-700"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
         <MessageCircleIcon className="size-3 shrink-0" />
         评论 {comments.length}
-      </p>
-      <div className="grid gap-1.5">
+        <ChevronDownIcon className={`size-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <>
+          <div className="mt-1.5 grid gap-1.5">
         {preview.map((comment, index) => (
           <div key={`${comment.uin}-${index}`} className="rounded-md bg-slate-50 px-2 py-1.5">
             <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px] leading-5">
@@ -1682,15 +1693,17 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
             ) : null}
           </div>
         ))}
-      </div>
-      {comments.length > 3 ? (
-        <button
-          type="button"
-          className="mt-1.5 text-[11px] font-bold text-blue-600 hover:underline"
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? "收起" : `展开全部 ${comments.length} 条`}
-        </button>
+          </div>
+          {comments.length > 3 ? (
+            <button
+              type="button"
+              className="mt-1.5 text-[11px] font-bold text-blue-600 hover:underline"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll ? "收起" : `展开全部 ${comments.length} 条`}
+            </button>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -1750,14 +1763,13 @@ function QQUinTag({ uin }: { uin?: string | null }) {
 }
 
 function QZoneMetricItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number | null }) {
+  const muted = value === null || value === 0;
   return (
-    <div className="min-w-0 rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5">
-      <p className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
-        <Icon className="size-3.5" />
-        {label}
-      </p>
-      <p className="mt-0.5 truncate text-sm font-black text-slate-900">{formatMetricCount(value)}</p>
-    </div>
+    <span className="inline-flex items-baseline gap-1 whitespace-nowrap" title={label}>
+      <Icon className={`size-3.5 shrink-0 self-center ${muted ? "text-slate-300" : "text-slate-400"}`} />
+      <span className="text-[11px] font-semibold text-slate-400">{label}</span>
+      <span className={`text-sm font-black tabular-nums ${muted ? "text-slate-400" : "text-slate-900"}`}>{formatMetricCount(value)}</span>
+    </span>
   );
 }
 
