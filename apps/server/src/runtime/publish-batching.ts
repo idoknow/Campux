@@ -218,8 +218,12 @@ export async function addApprovedPostToBatch(
 let sweeperTimer: ReturnType<typeof setInterval> | undefined;
 
 /**
- * 兜底定时器：周期扫描"停滞过久"的 collecting 批次（已达下限但长时间无新增），
- * 直接 flush，避免低投稿量墙号的稿件一直攒着不发。停滞阈值是租户可调设置。
+ * 兜底定时器：周期扫描“停滞过久”的 collecting 批次，直接 flush，避免低投稿量墙号的
+ * 稿件一直攒着不发。停滞阈值是租户可调设置。
+ *
+ * 注意：达到 min/max 的批次在审核通过时已被 decideFlush 立即冲刷，不会留到 collecting
+ * 状态。因此 sweeper 扫到的 collecting 批次几乎必然「未达 min」——这正是它该兜底的场景，
+ * 绝不能再用 imageCount >= min 把它排除掉，否则凑不够 min 的小批次会永久卡在「发布中」。
  */
 export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBaseLogger) {
   const intervalMs = 5 * 60 * 1000; // 每 5 分钟扫一次
@@ -234,13 +238,12 @@ export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBa
         if (batch.imageCount <= 0 || !batch.lastItemAt) {
           continue;
         }
-        const { mode, minImages, staleMinutes } = await readTenantPublishMode(prisma, batch.tenantId);
+        const { mode, staleMinutes } = await readTenantPublishMode(prisma, batch.tenantId);
         if (mode !== "accumulate") {
           continue;
         }
-        if (batch.imageCount < minImages) {
-          continue;
-        }
+        // 停滞超过阈值即冲刷，不论是否达到 min：宁可发一条不足下限的说说，
+        // 也不能让稿件无限期卡在「发布中」。达到 min 的批次早已在审核时即时发出。
         if (now - batch.lastItemAt.getTime() < staleMinutes * 60 * 1000) {
           continue;
         }
