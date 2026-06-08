@@ -62,12 +62,14 @@ export function LoadingBlock({ title = "正在加载..." }: { title?: string }) 
 }
 
 function buildPageItems(current: number, pageCount: number): (number | "ellipsis-start" | "ellipsis-end")[] {
-  if (pageCount <= 7) {
+  // 直接全部展开的阈值，避免页数不多时还要省略号
+  if (pageCount <= 9) {
     return Array.from({ length: pageCount }, (_, i) => i + 1);
   }
   const items: (number | "ellipsis-start" | "ellipsis-end")[] = [1];
-  const start = Math.max(2, current - 1);
-  const end = Math.min(pageCount - 1, current + 1);
+  // 当前页左右各显示 2 个，配合首尾共最多 ~7 个可点页码
+  const start = Math.max(2, current - 2);
+  const end = Math.min(pageCount - 1, current + 2);
   if (start > 2) {
     items.push("ellipsis-start");
   }

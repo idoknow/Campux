@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -86,6 +86,15 @@ type ImagePreviewState = {
   index: number;
   title: string;
 };
+
+// 让深层嵌套的评论配图也能复用顶层看图浮窗，避免逐层透传回调
+type ImageLightbox = (images: PostImage[], index: number, title: string) => void;
+const ImageLightboxContext = createContext<ImageLightbox | null>(null);
+
+function useImageLightbox(): ImageLightbox {
+  const open = useContext(ImageLightboxContext);
+  return open ?? (() => undefined);
+}
 
 const postCardPalettes = [
   "border-slate-200 bg-white",
@@ -614,6 +623,7 @@ export function PostsPage({
   }
 
   return (
+    <ImageLightboxContext.Provider value={openImagePreview}>
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="min-h-0 flex-1">
         <div className="flex items-center justify-between gap-3">
@@ -858,6 +868,7 @@ export function PostsPage({
                   <img
                     src={getPostImageUrl(activePreviewImage)}
                     alt={activePreviewImage.fileName ?? imagePreview.title}
+                    referrerPolicy="no-referrer"
                     className="max-h-[70dvh] w-auto max-w-full object-contain"
                   />
                 </div>
@@ -987,6 +998,7 @@ export function PostsPage({
         </DialogContent>
       </Dialog>
     </div>
+    </ImageLightboxContext.Provider>
   );
 }
 
@@ -1695,7 +1707,7 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
             ) : comment.images && comment.images.length > 0 ? null : (
               <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">（空）</p>
             )}
-            <QZoneCommentImages images={comment.images} />
+            <QZoneCommentImages images={comment.images} title={`${comment.name || comment.uin || "匿名"} 的评论图片`} />
             {comment.replies && comment.replies.length > 0 ? (
               <div className="mt-1 grid gap-1 border-l-2 border-slate-200 pl-2">
                 {comment.replies.map((reply, replyIndex) => (
@@ -1708,7 +1720,7 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
                         {reply.content || (reply.images && reply.images.length > 0 ? "" : "（空）")}
                       </span>
                     </div>
-                    <QZoneCommentImages images={reply.images} />
+                    <QZoneCommentImages images={reply.images} title={`${reply.name || reply.uin || "匿名"} 的回复图片`} />
                   </div>
                 ))}
               </div>
@@ -1731,28 +1743,30 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
   );
 }
 
-function QZoneCommentImages({ images }: { images?: string[] | undefined }) {
+function QZoneCommentImages({ images, title = "评论图片" }: { images?: string[] | undefined; title?: string }) {
+  const openLightbox = useImageLightbox();
   if (!images || images.length === 0) {
     return null;
   }
+  const previewImages: PostImage[] = images.map((src) => ({ url: src }));
   return (
     <div className="mt-1 flex flex-wrap gap-1.5">
       {images.map((src, index) => (
-        <a
+        <button
           key={`${src}-${index}`}
-          href={src}
-          target="_blank"
-          rel="noreferrer"
-          className="block size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100"
+          type="button"
+          onClick={() => openLightbox(previewImages, index, title)}
+          className="block size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100 transition hover:ring-2 hover:ring-blue-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          aria-label={`查看${title} ${index + 1}`}
         >
           <img
             src={src}
-            alt="评论图片"
+            alt={title}
             loading="lazy"
             referrerPolicy="no-referrer"
             className="size-full object-cover"
           />
-        </a>
+        </button>
       ))}
     </div>
   );
