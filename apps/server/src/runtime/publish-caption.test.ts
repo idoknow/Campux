@@ -35,8 +35,8 @@ describe("renderPublishCaption batch member (omitFixedText on)", () => {
   });
 });
 
-describe("凑批整条说说：固定前后缀各只出现一次", () => {
-  test("两条凑批稿件 → 前缀一次 + 两条 #号 + 后缀一次", () => {
+describe("批量整条说说：固定前后缀各只出现一次", () => {
+  test("两条批量稿件 → 前缀一次 + 两条 #号 + 后缀一次", () => {
     const parts = [6449, 6450].map((postId) =>
       renderPublishCaption(template, { ...basePost, postId, omitFixedText: true }),
     );

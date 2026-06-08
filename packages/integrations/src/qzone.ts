@@ -322,7 +322,7 @@ export type QZoneUploadImage = { name: string; bytes: Uint8Array };
 
 /**
  * 构造一条说说要上传的图片序列：先所有渲染卡片图（按顺序），再所有投稿原图。
- * 单条模式渲染卡片只有 1 张；凑批模式可有多张（每条稿件一张卡片）。
+ * 单条模式渲染卡片只有 1 张；批量模式可有多张（每条稿件一张卡片）。
  */
 export function buildPublishImageList(renderedCards: Uint8Array[], images?: QZoneUploadImage[]): QZoneUploadImage[] {
   return [

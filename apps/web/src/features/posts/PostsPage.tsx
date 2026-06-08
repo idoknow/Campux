@@ -134,7 +134,7 @@ const statusDotStyles: Record<string, string> = {
   recalled: "bg-zinc-400",
 };
 
-// 凑批收集中的稿件后端复用 publishing 状态，前端派生为"等待批次"以区别于真正发布中。
+// 批量收集中的稿件后端复用 publishing 状态，前端派生为"等待批次"以区别于真正发布中。
 const WAITING_BATCH_STATUS = "waiting_batch";
 const waitingBatchLabel = "等待批次";
 
@@ -1550,7 +1550,7 @@ function PostMetaHeader({
   title?: string;
   actions?: ReactNode;
 }) {
-  // 凑批收集中（后端为 publishing）派生为"等待批次"，并据此覆盖徽章配色，
+  // 批量收集中（后端为 publishing）派生为"等待批次"，并据此覆盖徽章配色，
   // 这样两个调用方传入的 statusClassName 不一致时也能自洽。
   const displayStatus = status === "publishing" && batch?.collecting ? WAITING_BATCH_STATUS : status;
   const effectiveStatusClassName = displayStatus === WAITING_BATCH_STATUS ? statusStyles[WAITING_BATCH_STATUS] ?? statusClassName : statusClassName;
@@ -1568,9 +1568,9 @@ function PostMetaHeader({
           {batch && batch.postCount > 1 ? (
             <span
               className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-1.5 py-0.5 text-xs font-semibold leading-4 text-violet-700"
-              title={batch.otherDisplayIds.length > 0 ? `与 ${batch.otherDisplayIds.map((id) => `#${id}`).join(" ")} 合并为一条说说` : "凑批发布"}
+              title={batch.otherDisplayIds.length > 0 ? `与 ${batch.otherDisplayIds.map((id) => `#${id}`).join(" ")} 合并为一条说说` : "批量发布"}
             >
-              凑批 · 同说说 {batch.postCount} 条
+              批量 · 同说说 {batch.postCount} 条
             </span>
           ) : null}
           <InfoPill icon={ImageIcon}>{imageCount} 个附件</InfoPill>
@@ -1691,7 +1691,7 @@ function PublishedFeedCard({
       <CardContent className="grid gap-3 p-2.5 md:p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           {isBatch ? (
-            <Badge className="bg-violet-100 text-violet-700 hover:bg-violet-100">凑批 · {item.posts.length} 条稿件 · 同一条说说</Badge>
+            <Badge className="bg-violet-100 text-violet-700 hover:bg-violet-100">批量 · {item.posts.length} 条稿件 · 同一条说说</Badge>
           ) : (
             <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">独立发布</Badge>
           )}

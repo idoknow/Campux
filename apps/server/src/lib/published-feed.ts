@@ -5,7 +5,7 @@ import { toQZonePostStats, type PostQZoneMetric } from "./posts";
  *
  * 聚合单位 = 一条 QQ 空间说说：
  * - 独立发布：1 稿 → 1 个 single 条目。
- * - 凑批发布：N 稿合并发一条说说 → 1 个 batch 条目（含 N 条稿件）。
+ * - 批量发布：N 稿合并发一条说说 → 1 个 batch 条目（含 N 条稿件）。
  *
  * 互动数据（浏览/点赞/评论/转发 + 评论列表）按说说聚合（跨墙号求和），
  * 复用 toQZonePostStats。

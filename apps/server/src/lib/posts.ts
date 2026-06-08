@@ -91,8 +91,8 @@ export function toPostListItem(post: {
 }
 
 /**
- * 凑批稿件的"同说说"提示：返回同批次其他稿件的 displayId 列表与总条数。
- * 非凑批稿件返回 null。
+ * 批量稿件的"同说说"提示：返回同批次其他稿件的 displayId 列表与总条数。
+ * 非批量稿件返回 null。
  */
 function toBatchSummary(
   batchItem: { batch: { status: string; items: Array<{ post: { displayId: number } }> } } | null | undefined,
@@ -106,7 +106,7 @@ function toBatchSummary(
     postCount: displayIds.length,
     displayIds,
     otherDisplayIds: displayIds.filter((displayId) => displayId !== selfDisplayId),
-    // 批次仍在凑批收集中（尚未真正发布）。前端据此把"发布中"显示为"等待批次"。
+    // 批次仍在批量收集中（尚未真正发布）。前端据此把"发布中"显示为"等待批次"。
     collecting: batchItem.batch.status === "collecting",
   };
 }

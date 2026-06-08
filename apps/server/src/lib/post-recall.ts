@@ -22,7 +22,7 @@ export class PostRecallExecutionError extends Error {
   }
 }
 
-/** 凑批发布（多条稿件合并为一条说说）的稿件不支持程序撤回。 */
+/** 批量发布（多条稿件合并为一条说说）的稿件不支持程序撤回。 */
 export class PostRecallNotSupportedError extends Error {
   constructor(message: string) {
     super(message);
@@ -46,7 +46,7 @@ export async function executePostRecall({
     select: { id: true },
   });
   if (batchItem) {
-    throw new PostRecallNotSupportedError("凑批发布的稿件不支持程序撤回，请手动到 QQ 空间删除对应说说");
+    throw new PostRecallNotSupportedError("批量发布的稿件不支持程序撤回，请手动到 QQ 空间删除对应说说");
   }
 
   const post = await prisma.post.findFirst({

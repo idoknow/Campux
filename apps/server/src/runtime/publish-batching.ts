@@ -1,5 +1,5 @@
 /**
- * 凑批发布（accumulate 模式）的纯判定逻辑。
+ * 批量发布（accumulate 模式）的纯判定逻辑。
  *
  * 计数口径：一条稿件的图片数 = 1 张渲染卡片图 + attachments（投稿原图）数量。
  * 一个批次的图片总数 = 批次内所有稿件图片数之和。一条说说上传的图片就是
@@ -90,7 +90,7 @@ export function decideFlush(prevTotal: number, postImages: number, min: number, 
 
 // ── 以下是有状态部分：操作数据库、调度发布 ──────────────────────────────
 
-/** 每租户的凑批操作用 advisory lock 串行化，避免并发审核把同一条稿件塞进两个批次。 */
+/** 每租户的批量操作用 advisory lock 串行化，避免并发审核把同一条稿件塞进两个批次。 */
 async function lockTenantBatch<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
@@ -127,7 +127,7 @@ async function appendItemToBatch(batchId: string, postId: string, postImages: nu
 
 /**
  * accumulate 模式：一条稿件审核通过后调用。把它放入当前 collecting 批次，
- * 按 decideFlush 决定是否触发发布。post 先置 publishing 表示"已入凑批队列"。
+ * 按 decideFlush 决定是否触发发布。post 先置 publishing 表示"已入批量队列"。
  */
 export async function addApprovedPostToBatch(
   queue: RuntimeQueue,
@@ -148,7 +148,7 @@ export async function addApprovedPostToBatch(
   const { minImages, maxImages } = await readTenantPublishMode(prisma, tenantId);
   const postImages = postImageCount(post.attachments);
 
-  // 把 post 标记为"已进入凑批队列"（复用 publishing 态，避免新增 PostStatus）。
+  // 把 post 标记为"已进入批量队列"（复用 publishing 态，避免新增 PostStatus）。
   await prisma.post.update({
     where: { id: postId },
     data: {
@@ -159,7 +159,7 @@ export async function addApprovedPostToBatch(
           actorId,
           oldStatus: post.status,
           newStatus: "publishing",
-          comment: "已进入凑批发布队列，等待与其他稿件合并为一条说说发布",
+          comment: "已进入批量发布队列，等待与其他稿件合并为一条说说发布",
         },
       },
     },

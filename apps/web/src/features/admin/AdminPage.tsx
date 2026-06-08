@@ -1797,7 +1797,7 @@ function MetadataPanel({
                     : "border-slate-200 bg-white hover:border-slate-300"
                 }`}
               >
-                <p className="text-sm font-semibold text-slate-900">凑批发布</p>
+                <p className="text-sm font-semibold text-slate-900">批量发布</p>
                 <p className="text-xs text-slate-500">攒够设定的图片数量，把多条稿件合并成一条说说发出。</p>
               </button>
             </div>
@@ -1845,7 +1845,7 @@ function MetadataPanel({
                   <p className="text-xs font-semibold text-rose-600">上限不能小于下限，保存时会自动校正为下限值。</p>
                 ) : null}
                 <p className="text-xs font-semibold text-amber-600">
-                  注意：QQ 空间单条说说图片上限约 9 张，下限/上限请勿超过 9；凑批模式下的稿件不支持程序撤回。
+                  注意：QQ 空间单条说说图片上限约 9 张，下限/上限请勿超过 9；批量模式下的稿件不支持程序撤回。
                 </p>
               </div>
             ) : null}

@@ -647,7 +647,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     };
   }
 
-  // 「已发布」聚合 feed：按说说为单位返回已发布稿件（独立发布 + 凑批发布），
+  // 「已发布」聚合 feed：按说说为单位返回已发布稿件（独立发布 + 批量发布），
   // 互动数据按说说聚合，匿名作者按调用者角色脱敏（审核员可见真实身份）。
   // 面向本墙任意登录成员公开。
   app.get("/api/posts/published", async (request, reply) => {
@@ -692,7 +692,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         },
         orderBy: { updatedAt: "desc" },
       }),
-      // B) 已发布批次（凑批）
+      // B) 已发布批次（批量）
       prisma.publishBatch.findMany({
         where: { tenantId, status: "published" },
         include: {
@@ -872,7 +872,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       select: { id: true },
     });
     if (batchItem) {
-      return reply.code(409).send({ message: "凑批发布的稿件不支持程序撤回，请联系管理员手动到 QQ 空间删除对应说说" });
+      return reply.code(409).send({ message: "批量发布的稿件不支持程序撤回，请联系管理员手动到 QQ 空间删除对应说说" });
     }
     const body = recallRequestSchema.parse(request.body ?? {});
     const reason = body.reason.trim();

@@ -162,7 +162,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
 }
 
 /**
- * 凑批模式：把一个已凑齐的批次 fan out 到每个启用的发布目标。
+ * 批量模式：把一个已凑齐的批次 fan out 到每个启用的发布目标。
  * 每个 target 一个 batch attempt（渲染批次内全部稿件的卡片，合成一条说说）。
  */
 export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: string, batchId: string, actorId?: string | null) {
@@ -561,7 +561,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       },
     });
 
-    // 凑批 attempt：渲染批次内每条稿件的卡片，拼接配文，合成一条说说；
+    // 批量 attempt：渲染批次内每条稿件的卡片，拼接配文，合成一条说说；
     // 单稿 attempt：渲染单条稿件的卡片。
     const postsToPublish = attempt.batch
       ? attempt.batch.items.map((item) => item.post)
@@ -592,7 +592,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           text: target.text,
           anonymous: target.anonymous,
           authorQq: target.author.qqUin.toString(),
-          // 凑批时省略固定前/后缀，整条说说只在外层各加一次。
+          // 批量时省略固定前/后缀，整条说说只在外层各加一次。
           omitFixedText: isBatch,
         }),
       );
@@ -600,7 +600,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       aggregatedImageUrls.push(...getImageUrls(target.attachments));
     }
     // 单稿：renderPublishCaption 已含固定前后缀，直接拼接。
-    // 凑批：每条只保留可变部分（#号/@作者/链接），固定前缀与后缀在整条说说级别各加一次。
+    // 批量：每条只保留可变部分（#号/@作者/链接），固定前缀与后缀在整条说说级别各加一次。
     const captionText = isBatch
       ? wrapBatchCaptionWithFixedText(attempt.publishTarget.botAccount.publishTextTemplate, joinBatchCaptions(captionParts))
       : joinBatchCaptions(captionParts);
@@ -933,7 +933,7 @@ type AggregateAttempt = {
 
 /**
  * 纯逻辑：根据一组发布 attempt 推导稿件/批次的聚合状态。
- * 单稿模式 attempts = 该 post 的 attempts；凑批模式 attempts = 该 batch 的 attempts。
+ * 单稿模式 attempts = 该 post 的 attempts；批量模式 attempts = 该 batch 的 attempts。
  */
 export function deriveAggregateStatus(attempts: AggregateAttempt[]): { status: PostStatus; comment: string } | null {
   if (attempts.length === 0) {
@@ -1007,7 +1007,7 @@ const batchStatusFromPostStatus: Record<string, "publishing" | "published" | "pa
 };
 
 /**
- * 凑批模式：批次内每条稿件共享同一组 batch attempt 的结果。
+ * 批量模式：批次内每条稿件共享同一组 batch attempt 的结果。
  * 据 batch.attempts 推导聚合状态，应用到批次内每条 post，并同步推进 PublishBatch.status。
  */
 async function refreshBatchPostStatuses(batchId: string) {
@@ -1050,7 +1050,7 @@ async function refreshBatchPostStatuses(batchId: string) {
 }
 
 /**
- * 刷新一个 attempt 影响到的所有稿件状态：凑批 attempt 刷新整批，单稿 attempt 刷新单稿。
+ * 刷新一个 attempt 影响到的所有稿件状态：批量 attempt 刷新整批，单稿 attempt 刷新单稿。
  */
 async function refreshAttemptPostStatuses(attempt: { postId: string; batchId: string | null }) {
   if (attempt.batchId) {
@@ -1249,24 +1249,24 @@ export function renderPublishCaption(
   if (template.includeAuthorMention && !post.anonymous) {
     parts.push(`@{uin:${post.authorQq},nick:,who:1}`);
   }
-  // 凑批时省略固定前缀 customText（整条说说只在外层加一次）；单稿保持原行为。
+  // 批量时省略固定前缀 customText（整条说说只在外层加一次）；单稿保持原行为。
   const firstLineParts = omitFixed ? parts : [template.customText?.trim(), ...parts];
   const firstLine = firstLineParts.filter(Boolean).join(" ").trim();
   const lines = firstLine ? [firstLine] : [];
   if (template.includeLinks) {
     lines.push(...extractLinks(post.text));
   }
-  // 凑批时省略固定后缀 suffixText（整条说说只在外层加一次）。
+  // 批量时省略固定后缀 suffixText（整条说说只在外层加一次）。
   if (!omitFixed && template.suffixText?.trim()) {
     lines.push(template.suffixText.trim());
   }
   const body = lines.join("\n").trim();
-  // 凑批的每稿可变部分允许为空（外层会兜底固定文本/#号）；单稿保持「至少 #号」兜底。
+  // 批量的每稿可变部分允许为空（外层会兜底固定文本/#号）；单稿保持「至少 #号」兜底。
   return omitFixed ? body : body || `#${post.postId}`;
 }
 
 /**
- * 凑批整条说说级别加固定前缀与后缀（各一次）：
+ * 批量整条说说级别加固定前缀与后缀（各一次）：
  *   [固定前缀]
  *   <各稿可变部分拼接>
  *   [固定后缀]
