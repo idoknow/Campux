@@ -1,7 +1,7 @@
 import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "ai" | "stats" | "services" | "admin";
-export type PostsTab = "mine" | "review";
+export type PostsTab = "mine" | "review" | "published";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
@@ -215,6 +215,29 @@ export type ReviewPostItem = PostItem & {
     qqUin: string;
     displayName: string | null;
   } | null;
+};
+
+export type PublishedFeedAuthor = {
+  displayName: string;
+  qqUin: string;
+} | null;
+
+export type PublishedFeedPost = {
+  id: string;
+  displayId: number;
+  text: string;
+  attachments: unknown;
+  anonymous: boolean;
+  author: PublishedFeedAuthor;
+  createdAt: string;
+};
+
+export type PublishedFeedItem = {
+  kind: "single" | "batch";
+  key: string;
+  publishedAt: string;
+  posts: PublishedFeedPost[];
+  qzoneStats: PostItem["qzoneStats"];
 };
 
 export type AdminMember = {

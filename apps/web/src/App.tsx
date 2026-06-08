@@ -42,6 +42,7 @@ const tabPaths: Record<MainTab, string> = {
 const postsTabPaths: Record<PostsTab, string> = {
   mine: "/posts",
   review: "/posts/review",
+  published: "/posts/published",
 };
 
 const adminTabPaths: Record<AdminTab, string> = {
@@ -64,6 +65,7 @@ const mainTabTitles: Record<MainTab, string> = {
 const postsTabTitles: Record<PostsTab, string> = {
   mine: "你的稿件",
   review: "审核稿件",
+  published: "已发布",
 };
 
 const adminTabTitles: Record<AdminTab, string> = {

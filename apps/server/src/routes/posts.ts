@@ -11,6 +11,7 @@ import { createS3Client } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
+import { buildPublishedFeed, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
@@ -645,6 +646,112 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       pageCount: Math.max(1, Math.ceil(total / limit)),
     };
   }
+
+  // 「已发布」聚合 feed：按说说为单位返回已发布稿件（独立发布 + 凑批发布），
+  // 互动数据按说说聚合，匿名作者按调用者角色脱敏（审核员可见真实身份）。
+  // 面向本墙任意登录成员公开。
+  app.get("/api/posts/published", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "submitter");
+    const query = listQuerySchema.parse(request.query);
+    const tenantId = context.selectedTenant.id;
+    const viewerIsReviewer = hasTenantRole(context.selectedMembership.role, "reviewer");
+
+    const metricInclude = {
+      include: {
+        publishAttempt: {
+          select: {
+            publishTarget: {
+              select: {
+                displayName: true,
+                botAccount: {
+                  select: {
+                    displayName: true,
+                    qqUin: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    } as const;
+
+    const authorSelect = { select: { displayName: true, qqUin: true } } as const;
+
+    const [singlePosts, batches] = await Promise.all([
+      // A) 独立发布稿件：已发布且不属于任何批次
+      prisma.post.findMany({
+        where: {
+          tenantId,
+          status: "published",
+          batchItem: { is: null },
+        },
+        include: {
+          author: authorSelect,
+          qzonePostMetrics: metricInclude,
+        },
+        orderBy: { updatedAt: "desc" },
+      }),
+      // B) 已发布批次（凑批）
+      prisma.publishBatch.findMany({
+        where: { tenantId, status: "published" },
+        include: {
+          items: {
+            orderBy: { position: "asc" },
+            include: { post: { include: { author: authorSelect } } },
+          },
+          attempts: {
+            include: { qzonePostMetrics: metricInclude },
+          },
+        },
+        orderBy: { flushedAt: "desc" },
+      }),
+    ]);
+
+    const toRawPost = (post: {
+      id: string;
+      displayId: number;
+      text: string;
+      attachments: unknown;
+      anonymous: boolean;
+      createdAt: Date;
+      author: { displayName: string | null; qqUin: bigint } | null;
+    }): RawFeedPost => ({
+      id: post.id,
+      displayId: post.displayId,
+      text: post.text,
+      attachments: post.attachments,
+      anonymous: post.anonymous,
+      author: post.author ? { displayName: post.author.displayName ?? "", qqUin: post.author.qqUin } : null,
+      createdAt: post.createdAt,
+    });
+
+    const singles: SingleFeedInput[] = singlePosts.map((post) => ({
+      post: toRawPost(post),
+      publishedAt: post.updatedAt,
+      metrics: post.qzonePostMetrics,
+    }));
+
+    const batchInputs: BatchFeedInput[] = batches.map((batch) => {
+      const metrics = batch.attempts.flatMap((attempt) => attempt.qzonePostMetrics);
+      return {
+        batchId: batch.id,
+        publishedAt: batch.flushedAt ?? batch.updatedAt,
+        posts: batch.items.map((item) => toRawPost(item.post)),
+        metrics,
+      };
+    });
+
+    const allItems = buildPublishedFeed({ singles, batches: batchInputs, viewerIsReviewer });
+    const total = allItems.length;
+    const start = (query.page - 1) * query.limit;
+    const items = allItems.slice(start, start + query.limit);
+
+    return {
+      items,
+      pagination: toPagination(query.page, query.limit, total),
+    };
+  });
 
   app.get("/api/posts/:id/render-preview", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
