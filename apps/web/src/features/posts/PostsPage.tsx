@@ -1668,7 +1668,7 @@ function PublishedFeedPostBlock({
         <span className="inline-flex items-center rounded bg-sky-50 px-1.5 py-0.5 text-xs font-bold text-sky-700">稿件 {post.displayId}</span>
       </div>
       <PublishedFeedAuthorLine post={post} canViewIdentity={canViewIdentity} />
-      <PostTextBlock text={post.text} createdAt={post.createdAt} compact />
+      <PostTextBlock text={post.text} createdAt={post.createdAt} />
       {images.length > 0 ? (
         <ImageGallery images={images} compact onImageClick={(imgs, index) => onImagePreview(imgs, index, `稿件 ${post.displayId} 上传图片`)} />
       ) : null}
