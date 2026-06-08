@@ -7,6 +7,7 @@ export type RenderPostCardInput = {
   authorQq?: string;
   cornerQq?: string | undefined;
   displayHost?: string | null | undefined;
+  displayId?: number | undefined;
   text: string;
   createdAt: Date;
   anonymous: boolean;
@@ -69,6 +70,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   }).format(input.createdAt);
   const author = input.anonymous ? "匿名" : input.authorName || input.authorQq || "用户";
   const footer = input.anonymous ? `匿名用户 发表于 ${createdAt}` : `${input.authorQq ?? input.authorName} 发表于 ${createdAt}`;
+  const postIdTag = typeof input.displayId === "number" ? `#${input.displayId}` : "";
   const displayHost = normalizeDisplayHost(input.displayHost);
   const avatar = input.anonymous ? anonymousAvatarDataUrl() : await qqAvatarDataUrl(input.authorQq);
   const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
@@ -139,7 +141,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <div id="title-bar" style="background-color: #1E88E5; height: 5%; width: calc(100% + 50px); padding: 16px; border-radius: 0 0 8px 8px; font-weight: bold">
     <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
   </div>
-  <div style="padding: 2.5rem; min-height: 550px;">
+  <div style="padding: 2.5rem; min-height: 550px; position: relative;">
+    ${postIdTag ? `<span id="post-id-tag" style="position: absolute; top: 2.5rem; right: 2.5rem; font-size: 2.6rem; font-weight: bold; color: #1E88E5; background: #E3F2FD; padding: 0.4rem 1.4rem; border-radius: 999px; letter-spacing: 0.1rem;">${escapeHtml(postIdTag)}</span>` : ""}
     <div style="display: flex;">
       <img id="avatar" src="${avatar}" />
       <div style="margin-left: 32px; margin-top: 32px">

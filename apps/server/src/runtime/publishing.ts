@@ -571,11 +571,13 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     const aggregatedImages: Array<{ name: string; bytes: Uint8Array }> = [];
     const aggregatedImageUrls: string[] = [];
     const captionParts: string[] = [];
+    const isBatch = Boolean(attempt.batch);
     for (const target of postsToPublish) {
       renderedCards.push(
         await renderPostCard({
           tenantName: target.tenant.name,
           displayHost: target.tenant.host,
+          displayId: target.displayId,
           authorName: target.author.displayName ?? target.author.qqUin.toString(),
           authorQq: target.author.qqUin.toString(),
           cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
@@ -590,12 +592,18 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           text: target.text,
           anonymous: target.anonymous,
           authorQq: target.author.qqUin.toString(),
+          // 凑批时省略固定前/后缀，整条说说只在外层各加一次。
+          omitFixedText: isBatch,
         }),
       );
       aggregatedImages.push(...(await loadPostImages(config, attempt.tenantId, target.attachments)));
       aggregatedImageUrls.push(...getImageUrls(target.attachments));
     }
-    const captionText = joinBatchCaptions(captionParts);
+    // 单稿：renderPublishCaption 已含固定前后缀，直接拼接。
+    // 凑批：每条只保留可变部分（#号/@作者/链接），固定前缀与后缀在整条说说级别各加一次。
+    const captionText = isBatch
+      ? wrapBatchCaptionWithFixedText(attempt.publishTarget.botAccount.publishTextTemplate, joinBatchCaptions(captionParts))
+      : joinBatchCaptions(captionParts);
     const result = await publishToQZone({
       tenantId: attempt.tenantId,
       postId: attempt.postId,
@@ -1228,8 +1236,12 @@ type PublishCaptionTemplate = {
   includeLinks?: boolean;
 };
 
-function renderPublishCaption(value: Prisma.JsonValue | null | undefined, post: { postId: number; text: string; anonymous: boolean; authorQq: string }) {
+export function renderPublishCaption(
+  value: Prisma.JsonValue | null | undefined,
+  post: { postId: number; text: string; anonymous: boolean; authorQq: string; omitFixedText?: boolean },
+) {
   const template = normalizePublishCaptionTemplate(value);
+  const omitFixed = Boolean(post.omitFixedText);
   const parts = [];
   if (template.includePostId) {
     parts.push(`#${post.postId}`);
@@ -1237,15 +1249,35 @@ function renderPublishCaption(value: Prisma.JsonValue | null | undefined, post: 
   if (template.includeAuthorMention && !post.anonymous) {
     parts.push(`@{uin:${post.authorQq},nick:,who:1}`);
   }
-  const firstLine = [template.customText?.trim(), ...parts].filter(Boolean).join(" ").trim();
+  // 凑批时省略固定前缀 customText（整条说说只在外层加一次）；单稿保持原行为。
+  const firstLineParts = omitFixed ? parts : [template.customText?.trim(), ...parts];
+  const firstLine = firstLineParts.filter(Boolean).join(" ").trim();
   const lines = firstLine ? [firstLine] : [];
   if (template.includeLinks) {
     lines.push(...extractLinks(post.text));
   }
-  if (template.suffixText?.trim()) {
+  // 凑批时省略固定后缀 suffixText（整条说说只在外层加一次）。
+  if (!omitFixed && template.suffixText?.trim()) {
     lines.push(template.suffixText.trim());
   }
-  return lines.join("\n").trim() || `#${post.postId}`;
+  const body = lines.join("\n").trim();
+  // 凑批的每稿可变部分允许为空（外层会兜底固定文本/#号）；单稿保持「至少 #号」兜底。
+  return omitFixed ? body : body || `#${post.postId}`;
+}
+
+/**
+ * 凑批整条说说级别加固定前缀与后缀（各一次）：
+ *   [固定前缀]
+ *   <各稿可变部分拼接>
+ *   [固定后缀]
+ * body 已是 joinBatchCaptions 拼好的各稿可变部分。任一段为空则跳过。
+ */
+export function wrapBatchCaptionWithFixedText(value: Prisma.JsonValue | null | undefined, body: string): string {
+  const template = normalizePublishCaptionTemplate(value);
+  const prefix = template.customText?.trim() ?? "";
+  const suffix = template.suffixText?.trim() ?? "";
+  const lines = [prefix, body.trim(), suffix].filter(Boolean);
+  return lines.join("\n").trim();
 }
 
 function normalizePublishCaptionTemplate(value: Prisma.JsonValue | null | undefined): PublishCaptionTemplate {

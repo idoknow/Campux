@@ -110,6 +110,7 @@ const statusStyles: Record<string, string> = {
   rejected: "bg-red-100 text-red-800 ring-1 ring-red-300",
   cancelled: "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-300",
   publishing: "bg-blue-100 text-blue-900 ring-1 ring-blue-300",
+  waiting_batch: "bg-cyan-100 text-cyan-900 ring-1 ring-cyan-300",
   partially_failed: "bg-orange-100 text-orange-900 ring-1 ring-orange-300",
   failed: "bg-red-100 text-red-800 ring-1 ring-red-300",
   waiting_cookies: "bg-amber-100 text-amber-900 ring-1 ring-amber-300",
@@ -124,6 +125,7 @@ const statusDotStyles: Record<string, string> = {
   rejected: "bg-red-500",
   cancelled: "bg-zinc-400",
   publishing: "bg-blue-500 animate-pulse",
+  waiting_batch: "bg-cyan-500",
   partially_failed: "bg-orange-500",
   failed: "bg-red-500",
   waiting_cookies: "bg-amber-500 animate-pulse",
@@ -131,6 +133,14 @@ const statusDotStyles: Record<string, string> = {
   pending_recall: "bg-violet-500 animate-pulse",
   recalled: "bg-zinc-400",
 };
+
+// 凑批收集中的稿件后端复用 publishing 状态，前端派生为"等待批次"以区别于真正发布中。
+const WAITING_BATCH_STATUS = "waiting_batch";
+const waitingBatchLabel = "等待批次";
+
+function displayStatusLabel(status: string): string {
+  return status === WAITING_BATCH_STATUS ? waitingBatchLabel : statusLabels[status] ?? status;
+}
 
 const postTabsListClassName = "product-tabs-list";
 const postTabsTriggerClassName = "product-tabs-trigger after:hidden";
@@ -1047,7 +1057,7 @@ function PostDetailDialog({
           <div className="grid gap-3 px-5 pb-5">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">#{post.displayId}</Badge>
-              <Badge variant="secondary">{statusLabels[post.status] ?? post.status}</Badge>
+              <Badge variant="secondary">{post.status === "publishing" && post.batch?.collecting ? waitingBatchLabel : statusLabels[post.status] ?? post.status}</Badge>
               {post.anonymous ? <Badge variant="outline">匿名展示</Badge> : <Badge variant="outline">实名展示</Badge>}
               <Badge variant="outline">{images.length} 张图片</Badge>
             </div>
@@ -1453,7 +1463,7 @@ function PostCard({
           </span>
           <span className="inline-flex items-center gap-1 text-slate-500">
             <SparklesIcon className="size-3.5" />
-            {post.status === "published" ? "已发布到墙上" : statusLabels[post.status] ?? "处理中"}
+            {post.status === "published" ? "已发布到墙上" : post.status === "publishing" && post.batch?.collecting ? waitingBatchLabel : statusLabels[post.status] ?? "处理中"}
           </span>
         </div>
       </CardContent>
@@ -1485,10 +1495,14 @@ function PostMetaHeader({
   status: string;
   statusClassName: string;
   submissionChannel?: "web" | "private";
-  batch?: { postCount: number; otherDisplayIds: number[] } | null | undefined;
+  batch?: { postCount: number; otherDisplayIds: number[]; collecting?: boolean } | null | undefined;
   title?: string;
   actions?: ReactNode;
 }) {
+  // 凑批收集中（后端为 publishing）派生为"等待批次"，并据此覆盖徽章配色，
+  // 这样两个调用方传入的 statusClassName 不一致时也能自洽。
+  const displayStatus = status === "publishing" && batch?.collecting ? WAITING_BATCH_STATUS : status;
+  const effectiveStatusClassName = displayStatus === WAITING_BATCH_STATUS ? statusStyles[WAITING_BATCH_STATUS] ?? statusClassName : statusClassName;
   return (
     <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:gap-3">
       <div className="min-w-0">
@@ -1514,9 +1528,9 @@ function PostMetaHeader({
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:justify-end md:gap-2">
         {actions}
-        <Badge className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-none md:px-3 ${statusClassName}`}>
-          <span className={`size-1.5 shrink-0 rounded-full ${statusDotStyles[status] ?? "bg-slate-400"}`} />
-          {statusLabels[status] ?? status}
+        <Badge className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-none md:px-3 ${effectiveStatusClassName}`}>
+          <span className={`size-1.5 shrink-0 rounded-full ${statusDotStyles[displayStatus] ?? "bg-slate-400"}`} />
+          {displayStatusLabel(displayStatus)}
         </Badge>
       </div>
     </div>

@@ -98,6 +98,18 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
               },
             },
           },
+          batchItem: {
+            select: {
+              batch: {
+                select: {
+                  status: true,
+                  items: {
+                    select: { post: { select: { displayId: true } } },
+                  },
+                },
+              },
+            },
+          },
         },
         orderBy: {
           createdAt: "desc",

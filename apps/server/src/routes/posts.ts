@@ -614,6 +614,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             select: {
               batch: {
                 select: {
+                  status: true,
                   items: {
                     select: { post: { select: { displayId: true } } },
                   },
@@ -679,6 +680,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     const bytes = await renderPostCard({
       tenantName: post.tenant.name,
       displayHost: post.tenant.host,
+      displayId: post.displayId,
       authorName: post.author.displayName ?? post.author.qqUin.toString(),
       authorQq: post.author.qqUin.toString(),
       cornerQq: previewBot?.qqUin.toString(),

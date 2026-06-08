@@ -205,6 +205,7 @@ export type PostItem = {
     postCount: number;
     displayIds: number[];
     otherDisplayIds: number[];
+    collecting: boolean;
   } | null;
 };
 

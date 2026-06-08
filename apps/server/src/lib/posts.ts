@@ -60,6 +60,7 @@ export function toPostListItem(post: {
   follows?: Array<{ id: string }>;
   batchItem?: {
     batch: {
+      status: string;
       items: Array<{ post: { displayId: number } }>;
     };
   } | null;
@@ -94,7 +95,7 @@ export function toPostListItem(post: {
  * 非凑批稿件返回 null。
  */
 function toBatchSummary(
-  batchItem: { batch: { items: Array<{ post: { displayId: number } }> } } | null | undefined,
+  batchItem: { batch: { status: string; items: Array<{ post: { displayId: number } }> } } | null | undefined,
   selfDisplayId: number,
 ) {
   if (!batchItem) {
@@ -105,6 +106,8 @@ function toBatchSummary(
     postCount: displayIds.length,
     displayIds,
     otherDisplayIds: displayIds.filter((displayId) => displayId !== selfDisplayId),
+    // 批次仍在凑批收集中（尚未真正发布）。前端据此把"发布中"显示为"等待批次"。
+    collecting: batchItem.batch.status === "collecting",
   };
 }
 
