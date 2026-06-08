@@ -21,6 +21,15 @@ import {
   botPrivatePostStylishEnabledKey,
   normalizeBotPrivatePostStylishEnabled,
   readTenantImageCompression,
+  publishModeKey,
+  publishAccumulateMinImagesKey,
+  publishAccumulateMaxImagesKey,
+  publishAccumulateStaleMinutesKey,
+  normalizePublishMode,
+  normalizeAccumulateImages,
+  normalizeAccumulateStaleMinutes,
+  publishAccumulateImageHardMax,
+  readTenantPublishMode,
 } from "../lib/tenant-metadata";
 
 const publicMetadataKeys = [
@@ -35,6 +44,10 @@ const publicMetadataKeys = [
   imageCompressionMaxDimensionKey,
   botStylishMessagesEnabledKey,
   botPrivatePostStylishEnabledKey,
+  publishModeKey,
+  publishAccumulateMinImagesKey,
+  publishAccumulateMaxImagesKey,
+  publishAccumulateStaleMinutesKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -58,6 +71,10 @@ const patchMetadataSchema = z.object({
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
   botStylishMessagesEnabled: z.boolean().optional(),
   botPrivatePostStylishEnabled: z.boolean().optional(),
+  publishMode: z.enum(["single", "accumulate"]).optional(),
+  publishAccumulateMinImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
+  publishAccumulateMaxImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
+  publishAccumulateStaleMinutes: z.number().int().min(1).max(1440).optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -87,6 +104,11 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     },
     botStylishMessagesEnabled: normalizeBotStylishMessagesEnabled(record[botStylishMessagesEnabledKey]),
     botPrivatePostStylishEnabled: normalizeBotPrivatePostStylishEnabled(record[botPrivatePostStylishEnabledKey]),
+    publishMode: normalizePublishMode(record[publishModeKey]),
+    publishAccumulate: {
+      ...normalizeAccumulateImages(record[publishAccumulateMinImagesKey], record[publishAccumulateMaxImagesKey]),
+      staleMinutes: normalizeAccumulateStaleMinutes(record[publishAccumulateStaleMinutesKey]),
+    },
   };
 }
 
@@ -308,6 +330,21 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.botPrivatePostStylishEnabled !== undefined) {
       updates.push({ key: botPrivatePostStylishEnabledKey, value: body.botPrivatePostStylishEnabled });
+    }
+    if (body.publishMode !== undefined) {
+      updates.push({ key: publishModeKey, value: body.publishMode });
+    }
+    if (body.publishAccumulateMinImages !== undefined || body.publishAccumulateMaxImages !== undefined) {
+      const current = await readTenantPublishMode(prisma, context.selectedTenant.id);
+      const { minImages, maxImages } = normalizeAccumulateImages(
+        body.publishAccumulateMinImages ?? current.minImages,
+        body.publishAccumulateMaxImages ?? current.maxImages,
+      );
+      updates.push({ key: publishAccumulateMinImagesKey, value: minImages });
+      updates.push({ key: publishAccumulateMaxImagesKey, value: maxImages });
+    }
+    if (body.publishAccumulateStaleMinutes !== undefined) {
+      updates.push({ key: publishAccumulateStaleMinutesKey, value: normalizeAccumulateStaleMinutes(body.publishAccumulateStaleMinutes) });
     }
 
     await prisma.$transaction(

@@ -58,6 +58,11 @@ export function toPostListItem(post: {
   }>;
   qzonePostMetrics?: PostQZoneMetric[];
   follows?: Array<{ id: string }>;
+  batchItem?: {
+    batch: {
+      items: Array<{ post: { displayId: number } }>;
+    };
+  } | null;
 }) {
   const recallLog = post.logs
     ?.filter((log) => log.oldStatus === "published" && log.newStatus === "pending_recall")
@@ -80,6 +85,26 @@ export function toPostListItem(post: {
     following: Boolean(post.follows && post.follows.length > 0),
     submissionChannel: inferSubmissionChannel(post.logs),
     qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? []),
+    batch: toBatchSummary(post.batchItem, post.displayId),
+  };
+}
+
+/**
+ * 凑批稿件的"同说说"提示：返回同批次其他稿件的 displayId 列表与总条数。
+ * 非凑批稿件返回 null。
+ */
+function toBatchSummary(
+  batchItem: { batch: { items: Array<{ post: { displayId: number } }> } } | null | undefined,
+  selfDisplayId: number,
+) {
+  if (!batchItem) {
+    return null;
+  }
+  const displayIds = batchItem.batch.items.map((item) => item.post.displayId).sort((a, b) => a - b);
+  return {
+    postCount: displayIds.length,
+    displayIds,
+    otherDisplayIds: displayIds.filter((displayId) => displayId !== selfDisplayId),
   };
 }
 

@@ -5,8 +5,10 @@ import { requireReadyTenant } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
-import { executePostRecall, PostRecallExecutionError } from "../lib/post-recall";
+import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
 import { enqueuePublishFanout } from "../runtime/publishing";
+import { addApprovedPostToBatch } from "../runtime/publish-batching";
+import { readTenantPublishMode } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 
@@ -164,7 +166,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         displayId: post.displayId,
       },
     });
-    await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+    const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
+    if (publishMode.mode === "accumulate") {
+      await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
+    } else {
+      await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+    }
 
     return {
       ok: true,
@@ -259,6 +266,9 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         results: result.results,
       };
     } catch (error) {
+      if (error instanceof PostRecallNotSupportedError) {
+        return reply.code(409).send({ message: error.message });
+      }
       if (error instanceof PostRecallExecutionError) {
         oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {
           app.log.warn({ error: caught, postId: post.id }, "failed to notify post recall failure");
@@ -426,6 +436,9 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         results: result.results,
       };
     } catch (error) {
+      if (error instanceof PostRecallNotSupportedError) {
+        return reply.code(409).send({ message: error.message });
+      }
       if (error instanceof PostRecallExecutionError) {
         oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {
           app.log.warn({ error: caught, postId: post.id }, "failed to notify post recall failure");

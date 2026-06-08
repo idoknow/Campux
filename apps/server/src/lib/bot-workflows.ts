@@ -5,6 +5,8 @@ import { writeAuditLog } from "./audit";
 import { prisma } from "./prisma";
 import { encryptJson } from "./secret-json";
 import { enqueuePublishFanout } from "../runtime/publishing";
+import { addApprovedPostToBatch } from "../runtime/publish-batching";
+import { readTenantPublishMode } from "./tenant-metadata";
 import type { RuntimeQueue } from "../runtime/queue";
 
 export const qzoneCookieDomain = "user.qzone.qq.com";
@@ -242,7 +244,12 @@ export async function reviewPostViaBot({
   });
 
   if (action === "approve") {
-    await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+    const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
+    if (publishMode.mode === "accumulate") {
+      await addApprovedPostToBatch(queue, bot.tenantId, post.id, operator.id);
+    } else {
+      await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+    }
   }
 
   return {

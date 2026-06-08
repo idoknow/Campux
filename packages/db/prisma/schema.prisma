@@ -47,6 +47,14 @@ enum PublishAttemptStatus {
   skipped
 }
 
+enum PublishBatchStatus {
+  collecting
+  publishing
+  published
+  partially_failed
+  failed
+}
+
 model Tenant {
   id             String             @id @default(uuid())
   slug           String             @unique
@@ -76,6 +84,7 @@ model Tenant {
   aiBackfillBatches AiBackfillBatch[]
   qzoneVisitorSnapshots QZoneVisitorSnapshot[]
   botFriendSnapshots BotFriendSnapshot[]
+  publishBatches PublishBatch[]
 }
 
 model User {
@@ -248,6 +257,7 @@ model Post {
   aiAnalyses      PostAiAnalysis[]
   aiBackfillItems AiBackfillItem[]
   follows         PostFollow[]
+  batchItem       PublishBatchItem?
 
   @@unique([tenantId, displayId])
   @@unique([tenantId, legacyDisplayId])
@@ -393,6 +403,7 @@ model PublishAttempt {
   tenantId        String
   postId          String
   publishTargetId String
+  batchId         String?
   status          PublishAttemptStatus @default(queued)
   attempt         Int                  @default(0)
   lastError       String?
@@ -404,10 +415,44 @@ model PublishAttempt {
   updatedAt       DateTime             @updatedAt
   post            Post                 @relation(fields: [postId], references: [id], onDelete: Cascade)
   publishTarget   PublishTarget        @relation(fields: [publishTargetId], references: [id], onDelete: Cascade)
+  batch           PublishBatch?        @relation(fields: [batchId], references: [id], onDelete: Cascade)
   qzonePostMetrics QZonePostMetric[]
 
   @@unique([postId, publishTargetId])
+  @@unique([batchId, publishTargetId])
   @@index([tenantId, status, nextRunAt])
+  @@index([batchId])
+}
+
+model PublishBatch {
+  id            String             @id @default(uuid())
+  tenantId      String
+  status        PublishBatchStatus @default(collecting)
+  imageCount    Int                @default(0)
+  flushedAt     DateTime?
+  lastItemAt    DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items         PublishBatchItem[]
+  attempts      PublishAttempt[]
+
+  @@index([tenantId, status, lastItemAt])
+}
+
+model PublishBatchItem {
+  id         String       @id @default(uuid())
+  batchId    String
+  postId     String
+  position   Int
+  imageCount Int
+  createdAt  DateTime     @default(now())
+  batch      PublishBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  post       Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, postId])
+  @@unique([postId])
+  @@index([batchId, position])
 }
 
 model QZonePostMetric {

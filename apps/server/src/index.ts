@@ -20,6 +20,7 @@ import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publ
 import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from "./runtime/qzone-post-metrics";
 import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapshots";
 import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-comments";
+import { registerBatchFlushSweeper, stopBatchFlushSweeper } from "./runtime/publish-batching";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAiRoutes } from "./routes/ai";
@@ -110,6 +111,7 @@ const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: 
 const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });
 const stopBotFriendSnapshotScheduler = registerBotFriendSnapshotScheduler({ caller: oneBot, logger: app.log });
 const stopFollowedPostCommentScheduler = registerFollowedPostCommentScheduler({ caller: oneBot, logger: app.log });
+registerBatchFlushSweeper(queue, app.log);
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();
@@ -117,6 +119,7 @@ app.addHook("onClose", async () => {
   stopQZonePostMetricScheduler();
   stopBotFriendSnapshotScheduler();
   stopFollowedPostCommentScheduler();
+  stopBatchFlushSweeper();
 });
 
 await app.listen({

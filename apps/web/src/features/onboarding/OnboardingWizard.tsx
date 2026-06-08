@@ -59,6 +59,30 @@ export function OnboardingWizard({
 
   const [qrLogin, setQrLogin] = useState<QrLoginState>({ open: false, botId: "", loginId: "", qrImage: "", status: "", message: "" });
 
+  const [publishMode, setPublishMode] = useState<"single" | "accumulate">("single");
+  const [accumulateMin, setAccumulateMin] = useState(6);
+  const [accumulateMax, setAccumulateMax] = useState(9);
+  const [savingPublishMode, setSavingPublishMode] = useState(false);
+
+  async function savePublishModeAndContinue() {
+    setSavingPublishMode(true);
+    try {
+      await api("/api/admin/tenant/metadata", {
+        method: "PATCH",
+        body: JSON.stringify(
+          publishMode === "accumulate"
+            ? { publishMode, publishAccumulateMinImages: accumulateMin, publishAccumulateMaxImages: accumulateMax }
+            : { publishMode },
+        ),
+      });
+      setStep("done");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "保存发布模式失败");
+    } finally {
+      setSavingPublishMode(false);
+    }
+  }
+
   const primaryBot = bots[0] ?? null;
   const botOnline = Boolean(primaryBot?.connection.online);
   const publishReady = Boolean(primaryBot?.sessions.some((session) => session.status === "available"));
@@ -290,11 +314,52 @@ export function OnboardingWizard({
                   </Button>
                 </div>
               </div>
+              <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                <p className="text-sm font-bold text-slate-900 dark:text-slate-100">发布模式</p>
+                <p className="text-xs font-semibold text-slate-500">决定审核通过的稿件如何发到 QQ 空间说说，之后可在「管理 - 设置」里随时调整。</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setPublishMode("single")}
+                    className={`rounded-md border px-3 py-2 text-left transition ${
+                      publishMode === "single" ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200" : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-slate-900">逐条发布</p>
+                    <p className="text-xs text-slate-500">每条稿件单独发一条说说（默认）。</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPublishMode("accumulate")}
+                    className={`rounded-md border px-3 py-2 text-left transition ${
+                      publishMode === "accumulate" ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200" : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-slate-900">凑批发布</p>
+                    <p className="text-xs text-slate-500">攒够图片数量，把多条稿件合并成一条说说。</p>
+                  </button>
+                </div>
+                {publishMode === "accumulate" ? (
+                  <div className="mt-3 grid gap-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                        图片数量下限
+                        <Input type="number" min={1} max={9} value={accumulateMin} onChange={(event) => setAccumulateMin(Number(event.target.value))} />
+                      </label>
+                      <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                        图片数量上限
+                        <Input type="number" min={1} max={9} value={accumulateMax} onChange={(event) => setAccumulateMax(Number(event.target.value))} />
+                      </label>
+                    </div>
+                    <p className="text-xs font-semibold text-amber-600">QQ 空间单条说说图片上限约 9 张；凑批模式下的稿件不支持程序撤回。</p>
+                  </div>
+                ) : null}
+              </div>
               <div className="flex items-center justify-between gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setStep("bot")}>上一步</Button>
                 <div className="flex gap-2">
-                  {!publishReady ? <Button variant="outline" onClick={() => setStep("done")}>稍后配置</Button> : null}
-                  <Button onClick={() => setStep("done")}>下一步</Button>
+                  {!publishReady ? <Button variant="outline" disabled={savingPublishMode} onClick={() => void savePublishModeAndContinue()}>稍后配置</Button> : null}
+                  <Button disabled={savingPublishMode} onClick={() => void savePublishModeAndContinue()}>下一步</Button>
                 </div>
               </div>
             </section>
