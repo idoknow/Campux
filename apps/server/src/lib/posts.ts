@@ -147,6 +147,24 @@ function toQZonePostStats(metrics: PostQZoneMetric[]) {
     };
   });
 
+  // 多墙号时保证稳定且一致的展示顺序：按机器人 QQ 号（墙号）升序，
+  // 再回退到墙名 / qzoneTid，避免不同稿件里「一墙」时前时后。
+  targets.sort((left, right) => {
+    const leftQq = left.botQqUin ?? "";
+    const rightQq = right.botQqUin ?? "";
+    if (leftQq !== rightQq) {
+      if (leftQq && rightQq) {
+        return leftQq.localeCompare(rightQq, undefined, { numeric: true });
+      }
+      return leftQq ? -1 : 1;
+    }
+    const byName = left.targetName.localeCompare(right.targetName, "zh-Hans-CN");
+    if (byName !== 0) {
+      return byName;
+    }
+    return left.qzoneTid.localeCompare(right.qzoneTid);
+  });
+
   return {
     visitorCount: hasCounts ? totals.visitorCount : null,
     likeCount: hasCounts ? totals.likeCount : null,
