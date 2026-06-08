@@ -7,7 +7,7 @@ type PostQZoneComment = {
   replies?: Array<{ uin: string; name: string; content: string; images: string[]; createdAt: string | null }>;
 };
 
-type PostQZoneMetric = {
+export type PostQZoneMetric = {
   visitorCount: number | null;
   likeCount: number | null;
   commentCount: number | null;
@@ -111,7 +111,7 @@ function toBatchSummary(
   };
 }
 
-function toQZonePostStats(metrics: PostQZoneMetric[]) {
+export function toQZonePostStats(metrics: PostQZoneMetric[]) {
   if (metrics.length === 0) {
     return null;
   }

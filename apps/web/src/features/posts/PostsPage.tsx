@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Pagination, PostItem, PostsTab, ReviewPostItem, TenantRole } from "@/types/app";
+import type { Pagination, PostItem, PostsTab, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -232,6 +232,10 @@ export function PostsPage({
   const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewListPreferences(tenantId).status);
   const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
+  const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
+  const [publishedPagination, setPublishedPagination] = useState<Pagination>(() => defaultPagination());
+  const [publishedLoading, setPublishedLoading] = useState(false);
+  const [publishedPage, setPublishedPage] = useState(1);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
@@ -274,7 +278,7 @@ export function PostsPage({
   }, [preview.url]);
 
   useEffect(() => {
-    if (!canReview && activeTab !== "mine") {
+    if (!canReview && activeTab !== "mine" && activeTab !== "published") {
       onTabChange("mine");
     }
   }, [activeTab, canReview, onTabChange]);
@@ -303,10 +307,22 @@ export function PostsPage({
     });
   }, [canReview, reviewStatus, reviewPage, tenantId]);
 
+  useEffect(() => {
+    if (activeTab !== "published") {
+      return;
+    }
+    void refreshPublishedFeed(publishedPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取已发布稿件");
+    });
+  }, [activeTab, publishedPage, tenantId]);
+
   async function refreshAll() {
     await onRefresh();
     if (canReview) {
       await Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]);
+    }
+    if (activeTab === "published") {
+      await refreshPublishedFeed(publishedPage);
     }
   }
 
@@ -342,6 +358,21 @@ export function PostsPage({
       setReviewPagination(data.pagination);
     } finally {
       setReviewLoading(false);
+    }
+  }
+
+  async function refreshPublishedFeed(page = publishedPage) {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(publishedPagination.limit),
+    });
+    setPublishedLoading(true);
+    try {
+      const data = await api<{ items: PublishedFeedItem[]; pagination: Pagination }>(`/api/posts/published?${params}`);
+      setPublishedItems(data.items);
+      setPublishedPagination(data.pagination);
+    } finally {
+      setPublishedLoading(false);
     }
   }
 
@@ -646,6 +677,9 @@ export function PostsPage({
             <TabsTrigger value="mine" className={postTabsTriggerClassName}>
               你的稿件
             </TabsTrigger>
+            <TabsTrigger value="published" className={postTabsTriggerClassName}>
+              已发布
+            </TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-3">
             <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-500" title="开启后，你的每条稿件发布成功时会自动关注其评论，新评论每 12 小时私信提醒你">
@@ -678,6 +712,27 @@ export function PostsPage({
                 onToggleFollow={(post) => void toggleFollowPost(post)}
               />
               <PaginationControls pagination={minePagination} busy={mineLoading} onPageChange={onMinePageChange} />
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="published" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+          {publishedLoading ? (
+            <LoadingBlock title="正在加载已发布稿件..." />
+          ) : publishedItems.length === 0 ? (
+            <EmptyCard title="还没有已发布的稿件" />
+          ) : (
+            <>
+              <div className="space-y-3">
+                {publishedItems.map((item) => (
+                  <PublishedFeedCard
+                    key={item.key}
+                    item={item}
+                    canViewIdentity={canReview}
+                    onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
+                  />
+                ))}
+              </div>
+              <PaginationControls pagination={publishedPagination} busy={publishedLoading} onPageChange={setPublishedPage} />
             </>
           )}
         </TabsContent>
@@ -1294,8 +1349,6 @@ function ReviewCard({
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
-        <QZoneStatsBlock stats={post.qzoneStats} />
-
         {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
         {canApproveRecall && post.recallIgnored ? <IgnoredRecallBlock ignoredAt={post.recallIgnoredAt} /> : null}
 
@@ -1452,8 +1505,6 @@ function PostCard({
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
-        <QZoneStatsBlock stats={post.qzoneStats} />
-
         {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
@@ -1577,6 +1628,92 @@ function FollowButton({ following, busy, onClick }: { following: boolean; busy: 
       {following ? <BellRingIcon data-icon="inline-start" /> : <BellIcon data-icon="inline-start" />}
       {following ? "已关注" : "关注评论"}
     </Button>
+  );
+}
+
+function PublishedFeedAuthorLine({ post, canViewIdentity }: { post: PublishedFeedItem["posts"][number]; canViewIdentity: boolean }) {
+  // 后端已脱敏：普通用户看匿名稿件时 author 为 null。
+  if (post.author === null) {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-500">
+        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">匿名</span>
+      </div>
+    );
+  }
+  // 实名稿件：所有成员可见昵称 + QQ。匿名稿件 + 审核员/管理员：显示真实身份并标注「匿名」。
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-500">
+      {post.anonymous && canViewIdentity ? (
+        <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">匿名（仅审核可见实名）</span>
+      ) : null}
+      <span className="min-w-0 truncate text-slate-800">{post.author.displayName || "未命名用户"}</span>
+      <span>QQ {post.author.qqUin}</span>
+    </div>
+  );
+}
+
+function PublishedFeedPostBlock({
+  post,
+  canViewIdentity,
+  onImagePreview,
+}: {
+  post: PublishedFeedItem["posts"][number];
+  canViewIdentity: boolean;
+  onImagePreview: (images: PostImage[], index: number, title: string) => void;
+}) {
+  const images = getPostImages(post.attachments);
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center rounded bg-sky-50 px-1.5 py-0.5 text-xs font-bold text-sky-700">稿件 {post.displayId}</span>
+      </div>
+      <PublishedFeedAuthorLine post={post} canViewIdentity={canViewIdentity} />
+      <PostTextBlock text={post.text} createdAt={post.createdAt} compact />
+      {images.length > 0 ? (
+        <ImageGallery images={images} compact onImageClick={(imgs, index) => onImagePreview(imgs, index, `稿件 ${post.displayId} 上传图片`)} />
+      ) : null}
+    </div>
+  );
+}
+
+function PublishedFeedCard({
+  item,
+  canViewIdentity,
+  onImagePreview,
+}: {
+  item: PublishedFeedItem;
+  canViewIdentity: boolean;
+  onImagePreview: (images: PostImage[], index: number, title: string) => void;
+}) {
+  const isBatch = item.kind === "batch";
+  return (
+    <Card className="overflow-hidden rounded-md border border-slate-200 shadow-none">
+      <CardContent className="grid gap-3 p-2.5 md:p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {isBatch ? (
+            <Badge className="bg-violet-100 text-violet-700 hover:bg-violet-100">凑批 · {item.posts.length} 条稿件 · 同一条说说</Badge>
+          ) : (
+            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">独立发布</Badge>
+          )}
+          <span className="text-xs font-semibold text-slate-400">发布于 {formatFullDateTime(item.publishedAt)}</span>
+        </div>
+
+        {isBatch ? (
+          <div className="grid gap-3 divide-y divide-slate-100">
+            {item.posts.map((post, index) => (
+              <div key={post.id} className={index > 0 ? "pt-3" : ""}>
+                <PublishedFeedPostBlock post={post} canViewIdentity={canViewIdentity} onImagePreview={onImagePreview} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          item.posts[0] ? <PublishedFeedPostBlock post={item.posts[0]} canViewIdentity={canViewIdentity} onImagePreview={onImagePreview} /> : null
+        )}
+
+        {/* 互动数据按说说聚合，整张卡片只显示一份 */}
+        <QZoneStatsBlock stats={item.qzoneStats} />
+      </CardContent>
+    </Card>
   );
 }
 
