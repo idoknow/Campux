@@ -30,6 +30,8 @@ import {
   normalizeAccumulateStaleMinutes,
   publishAccumulateImageHardMax,
   readTenantPublishMode,
+  publishLlmSummaryEnabledKey,
+  normalizePublishLlmSummaryEnabled,
 } from "../lib/tenant-metadata";
 
 const publicMetadataKeys = [
@@ -48,6 +50,7 @@ const publicMetadataKeys = [
   publishAccumulateMinImagesKey,
   publishAccumulateMaxImagesKey,
   publishAccumulateStaleMinutesKey,
+  publishLlmSummaryEnabledKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -75,6 +78,7 @@ const patchMetadataSchema = z.object({
   publishAccumulateMinImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
   publishAccumulateMaxImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
   publishAccumulateStaleMinutes: z.number().int().min(1).max(1440).optional(),
+  publishLlmSummaryEnabled: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -109,6 +113,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
       ...normalizeAccumulateImages(record[publishAccumulateMinImagesKey], record[publishAccumulateMaxImagesKey]),
       staleMinutes: normalizeAccumulateStaleMinutes(record[publishAccumulateStaleMinutesKey]),
     },
+    publishLlmSummaryEnabled: normalizePublishLlmSummaryEnabled(record[publishLlmSummaryEnabledKey]),
   };
 }
 
@@ -345,6 +350,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.publishAccumulateStaleMinutes !== undefined) {
       updates.push({ key: publishAccumulateStaleMinutesKey, value: normalizeAccumulateStaleMinutes(body.publishAccumulateStaleMinutes) });
+    }
+    if (body.publishLlmSummaryEnabled !== undefined) {
+      updates.push({ key: publishLlmSummaryEnabledKey, value: body.publishLlmSummaryEnabled });
     }
 
     await prisma.$transaction(

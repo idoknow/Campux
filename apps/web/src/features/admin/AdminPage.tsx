@@ -58,6 +58,7 @@ type TenantSettingsForm = {
   publishAccumulateMinImages: number;
   publishAccumulateMaxImages: number;
   publishAccumulateStaleMinutes: number;
+  publishLlmSummaryEnabled: boolean;
 };
 
 type BanForm = {
@@ -337,7 +338,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -518,6 +519,7 @@ export function AdminPage({
           publishAccumulateMinImages: form.publishAccumulateMinImages,
           publishAccumulateMaxImages: form.publishAccumulateMaxImages,
           publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
+          publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
         }),
       });
       await onSaved();
@@ -1849,6 +1851,18 @@ function MetadataPanel({
                 </p>
               </div>
             ) : null}
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div>
+              <p className="text-sm font-medium text-slate-900">说说文字 AI 总结</p>
+              <p className="text-xs text-slate-500">开启后，发布说说时在 @原作者 之后追加一句不超过 16 字的 AI 总结（仅说说文字，不影响渲染图）。批量发送时每条子稿件各自生成。需先在「AI」中配置并启用 LLM，否则不会生成。</p>
+            </div>
+            <Switch
+              checked={form.publishLlmSummaryEnabled}
+              disabled={busy}
+              onCheckedChange={(value) => onFormChange({ ...form, publishLlmSummaryEnabled: value })}
+              aria-label="启用说说文字 AI 总结"
+            />
           </div>
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <div>
@@ -3388,6 +3402,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     publishAccumulateMinImages: metadata.publishAccumulate.minImages,
     publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,
     publishAccumulateStaleMinutes: metadata.publishAccumulate.staleMinutes,
+    publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
   };
 }
 

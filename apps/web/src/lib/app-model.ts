@@ -40,6 +40,7 @@ export const defaultMetadata: TenantMetadata = {
     maxImages: 9,
     staleMinutes: 30,
   },
+  publishLlmSummaryEnabled: false,
 };
 
 export const navItems = [

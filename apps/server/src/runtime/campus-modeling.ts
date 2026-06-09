@@ -1029,7 +1029,7 @@ async function analyzeTextWithLlm(options: {
   }
 }
 
-async function resolveTenantAiApiKey(tenantId: string, input: Pick<TenantAiSettingsUpdate, "apiKey" | "clearApiKey">) {
+export async function resolveTenantAiApiKey(tenantId: string, input: Pick<TenantAiSettingsUpdate, "apiKey" | "clearApiKey">) {
   if (input.apiKey && input.apiKey.trim().length > 0) {
     return input.apiKey.trim();
   }
@@ -1425,7 +1425,7 @@ function normalizeMode(value: unknown): "local" | "llm" {
   return value === "llm" ? "llm" : "local";
 }
 
-function normalizeBaseUrl(value: string) {
+export function normalizeBaseUrl(value: string) {
   return (value.trim() || defaultAiSettings.baseUrl).replace(/\/+$/, "");
 }
 

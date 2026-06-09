@@ -208,3 +208,29 @@ export async function readTenantPublishMode(client: MetadataClient, tenantId: st
     staleMinutes: normalizeAccumulateStaleMinutes(record[publishAccumulateStaleMinutesKey]),
   };
 }
+
+// 发布说说文字里追加一段极短 LLM 总结（≤16 字）的开关。需同时配置了 LLM 才会生效。
+export const publishLlmSummaryEnabledKey = "publish_llm_summary_enabled";
+export const publishLlmSummaryEnabledDefault = false;
+
+export function normalizePublishLlmSummaryEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return publishLlmSummaryEnabledDefault;
+}
+
+export async function readTenantPublishLlmSummaryEnabled(client: MetadataClient, tenantId: string): Promise<boolean> {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: publishLlmSummaryEnabledKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizePublishLlmSummaryEnabled(entry?.value);
+}

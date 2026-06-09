@@ -11,6 +11,8 @@ import { decryptJson } from "../lib/secret-json";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { isQZoneProtocolAutoRefreshCooldownError } from "../lib/qzone-auto-refresh";
 import { joinBatchCaptions } from "./publish-batching";
+import { generatePublishSummary } from "./publish-summary";
+import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -572,7 +574,12 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     const aggregatedImageUrls: string[] = [];
     const captionParts: string[] = [];
     const isBatch = Boolean(attempt.batch);
+    // 配置了 LLM 且开启开关时，给每条稿件文字追加一句极短总结（≤16 字）。失败静默跳过，不阻塞发布。
+    const summaryEnabled = await readTenantPublishLlmSummaryEnabled(prisma, attempt.tenantId);
     for (const target of postsToPublish) {
+      const summary = summaryEnabled
+        ? await generatePublishSummary({ tenantId: attempt.tenantId, text: target.text, logger })
+        : null;
       renderedCards.push(
         await renderPostCard({
           tenantName: target.tenant.name,
@@ -594,6 +601,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           authorQq: target.author.qqUin.toString(),
           // 批量时省略固定前/后缀，整条说说只在外层各加一次。
           omitFixedText: isBatch,
+          summary,
         }),
       );
       aggregatedImages.push(...(await loadPostImages(config, attempt.tenantId, target.attachments)));
@@ -1238,7 +1246,7 @@ type PublishCaptionTemplate = {
 
 export function renderPublishCaption(
   value: Prisma.JsonValue | null | undefined,
-  post: { postId: number; text: string; anonymous: boolean; authorQq: string; omitFixedText?: boolean },
+  post: { postId: number; text: string; anonymous: boolean; authorQq: string; omitFixedText?: boolean; summary?: string | null },
 ) {
   const template = normalizePublishCaptionTemplate(value);
   const omitFixed = Boolean(post.omitFixedText);
@@ -1248,6 +1256,11 @@ export function renderPublishCaption(
   }
   if (template.includeAuthorMention && !post.anonymous) {
     parts.push(`@{uin:${post.authorQq},nick:,who:1}`);
+  }
+  // LLM 极短总结：紧跟在 @原作者 之后、固定后缀之前。批量时每条子稿件各自携带。
+  const summary = post.summary?.trim();
+  if (summary) {
+    parts.push(summary);
   }
   // 批量时省略固定前缀 customText（整条说说只在外层加一次）；单稿保持原行为。
   const firstLineParts = omitFixed ? parts : [template.customText?.trim(), ...parts];
