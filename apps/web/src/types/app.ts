@@ -123,6 +123,7 @@ export type TenantMetadata = {
     maxImages: number;
     staleMinutes: number;
   };
+  publishLlmSummaryEnabled: boolean;
 };
 
 export type PostAttachment = {
