@@ -569,8 +569,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       ? attempt.batch.items.map((item) => item.post)
       : [attempt.post];
 
-    const renderedCards: Uint8Array[] = [];
-    const aggregatedImages: Array<{ name: string; bytes: Uint8Array }> = [];
+    const imageGroups: Array<{ renderedCard?: Uint8Array | undefined; images?: Array<{ name: string; bytes: Uint8Array }> | undefined }> = [];
     const aggregatedImageUrls: string[] = [];
     const captionParts: string[] = [];
     const isBatch = Boolean(attempt.batch);
@@ -580,19 +579,17 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       const summary = summaryEnabled
         ? await generatePublishSummary({ tenantId: attempt.tenantId, text: target.text, logger })
         : null;
-      renderedCards.push(
-        await renderPostCard({
-          tenantName: target.tenant.name,
-          displayHost: target.tenant.host,
-          displayId: target.displayId,
-          authorName: target.author.displayName ?? target.author.qqUin.toString(),
-          authorQq: target.author.qqUin.toString(),
-          cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
-          text: target.text,
-          createdAt: target.createdAt,
-          anonymous: target.anonymous,
-        }),
-      );
+      const renderedCard = await renderPostCard({
+        tenantName: target.tenant.name,
+        displayHost: target.tenant.host,
+        displayId: target.displayId,
+        authorName: target.author.displayName ?? target.author.qqUin.toString(),
+        authorQq: target.author.qqUin.toString(),
+        cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
+        text: target.text,
+        createdAt: target.createdAt,
+        anonymous: target.anonymous,
+      });
       captionParts.push(
         renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
           postId: target.displayId,
@@ -604,7 +601,11 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           summary,
         }),
       );
-      aggregatedImages.push(...(await loadPostImages(config, attempt.tenantId, target.attachments)));
+      // 每条稿件成一组：渲染卡片 + 该稿件配图，保证上传顺序为「稿件1渲染图、稿件1配图…、稿件2渲染图、稿件2配图…」。
+      imageGroups.push({
+        renderedCard,
+        images: await loadPostImages(config, attempt.tenantId, target.attachments),
+      });
       aggregatedImageUrls.push(...getImageUrls(target.attachments));
     }
     // 单稿：renderPublishCaption 已含固定前后缀，直接拼接。
@@ -618,9 +619,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       targetId: attempt.publishTargetId,
       targetName: attempt.publishTarget.displayName,
       text: captionText,
-      renderedCards,
+      imageGroups,
       imageUrls: aggregatedImageUrls,
-      images: aggregatedImages,
       cookies,
     });
 

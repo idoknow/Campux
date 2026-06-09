@@ -11,6 +11,9 @@ export type QZonePublishInput = {
     name: string;
     bytes: Uint8Array;
   }>;
+  // 按稿件分组的图片序列：每组 = 该稿件的渲染卡片 + 其配图。设置后按组依次交错上传，
+  // 即「稿件1渲染图、稿件1配图…、稿件2渲染图、稿件2配图…」。优先于 renderedCards/images。
+  imageGroups?: QZonePublishImageGroup[];
   cookies?: Record<string, string> | null;
 };
 
@@ -320,6 +323,9 @@ export async function getQZoneEmotionComments(input: QZoneEmotionMetricsInput & 
 
 export type QZoneUploadImage = { name: string; bytes: Uint8Array };
 
+// 一条稿件的图片分组：渲染卡片（可选）+ 该稿件的配图（按原顺序）。
+export type QZonePublishImageGroup = { renderedCard?: Uint8Array | undefined; images?: QZoneUploadImage[] | undefined };
+
 /**
  * 构造一条说说要上传的图片序列：先所有渲染卡片图（按顺序），再所有投稿原图。
  * 单条模式渲染卡片只有 1 张；批量模式可有多张（每条稿件一张卡片）。
@@ -331,16 +337,44 @@ export function buildPublishImageList(renderedCards: Uint8Array[], images?: QZon
   ];
 }
 
+/**
+ * 按稿件分组交错构造图片序列：每条稿件先放它自己的渲染卡片，紧跟它自己的配图，
+ * 再到下一条稿件——即「稿件1渲染图、稿件1配图…、稿件2渲染图、稿件2配图…」。
+ * 这样多条稿件批量发到一条说说时，图片不会出现「所有渲染图在前、所有配图在后」的错乱顺序。
+ */
+export function buildPublishImageListFromGroups(groups: QZonePublishImageGroup[]): QZoneUploadImage[] {
+  const result: QZoneUploadImage[] = [];
+  groups.forEach((group, groupIndex) => {
+    if (group.renderedCard) {
+      result.push({ name: `rendered-card-${groupIndex + 1}.jpg`, bytes: group.renderedCard });
+    }
+    for (const image of group.images ?? []) {
+      result.push(image);
+    }
+  });
+  return result;
+}
+
 export async function publishToQZone(input: QZonePublishInput): Promise<QZonePublishResult> {
   const cookieNames = input.cookies ? Object.keys(input.cookies).sort() : [];
   const uin = normalizeUin(input.cookies);
-  const renderedCards = input.renderedCards ?? (input.renderedCard ? [input.renderedCard] : []);
+  const groups = input.imageGroups;
+  const renderedCards = groups
+    ? groups.flatMap((group) => (group.renderedCard ? [group.renderedCard] : []))
+    : input.renderedCards ?? (input.renderedCard ? [input.renderedCard] : []);
+  // 优先使用按稿件分组的交错顺序；否则退回旧的「先全部渲染图再全部配图」。
+  const imagesToUpload = groups
+    ? buildPublishImageListFromGroups(groups)
+    : buildPublishImageList(renderedCards, input.images);
   const renderedBytes = renderedCards.reduce((sum, card) => sum + card.byteLength, 0);
+  const originalImageCount = groups
+    ? groups.reduce((sum, group) => sum + (group.images?.length ?? 0), 0)
+    : input.images?.length ?? input.imageUrls.length;
   const verbose: QZonePublishVerbose = {
     mode: "real-qzone",
     targetName: input.targetName,
     renderedBytes,
-    imageCount: renderedCards.length + (input.images?.length ?? input.imageUrls.length),
+    imageCount: renderedCards.length + originalImageCount,
     renderedImageIncluded: renderedCards.length > 0,
     uploadedImages: [],
     cookieStatus: input.cookies && cookieNames.length > 0 ? "available" : "missing",
@@ -376,7 +410,6 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
     referer,
     "user-agent": userAgent,
   };
-  const imagesToUpload = buildPublishImageList(renderedCards, input.images);
   const uploadResults = [];
   for (const image of imagesToUpload) {
     uploadResults.push(await uploadQZoneImage({ image, cookies: input.cookies, cookieHeader, headers: requestHeaders, gtk, uin, verbose }));

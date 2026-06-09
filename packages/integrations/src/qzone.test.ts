@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildPublishImageList, parseQZoneCommentList, parseQZoneEmotionMetricsPayload } from "./qzone";
+import { buildPublishImageList, buildPublishImageListFromGroups, parseQZoneCommentList, parseQZoneEmotionMetricsPayload } from "./qzone";
 
 describe("buildPublishImageList (batch multi-card ordering)", () => {
   const card1 = new Uint8Array([1]);
@@ -25,6 +25,50 @@ describe("buildPublishImageList (batch multi-card ordering)", () => {
 
   test("no cards (defensive) yields only original images", () => {
     expect(buildPublishImageList([], [orig1]).map((image) => image.name)).toEqual(["o1.jpg"]);
+  });
+});
+
+describe("buildPublishImageListFromGroups (per-post interleaved ordering)", () => {
+  const card1 = new Uint8Array([1]);
+  const card2 = new Uint8Array([2]);
+  const card3 = new Uint8Array([3]);
+  const p1a = { name: "p1a.jpg", bytes: new Uint8Array([11]) };
+  const p1b = { name: "p1b.jpg", bytes: new Uint8Array([12]) };
+  const p2a = { name: "p2a.jpg", bytes: new Uint8Array([21]) };
+
+  test("interleaves each post's card immediately followed by that post's images", () => {
+    const result = buildPublishImageListFromGroups([
+      { renderedCard: card1, images: [p1a, p1b] },
+      { renderedCard: card2, images: [p2a] },
+      { renderedCard: card3, images: [] },
+    ]);
+    // 期望：稿件1渲染图、稿件1配图…、稿件2渲染图、稿件2配图…、稿件3渲染图
+    expect(result.map((image) => image.name)).toEqual([
+      "rendered-card-1.jpg",
+      "p1a.jpg",
+      "p1b.jpg",
+      "rendered-card-2.jpg",
+      "p2a.jpg",
+      "rendered-card-3.jpg",
+    ]);
+    expect(result[0].bytes).toBe(card1);
+    expect(result[3].bytes).toBe(card2);
+  });
+
+  test("single group (non-batch) = card then its images, identical to old behavior", () => {
+    const result = buildPublishImageListFromGroups([{ renderedCard: card1, images: [p1a, p1b] }]);
+    expect(result.map((image) => image.name)).toEqual(["rendered-card-1.jpg", "p1a.jpg", "p1b.jpg"]);
+  });
+
+  test("group without a card emits only its images", () => {
+    const result = buildPublishImageListFromGroups([{ images: [p1a] }, { renderedCard: card2, images: [p2a] }]);
+    expect(result.map((image) => image.name)).toEqual(["p1a.jpg", "rendered-card-2.jpg", "p2a.jpg"]);
+  });
+
+  test("card numbering follows group index, not card presence", () => {
+    // 第一组无卡片，第二组的卡片应编号为 rendered-card-2（按组序），不回退成 1。
+    const result = buildPublishImageListFromGroups([{ images: [p1a] }, { renderedCard: card2 }]);
+    expect(result.map((image) => image.name)).toEqual(["p1a.jpg", "rendered-card-2.jpg"]);
   });
 });
 
