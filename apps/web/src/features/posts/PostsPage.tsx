@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Pagination, PostItem, PostsTab, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
+import type { Pagination, PostItem, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -1126,6 +1126,7 @@ function PostDetailDialog({
               <span>作者 QQ：{post.author?.qqUin ?? "未知"}</span>
               <span>作者 ID：{post.author?.id ?? "未知"}</span>
             </div>
+            <PostTimeline timeline={post.timeline} />
             {images.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {images.map((image, index) => (
@@ -1157,6 +1158,55 @@ function PostDetailDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 稿件完整时间线：谁、什么时候、做了什么、状态如何变化。系统自动操作不显示操作人。 */
+function PostTimeline({ timeline }: { timeline?: PostTimelineEntry[] | undefined }) {
+  if (!timeline || timeline.length === 0) {
+    return null;
+  }
+  return (
+    <div className="rounded-md border border-slate-200 bg-white">
+      <p className="flex items-center gap-1.5 border-b border-slate-100 px-3 py-2 text-xs font-black text-slate-600">
+        <ClockIcon className="size-3.5" />
+        操作时间线
+      </p>
+      <ol className="grid gap-0 px-3 py-2">
+        {timeline.map((entry, index) => {
+          const isLast = index === timeline.length - 1;
+          const actor = entry.actorName ?? (entry.actorQq ? `QQ ${entry.actorQq}` : null);
+          const statusChanged = entry.oldStatus !== entry.newStatus;
+          return (
+            <li key={`${entry.createdAt}-${index}`} className="flex gap-2.5">
+              {/* 连续时间轴：竖线在节点处对齐贯穿，圆点叠在线上 */}
+              <div className="relative flex w-2 flex-col items-center">
+                {index > 0 ? <span className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-slate-200" /> : null}
+                {!isLast ? <span className="absolute bottom-0 left-1/2 top-2 w-px -translate-x-1/2 bg-slate-200" /> : null}
+                <span className={`relative mt-1 size-2 shrink-0 rounded-full ring-2 ring-white ${statusDotStyles[entry.newStatus] ?? "bg-slate-400"}`} />
+              </div>
+              <div className={`min-w-0 flex-1 ${isLast ? "pb-0.5" : "pb-3"}`}>
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] leading-5">
+                  <span className="font-bold text-slate-800">{actor ?? "系统"}</span>
+                  {actor ? <span className="text-slate-400">操作</span> : <span className="text-slate-400">自动</span>}
+                  {statusChanged ? (
+                    <span className="inline-flex items-center gap-1">
+                      {entry.oldStatus ? <span className="text-slate-400">{statusLabels[entry.oldStatus] ?? entry.oldStatus}</span> : null}
+                      <span className="text-slate-300">→</span>
+                      <span className="font-semibold text-slate-700">{statusLabels[entry.newStatus] ?? entry.newStatus}</span>
+                    </span>
+                  ) : (
+                    <span className="font-semibold text-slate-700">{statusLabels[entry.newStatus] ?? entry.newStatus}</span>
+                  )}
+                  <span className="text-slate-400">· {formatFullDateTime(entry.createdAt)}</span>
+                </div>
+                {entry.comment ? <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{entry.comment}</p> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
