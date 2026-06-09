@@ -82,7 +82,8 @@ export async function generatePublishSummary(options: {
       },
       body: JSON.stringify({
         model: settings.model,
-        temperature: Math.min(settings.temperature, 0.5),
+        // 提要要求确定性输出（同一稿件多墙复用同一份），温度固定为 0。
+        temperature: 0,
         messages: [
           {
             role: "system",

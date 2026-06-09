@@ -245,6 +245,7 @@ model Post {
   attachments     Json             @default("[]")
   anonymous       Boolean          @default(false)
   status          PostStatus       @default(pending_approval)
+  publishSummary  String?
   recallIgnored   Boolean          @default(false)
   recallIgnoredAt DateTime?
   createdAt       DateTime         @default(now())

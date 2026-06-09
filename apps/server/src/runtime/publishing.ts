@@ -264,6 +264,39 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
   return attempts;
 }
 
+/**
+ * 取得一条稿件用于说说的 LLM 极短提要，保证「一稿一份、多墙复用」：
+ * - 若该稿件已落库 publishSummary，直接返回（其他墙/重试不再重复调用 LLM）；
+ * - 否则生成一次并落库（仅当当前为空时写入，避免并发下覆盖出第二份不同文案）。
+ * 生成失败返回 null，调用方静默跳过、绝不阻塞发布。
+ */
+async function ensurePostPublishSummary(
+  tenantId: string,
+  postId: string,
+  text: string,
+  existing: string | null | undefined,
+  logger: FastifyBaseLogger,
+): Promise<string | null> {
+  const cached = existing?.trim();
+  if (cached) {
+    return cached;
+  }
+  const summary = await generatePublishSummary({ tenantId, text, logger });
+  if (!summary) {
+    return null;
+  }
+  // 仅当仍为空时写入：若另一墙的 attempt 已抢先生成并落库，沿用它那一份以保持各墙一致。
+  await prisma.post
+    .updateMany({ where: { id: postId, publishSummary: null }, data: { publishSummary: summary } })
+    .catch((error) => {
+      logger.warn({ error, postId }, "publish summary: failed to persist generated summary");
+    });
+  const persisted = await prisma.post
+    .findUnique({ where: { id: postId }, select: { publishSummary: true } })
+    .catch(() => null);
+  return persisted?.publishSummary?.trim() || summary;
+}
+
 export function effectivePublishIntervalSeconds(value: number | null | undefined) {
   return Math.max(value ?? defaultPublishIntervalSeconds, 0);
 }
@@ -576,8 +609,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     // 配置了 LLM 且开启开关时，给每条稿件文字追加一句极短总结（≤16 字）。失败静默跳过，不阻塞发布。
     const summaryEnabled = await readTenantPublishLlmSummaryEnabled(prisma, attempt.tenantId);
     for (const target of postsToPublish) {
+      // 同一稿件发往多个墙时复用同一份提要：首个 attempt 生成并落库，其余墙直接读，
+      // 避免 LLM temperature 造成各墙文字分叉，也省去重复调用。
       const summary = summaryEnabled
-        ? await generatePublishSummary({ tenantId: attempt.tenantId, text: target.text, logger })
+        ? await ensurePostPublishSummary(attempt.tenantId, target.id, target.text, target.publishSummary, logger)
         : null;
       const renderedCard = await renderPostCard({
         tenantName: target.tenant.name,
