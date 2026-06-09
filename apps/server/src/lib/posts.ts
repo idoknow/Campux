@@ -111,6 +111,35 @@ function toBatchSummary(
   };
 }
 
+export type PostTimelineActor = { displayName: string | null; qqUin: string | null };
+
+/**
+ * 将稿件状态变更日志整理成完整时间线（按时间升序）。
+ * actorId 为 null = 系统自动操作；否则用传入的 actors 映射解析操作人。
+ */
+export function toPostTimeline(
+  logs: Array<{ actorId: string | null; oldStatus: string | null; newStatus: string; comment: string; createdAt: Date }> | undefined,
+  actors: Map<string, PostTimelineActor>,
+) {
+  if (!logs) {
+    return [];
+  }
+  return [...logs]
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+    .map((log) => {
+      const actor = log.actorId ? actors.get(log.actorId) ?? null : null;
+      return {
+        actorId: log.actorId,
+        actorName: actor?.displayName ?? null,
+        actorQq: actor?.qqUin ?? null,
+        oldStatus: log.oldStatus,
+        newStatus: log.newStatus,
+        comment: log.comment,
+        createdAt: log.createdAt.toISOString(),
+      };
+    });
+}
+
 export function toQZonePostStats(metrics: PostQZoneMetric[]) {
   if (metrics.length === 0) {
     return null;

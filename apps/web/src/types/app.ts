@@ -209,12 +209,23 @@ export type PostItem = {
   } | null;
 };
 
+export type PostTimelineEntry = {
+  actorId: string | null;
+  actorName: string | null;
+  actorQq: string | null;
+  oldStatus: string | null;
+  newStatus: string;
+  comment: string;
+  createdAt: string;
+};
+
 export type ReviewPostItem = PostItem & {
   author: {
     id: string;
     qqUin: string;
     displayName: string | null;
   } | null;
+  timeline?: PostTimelineEntry[];
 };
 
 export type PublishedFeedAuthor = {

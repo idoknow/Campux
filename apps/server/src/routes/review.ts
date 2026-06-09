@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PostStatus, Prisma } from "@campux/db";
 import { z } from "zod";
 import { requireReadyTenant } from "../lib/auth";
-import { toPostListItem } from "../lib/posts";
+import { toPostListItem, toPostTimeline } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
 import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
@@ -119,6 +119,13 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       }),
     ]);
 
+    // 解析时间线里出现的操作人（actorId → 用户名/QQ），系统自动操作 actorId 为 null。
+    const actorIds = [...new Set(posts.flatMap((post) => post.logs.map((log) => log.actorId).filter((id): id is string => Boolean(id))))];
+    const actorRows = actorIds.length > 0
+      ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, displayName: true, qqUin: true } })
+      : [];
+    const actorMap = new Map(actorRows.map((u) => [u.id, { displayName: u.displayName, qqUin: u.qqUin.toString() }]));
+
     return {
       posts: posts.map((post) => ({
         ...toPostListItem(post),
@@ -127,6 +134,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           qqUin: post.author.qqUin.toString(),
           displayName: post.author.displayName,
         },
+        timeline: toPostTimeline(post.logs, actorMap),
       })),
       pagination: toPagination(query.page, query.limit, total),
     };
