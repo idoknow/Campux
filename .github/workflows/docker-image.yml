@@ -30,6 +30,8 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "image=rockchin/campux:$tag" >> "$GITHUB_OUTPUT"
+          echo "dash_image=rockchin/campux-dash:$tag" >> "$GITHUB_OUTPUT"
+          echo "build_version=$tag-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -46,8 +48,20 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            CAMPUX_BUILD_VERSION=${{ steps.meta.outputs.build_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push telemetry dash image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/dash/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.dash_image }}
+          cache-from: type=gha,scope=dash
+          cache-to: type=gha,mode=max,scope=dash
 
   deploy:
     name: Deploy Production

@@ -52,6 +52,17 @@ Campux 通过环境变量配置。可以写在 `.env`，也可以由容器平台
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` | 空 | 容器内建议设置为 `/usr/bin/chromium-browser` |
 | `CAMPUX_RENDER_CORNER_QQ` | 空 | 渲染图角标头像备用 QQ |
 
+## 匿名遥测
+
+详见[匿名遥测](/admin/telemetry)：上报内容、时机与隐私边界。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CAMPUX_TELEMETRY_DISABLED` | 空 | `true`/`1` 完全关闭匿名遥测 |
+| `CAMPUX_TELEMETRY_ENDPOINT` | `https://dash.campux.top` | 中心收集服务地址；非生产环境仅在显式设置时上报 |
+| `CAMPUX_TELEMETRY_INSTANCE_NAME` | 空 | 自愿的公开实例标签（≤64 字符） |
+| `CAMPUX_BUILD_VERSION` | `dev` | 构建版本号，由 CI 在镜像构建时注入，无需手动设置 |
+
 ## 示例
 
 ```ini

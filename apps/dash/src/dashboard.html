@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Campux 遥测看板</title>
+<style>
+  :root {
+    --canvas: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e4e7ea;
+    --text: #1f2329;
+    --text-muted: #6b7280;
+    --accent: #0190d5;
+    --green: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  header h1 { font-size: 20px; margin: 0; font-weight: 700; }
+  header h1 .dot { color: var(--accent); }
+  header .sub { color: var(--text-muted); font-size: 13px; }
+  .meta { color: var(--text-muted); font-size: 12px; margin-bottom: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .card .label { color: var(--text-muted); font-size: 12px; }
+  .card .value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .card .hint { color: var(--text-muted); font-size: 11px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+  .panel h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+  .panel h2 small { color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+  .chart svg { display: block; width: 100%; height: auto; }
+  .dist { display: flex; flex-direction: column; gap: 6px; }
+  .dist-row { display: grid; grid-template-columns: minmax(90px, auto) 1fr 40px; align-items: center; gap: 8px; font-size: 12px; }
+  .dist-row .bar { background: #eaf6fd; border-radius: 3px; height: 14px; position: relative; overflow: hidden; }
+  .dist-row .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .85; border-radius: 3px; }
+  .dist-row .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+  .dist-row .key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .table-wrap { overflow-x: auto; }
+  .inst { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .online { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; }
+  .offline { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #d1d5db; margin-right: 6px; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 11px; background: #f1f5f9; color: #475569; }
+  footer { color: var(--text-muted); font-size: 12px; margin-top: 18px; line-height: 1.8; }
+  footer a { color: var(--accent); text-decoration: none; }
+  #key-gate { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 24px; max-width: 420px; margin: 80px auto; display: none; }
+  #key-gate h2 { margin: 0 0 8px; font-size: 16px; }
+  #key-gate p { color: var(--text-muted); font-size: 13px; margin: 0 0 12px; }
+  #key-gate input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; margin-bottom: 10px; }
+  #key-gate button { background: var(--accent); border: 0; color: #fff; padding: 8px 16px; border-radius: 4px; font-size: 14px; cursor: pointer; }
+  #empty { text-align: center; color: var(--text-muted); padding: 48px 0; display: none; }
+  #empty code { background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  .err { color: #b91c1c; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Campux 遥测<span class="dot">.</span></h1>
+    <span class="sub">自部署实例匿名使用统计 · dash.campux.top</span>
+  </header>
+  <div class="meta" id="meta">加载中…</div>
+
+  <div id="key-gate">
+    <h2>需要访问密钥</h2>
+    <p>该看板已配置访问密钥（CAMPUX_DASH_ACCESS_KEY）。输入后保存在本浏览器。</p>
+    <input id="key-input" type="password" placeholder="访问密钥" />
+    <button id="key-submit">进入</button>
+    <p class="err" id="key-err"></p>
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="cards" id="cards"></div>
+    <div class="grid">
+      <div class="panel"><h2>每日活跃实例<small>近 30 天</small></h2><div class="chart" id="chart-active"></div></div>
+      <div class="panel"><h2>全网每日新增稿件<small>近 30 天 · 按实例计数器增量估算</small></h2><div class="chart" id="chart-posts"></div></div>
+      <div class="panel"><h2>新增实例<small>近 30 天首次上报</small></h2><div class="chart" id="chart-new"></div></div>
+      <div class="panel">
+        <h2>版本分布<small>近 30 天活跃</small></h2><div class="dist" id="dist-version"></div>
+        <h2 style="margin-top:14px">部署模式</h2><div class="dist" id="dist-mode"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>活跃实例<small>近 30 天 · 最多展示 300 个</small></h2>
+      <div id="empty">还没有实例上报。生产实例会在启动约 2 分钟后上报到 <code>POST /api/v1/report</code>，此后每 6 小时心跳一次。</div>
+      <div class="table-wrap"><table id="inst-table" style="display:none">
+        <thead><tr>
+          <th>实例</th><th>版本</th><th>模式</th><th>地区</th>
+          <th class="num">校园墙</th><th class="num">用户</th><th class="num">稿件</th><th class="num">Bot</th>
+          <th>首次上报</th><th>最近上报</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+    <footer id="foot"></footer>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const KEY_STORAGE = "campux_dash_key";
+  const $ = (id) => document.getElementById(id);
+  const nf = new Intl.NumberFormat("zh-CN");
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function relTime(ms) {
+    const diff = Date.now() - ms;
+    if (diff < 90e3) return "刚刚";
+    if (diff < 3600e3) return Math.round(diff / 60e3) + " 分钟前";
+    if (diff < 86400e3) return Math.round(diff / 3600e3) + " 小时前";
+    return Math.round(diff / 86400e3) + " 天前";
+  }
+  const dayLabel = (day) => day.slice(5);
+
+  // Minimal SVG charts: shared scale helpers, no external libraries.
+  function chartFrame(width, height, pad) {
+    return { width, height, pad, x: (i, n) => pad.l + (n <= 1 ? 0 : (i / (n - 1)) * (width - pad.l - pad.r)), y: (v, max) => height - pad.b - (max <= 0 ? 0 : (v / max) * (height - pad.t - pad.b)) };
+  }
+  function axisParts(f, points, max) {
+    const mid = Math.floor(points.length / 2);
+    const ticks = [0, mid, points.length - 1].map((i) =>
+      `<text x="${f.x(i, points.length)}" y="${f.height - 4}" font-size="9" fill="#9ca3af" text-anchor="middle">${dayLabel(points[i].day)}</text>`).join("");
+    const seen = new Set();
+    const grid = [1, 0.5].map((r) => {
+      const v = Math.round(max * r), y = f.y(max * r, max);
+      const label = seen.has(v) ? "" : `<text x="${f.pad.l - 4}" y="${y + 3}" font-size="9" fill="#9ca3af" text-anchor="end">${nf.format(v)}</text>`;
+      seen.add(v);
+      return `<line x1="${f.pad.l}" x2="${f.width - f.pad.r}" y1="${y}" y2="${y}" stroke="#eef0f2"/>` + label;
+    }).join("");
+    const base = `<line x1="${f.pad.l}" x2="${f.width - f.pad.r}" y1="${f.y(0, max)}" y2="${f.y(0, max)}" stroke="#e4e7ea"/>`;
+    return grid + base + ticks;
+  }
+  function lineChart(el, points, color) {
+    const f = chartFrame(600, 170, { l: 34, r: 8, t: 10, b: 18 });
+    const max = Math.max(1, ...points.map((p) => p.count));
+    const coords = points.map((p, i) => `${f.x(i, points.length).toFixed(1)},${f.y(p.count, max).toFixed(1)}`);
+    const area = `M${f.pad.l},${f.y(0, max)} L${coords.join(" L")} L${f.x(points.length - 1, points.length)},${f.y(0, max)} Z`;
+    const last = points[points.length - 1];
+    el.innerHTML = `<svg viewBox="0 0 600 170" role="img">${axisParts(f, points, max)}
+      <path d="${area}" fill="${color}" opacity="0.08"/>
+      <polyline points="${coords.join(" ")}" fill="none" stroke="${color}" stroke-width="1.8"/>
+      <circle cx="${f.x(points.length - 1, points.length)}" cy="${f.y(last.count, max)}" r="2.6" fill="${color}"/></svg>`;
+  }
+  function barChart(el, points, color) {
+    const f = chartFrame(600, 170, { l: 34, r: 8, t: 10, b: 18 });
+    const max = Math.max(1, ...points.map((p) => p.count));
+    const innerW = 600 - f.pad.l - f.pad.r;
+    const bw = Math.max(2, (innerW / points.length) * 0.62);
+    const bars = points.map((p, i) => {
+      const y = f.y(p.count, max);
+      return `<rect x="${(f.x(i, points.length) - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, f.y(0, max) - y).toFixed(1)}" fill="${color}" opacity="0.85" rx="1"/>`;
+    }).join("");
+    el.innerHTML = `<svg viewBox="0 0 600 170" role="img">${axisParts(f, points, max)}${bars}</svg>`;
+  }
+  function distList(el, entries) {
+    if (!entries.length) { el.innerHTML = '<div class="dist-row"><span class="key" style="color:#9ca3af">暂无数据</span></div>'; return; }
+    const max = Math.max(...entries.map((e) => e.count));
+    el.innerHTML = entries.map((e) =>
+      `<div class="dist-row"><span class="key" title="${esc(e.key)}">${esc(e.key)}</span>
+       <span class="bar"><i style="width:${((e.count / max) * 100).toFixed(1)}%"></i></span>
+       <span class="num">${nf.format(e.count)}</span></div>`).join("");
+  }
+
+  function card(label, value, hint) {
+    return `<div class="card"><div class="label">${label}</div><div class="value">${nf.format(value)}</div>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`;
+  }
+
+  function render(s) {
+    $("content").style.display = "";
+    $("key-gate").style.display = "none";
+    const todayPosts = s.dailyNewPosts[s.dailyNewPosts.length - 1];
+    $("cards").innerHTML =
+      card("累计实例", s.totals.instancesEver, "历史所有") +
+      card("24h 活跃", s.totals.active24h) +
+      card("7 天活跃", s.totals.active7d) +
+      card("30 天活跃", s.totals.active30d) +
+      card("全网校园墙", s.fleet.tenants, "30 天活跃实例合计") +
+      card("全网用户", s.fleet.users, "30 天活跃实例合计") +
+      card("全网稿件", s.fleet.postsTotal, todayPosts ? `今日 +${nf.format(todayPosts.count)}` : "") +
+      card("在线 Bot", s.fleet.botsEnabled, "已启用");
+    lineChart($("chart-active"), s.dailyActiveInstances, "#0190d5");
+    barChart($("chart-posts"), s.dailyNewPosts, "#0190d5");
+    barChart($("chart-new"), s.dailyNewInstances, "#16a34a");
+    distList($("dist-version"), s.versionDistribution.map((d) => ({ key: d.key, count: d.count })));
+    distList($("dist-mode"), s.deployModeDistribution.map((d) => ({ key: d.key === "single" ? "single · 自用单墙" : d.key === "multi" ? "multi · 多租户" : d.key, count: d.count })));
+
+    const tbody = $("inst-table").querySelector("tbody");
+    if (!s.instances.length) {
+      $("empty").style.display = "";
+      $("inst-table").style.display = "none";
+    } else {
+      $("empty").style.display = "none";
+      $("inst-table").style.display = "";
+      tbody.innerHTML = s.instances.map((it) => `<tr>
+        <td><span class="${it.online ? "online" : "offline"}"></span><span class="inst">${esc(it.idShort)}</span>${it.name ? ` <span class="tag">${esc(it.name)}</span>` : ""}</td>
+        <td class="inst">${esc(it.version)}</td>
+        <td>${esc(it.deployMode)}${it.environment !== "production" ? ' <span class="tag">' + esc(it.environment) + "</span>" : ""}</td>
+        <td>${it.country ? esc(it.country) : "—"}</td>
+        <td class="num">${nf.format(it.tenants)}</td>
+        <td class="num">${nf.format(it.users)}</td>
+        <td class="num">${nf.format(it.postsTotal)}</td>
+        <td class="num">${nf.format(it.botsEnabled)}</td>
+        <td>${new Date(it.firstSeenAt).toLocaleDateString("zh-CN")}</td>
+        <td title="${new Date(it.lastSeenAt).toLocaleString("zh-CN")}">${relTime(it.lastSeenAt)}</td>
+      </tr>`).join("");
+    }
+
+    $("meta").textContent = `统计口径：生产实例 · 更新于 ${new Date(s.generatedAt).toLocaleString("zh-CN")} · 每 60 秒自动刷新`;
+    $("foot").innerHTML =
+      (s.totals.nonProductionActive7d > 0 ? `另有 ${nf.format(s.totals.nonProductionActive7d)} 个非生产实例（开发/测试）近 7 天有上报，未计入上方统计。<br/>` : "") +
+      `实例每 6 小时匿名上报一次聚合计数，不含任何用户内容或身份信息 · <a href="https://docs.campux.top/admin/telemetry" target="_blank" rel="noopener">遥测说明与退出方式</a>`;
+  }
+
+  async function load() {
+    const key = localStorage.getItem(KEY_STORAGE);
+    const res = await fetch("/api/v1/stats", { headers: key ? { authorization: "Bearer " + key } : {} });
+    if (res.status === 401) {
+      $("content").style.display = "none";
+      $("key-gate").style.display = "block";
+      if (key) $("key-err").textContent = "密钥无效，请重新输入。";
+      return;
+    }
+    if (!res.ok) {
+      $("meta").textContent = "加载失败（" + res.status + "），稍后自动重试…";
+      return;
+    }
+    render(await res.json());
+  }
+
+  $("key-submit").addEventListener("click", () => {
+    localStorage.setItem(KEY_STORAGE, $("key-input").value.trim());
+    $("key-err").textContent = "";
+    load().catch(() => {});
+  });
+  $("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("key-submit").click(); });
+
+  load().catch(() => { $("meta").textContent = "加载失败，稍后自动重试…"; });
+  setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60_000);
+})();
+</script>
+</body>
+</html>

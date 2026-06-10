@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "campux-next",
@@ -14,6 +15,17 @@
         "vitepress": "^1.6.4",
       },
     },
+    "apps/dash": {
+      "name": "@campux/dash",
+      "dependencies": {
+        "@campux/telemetry": "workspace:*",
+        "fastify": "^5.3.3",
+        "zod": "^3.24.4",
+      },
+      "devDependencies": {
+        "typescript": "^5.8.3",
+      },
+    },
     "apps/server": {
       "name": "@campux/server",
       "dependencies": {
@@ -24,6 +36,7 @@
         "@campux/domain": "workspace:*",
         "@campux/integrations": "workspace:*",
         "@campux/render": "workspace:*",
+        "@campux/telemetry": "workspace:*",
         "@fastify/cors": "^11.0.1",
         "@fastify/multipart": "^9.0.0",
         "@fastify/static": "^9.1.3",
@@ -98,6 +111,12 @@
       "name": "@campux/render",
       "dependencies": {
         "playwright-core": "^1.60.0",
+      },
+    },
+    "packages/telemetry": {
+      "name": "@campux/telemetry",
+      "dependencies": {
+        "zod": "^3.24.4",
       },
     },
   },
@@ -286,6 +305,8 @@
 
     "@campux/config": ["@campux/config@workspace:packages/config"],
 
+    "@campux/dash": ["@campux/dash@workspace:apps/dash"],
+
     "@campux/db": ["@campux/db@workspace:packages/db"],
 
     "@campux/domain": ["@campux/domain@workspace:packages/domain"],
@@ -295,6 +316,8 @@
     "@campux/render": ["@campux/render@workspace:packages/render"],
 
     "@campux/server": ["@campux/server@workspace:apps/server"],
+
+    "@campux/telemetry": ["@campux/telemetry@workspace:packages/telemetry"],
 
     "@campux/web": ["@campux/web@workspace:apps/web"],
 
@@ -2011,6 +2034,8 @@
     "@babel/helper-compilation-targets/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
     "@babel/helper-create-class-features-plugin/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
+
+    "@campux/dash/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@campux/db/@prisma/client": ["@prisma/client@6.19.3", "", { "peerDependencies": { "prisma": "*", "typescript": ">=5.1.0" }, "optionalPeers": ["prisma", "typescript"] }, "sha512-mKq3jQFhjvko5LTJFHGilsuQs+W+T3Gm451NzuTDGQxwCzwXHYnIu2zGkRoW+Exq3Rob7yp2MfzSrdIiZVhrBg=="],
 
