@@ -2447,9 +2447,10 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function parseCommand(input: string) {
+export function parseCommand(input: string) {
   const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
-  const commandStart = normalized.search(/[#/]/);
+  // 同时支持半角 # / 与全角 ＃ 作为命令前缀（全角 # 在中文输入法下很常见，否则会出现指令无法识别）
+  const commandStart = normalized.search(/[#＃/]/);
   if (commandStart < 0) {
     return null;
   }
@@ -2458,7 +2459,7 @@ function parseCommand(input: string) {
     return null;
   }
   const commandText = normalized.slice(commandStart);
-  const match = commandText.match(/^[#/]\s*([^\s]+)\s*(.*)$/);
+  const match = commandText.match(/^[#＃/]\s*([^\s]+)\s*(.*)$/);
   const name = match?.[1];
   if (!match || !name) {
     return null;
