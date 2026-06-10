@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyRequest } from "fastify";
 import type { Database } from "bun:sqlite";
 import { parseTelemetryReport } from "@campux/telemetry";
-import { ingestReport } from "./db";
+import { ingestReport, resolveInstanceId, setInstanceTag } from "./db";
 import { computeStats, type StatsEnvScope } from "./stats";
 
 // Ingestion abuse guards. The endpoint is anonymous and open by design, so the
@@ -17,13 +17,14 @@ const LIMITER_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 export type DashServerOptions = {
   db: Database;
   accessKey?: string | undefined;
+  adminKey?: string | undefined;
   logger?: boolean | object;
   now?: () => Date;
 };
 
 type IpWindow = { windowStart: number; count: number };
 
-export function createDashServer({ db, accessKey, logger = false, now = () => new Date() }: DashServerOptions) {
+export function createDashServer({ db, accessKey, adminKey, logger = false, now = () => new Date() }: DashServerOptions) {
   const app = Fastify({
     logger,
     bodyLimit: 64 * 1024,
@@ -92,6 +93,54 @@ export function createDashServer({ db, accessKey, logger = false, now = () => ne
     return reply.send(computeStats(db, scope, now()));
   });
 
+  // Operator instance tagging. Gated by CAMPUX_DASH_ADMIN_KEY; when that env is
+  // unset the routes 404 so a public dashboard exposes no write surface at all.
+  // The :id path segment is the 8-char short id shown on the dashboard (a full
+  // id also works); the full UUID is never required and never echoed back.
+  app.put<{ Params: { id: string }; Body: unknown }>("/api/v1/instances/:id/tag", async (request, reply) => {
+    if (!adminKey) {
+      return reply.code(404).send({ ok: false, error: "not found" });
+    }
+    if (!adminAuthorized(request, adminKey)) {
+      return reply.code(401).send({ ok: false, error: "admin key required" });
+    }
+    const resolved = resolveInstanceId(db, request.params.id);
+    if (!resolved.ok) {
+      const code = resolved.reason === "ambiguous" ? 409 : 404;
+      return reply.code(code).send({ ok: false, error: resolved.reason });
+    }
+    const body = (request.body ?? {}) as { label?: unknown; note?: unknown };
+    if (
+      (body.label !== undefined && body.label !== null && typeof body.label !== "string") ||
+      (body.note !== undefined && body.note !== null && typeof body.note !== "string")
+    ) {
+      return reply.code(400).send({ ok: false, error: "label and note must be strings" });
+    }
+    const tag = setInstanceTag(
+      db,
+      resolved.instanceId,
+      { label: (body.label as string | null | undefined) ?? undefined, note: (body.note as string | null | undefined) ?? undefined },
+      now(),
+    );
+    return reply.send({ ok: true, tag });
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/v1/instances/:id/tag", async (request, reply) => {
+    if (!adminKey) {
+      return reply.code(404).send({ ok: false, error: "not found" });
+    }
+    if (!adminAuthorized(request, adminKey)) {
+      return reply.code(401).send({ ok: false, error: "admin key required" });
+    }
+    const resolved = resolveInstanceId(db, request.params.id);
+    if (!resolved.ok) {
+      const code = resolved.reason === "ambiguous" ? 409 : 404;
+      return reply.code(code).send({ ok: false, error: resolved.reason });
+    }
+    setInstanceTag(db, resolved.instanceId, { label: null, note: null }, now());
+    return reply.send({ ok: true, tag: null });
+  });
+
   app.get("/api/health", async () => ({ ok: true, service: "campux-dash" }));
 
   // The dashboard shell is always served; with an access key configured it
@@ -121,5 +170,20 @@ function authorized(request: FastifyRequest, accessKey: string | undefined): boo
   const provided = bearer ?? (request.query as { key?: string }).key ?? "";
   const a = Buffer.from(provided);
   const b = Buffer.from(accessKey);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Admin (write) auth is deliberately stricter than read auth: there is no
+// "unset = open" fallback (callers already 404 when adminKey is unset), and the
+// key is taken only from the X-Admin-Key header or Authorization: Bearer — never
+// a query string, so it does not end up in proxy/CDN access logs.
+function adminAuthorized(request: FastifyRequest, adminKey: string): boolean {
+  const headerKey = request.headers["x-admin-key"];
+  const fromHeader = Array.isArray(headerKey) ? headerKey[0] : headerKey;
+  const auth = request.headers.authorization;
+  const bearer = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
+  const provided = fromHeader ?? bearer ?? "";
+  const a = Buffer.from(provided);
+  const b = Buffer.from(adminKey);
   return a.length === b.length && timingSafeEqual(a, b);
 }

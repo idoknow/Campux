@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS reports_day_idx ON reports(day, instance_id);
 CREATE INDEX IF NOT EXISTS reports_instance_idx ON reports(instance_id, received_at);
+
+-- Operator-assigned annotations, kept in a SEPARATE table on purpose: the
+-- ingest upsert rewrites the whole instances row on every heartbeat, so a tag
+-- stored there would be clobbered. These are written only by an authenticated
+-- operator (CAMPUX_DASH_ADMIN_KEY), never by the anonymous report endpoint.
+CREATE TABLE IF NOT EXISTS instance_tags (
+  instance_id TEXT PRIMARY KEY,
+  label       TEXT,
+  note        TEXT,
+  updated_at  INTEGER NOT NULL
+);
 `;
 
 export function openDashDatabase(path: string): Database {
@@ -151,4 +162,96 @@ export function pruneOldReports(db: Database, retentionDays: number, now: Date):
   const cutoff = now.getTime() - retentionDays * 24 * 60 * 60 * 1000;
   const result = db.query(`DELETE FROM reports WHERE received_at < ?`).run(cutoff);
   return result.changes;
+}
+
+export type InstanceTag = {
+  label: string | null;
+  note: string | null;
+  updatedAt: number;
+};
+
+// Operators address instances by the 8-char short id shown on the dashboard;
+// the full UUID is the ingest credential and never leaves the collector. Map a
+// short id (or a full id) back to the canonical instance_id, refusing to act
+// when a prefix is ambiguous or unknown.
+export type ResolveResult =
+  | { ok: true; instanceId: string }
+  | { ok: false; reason: "not_found" | "ambiguous" };
+
+export function resolveInstanceId(db: Database, idOrShort: string): ResolveResult {
+  const needle = idOrShort.trim().toLowerCase();
+  if (!needle) {
+    return { ok: false, reason: "not_found" };
+  }
+  // Exact match first — an operator pasting a full id should always win.
+  const exact = db.query(`SELECT instance_id FROM instances WHERE instance_id = ?`).get(needle) as
+    | { instance_id: string }
+    | undefined;
+  if (exact) {
+    return { ok: true, instanceId: exact.instance_id };
+  }
+  const matches = db
+    .query(`SELECT instance_id FROM instances WHERE instance_id LIKE ? LIMIT 2`)
+    .all(needle + "%") as { instance_id: string }[];
+  if (matches.length === 0) {
+    return { ok: false, reason: "not_found" };
+  }
+  if (matches.length > 1) {
+    return { ok: false, reason: "ambiguous" };
+  }
+  return { ok: true, instanceId: matches[0]!.instance_id };
+}
+
+// Upsert an operator tag. Empty label and empty note together delete the row so
+// "clear both fields" leaves no dangling record. Returns the stored tag, or null
+// when it was cleared.
+export function setInstanceTag(
+  db: Database,
+  instanceId: string,
+  input: { label?: string | null | undefined; note?: string | null | undefined },
+  now: Date,
+): InstanceTag | null {
+  const norm = (v: string | null | undefined): string | null => {
+    if (v === undefined || v === null) {
+      return null;
+    }
+    const trimmed = v.trim().slice(0, 80);
+    return trimmed.length > 0 ? trimmed : null;
+  };
+  const label = norm(input.label);
+  const note = input.note === undefined || input.note === null ? null : input.note.trim().slice(0, 280) || null;
+
+  if (label === null && note === null) {
+    db.query(`DELETE FROM instance_tags WHERE instance_id = ?`).run(instanceId);
+    return null;
+  }
+
+  db.query(
+    `INSERT INTO instance_tags (instance_id, label, note, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(instance_id) DO UPDATE SET
+       label = excluded.label,
+       note = excluded.note,
+       updated_at = excluded.updated_at`,
+  ).run(instanceId, label, note, now.getTime());
+  return { label, note, updatedAt: now.getTime() };
+}
+
+export function getInstanceTag(db: Database, instanceId: string): InstanceTag | null {
+  const row = db.query(`SELECT label, note, updated_at FROM instance_tags WHERE instance_id = ?`).get(instanceId) as
+    | { label: string | null; note: string | null; updated_at: number }
+    | undefined;
+  return row ? { label: row.label, note: row.note, updatedAt: row.updated_at } : null;
+}
+
+// All tags as a map keyed by full instance_id, for joining onto the stats view
+// without an N+1 per-instance lookup.
+export function loadInstanceTags(db: Database): Map<string, InstanceTag> {
+  const rows = db.query(`SELECT instance_id, label, note, updated_at FROM instance_tags`).all() as {
+    instance_id: string;
+    label: string | null;
+    note: string | null;
+    updated_at: number;
+  }[];
+  return new Map(rows.map((r) => [r.instance_id, { label: r.label, note: r.note, updatedAt: r.updated_at }]));
 }

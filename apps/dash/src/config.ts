@@ -8,9 +8,14 @@ const configSchema = z.object({
   // volume is the whole storage story. Use ":memory:" in tests.
   CAMPUX_DASH_DB_PATH: z.string().default("./data/campux-dash.sqlite"),
   // When set, GET /api/v1/stats and the dashboard data require this key
-  // (Authorization: Bearer <key> or ?key=). Report ingestion stays open —
+  // (Authorization: Bearer *** or ?key=). Report ingestion stays open —
   // instances in the wild must always be able to report.
   CAMPUX_DASH_ACCESS_KEY: z.string().optional(),
+  // When set, the operator tagging endpoints (PUT/DELETE /api/v1/instances/:id/tag)
+  // require this key. Separate from the read key on purpose: the dashboard is
+  // public by default, but writing operator labels must always be gated. If
+  // unset, the tagging endpoints are disabled (return 404) rather than open.
+  CAMPUX_DASH_ADMIN_KEY: z.string().optional(),
   // Raw reports older than this are pruned daily; instances keep their latest
   // snapshot forever.
   CAMPUX_DASH_RETENTION_DAYS: z.coerce.number().int().positive().default(400),
@@ -26,6 +31,7 @@ export function loadDashConfig() {
     port: env.CAMPUX_DASH_PORT,
     dbPath: env.CAMPUX_DASH_DB_PATH,
     accessKey: env.CAMPUX_DASH_ACCESS_KEY,
+    adminKey: env.CAMPUX_DASH_ADMIN_KEY,
     retentionDays: env.CAMPUX_DASH_RETENTION_DAYS,
   };
 }

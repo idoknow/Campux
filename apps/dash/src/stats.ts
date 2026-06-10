@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { formatDay, lastDays } from "./db";
+import { formatDay, lastDays, loadInstanceTags } from "./db";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CHART_DAYS = 30;
@@ -16,6 +16,9 @@ export type InstanceSummary = {
   // instance UUID, so the full id must never leave the collector.
   idShort: string;
   name: string | null;
+  // Operator-assigned annotations (separate from the self-reported `name`).
+  label: string | null;
+  note: string | null;
   version: string;
   deployMode: string;
   environment: string;
@@ -120,6 +123,7 @@ export function computeStats(db: Database, scope: StatsEnvScope, now: Date): Das
 
   const dailyNewPosts = fillDays(computeDailyNewPosts(db, envClause, now, chartDays));
 
+  const tags = loadInstanceTags(db);
   const instances = (
     db
       .query(
@@ -142,21 +146,26 @@ export function computeStats(db: Database, scope: StatsEnvScope, now: Date): Das
       first_seen_at: number;
       last_seen_at: number;
     }[]
-  ).map((row) => ({
-    idShort: row.instance_id.slice(0, 8),
-    name: row.instance_name,
-    version: row.version,
-    deployMode: row.deploy_mode,
-    environment: row.environment,
-    country: row.country,
-    tenants: row.tenants,
-    users: row.users,
-    postsTotal: row.posts_total,
-    botsEnabled: row.bots_enabled,
-    firstSeenAt: row.first_seen_at,
-    lastSeenAt: row.last_seen_at,
-    online: row.last_seen_at >= since(ONLINE_WINDOW_MS),
-  }));
+  ).map((row) => {
+    const tag = tags.get(row.instance_id);
+    return {
+      idShort: row.instance_id.slice(0, 8),
+      name: row.instance_name,
+      label: tag?.label ?? null,
+      note: tag?.note ?? null,
+      version: row.version,
+      deployMode: row.deploy_mode,
+      environment: row.environment,
+      country: row.country,
+      tenants: row.tenants,
+      users: row.users,
+      postsTotal: row.posts_total,
+      botsEnabled: row.bots_enabled,
+      firstSeenAt: row.first_seen_at,
+      lastSeenAt: row.last_seen_at,
+      online: row.last_seen_at >= since(ONLINE_WINDOW_MS),
+    };
+  });
 
   return {
     generatedAt: now.toISOString(),

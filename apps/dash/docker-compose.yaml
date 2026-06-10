@@ -19,6 +19,10 @@ services:
       # Optional: when set, the dashboard and GET /api/v1/stats require this
       # key. Report ingestion from instances always stays open.
       CAMPUX_DASH_ACCESS_KEY: ${CAMPUX_DASH_ACCESS_KEY:-}
+      # Optional: when set, enables the operator instance-tagging endpoints
+      # (PUT/DELETE /api/v1/instances/:id/tag). Unset => tagging is disabled
+      # (404) and the dashboard stays read-only. Independent of the read key.
+      CAMPUX_DASH_ADMIN_KEY: ${CAMPUX_DASH_ADMIN_KEY:-}
     ports:
       - "8990:8990"
     volumes:
