@@ -21,6 +21,7 @@ import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from 
 import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapshots";
 import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-comments";
 import { registerBatchFlushSweeper, stopBatchFlushSweeper } from "./runtime/publish-batching";
+import { registerTelemetryReporter } from "./runtime/telemetry";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAiRoutes } from "./routes/ai";
@@ -111,6 +112,7 @@ const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: 
 const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });
 const stopBotFriendSnapshotScheduler = registerBotFriendSnapshotScheduler({ caller: oneBot, logger: app.log });
 const stopFollowedPostCommentScheduler = registerFollowedPostCommentScheduler({ caller: oneBot, logger: app.log });
+const stopTelemetryReporter = registerTelemetryReporter({ logger: app.log, config });
 registerBatchFlushSweeper(queue, app.log);
 
 app.addHook("onClose", async () => {
@@ -119,6 +121,7 @@ app.addHook("onClose", async () => {
   stopQZonePostMetricScheduler();
   stopBotFriendSnapshotScheduler();
   stopFollowedPostCommentScheduler();
+  stopTelemetryReporter();
   stopBatchFlushSweeper();
 });
 

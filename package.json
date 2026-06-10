@@ -10,8 +10,9 @@
   "scripts": {
     "dev:web": "bun --cwd apps/web dev",
     "dev:server": "bun --cwd apps/server dev",
+    "dev:dash": "bun --cwd apps/dash dev",
     "build": "bun --cwd apps/web build && bun --cwd apps/server build",
-    "typecheck": "bun --cwd apps/web typecheck && bun --cwd apps/server typecheck",
+    "typecheck": "bun --cwd apps/web typecheck && bun --cwd apps/server typecheck && bun --cwd apps/dash typecheck",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",

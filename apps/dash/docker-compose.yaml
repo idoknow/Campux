@@ -1,0 +1,34 @@
+# Deployment for the central telemetry collector + dashboard (dash.campux.top).
+# Run from this directory: docker compose up -d
+# Point dash.campux.top at port 8990 via your reverse proxy (Caddy/Nginx) or a
+# Cloudflare proxied DNS record; with Cloudflare in front the CF-IPCountry
+# header also lights up the per-instance region column.
+services:
+  campux-dash:
+    build:
+      context: ../..
+      dockerfile: apps/dash/Dockerfile
+    image: rockchin/campux-dash:local
+    container_name: campux-dash
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CAMPUX_DASH_HOST: 0.0.0.0
+      CAMPUX_DASH_PORT: 8990
+      CAMPUX_DASH_DB_PATH: /data/campux-dash.sqlite
+      # Optional: when set, the dashboard and GET /api/v1/stats require this
+      # key. Report ingestion from instances always stays open.
+      CAMPUX_DASH_ACCESS_KEY: ${CAMPUX_DASH_ACCESS_KEY:-}
+    ports:
+      - "8990:8990"
+    volumes:
+      - campux-dash-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:8990/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  campux-dash-data:

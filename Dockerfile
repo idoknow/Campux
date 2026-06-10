@@ -20,6 +20,11 @@ WORKDIR /app
 
 RUN apk add --no-cache ca-certificates chromium font-noto-cjk font-noto-emoji openssl tzdata
 
+# Release identifier baked in by CI (branch-shortsha); surfaces in /api/health
+# style diagnostics and the anonymous telemetry version distribution.
+ARG CAMPUX_BUILD_VERSION=dev
+ENV CAMPUX_BUILD_VERSION=${CAMPUX_BUILD_VERSION}
+
 ENV NODE_ENV=production
 # Campux only operates in China; pin the whole process to Beijing time so every
 # Date method (daily/hourly stats buckets, schedulers) resolves in UTC+8.

@@ -72,6 +72,7 @@ export default defineConfig({
           { text: "账号与权限", link: "/admin/accounts" },
           { text: "部署与升级", link: "/admin/deployment" },
           { text: "安全基线", link: "/admin/security" },
+          { text: "匿名遥测", link: "/admin/telemetry" },
           { text: "故障排查", link: "/admin/troubleshooting" },
         ],
       },
