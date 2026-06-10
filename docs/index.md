@@ -27,9 +27,21 @@ features:
     details: 使用 PostgreSQL、S3/MinIO、Docker Compose 和自动迁移，适合个人或团队部署。
 ---
 
-![Campux 统计看板](/screenshots/stats-dashboard.png)
+## 核心功能
+
+| 功能 | 简介 | 预览 |
+| --- | --- | --- |
+| **网页、私聊双重投稿渠道** | 网页端和 QQ 私聊墙号机器人均可投稿，两个入口统一进入同一条审核流程。 | ![网页与私聊双投稿渠道](/screenshots/features/submission-channels.png) |
+| **自动发表到空间，支持单条、多条稿件发布** | 稿件通过审核后自动发表到 QQ 空间，既支持单条即时发布，也支持多条稿件合并为一条说说发布；失败可重试，发布日志可追溯。 | ![自动发表到 QQ 空间](/screenshots/features/auto-publish.png) |
+| **自动获取登录信息，省心快捷** | 协议自动获取与扫码登录两种方式维护 QZone 登录态，定时检测、失效自动刷新，无需手动抓取 cookies。 | ![自动获取登录信息](/screenshots/features/auto-login.png) |
+| **投稿量、访客量统计图表** | 统计看板以图表展示投稿量、空间访客量等运营数据，支持多时间范围切换，活跃度与发布质量一目了然。 | ![投稿量与访客量统计图表](/screenshots/features/stats-charts.png) |
+| **评论同步展示、定时通知投稿人** | QQ 空间评论自动同步到站内稿件页展示；投稿人关注自己的稿件后，会定时收到新评论摘要的私聊通知。 | ![评论同步展示与定时通知](/screenshots/features/comment-sync.png) |
+
+## 产品界面
 
 Campux 的核心工作台由投稿、稿件审核、租户管理、机器人、发布目标和统计看板组成。下面这些页面截图均来自本地运行环境，展示的是实际产品界面。
+
+![Campux 统计看板](/screenshots/stats-dashboard.png)
 
 ![稿件审核工作台](/screenshots/review-board.png)
 
