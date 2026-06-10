@@ -3,8 +3,8 @@ import { formatDay, lastDays, loadInstanceTags } from "./db";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CHART_DAYS = 30;
-// An instance heartbeats every ~6 h; two missed beats + jitter ≈ offline.
-const ONLINE_WINDOW_MS = 13 * 60 * 60 * 1000;
+// An instance heartbeats every ~2 h; two missed beats + jitter ≈ offline.
+const ONLINE_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 export type StatsEnvScope = "production" | "all";
 

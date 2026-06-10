@@ -7,7 +7,7 @@ import { ingestReport, resolveInstanceId, setInstanceTag } from "./db";
 import { computeStats, type StatsEnvScope } from "./stats";
 
 // Ingestion abuse guards. The endpoint is anonymous and open by design, so the
-// budget is generous for real instances (one report per ~6 h) and tight enough
+// budget is generous for real instances (one report per ~2 h) and tight enough
 // that a spammer cannot bloat the database quickly.
 const MIN_REPORT_SPACING_MS = 60 * 1000; // per instance id
 const IP_WINDOW_MS = 60 * 60 * 1000;
