@@ -9,7 +9,7 @@
 ┌─────────────────────────┐            ┌────────────────────────────┐
 │ registerTelemetryReporter│  POST      │ POST /api/v1/report  ← 收数 │
 │ 启动后 2min 首报，        │ ────────▶  │   zod 校验 + 限流 + SQLite   │
-│ 之后每 6h 心跳（带抖动）   │  HTTPS     │ GET  /api/v1/stats   ← 聚合 │
+│ 之后每 2h 心跳（带抖动）   │  HTTPS     │ GET  /api/v1/stats   ← 聚合 │
 │ 匿名 UUID 存 SystemSetting│            │ GET  /              ← 看板  │
 └─────────────────────────┘            └────────────────────────────┘
 ```

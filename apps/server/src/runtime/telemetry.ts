@@ -8,7 +8,7 @@ import { getDeployMode, isSetupCompleted } from "../lib/deploy-mode";
 
 export const TELEMETRY_INSTANCE_ID_KEY = "telemetry_instance_id";
 
-const reportIntervalMs = 6 * 60 * 60 * 1000; // heartbeat; central "active in 24h" tolerates 3 missed beats
+const reportIntervalMs = 2 * 60 * 60 * 1000; // heartbeat; central "active in 24h" tolerates several missed beats
 const intervalJitterMs = 30 * 60 * 1000; // ±15 min so the fleet does not stampede the collector
 const initialDelayMs = 2 * 60 * 1000; // let migrations/queue/bots settle before the boot report
 const failureRetryDelayMs = 30 * 60 * 1000;
@@ -145,7 +145,7 @@ export async function collectTelemetryReport(config: CampuxConfig): Promise<Tele
 
 /**
  * Anonymous usage reporting to the central Campux dashboard. First report
- * shortly after boot, then a jittered ~6 h heartbeat. Failures are silent
+ * shortly after boot, then a jittered ~2 h heartbeat. Failures are silent
  * (debug-level) and retried later — the collector being down must never
  * degrade or noise up a self-hosted instance.
  */

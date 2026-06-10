@@ -108,7 +108,7 @@
         <span id="admin-status">运维标记：未启用</span>
         <button id="admin-toggle" type="button">输入运维密钥</button>
       </div>
-      <div id="empty">还没有实例上报。生产实例会在启动约 2 分钟后上报到 <code>POST /api/v1/report</code>，此后每 6 小时心跳一次。</div>
+      <div id="empty">还没有实例上报。生产实例会在启动约 2 分钟后上报到 <code>POST /api/v1/report</code>，此后每 2 小时心跳一次。</div>
       <div class="table-wrap"><table id="inst-table" style="display:none">
         <thead><tr>
           <th>实例</th><th>标记</th><th>版本</th><th>模式</th><th>地区</th>
@@ -244,7 +244,7 @@
     $("meta").textContent = `统计口径：生产实例 · 更新于 ${new Date(s.generatedAt).toLocaleString("zh-CN")} · 每 60 秒自动刷新`;
     $("foot").innerHTML =
       (s.totals.nonProductionActive7d > 0 ? `另有 ${nf.format(s.totals.nonProductionActive7d)} 个非生产实例（开发/测试）近 7 天有上报，未计入上方统计。<br/>` : "") +
-      `实例每 6 小时匿名上报一次聚合计数，不含任何用户内容或身份信息 · <a href="https://docs.campux.top/admin/telemetry" target="_blank" rel="noopener">遥测说明与退出方式</a>`;
+      `实例每 2 小时匿名上报一次聚合计数，不含任何用户内容或身份信息 · <a href="https://docs.campux.top/admin/telemetry" target="_blank" rel="noopener">遥测说明与退出方式</a>`;
   }
 
   // ---- Operator instance tagging ----------------------------------------
