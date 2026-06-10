@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { TelemetryReport } from "@campux/telemetry";
-import { formatDay, ingestReport, lastDays, openDashDatabase, pruneOldReports } from "./db";
+import {
+  formatDay,
+  getInstanceTag,
+  ingestReport,
+  lastDays,
+  loadInstanceTags,
+  openDashDatabase,
+  pruneOldReports,
+  resolveInstanceId,
+  setInstanceTag,
+} from "./db";
 import { computeStats } from "./stats";
 import { createDashServer } from "./server";
 
@@ -221,6 +231,144 @@ describe("collector HTTP API", () => {
     expect(page.statusCode).toBe(200);
     expect(page.headers["content-type"]).toContain("text/html");
     expect(page.body).toContain("Campux 遥测");
+    await app.close();
+  });
+});
+
+describe("instance tagging (db)", () => {
+  const ID = "11111111-1111-4111-8111-111111111111";
+
+  test("resolveInstanceId maps short id, full id, rejects unknown and ambiguous", () => {
+    const db = freshDb();
+    ingestReport(db, report(), { receivedAt: NOW, country: null });
+    ingestReport(db, report({ instanceId: "1122aaaa-0000-4000-8000-000000000000" }), { receivedAt: NOW, country: null });
+
+    const byShort = resolveInstanceId(db, "11111111");
+    expect(byShort.ok && byShort.instanceId).toBe(ID);
+    const byFull = resolveInstanceId(db, ID);
+    expect(byFull.ok && byFull.instanceId).toBe(ID);
+    const byPrefix = resolveInstanceId(db, "111111"); // unique prefix
+    expect(byPrefix.ok && byPrefix.instanceId).toBe(ID);
+    const missing = resolveInstanceId(db, "deadbeef");
+    expect(missing.ok).toBe(false);
+    expect(missing.ok === false && missing.reason).toBe("not_found");
+    const ambiguous = resolveInstanceId(db, "11"); // matches both
+    expect(ambiguous.ok).toBe(false);
+    expect(ambiguous.ok === false && ambiguous.reason).toBe("ambiguous");
+  });
+
+  test("setInstanceTag upserts, trims, and clears", () => {
+    const db = freshDb();
+    ingestReport(db, report(), { receivedAt: NOW, country: null });
+
+    const created = setInstanceTag(db, ID, { label: "  广州大学城  ", note: "官方运营" }, NOW);
+    expect(created).toEqual({ label: "广州大学城", note: "官方运营", updatedAt: NOW.getTime() });
+    expect(getInstanceTag(db, ID)).toEqual({ label: "广州大学城", note: "官方运营", updatedAt: NOW.getTime() });
+
+    // update just the label, keep it a single row
+    setInstanceTag(db, ID, { label: "官方", note: null }, NOW);
+    expect(getInstanceTag(db, ID)?.label).toBe("官方");
+    expect((db.query("SELECT COUNT(*) AS c FROM instance_tags").get() as { c: number }).c).toBe(1);
+
+    // clearing both label and note removes the row entirely
+    expect(setInstanceTag(db, ID, { label: "", note: "" }, NOW)).toBeNull();
+    expect(getInstanceTag(db, ID)).toBeNull();
+    expect((db.query("SELECT COUNT(*) AS c FROM instance_tags").get() as { c: number }).c).toBe(0);
+  });
+
+  test("tags survive an ingest heartbeat (separate table, not clobbered)", () => {
+    const db = freshDb();
+    ingestReport(db, report({ counts: { postsTotal: 1000 } }), { receivedAt: new Date(NOW.getTime() - DAY_MS), country: "CN" });
+    setInstanceTag(db, ID, { label: "测试墙", note: null }, NOW);
+    // a later heartbeat rewrites the instances row; the tag must remain
+    ingestReport(db, report({ counts: { postsTotal: 1040 } }), { receivedAt: NOW, country: "CN" });
+    expect(getInstanceTag(db, ID)?.label).toBe("测试墙");
+    expect(loadInstanceTags(db).get(ID)?.label).toBe("测试墙");
+  });
+
+  test("computeStats surfaces operator label and note on the instance row", () => {
+    const db = freshDb();
+    ingestReport(db, report(), { receivedAt: NOW, country: null });
+    setInstanceTag(db, ID, { label: "广州大学城", note: "官方" }, NOW);
+    const stats = computeStats(db, "production", NOW);
+    expect(stats.instances[0]!.label).toBe("广州大学城");
+    expect(stats.instances[0]!.note).toBe("官方");
+    // untagged instance reports null, not undefined
+    const db2 = freshDb();
+    ingestReport(db2, report(), { receivedAt: NOW, country: null });
+    expect(computeStats(db2, "production", NOW).instances[0]!.label).toBeNull();
+  });
+});
+
+describe("instance tagging (HTTP)", () => {
+  const ID = "11111111-1111-4111-8111-111111111111";
+
+  test("tag routes 404 when no admin key is configured", async () => {
+    const db = freshDb();
+    ingestReport(db, report(), { receivedAt: NOW, country: null });
+    const app = createDashServer({ db, now: () => NOW });
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/v1/instances/11111111/tag",
+      payload: { label: "x" },
+    });
+    expect(put.statusCode).toBe(404);
+    await app.close();
+  });
+
+  test("PUT requires the admin key, then tags by short id", async () => {
+    const db = freshDb();
+    ingestReport(db, report(), { receivedAt: NOW, country: null });
+    const app = createDashServer({ db, adminKey: "op-secret", now: () => NOW });
+
+    // missing/bad key
+    expect((await app.inject({ method: "PUT", url: "/api/v1/instances/11111111/tag", payload: { label: "x" } })).statusCode).toBe(401);
+    expect(
+      (await app.inject({ method: "PUT", url: "/api/v1/instances/11111111/tag", headers: { "x-admin-key": "nope" }, payload: { label: "x" } })).statusCode,
+    ).toBe(401);
+
+    // good key, by short id
+    const ok = await app.inject({
+      method: "PUT",
+      url: "/api/v1/instances/11111111/tag",
+      headers: { "x-admin-key": "op-secret" },
+      payload: { label: "广州大学城", note: "官方" },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(JSON.parse(ok.body)).toEqual({ ok: true, tag: { label: "广州大学城", note: "官方", updatedAt: NOW.getTime() } });
+    expect(getInstanceTag(db, ID)?.label).toBe("广州大学城");
+
+    // unknown id -> 404, ambiguous handled by resolveInstanceId tests
+    expect(
+      (await app.inject({ method: "PUT", url: "/api/v1/instances/deadbeef/tag", headers: { "x-admin-key": "op-secret" }, payload: { label: "x" } })).statusCode,
+    ).toBe(404);
+
+    // bad body type -> 400
+    expect(
+      (await app.inject({ method: "PUT", url: "/api/v1/instances/11111111/tag", headers: { "x-admin-key": "op-secret" }, payload: { label: 123 } })).statusCode,
+    ).toBe(400);
+
+    // DELETE clears it
+    const del = await app.inject({ method: "DELETE", url: "/api/v1/instances/11111111/tag", headers: { "x-admin-key": "op-secret" } });
+    expect(del.statusCode).toBe(200);
+    expect(getInstanceTag(db, ID)).toBeNull();
+    await app.close();
+  });
+
+  test("tagging does not require the read access key even when one is set", async () => {
+    const db = freshDb();
+    ingestReport(db, report(), { receivedAt: NOW, country: null });
+    const app = createDashServer({ db, accessKey: "read-key", adminKey: "op-secret", now: () => NOW });
+    // stats still needs the read key
+    expect((await app.inject({ method: "GET", url: "/api/v1/stats" })).statusCode).toBe(401);
+    // but tagging only needs the admin key
+    const ok = await app.inject({
+      method: "PUT",
+      url: "/api/v1/instances/11111111/tag",
+      headers: { "x-admin-key": "op-secret" },
+      payload: { label: "官方" },
+    });
+    expect(ok.statusCode).toBe(200);
     await app.close();
   });
 });

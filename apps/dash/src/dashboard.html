@@ -53,6 +53,16 @@
   .online { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; }
   .offline { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #d1d5db; margin-right: 6px; }
   .tag { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 11px; background: #f1f5f9; color: #475569; }
+  .tag.op { background: #fff7ed; color: #c2410c; cursor: pointer; }
+  .tag.op:hover { background: #ffedd5; }
+  .tag-add { color: var(--accent); cursor: pointer; font-size: 11px; opacity: .7; }
+  .tag-add:hover { opacity: 1; text-decoration: underline; }
+  .op-note { color: var(--text-muted); font-size: 11px; display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .admin-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; font-size: 12px; color: var(--text-muted); }
+  .admin-bar input { padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+  .admin-bar button { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+  .admin-bar button:hover { background: #f8fafc; }
+  .admin-bar .on { color: var(--green); }
   footer { color: var(--text-muted); font-size: 12px; margin-top: 18px; line-height: 1.8; }
   footer a { color: var(--accent); text-decoration: none; }
   #key-gate { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 24px; max-width: 420px; margin: 80px auto; display: none; }
@@ -94,10 +104,14 @@
     </div>
     <div class="panel">
       <h2>活跃实例<small>近 30 天 · 最多展示 300 个</small></h2>
+      <div class="admin-bar" id="admin-bar">
+        <span id="admin-status">运维标记：未启用</span>
+        <button id="admin-toggle" type="button">输入运维密钥</button>
+      </div>
       <div id="empty">还没有实例上报。生产实例会在启动约 2 分钟后上报到 <code>POST /api/v1/report</code>，此后每 6 小时心跳一次。</div>
       <div class="table-wrap"><table id="inst-table" style="display:none">
         <thead><tr>
-          <th>实例</th><th>版本</th><th>模式</th><th>地区</th>
+          <th>实例</th><th>标记</th><th>版本</th><th>模式</th><th>地区</th>
           <th class="num">校园墙</th><th class="num">用户</th><th class="num">稿件</th><th class="num">Bot</th>
           <th>首次上报</th><th>最近上报</th>
         </tr></thead>
@@ -112,6 +126,8 @@
 (() => {
   "use strict";
   const KEY_STORAGE = "campux_dash_key";
+  const ADMIN_KEY_STORAGE = "campux_dash_admin_key";
+  let adminKey = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
   const $ = (id) => document.getElementById(id);
   const nf = new Intl.NumberFormat("zh-CN");
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -204,8 +220,13 @@
     } else {
       $("empty").style.display = "none";
       $("inst-table").style.display = "";
-      tbody.innerHTML = s.instances.map((it) => `<tr>
+      tbody.innerHTML = s.instances.map((it) => {
+        const opCell = it.label
+          ? `<span class="tag op" data-id="${esc(it.idShort)}" title="点击编辑运维标记">${esc(it.label)}</span>${it.note ? `<span class="op-note" title="${esc(it.note)}">${esc(it.note)}</span>` : ""}`
+          : (adminKey ? `<span class="tag-add" data-id="${esc(it.idShort)}">+ 标记</span>` : '<span style="color:#cbd5e1">—</span>');
+        return `<tr>
         <td><span class="${it.online ? "online" : "offline"}"></span><span class="inst">${esc(it.idShort)}</span>${it.name ? ` <span class="tag">${esc(it.name)}</span>` : ""}</td>
+        <td>${opCell}</td>
         <td class="inst">${esc(it.version)}</td>
         <td>${esc(it.deployMode)}${it.environment !== "production" ? ' <span class="tag">' + esc(it.environment) + "</span>" : ""}</td>
         <td>${it.country ? esc(it.country) : "—"}</td>
@@ -215,7 +236,9 @@
         <td class="num">${nf.format(it.botsEnabled)}</td>
         <td>${new Date(it.firstSeenAt).toLocaleDateString("zh-CN")}</td>
         <td title="${new Date(it.lastSeenAt).toLocaleString("zh-CN")}">${relTime(it.lastSeenAt)}</td>
-      </tr>`).join("");
+      </tr>`;
+      }).join("");
+      wireTagEditors(s.instances);
     }
 
     $("meta").textContent = `统计口径：生产实例 · 更新于 ${new Date(s.generatedAt).toLocaleString("zh-CN")} · 每 60 秒自动刷新`;
@@ -223,6 +246,71 @@
       (s.totals.nonProductionActive7d > 0 ? `另有 ${nf.format(s.totals.nonProductionActive7d)} 个非生产实例（开发/测试）近 7 天有上报，未计入上方统计。<br/>` : "") +
       `实例每 6 小时匿名上报一次聚合计数，不含任何用户内容或身份信息 · <a href="https://docs.campux.top/admin/telemetry" target="_blank" rel="noopener">遥测说明与退出方式</a>`;
   }
+
+  // ---- Operator instance tagging ----------------------------------------
+  function updateAdminStatus() {
+    const status = $("admin-status");
+    const toggle = $("admin-toggle");
+    if (adminKey) {
+      status.innerHTML = '运维标记：<span class="on">已启用</span>（点击实例行的标记可编辑）';
+      toggle.textContent = "退出运维";
+    } else {
+      status.textContent = "运维标记：未启用";
+      toggle.textContent = "输入运维密钥";
+    }
+  }
+
+  async function saveTag(idShort, label, note) {
+    const res = await fetch(`/api/v1/instances/${encodeURIComponent(idShort)}/tag`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-admin-key": adminKey },
+      body: JSON.stringify({ label, note }),
+    });
+    if (res.status === 401) { alert("运维密钥无效。"); return false; }
+    if (res.status === 404) { alert("该实例不存在，或服务端未启用运维标记（CAMPUX_DASH_ADMIN_KEY 未设置）。"); return false; }
+    if (res.status === 409) { alert("实例短 ID 不唯一，请用更长的前缀。"); return false; }
+    if (!res.ok) { alert("保存失败（" + res.status + "）。"); return false; }
+    return true;
+  }
+
+  function editTag(idShort, current) {
+    if (!adminKey) return;
+    const label = prompt(`实例 ${idShort} 的运维标记（留空清除）：`, current.label || "");
+    if (label === null) return; // cancelled
+    let note = current.note || "";
+    if (label.trim()) {
+      const n = prompt("备注（可选，留空表示无）：", note);
+      if (n === null) return;
+      note = n;
+    } else {
+      note = "";
+    }
+    saveTag(idShort, label.trim(), note.trim()).then((ok) => { if (ok) load().catch(() => {}); });
+  }
+
+  function wireTagEditors(instances) {
+    const byId = new Map(instances.map((it) => [it.idShort, it]));
+    document.querySelectorAll("#inst-table .tag.op, #inst-table .tag-add").forEach((el) => {
+      el.addEventListener("click", () => {
+        const it = byId.get(el.getAttribute("data-id"));
+        editTag(el.getAttribute("data-id"), { label: it && it.label, note: it && it.note });
+      });
+    });
+  }
+
+  $("admin-toggle").addEventListener("click", () => {
+    if (adminKey) {
+      adminKey = "";
+      localStorage.removeItem(ADMIN_KEY_STORAGE);
+    } else {
+      const k = prompt("输入运维密钥（CAMPUX_DASH_ADMIN_KEY）：", "");
+      if (k === null) return;
+      adminKey = k.trim();
+      if (adminKey) localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+    }
+    updateAdminStatus();
+    load().catch(() => {});
+  });
 
   async function load() {
     const key = localStorage.getItem(KEY_STORAGE);
@@ -247,6 +335,7 @@
   });
   $("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("key-submit").click(); });
 
+  updateAdminStatus();
   load().catch(() => { $("meta").textContent = "加载失败，稍后自动重试…"; });
   setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60_000);
 })();

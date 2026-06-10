@@ -14,6 +14,7 @@ const db = openDashDatabase(config.dbPath);
 const app = createDashServer({
   db,
   accessKey: config.accessKey,
+  adminKey: config.adminKey,
   logger: { level: config.nodeEnv === "production" ? "info" : "debug" },
 });
 
@@ -34,6 +35,10 @@ app.addHook("onClose", async () => {
 
 await app.listen({ host: config.host, port: config.port });
 app.log.info(
-  { dbPath: config.dbPath, accessKeyConfigured: Boolean(config.accessKey) },
+  {
+    dbPath: config.dbPath,
+    accessKeyConfigured: Boolean(config.accessKey),
+    adminKeyConfigured: Boolean(config.adminKey),
+  },
   "campux-dash collector listening",
 );

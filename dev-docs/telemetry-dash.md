@@ -54,7 +54,31 @@ docker build -f apps/dash/Dockerfile -t rockchin/campux-dash .
 | `CAMPUX_DASH_HOST` / `CAMPUX_DASH_PORT` | `0.0.0.0` / `8990` | 监听地址 |
 | `CAMPUX_DASH_DB_PATH` | `./data/campux-dash.sqlite` | SQLite 路径（容器内为 `/data/campux-dash.sqlite`，挂卷持久化） |
 | `CAMPUX_DASH_ACCESS_KEY` | 空 | 设置后保护看板与 stats API |
+| `CAMPUX_DASH_ADMIN_KEY` | 空 | 设置后开放**运维标记**写接口（给实例打标签/备注）；**不设置则标记接口直接 404**，看板只读。与读密钥相互独立 |
 | `CAMPUX_DASH_RETENTION_DAYS` | `400` | 原始心跳保留天数（实例快照永久保留） |
+
+## 运维标记（给各实例打标签）
+
+实例上报是**匿名**的——看板只暴露随机 UUID 的前 8 位，不知道每台实例对应哪所学校。运维标记让你（中心服务的维护者）在中心侧给实例加一个**人类可读的标签 + 备注**（例如「广州大学城 / 官方运营」「测试墙」），只存在中心库、不下发、不影响实例端隐私。
+
+- **存储**：独立的 `instance_tags` 表（`instance_id` 主键 + `label`/`note`/`updated_at`）。**故意不放在 `instances` 行上**——心跳上报会整行重写 `instances`，标记若混在里面会被覆盖。
+- **鉴权**：写接口由 `CAMPUX_DASH_ADMIN_KEY` 保护，**与看板读密钥 `CAMPUX_DASH_ACCESS_KEY` 完全独立**（看板可以公开只读，但写标记必须有运维密钥）。密钥只从 `X-Admin-Key` 头或 `Authorization: Bearer` 取，不走 query string，避免落进 CDN/反代访问日志。
+- **寻址**：用看板上显示的 8 位短 ID（也接受完整 UUID）。前缀唯一即可；不唯一返回 `409`，不存在返回 `404`。
+
+接口：
+
+```bash
+# 打标记（label 必填，note 可选；label/note 各自上限 80/280 字）
+curl -X PUT https://dash.campux.top/api/v1/instances/<短ID>/tag \
+  -H 'X-Admin-Key: <CAMPUX_DASH_ADMIN_KEY>' -H 'content-type: application/json' \
+  -d '{"label":"广州大学城","note":"官方运营实例"}'
+
+# 清除标记（label 与 note 都留空亦可，等价于删除）
+curl -X DELETE https://dash.campux.top/api/v1/instances/<短ID>/tag \
+  -H 'X-Admin-Key: <CAMPUX_DASH_ADMIN_KEY>'
+```
+
+看板上的操作：实例表新增「标记」列。设置了运维密钥后，点表格上方「输入运维密钥」存入浏览器（localStorage），即可点任意实例行的标记（或「+ 标记」）就地编辑。标记会作为橙色标签显示，备注作为灰色副文本。
 
 ## 运维要点
 
