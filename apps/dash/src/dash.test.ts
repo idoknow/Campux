@@ -332,6 +332,16 @@ describe("collector HTTP API", () => {
     expect(page.body).toContain("Campux 遥测");
     await app.close();
   });
+
+  test("robots.txt disallows all crawling (private ops view)", async () => {
+    const db = freshDb();
+    const app = createDashServer({ db, now: () => NOW });
+    const res = await app.inject({ method: "GET", url: "/robots.txt" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body).toContain("Disallow: /");
+    await app.close();
+  });
 });
 
 describe("instance tagging (db)", () => {

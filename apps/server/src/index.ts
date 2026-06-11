@@ -83,6 +83,15 @@ registerReviewRoutes(app, queue, oneBot);
 registerStatsRoutes(app);
 registerSystemRoutes(app, queue);
 
+// Campux walls/console are private operating tools, not public content — keep
+// every host (app/admin/<wall>.campux.top) out of search engines. Served before
+// the SPA fallback so crawlers get a real robots.txt instead of the app shell.
+app.get("/robots.txt", async (_request, reply) => {
+  return reply
+    .header("content-type", "text/plain; charset=utf-8")
+    .send("User-agent: *\nDisallow: /\n");
+});
+
 const webDistDir = resolve(process.cwd(), config.webDistDir);
 if (existsSync(webDistDir)) {
   await app.register(fastifyStatic, {

@@ -149,6 +149,12 @@ export function createDashServer({ db, accessKey, adminKey, logger = false, now 
 
   app.get("/api/health", async () => ({ ok: true, service: "campux-dash" }));
 
+  // The telemetry dashboard is an internal operations view — keep it out of
+  // search engines entirely.
+  app.get("/robots.txt", async (_request, reply) =>
+    reply.header("content-type", "text/plain; charset=utf-8").send("User-agent: *\nDisallow: /\n"),
+  );
+
   // The dashboard shell is always served; with an access key configured it
   // renders a key prompt until /api/v1/stats accepts the key.
   const dashboardHtml = readFileSync(new URL("./dashboard.html", import.meta.url), "utf8");

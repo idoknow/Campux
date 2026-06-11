@@ -4,10 +4,20 @@ title: Campux 文档
 aside: false
 sidebar: false
 footer: false
+# This root page only redirects to /intro — keep it out of the sitemap and
+# search index so /intro is the canonical entry point.
+sitemap:
+  exclude: true
 head:
   - - meta
     - http-equiv: refresh
       content: 0; url=/intro
+  - - meta
+    - name: robots
+      content: noindex, follow
+  - - link
+    - rel: canonical
+      href: https://docs.campux.top/intro
 ---
 
 <script setup>
