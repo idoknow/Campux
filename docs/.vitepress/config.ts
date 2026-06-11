@@ -5,11 +5,54 @@ export default defineConfig({
   description: "Open-source campus wall operations platform",
   lang: "zh-CN",
   cleanUrls: true,
+  // Absolute base used for canonical / OG URLs and sitemap entries.
+  sitemap: {
+    hostname: "https://docs.campux.top",
+    // The root URL only redirects to /intro; drop it so /intro is the single
+    // indexed entry point.
+    transformItems: (items) => items.filter((item) => item.url !== "" && item.url !== "/"),
+  },
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["link", { rel: "apple-touch-icon", href: "/logo.svg" }],
     ["meta", { name: "theme-color", content: "#0190D5" }],
+    ["meta", { name: "author", content: "Campux" }],
+    ["meta", { name: "keywords", content: "Campux,校园墙,校园墙系统,校园墙运营,开源校园墙,投稿审核,QZone 发布,OneBot,自托管,文档" }],
+    // Global Open Graph / Twitter defaults; per-page title/description/url/canonical
+    // are injected in transformPageData below.
+    ["meta", { property: "og:site_name", content: "Campux 文档" }],
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { property: "og:locale", content: "zh_CN" }],
+    ["meta", { property: "og:image", content: "https://campux.top/assets/og-image.png" }],
+    ["meta", { property: "og:image:width", content: "1200" }],
+    ["meta", { property: "og:image:height", content: "630" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ["meta", { name: "twitter:image", content: "https://campux.top/assets/og-image.png" }],
   ],
+  // Inject per-page canonical + Open Graph URL/title/description so every doc
+  // page is independently shareable and indexable.
+  transformPageData(pageData) {
+    // The root index.md only redirects to /intro and sets its own
+    // noindex + canonical in frontmatter — don't double-inject here.
+    if (pageData.relativePath === "index.md") return;
+    const base = "https://docs.campux.top";
+    const path = pageData.relativePath.replace(/(index)?\.md$/, "").replace(/\/$/, "");
+    const url = path ? `${base}/${path}` : `${base}/`;
+    const title = pageData.frontmatter.title || pageData.title || "Campux 文档";
+    const description =
+      pageData.frontmatter.description ||
+      pageData.description ||
+      "Campux 开源校园墙运营系统文档：自助开墙、审核发布、机器人、自托管部署与运维。";
+    pageData.frontmatter.head ??= [];
+    pageData.frontmatter.head.push(
+      ["link", { rel: "canonical", href: url }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: description }],
+      ["meta", { name: "twitter:title", content: title }],
+      ["meta", { name: "twitter:description", content: description }],
+    );
+  },
   markdown: {
     config(md) {
       const defaultFence = md.renderer.rules.fence?.bind(md.renderer.rules);
