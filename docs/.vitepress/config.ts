@@ -38,7 +38,7 @@ export default defineConfig({
       {
         text: "开始",
         items: [
-          { text: "项目介绍", link: "/" },
+          { text: "项目介绍", link: "/intro" },
           { text: "自助开墙流程", link: "/operator/self-service-onboarding" },
           { text: "系统模型", link: "/concepts" },
         ],

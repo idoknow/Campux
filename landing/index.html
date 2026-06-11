@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Campux · 开源校园墙运营系统</title>
+<meta name="description" content="Campux 是面向校园墙运营管理员的开源平台：投稿、审核、Bot、QZone 发布与运维一体化。支持多墙统一管理、自托管部署。" />
+<meta name="theme-color" content="#0190D5" />
+<link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+<meta property="og:title" content="Campux · 开源校园墙运营系统" />
+<meta property="og:description" content="面向校园墙运营管理员的投稿、审核、Bot、发布与运维一体化平台。" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://campux.top" />
+<style>
+  :root {
+    --bg: #f3f5f8;
+    --surface: #ffffff;
+    --surface-muted: #f8fafc;
+    --border: #dbe3ee;
+    --border-soft: #e8edf3;
+    --primary: #0190d5;
+    --primary-deep: #0072d3;
+    --primary-soft: #e9f4fc;
+    --accent: #27d6fe;
+    --text: #172033;
+    --text-secondary: #33445c;
+    --text-muted: #5b6f91;
+    --text-subtle: #8aa0b8;
+    --warning: #d97706;
+    --warning-bg: #fff7e6;
+    --warning-border: #ffd591;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-pill: 999px;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 6px 24px rgba(15, 23, 42, 0.06);
+    --maxw: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- Header ---------- */
+  header.site {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255, 255, 255, 0.86);
+    backdrop-filter: saturate(160%) blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img { width: 30px; height: 30px; display: block; }
+  .brand .name { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+  .brand .name span { color: var(--primary-deep); }
+  .nav-links { display: flex; align-items: center; gap: 4px; }
+  .nav-links a {
+    padding: 7px 13px; border-radius: var(--radius-pill);
+    font-size: 14px; font-weight: 600; color: var(--text-secondary);
+    transition: background .15s, color .15s;
+  }
+  .nav-links a:hover { background: var(--primary-soft); color: var(--primary-deep); }
+  .nav-cta {
+    background: var(--primary) !important; color: #fff !important;
+    box-shadow: var(--shadow-sm);
+  }
+  .nav-cta:hover { background: var(--primary-deep) !important; color: #fff !important; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 76px 0 52px; }
+  .hero-grid {
+    display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 48px; align-items: center;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-pill); padding: 5px 13px;
+    font-size: 13px; font-weight: 700; color: var(--text-muted);
+    box-shadow: var(--shadow-sm); margin-bottom: 22px;
+  }
+  .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; }
+  .hero h1 {
+    margin: 0 0 18px; font-size: 46px; line-height: 1.12; font-weight: 850;
+    letter-spacing: -0.02em;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(100deg, var(--primary-deep), var(--accent));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .hero p.lead { margin: 0 0 30px; font-size: 17.5px; color: var(--text-secondary); max-width: 540px; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 46px; padding: 0 22px; border-radius: var(--radius-md);
+    font-size: 15px; font-weight: 700; cursor: pointer;
+    border: 1px solid transparent; transition: all .15s;
+  }
+  .btn-primary { background: var(--primary); color: #fff; box-shadow: var(--shadow-sm); }
+  .btn-primary:hover { background: var(--primary-deep); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+  .btn-ghost { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: var(--primary); color: var(--primary-deep); }
+  .hero-meta { margin-top: 26px; display: flex; gap: 26px; flex-wrap: wrap; }
+  .hero-meta div { font-size: 13.5px; color: var(--text-muted); }
+  .hero-meta b { display: block; font-size: 22px; font-weight: 800; color: var(--text); }
+
+  .hero-art {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+  .hero-art .bar {
+    display: flex; align-items: center; gap: 7px; padding: 11px 14px;
+    border-bottom: 1px solid var(--border-soft); background: var(--surface-muted);
+  }
+  .hero-art .bar i { width: 11px; height: 11px; border-radius: 50%; background: #e2e8f0; display: block; }
+  .hero-art img { width: 100%; display: block; }
+
+  /* ---------- Section scaffolding ---------- */
+  section.block { padding: 56px 0; }
+  .sec-head { max-width: 680px; margin: 0 auto 40px; text-align: center; }
+  .sec-head .kicker {
+    font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--primary-deep); margin-bottom: 10px;
+  }
+  .sec-head h2 { margin: 0 0 10px; font-size: 30px; font-weight: 820; letter-spacing: -0.02em; }
+  .sec-head p { margin: 0; color: var(--text-muted); font-size: 16px; }
+
+  /* ---------- Feature cards (4) ---------- */
+  .feat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .feat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--shadow-sm);
+    transition: border-color .15s, transform .15s;
+  }
+  .feat:hover { border-color: #c2d3e6; transform: translateY(-2px); }
+  .feat .ic {
+    width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
+    background: var(--primary-soft); color: var(--primary-deep); margin-bottom: 14px;
+  }
+  .feat h3 { margin: 0 0 7px; font-size: 16px; font-weight: 750; }
+  .feat p { margin: 0; font-size: 13.5px; color: var(--text-muted); line-height: 1.6; }
+
+  /* ---------- Feature rows (table content -> alternating) ---------- */
+  .rows { display: flex; flex-direction: column; gap: 22px; }
+  .frow {
+    display: grid; grid-template-columns: 1fr 1.25fr; gap: 36px; align-items: center;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 26px; box-shadow: var(--shadow-sm);
+  }
+  .frow:nth-child(even) .ftext { order: 2; }
+  .frow .badge-n {
+    display: inline-block; font-size: 12.5px; font-weight: 800; color: var(--primary-deep);
+    background: var(--primary-soft); border-radius: var(--radius-pill);
+    padding: 3px 11px; margin-bottom: 13px;
+  }
+  .frow h3 { margin: 0 0 9px; font-size: 20px; font-weight: 780; letter-spacing: -0.01em; }
+  .frow p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+  .frow .shot {
+    border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;
+    box-shadow: var(--shadow-sm); background: var(--surface-muted);
+  }
+  .frow .shot img { width: 100%; display: block; aspect-ratio: 16 / 10; object-fit: cover; object-position: top center; }
+
+  /* ---------- Gallery ---------- */
+  .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .gallery .g {
+    border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
+    background: var(--surface); box-shadow: var(--shadow-sm);
+  }
+  .gallery .g.wide { grid-column: 1 / -1; }
+  .gallery .g .cap {
+    padding: 11px 16px; font-size: 13.5px; font-weight: 650; color: var(--text-muted);
+    border-bottom: 1px solid var(--border-soft); background: var(--surface-muted);
+  }
+  .gallery .g img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover; object-position: top center; }
+  .gallery .g.wide img { aspect-ratio: 40 / 13; }
+
+  /* ---------- Audience / paths ---------- */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 26px; box-shadow: var(--shadow-sm);
+  }
+  .panel h3 { margin: 0 0 14px; font-size: 18px; font-weight: 780; }
+  .panel ol, .panel ul { margin: 0; padding-left: 20px; color: var(--text-secondary); }
+  .panel li { margin: 8px 0; font-size: 14.5px; }
+  .panel li a { color: var(--primary-deep); font-weight: 650; }
+  .panel li a:hover { text-decoration: underline; }
+
+  /* ---------- CTA band ---------- */
+  .cta-band {
+    background: linear-gradient(120deg, var(--primary-deep), var(--primary) 60%, var(--accent));
+    border-radius: var(--radius-lg); padding: 48px 40px; text-align: center; color: #fff;
+    box-shadow: var(--shadow-md);
+  }
+  .cta-band h2 { margin: 0 0 10px; font-size: 28px; font-weight: 820; letter-spacing: -0.01em; }
+  .cta-band p { margin: 0 0 24px; opacity: 0.92; font-size: 16px; }
+  .cta-band .btn-row { justify-content: center; }
+  .cta-band .btn-light { background: #fff; color: var(--primary-deep); }
+  .cta-band .btn-light:hover { background: #f0f7fd; }
+  .cta-band .btn-outline { background: transparent; color: #fff; border-color: rgba(255,255,255,.55); }
+  .cta-band .btn-outline:hover { background: rgba(255,255,255,.12); }
+
+  /* ---------- Footer ---------- */
+  footer.site { border-top: 1px solid var(--border); background: var(--surface); margin-top: 56px; }
+  .foot { display: flex; justify-content: space-between; gap: 32px; padding: 40px 0; flex-wrap: wrap; }
+  .foot .col-brand { max-width: 300px; }
+  .foot .brand { margin-bottom: 12px; }
+  .foot .col-brand p { margin: 0; color: var(--text-muted); font-size: 13.5px; }
+  .foot-links { display: flex; gap: 56px; flex-wrap: wrap; }
+  .foot-links .grp h4 { margin: 0 0 12px; font-size: 13px; font-weight: 750; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.04em; }
+  .foot-links .grp a { display: block; margin: 8px 0; font-size: 14px; color: var(--text-secondary); }
+  .foot-links .grp a:hover { color: var(--primary-deep); }
+  .foot-bottom { border-top: 1px solid var(--border-soft); padding: 18px 0; font-size: 13px; color: var(--text-subtle); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 940px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+    .feat-grid { grid-template-columns: repeat(2, 1fr); }
+    .frow { grid-template-columns: 1fr; gap: 20px; }
+    .frow:nth-child(even) .ftext { order: 0; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 620px) {
+    .hero h1 { font-size: 34px; }
+    .feat-grid { grid-template-columns: 1fr; }
+    .gallery { grid-template-columns: 1fr; }
+    .nav-links a:not(.nav-cta) { display: none; }
+    .hero { padding: 48px 0 36px; }
+    .sec-head h2 { font-size: 25px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="brand" href="/">
+      <img src="/assets/logo.svg" alt="Campux logo" />
+      <span class="name">Camp<span>ux</span></span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#gallery">界面</a>
+      <a href="https://docs.campux.top/intro">文档</a>
+      <a href="https://github.com/idoknow/Campux" target="_blank" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="https://docs.campux.top/operator/self-service-onboarding">自助开墙</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- Hero -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="ftext">
+        <span class="eyebrow"><span class="dot"></span> 开源 · 自托管 · 多墙统一管理</span>
+        <h1>开源<span class="grad">校园墙</span>运营系统</h1>
+        <p class="lead">面向校园墙运营管理员的投稿、审核、Bot、QZone 发布与运维一体化平台。一个实例，统一管理多个校园墙。</p>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="https://docs.campux.top/operator/self-service-onboarding">
+            自助开墙
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="https://docs.campux.top/getting-started">部署快速开始</a>
+        </div>
+        <div class="hero-meta">
+          <div><b>多墙</b>统一管理</div>
+          <div><b>OneBot</b>原生接入</div>
+          <div><b>QZone</b>自动发布</div>
+        </div>
+      </div>
+      <div class="hero-art">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <img src="/assets/screenshots/review-board.png" alt="Campux 稿件审核工作台" loading="eager" />
+      </div>
+    </div>
+  </section>
+
+  <!-- Feature cards -->
+  <section class="block" id="why">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Why Campux</div>
+        <h2>为校园墙运营而生</h2>
+        <p>从投稿到发布的完整闭环，配合原生 Bot 接入与面向自托管的部署方式。</p>
+      </div>
+      <div class="feat-grid">
+        <div class="feat">
+          <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+          <h3>多墙统一管理</h3>
+          <p>一个实例管理多个校园墙，账号、成员身份、专属 host 和运维面板统一维护。</p>
+        </div>
+        <div class="feat">
+          <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <h3>审核到发布闭环</h3>
+          <p>网页审核、审核群命令、QZone 发布、失败重试和详细发布日志串成完整链路。</p>
+        </div>
+        <div class="feat">
+          <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 14h.01M15 14h.01"/></svg></div>
+          <h3>Bot 原生接入</h3>
+          <p>支持 OneBot v11 WebSocket，机器人注册、重置密码、审核命令、扫码登录和 cookies 检查。</p>
+        </div>
+        <div class="feat">
+          <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg></div>
+          <h3>面向自托管</h3>
+          <p>使用 PostgreSQL、S3/MinIO、Docker Compose 和自动迁移，适合个人或团队部署。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core features (from docs table) -->
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">核心功能</div>
+        <h2>覆盖运营全流程</h2>
+        <p>从双投稿渠道到自动发布、登录态维护、数据统计与评论回流。</p>
+      </div>
+      <div class="rows">
+        <div class="frow">
+          <div class="ftext">
+            <span class="badge-n">投稿</span>
+            <h3>网页、私聊双重投稿渠道</h3>
+            <p>网页端和 QQ 私聊墙号机器人均可投稿，两个入口统一进入同一条审核流程。</p>
+          </div>
+          <div class="shot"><img src="/assets/screenshots/features/submission-channels.png" alt="网页与私聊双投稿渠道" loading="lazy" /></div>
+        </div>
+        <div class="frow">
+          <div class="ftext">
+            <span class="badge-n">发布</span>
+            <h3>自动发表到空间，支持单条 / 多条</h3>
+            <p>稿件通过审核后自动发表到 QQ 空间，既支持单条即时发布，也支持多条稿件合并为一条说说发布；失败可重试，发布日志可追溯。</p>
+          </div>
+          <div class="shot"><img src="/assets/screenshots/features/auto-publish.png" alt="自动发表到 QQ 空间" loading="lazy" /></div>
+        </div>
+        <div class="frow">
+          <div class="ftext">
+            <span class="badge-n">登录态</span>
+            <h3>自动获取登录信息，省心快捷</h3>
+            <p>协议自动获取与扫码登录两种方式维护 QZone 登录态，定时检测、失效自动刷新，无需手动抓取 cookies。</p>
+          </div>
+          <div class="shot"><img src="/assets/screenshots/features/auto-login.png" alt="自动获取登录信息" loading="lazy" /></div>
+        </div>
+        <div class="frow">
+          <div class="ftext">
+            <span class="badge-n">统计</span>
+            <h3>投稿量、访客量统计图表</h3>
+            <p>统计看板以图表展示投稿量、空间访客量等运营数据，支持多时间范围切换，活跃度与发布质量一目了然。</p>
+          </div>
+          <div class="shot"><img src="/assets/screenshots/features/stats-charts.png" alt="投稿量与访客量统计图表" loading="lazy" /></div>
+        </div>
+        <div class="frow">
+          <div class="ftext">
+            <span class="badge-n">互动</span>
+            <h3>评论同步展示、定时通知投稿人</h3>
+            <p>QQ 空间评论自动同步到站内稿件页展示；投稿人关注自己的稿件后，会定时收到新评论摘要的私聊通知。</p>
+          </div>
+          <div class="shot"><img src="/assets/screenshots/features/comment-sync.png" alt="评论同步展示与定时通知" loading="lazy" /></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gallery -->
+  <section class="block" id="gallery">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">产品界面</div>
+        <h2>真实的产品工作台</h2>
+        <p>核心工作台由投稿、稿件审核、租户管理、机器人、发布目标和统计看板组成。以下页面均来自实际产品界面。</p>
+      </div>
+      <div class="gallery">
+        <div class="g wide">
+          <div class="cap">统计看板</div>
+          <img src="/assets/screenshots/stats-dashboard.png" alt="Campux 统计看板" loading="lazy" />
+        </div>
+        <div class="g">
+          <div class="cap">稿件审核工作台</div>
+          <img src="/assets/screenshots/review-board.png" alt="稿件审核工作台" loading="lazy" />
+        </div>
+        <div class="g">
+          <div class="cap">系统运维面板</div>
+          <img src="/assets/screenshots/ops-panel.png" alt="系统运维面板" loading="lazy" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Audience + reading paths -->
+  <section class="block" id="docs">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">从这里开始</div>
+        <h2>面向不同角色的文档</h2>
+        <p>文档主要面向校园墙运营管理员，同时覆盖自托管系统维护者。</p>
+      </div>
+      <div class="two-col">
+        <div class="panel">
+          <h3>校园墙运营管理员</h3>
+          <ol>
+            <li>自助开墙：先读 <a href="https://docs.campux.top/operator/self-service-onboarding">自助开墙流程</a>。</li>
+            <li>接手校园墙：读 <a href="https://docs.campux.top/operator/overview">运营工作台</a> 和 <a href="https://docs.campux.top/operator/review-and-publish">审核与发布</a>。</li>
+            <li>接入机器人：读 <a href="https://docs.campux.top/operator/bots">机器人管理</a> 和 <a href="https://docs.campux.top/reference/onebot">OneBot 接入</a>。</li>
+          </ol>
+        </div>
+        <div class="panel">
+          <h3>系统维护者（自托管）</h3>
+          <ul>
+            <li>部署上手：<a href="https://docs.campux.top/getting-started">快速开始</a>。</li>
+            <li>运维与多租户：<a href="https://docs.campux.top/admin/overview">运维面板</a>、<a href="https://docs.campux.top/admin/tenant-lifecycle">租户生命周期</a>。</li>
+            <li>安全基线：<a href="https://docs.campux.top/admin/security">安全基线</a> 与 <a href="https://docs.campux.top/admin/accounts">账号与权限</a>。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA band -->
+  <section class="block">
+    <div class="wrap">
+      <div class="cta-band">
+        <h2>给你的校园墙一套顺手的运营系统</h2>
+        <p>免费、开源、可自托管。几分钟即可自助开墙或部署你自己的实例。</p>
+        <div class="btn-row">
+          <a class="btn btn-light" href="https://docs.campux.top/operator/self-service-onboarding">自助开墙</a>
+          <a class="btn btn-outline" href="https://github.com/idoknow/Campux" target="_blank" rel="noopener">在 GitHub 上查看</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap foot">
+    <div class="col-brand">
+      <a class="brand" href="/">
+        <img src="/assets/logo.svg" alt="Campux logo" />
+        <span class="name">Camp<span>ux</span></span>
+      </a>
+      <p>开源校园墙运营系统。投稿、审核、Bot、发布与运维一体化。</p>
+    </div>
+    <div class="foot-links">
+      <div class="grp">
+        <h4>产品</h4>
+        <a href="#features">核心功能</a>
+        <a href="#gallery">产品界面</a>
+        <a href="https://app.campux.top">登录控制台</a>
+      </div>
+      <div class="grp">
+        <h4>文档</h4>
+        <a href="https://docs.campux.top/intro">项目介绍</a>
+        <a href="https://docs.campux.top/operator/self-service-onboarding">自助开墙</a>
+        <a href="https://docs.campux.top/getting-started">部署快速开始</a>
+      </div>
+      <div class="grp">
+        <h4>开源</h4>
+        <a href="https://github.com/idoknow/Campux" target="_blank" rel="noopener">GitHub 仓库</a>
+        <a href="https://docs.campux.top/contributing/local-development">参与开发</a>
+        <a href="https://docs.campux.top/admin/telemetry">匿名遥测</a>
+      </div>
+    </div>
+  </div>
+  <div class="wrap foot-bottom">
+    <span>© 2026 Campux · 开源校园墙运营系统</span>
+    <span>Powered by Campux</span>
+  </div>
+</footer>
+
+</body>
+</html>
