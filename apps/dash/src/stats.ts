@@ -240,11 +240,18 @@ export function computeStats(db: Database, scope: StatsEnvScope, now: Date): Das
 
 /**
  * Fleet-wide increase of a monotonic per-instance counter per day (posts or
- * users): take the last value an instance reported per day, then sum positive
- * day-over-day deltas across instances. An instance's first observed day
- * contributes nothing (no baseline), a counter reset (restore, wipe) clamps to
- * zero instead of going negative, and a multi-day gap attributes the whole
- * catch-up to the day the instance reappears.
+ * users): walk each instance's reports in chronological order and sum positive
+ * deltas between consecutive reports, attributing each delta to the day of the
+ * later report. This captures intraday growth (multiple reports land in a day)
+ * and same-day growth on an instance's first observed day — only the very first
+ * report of an instance is a pure baseline that contributes nothing. A counter
+ * reset (restore, wipe) clamps to zero instead of going negative, and a
+ * multi-day gap attributes the whole catch-up to the day the instance reappears.
+ *
+ * A previous version grouped by (instance, day) taking the daily MAX and then
+ * diffed day-over-day. That dropped all intraday growth and, crucially, lost the
+ * entire first observed day — so a brand-new instance's same-day signups never
+ * showed up. Consecutive-report deltas fix both.
  */
 export function computeDailyCounterDeltas(
   db: Database,
@@ -256,10 +263,9 @@ export function computeDailyCounterDeltas(
   const lookbackStart = formatDay(new Date(now.getTime() - (chartDays.length + 7) * DAY_MS));
   const rows = db
     .query(
-      `SELECT instance_id, day, MAX(${column}) AS metric FROM reports
+      `SELECT instance_id, day, ${column} AS metric FROM reports
        WHERE day >= ? ${envClause}
-       GROUP BY instance_id, day
-       ORDER BY instance_id ASC, day ASC`,
+       ORDER BY instance_id ASC, received_at ASC, id ASC`,
     )
     .all(lookbackStart) as { instance_id: string; day: string; metric: number }[];
 
