@@ -101,10 +101,9 @@ export type IngestMeta = {
   receivedAt: Date;
   // ISO 3166-1 alpha-2, from the CDN edge (e.g. CF-IPCountry) when available.
   country: string | null;
-  // ISO 3166-2 subdivision code without the country prefix (e.g. "GD" for
-  // 广东), from the CDN edge (e.g. CF-Region-Code) when available. Used to
-  // surface a province-level distribution; China-only deployment so these map
-  // to Chinese provinces. Optional: older callers / tests may omit it.
+  // Resolved mainland-China province name (e.g. "广东省"), derived at ingest from
+  // the reporting IP via offline ip2region lookup. null for overseas / private /
+  // unlocatable IPs. Optional: older callers / tests may omit it.
   region?: string | null;
 };
 

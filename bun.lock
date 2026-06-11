@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "campux-next",
@@ -20,6 +19,7 @@
       "dependencies": {
         "@campux/telemetry": "workspace:*",
         "fastify": "^5.3.3",
+        "ip2region-ts": "^2.0.1",
         "zod": "^3.24.4",
       },
       "devDependencies": {
@@ -1456,6 +1456,8 @@
     "internmap": ["internmap@2.0.3", "", {}, "sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg=="],
 
     "ip-address": ["ip-address@10.2.0", "", {}, "sha512-/+S6j4E9AHvW9SWMSEY9Xfy66O5PWvVEJ08O0y5JGyEKQpojb0K0GKpz/v5HJ/G0vi3D2sjGK78119oXZeE0qA=="],
+
+    "ip2region-ts": ["ip2region-ts@2.0.1", "", {}, "sha512-zZkNgAUVlneofpRu/cYhjrZ/fVLX5/9sYoW0Ha+OqAt4LGFsyuAiynRnmw0JY/CMfa1DamD/AmqJ5hfXRpjCTA=="],
 
     "ipaddr.js": ["ipaddr.js@2.4.0", "", {}, "sha512-9VGk3HGanVE6JoZXHiCpnGy5X0jYDnN4EA4lntFPj+1vIWlFhIylq2CrrCOJH9EAhc5CYhq18F2Av2tgoAPsYQ=="],
 
