@@ -177,20 +177,22 @@ describe("computeStats", () => {
     expect(stats.dailyNewUsers).toHaveLength(30);
   });
 
-  test("province distribution maps CN region codes to Chinese provinces, sorted desc", () => {
+  test("province distribution groups instances by resolved province, sorted desc", () => {
     const db = freshDb();
-    ingestReport(db, report({ instanceId: "a1111111-1111-4111-8111-111111111111" }), { receivedAt: NOW, country: "CN", region: "GD" });
-    ingestReport(db, report({ instanceId: "a2222222-2222-4222-8222-222222222222" }), { receivedAt: NOW, country: "CN", region: "GD" });
-    ingestReport(db, report({ instanceId: "a3333333-3333-4333-8333-333333333333" }), { receivedAt: NOW, country: "CN", region: "11" });
+    // `region` now holds a resolved Chinese province name (filled at ingest from
+    // the reporting IP), so the distribution groups on it directly.
+    ingestReport(db, report({ instanceId: "a1111111-1111-4111-8111-111111111111" }), { receivedAt: NOW, country: "CN", region: "广东省" });
+    ingestReport(db, report({ instanceId: "a2222222-2222-4222-8222-222222222222" }), { receivedAt: NOW, country: "CN", region: "广东省" });
+    ingestReport(db, report({ instanceId: "a3333333-3333-4333-8333-333333333333" }), { receivedAt: NOW, country: "CN", region: "北京" });
     ingestReport(db, report({ instanceId: "a4444444-4444-4444-8444-444444444444" }), { receivedAt: NOW, country: "CN", region: null });
     const stats = computeStats(db, "production", NOW);
     expect(stats.regionDistribution).toEqual([
-      { key: "广东", count: 2 },
+      { key: "广东省", count: 2 },
       { key: "北京", count: 1 },
     ]);
     // the instance row carries the resolved province
     const gd = stats.instances.find((i) => i.idShort === "a1111111");
-    expect(gd?.province).toBe("广东");
+    expect(gd?.province).toBe("广东省");
   });
 
   test("size distribution buckets instances by user count", () => {
@@ -255,14 +257,37 @@ describe("collector HTTP API", () => {
     await app.close();
   });
 
-  test("stores the CDN region header and resolves it to a province", async () => {
+  test("resolves the reporting IP to a Chinese province via offline geo lookup", async () => {
     const db = freshDb();
     const app = createDashServer({ db, now: () => NOW });
-    await app.inject({ method: "POST", url: "/api/v1/report", payload: report(), headers: { "cf-ipcountry": "cn", "cf-region-code": "gd" } });
-    expect((db.query("SELECT region FROM instances").get() as { region: string }).region).toBe("GD");
+    // trustProxy is on, so request.ip comes from X-Forwarded-For. 210.21.196.6
+    // is a Guangdong (广东省) address in the ip2region database.
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/report",
+      payload: report(),
+      headers: { "cf-ipcountry": "cn", "x-forwarded-for": "210.21.196.6" },
+    });
+    expect((db.query("SELECT region FROM instances").get() as { region: string }).region).toBe("广东省");
     const stats = computeStats(db, "production", NOW);
-    expect(stats.regionDistribution).toEqual([{ key: "广东", count: 1 }]);
-    expect(stats.instances[0]!.province).toBe("广东");
+    expect(stats.regionDistribution).toEqual([{ key: "广东省", count: 1 }]);
+    expect(stats.instances[0]!.province).toBe("广东省");
+    await app.close();
+  });
+
+  test("leaves province null for overseas / private reporting IPs", async () => {
+    const db = freshDb();
+    const app = createDashServer({ db, now: () => NOW });
+    // 8.8.8.8 is a US address; geo lookup must not assign a Chinese province.
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/report",
+      payload: report(),
+      headers: { "x-forwarded-for": "8.8.8.8" },
+    });
+    expect((db.query("SELECT region FROM instances").get() as { region: string | null }).region).toBeNull();
+    const stats = computeStats(db, "production", NOW);
+    expect(stats.regionDistribution).toEqual([]);
     await app.close();
   });
 

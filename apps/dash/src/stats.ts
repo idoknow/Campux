@@ -8,38 +8,10 @@ const ONLINE_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 export type StatsEnvScope = "production" | "all";
 
-// ISO 3166-2:CN subdivision code (the part after "CN-") -> Chinese province
-// name. Cloudflare's CF-Region-Code gives these for mainland visitors. Campux
-// is a China-only product, so a province-level breakdown is the useful geo cut.
-const CN_PROVINCES: Record<string, string> = {
-  BJ: "北京", TJ: "天津", HE: "河北", SX: "山西", NM: "内蒙古",
-  LN: "辽宁", JL: "吉林", HL: "黑龙江", SH: "上海", JS: "江苏",
-  ZJ: "浙江", AH: "安徽", FJ: "福建", JX: "江西", SD: "山东",
-  HA: "河南", HB: "湖北", HN: "湖南", GD: "广东", GX: "广西",
-  HI: "海南", CQ: "重庆", SC: "四川", GZ: "贵州", YN: "云南",
-  XZ: "西藏", SN: "陕西", GS: "甘肃", QH: "青海", NX: "宁夏",
-  XJ: "新疆", TW: "台湾", HK: "香港", MO: "澳门",
-};
-
-// Cloudflare sometimes emits numeric region codes for CN (e.g. "11" = 北京).
-const CN_NUMERIC: Record<string, string> = {
-  "11": "北京", "12": "天津", "13": "河北", "14": "山西", "15": "内蒙古",
-  "21": "辽宁", "22": "吉林", "23": "黑龙江", "31": "上海", "32": "江苏",
-  "33": "浙江", "34": "安徽", "35": "福建", "36": "江西", "37": "山东",
-  "41": "河南", "42": "湖北", "43": "湖南", "44": "广东", "45": "广西",
-  "46": "海南", "50": "重庆", "51": "四川", "52": "贵州", "53": "云南",
-  "54": "西藏", "61": "陕西", "62": "甘肃", "63": "青海", "64": "宁夏",
-  "65": "新疆", "71": "台湾", "81": "香港", "82": "澳门",
-};
-
-export function regionLabel(country: string | null, region: string | null): string {
-  if (!region) return "未知";
-  if (country === "CN" || /^[0-9]/.test(region)) {
-    return CN_PROVINCES[region] ?? CN_NUMERIC[region] ?? (country ? `${country}-${region}` : region);
-  }
-  return country ? `${country}-${region}` : region;
-}
-
+// Province distribution and the per-instance province come straight from the
+// `region` column, which the collector now fills with a resolved mainland-China
+// province name (e.g. "广东省") via offline ip2region IP lookup at ingest time.
+// No ISO-code mapping layer is needed any more.
 export type DayPoint = { day: string; count: number };
 export type DistributionEntry = { key: string; count: number };
 
@@ -132,28 +104,20 @@ export function computeStats(db: Database, scope: StatsEnvScope, now: Date): Das
         .all(since(30 * DAY_MS)) as DistributionEntry[]
     ).map((row) => ({ key: String(row.key), count: row.count }));
 
-  // Province distribution: group geo-tagged instances by Chinese province
-  // (mapped from country+region in code). Instances without a region code are
-  // counted under "未知".
-  const regionRows = db
-    .query(
-      `SELECT country, region, COUNT(*) AS count FROM instances
-       WHERE last_seen_at >= ? ${envClause}
-       GROUP BY country, region`,
-    )
-    .all(since(30 * DAY_MS)) as { country: string | null; region: string | null; count: number }[];
-  const regionAgg = new Map<string, number>();
-  for (const row of regionRows) {
-    // only count rows that actually carry a region; instances with no geo data
-    // are excluded rather than dumped into a giant "未知" bucket that dwarfs all.
-    if (!row.region) continue;
-    const label = regionLabel(row.country, row.region);
-    regionAgg.set(label, (regionAgg.get(label) ?? 0) + row.count);
-  }
-  const regionDistribution = [...regionAgg.entries()]
-    .map(([key, count]) => ({ key, count }))
-    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
-    .slice(0, 12);
+  // Province distribution: the `region` column already holds a resolved
+  // mainland-China province name (filled at ingest via offline IP lookup), so we
+  // can group on it directly. Instances with no resolved province (overseas /
+  // private / unlocatable IP) carry NULL and are excluded rather than dumped
+  // into a giant "未知" bucket that would dwarf the real provinces.
+  const regionDistribution = (
+    db
+      .query(
+        `SELECT region AS key, COUNT(*) AS count FROM instances
+         WHERE last_seen_at >= ? AND region IS NOT NULL ${envClause}
+         GROUP BY region ORDER BY count DESC, key ASC LIMIT 12`,
+      )
+      .all(since(30 * DAY_MS)) as DistributionEntry[]
+  ).map((row) => ({ key: String(row.key), count: row.count }));
 
   // Instance size buckets by user count — a fleet-shape view (how many small
   // vs large deployments). Buckets are derived in SQL with a CASE expression so
@@ -245,7 +209,8 @@ export function computeStats(db: Database, scope: StatsEnvScope, now: Date): Das
       environment: row.environment,
       country: row.country,
       region: row.region,
-      province: row.region ? regionLabel(row.country, row.region) : null,
+      // `region` already holds the resolved Chinese province name.
+      province: row.region ?? null,
       tenants: row.tenants,
       users: row.users,
       postsTotal: row.posts_total,

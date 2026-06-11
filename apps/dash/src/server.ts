@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import { parseTelemetryReport } from "@campux/telemetry";
 import { ingestReport, resolveInstanceId, setInstanceTag } from "./db";
 import { computeStats, type StatsEnvScope } from "./stats";
+import { lookupProvince } from "./geo";
 
 // Ingestion abuse guards. The endpoint is anonymous and open by design, so the
 // budget is generous for real instances (one report per ~2 h) and tight enough
@@ -78,10 +79,14 @@ export function createDashServer({ db, accessKey, adminKey, logger = false, now 
     }
     lastAcceptedByInstance.set(parsed.report.instanceId, receivedAt.getTime());
 
+    // Resolve the reporting IP to a mainland-China province offline (ip2region
+    // xdb). request.ip is the real client address (CF-Connecting-IP via
+    // trustProxy). Best-effort: null for overseas / private / unlocatable IPs.
+    const province = await lookupProvince(request.ip);
     ingestReport(db, parsed.report, {
       receivedAt,
       country: parseCountry(request.headers["cf-ipcountry"]),
-      region: parseRegion(request.headers["cf-region-code"]),
+      region: province,
     });
     return reply.send({ ok: true });
   });
@@ -160,19 +165,6 @@ function parseCountry(header: string | string[] | undefined): string | null {
   const country = value.toUpperCase();
   // "XX" (unknown) and "T1" (Tor) are Cloudflare pseudo-countries; drop them.
   return /^[A-Z]{2}$/.test(country) && country !== "XX" && country !== "T1" ? country : null;
-}
-
-// Cloudflare CF-Region-Code carries the ISO 3166-2 subdivision suffix (the part
-// after the country prefix), e.g. "GD" for 广东省, "11" for 北京市. It is only
-// present when the "Add visitor location headers" managed transform is enabled
-// on the zone. Accept short alphanumeric codes; anything else is noise.
-function parseRegion(header: string | string[] | undefined): string | null {
-  const value = Array.isArray(header) ? header[0] : header;
-  if (!value) {
-    return null;
-  }
-  const region = value.toUpperCase();
-  return /^[A-Z0-9]{1,3}$/.test(region) ? region : null;
 }
 
 function authorized(request: FastifyRequest, accessKey: string | undefined): boolean {
