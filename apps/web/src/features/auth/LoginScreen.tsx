@@ -6,6 +6,7 @@ import type { MeResponse } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 
 const CREDENTIALS_KEY = "campux.loginCredentials.v1";
@@ -64,14 +65,13 @@ export function LoginScreen({
 }) {
   const allowTestAccounts = import.meta.env.DEV;
   const title = hostTenant?.name ?? "Campux";
-  const registerTenantName = hostTenant?.name ?? "Campux";
 
   const [savedCredentials] = useState(readSavedCredentials);
   const [account, setAccount] = useState(() => savedCredentials?.account ?? (allowTestAccounts ? "10000" : ""));
   const [password, setPassword] = useState(() => savedCredentials?.password ?? (allowTestAccounts ? "campux123" : ""));
   const [remember, setRemember] = useState(() => savedCredentials !== null);
   const [busy, setBusy] = useState(false);
-  const [registerOpen, setRegisterOpen] = useState(false);
+  const [view, setView] = useState<"login" | "register">("login");
   const [loginError, setLoginError] = useState("");
   const displayError = loginError || error;
 
@@ -120,68 +120,96 @@ export function LoginScreen({
           </span>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold leading-tight tracking-normal text-slate-950">{title}</h1>
-            {hostTenant ? (
-              <span className="block truncate text-sm text-slate-600">
-                由
-                <a className="mx-1 font-medium text-blue-700 hover:underline" href="https://github.com/idoknow/Campux" target="_blank" rel="noreferrer">
-                  Campux
-                </a>
-                提供技术支持
-              </span>
-            ) : null}
           </div>
         </div>
 
-        <form className="product-surface px-4 py-5" onSubmit={handleSubmit}>
-          <p className="text-lg font-semibold text-slate-950">登录到 {title}</p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">输入 QQ 号或邮箱，以及你的账号密码。</p>
-          <div className="mt-5 grid gap-3">
-            <Input value={account} name="username" autoComplete="username" placeholder="QQ 号 / 邮箱" onChange={(event) => handleAccountChange(event.target.value)} />
-            <Input value={password} name="password" autoComplete="current-password" type="password" placeholder="密码" onChange={(event) => handlePasswordChange(event.target.value)} />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Switch id="remember-credentials" checked={remember} onCheckedChange={handleRememberChange} size="sm" />
-            <label htmlFor="remember-credentials" className="cursor-pointer select-none text-sm text-slate-700">在此浏览器记住登录信息</label>
-            <span className="basis-full pl-9 text-xs text-slate-400 sm:basis-auto sm:pl-0">仅保存在当前浏览器。</span>
-          </div>
-          {displayError ? <p className="mt-3 text-sm font-medium text-red-600">{displayError}</p> : null}
-          <Button className="mt-5 w-full font-medium" disabled={busy} type="submit">
-            {busy ? "登录中" : "登录"}
-          </Button>
-          {allowTestAccounts ? (
-            <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-              <summary className="cursor-pointer font-medium text-slate-600">开发测试账号</summary>
-              <p className="mt-2">密码均为 <code className="rounded bg-white px-1 py-0.5 font-mono text-slate-700">campux123</code>。</p>
-              <p>10000 用户，20000 审核员，30000 多墙管理员，40000 系统运维，50000 运营管理员。</p>
-            </details>
-          ) : null}
-        </form>
-
-        {managementHost ? (
-          <div className="mt-3 product-surface px-4 py-4">
+        {managementHost && view === "register" ? (
+          <div className="product-surface px-4 py-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-bold text-slate-950">墙号运营者第一次使用？</p>
-                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
-                  这个注册入口只面向要创建校园墙的运营者。普通用户请通过对应校园墙机器人注册，已有账号可直接登录。
+                <p className="text-lg font-semibold text-slate-950">注册运营管理员账号</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  这个入口只面向要创建并运营校园墙的运营者，注册后可自助开墙。普通用户请通过对应校园墙机器人注册。
                 </p>
               </div>
-              <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setRegisterOpen((value) => !value)}>
-                {registerOpen ? "收起注册" : "注册"}
+              <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("login")}>
+                返回登录
               </button>
             </div>
-            <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold leading-5 text-slate-600">
-              运营者可用邮箱验证码注册并创建校园墙；普通用户请通过对应校园墙机器人完成注册。
-            </p>
-            {registerOpen ? <RegisterPanel logoUrl={logoUrl} selectedTenantName={registerTenantName} onRegistered={onRegistered} /> : null}
+            <RegisterPanel onRegistered={onRegistered} />
+            <div className="mt-5 border-t border-slate-100 pt-3 text-center">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a className="text-xs text-slate-400 underline-offset-4 hover:underline" href="https://docs.campux.top" target="_blank" rel="noreferrer">
+                    想要自己部署？
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[280px]">Campux 开源且支持自部署，访问 docs.campux.top 自建你的校园墙服务。</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
-        ) : null}
+        ) : (
+          <>
+            <form className="product-surface px-4 py-5" onSubmit={handleSubmit}>
+              <p className="text-lg font-semibold text-slate-950">登录到 {title}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">输入 QQ 号或邮箱，以及你的账号密码。</p>
+              <div className="mt-5 grid gap-3">
+                <Input value={account} name="username" autoComplete="username" placeholder="QQ 号 / 邮箱" onChange={(event) => handleAccountChange(event.target.value)} />
+                <Input value={password} name="password" autoComplete="current-password" type="password" placeholder="密码" onChange={(event) => handlePasswordChange(event.target.value)} />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Switch id="remember-credentials" checked={remember} onCheckedChange={handleRememberChange} size="sm" />
+                <label htmlFor="remember-credentials" className="cursor-pointer select-none text-sm text-slate-700">在此浏览器记住登录信息</label>
+                <span className="basis-full pl-9 text-xs text-slate-400 sm:basis-auto sm:pl-0">仅保存在当前浏览器。</span>
+              </div>
+              {displayError ? <p className="mt-3 text-sm font-medium text-red-600">{displayError}</p> : null}
+              <Button className="mt-5 w-full font-medium" disabled={busy} type="submit">
+                {busy ? "登录中" : "登录"}
+              </Button>
+              {allowTestAccounts ? (
+                <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                  <summary className="cursor-pointer font-medium text-slate-600">开发测试账号</summary>
+                  <p className="mt-2">密码均为 <code className="rounded bg-white px-1 py-0.5 font-mono text-slate-700">campux123</code>。</p>
+                  <p>10000 用户，20000 审核员，30000 多墙管理员，40000 系统运维，50000 运营管理员。</p>
+                </details>
+              ) : null}
+              {managementHost ? null : (
+                <div className="mt-5 border-t border-slate-100 pt-3 text-center">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a className="text-xs text-slate-400 underline-offset-4 hover:underline" href="https://docs.campux.top" target="_blank" rel="noreferrer">
+                        由 Campux 提供技术支持
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[280px]">把你运营的校园墙也交给 Campux 托管？访问 docs.campux.top 了解接入方式。</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+            </form>
+
+            {managementHost ? (
+              <div className="mt-3 product-surface px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-950">墙号运营者第一次使用？</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                      注册运营管理员账号即可自助创建校园墙。普通用户请通过对应校园墙机器人注册，已有账号可直接登录。
+                    </p>
+                  </div>
+                  <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("register")}>
+                    注册
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
       </section>
     </main>
   );
 }
 
-function RegisterPanel({ logoUrl, selectedTenantName, onRegistered }: { logoUrl: string; selectedTenantName: string; onRegistered: (data: MeResponse) => void }) {
+function RegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => void }) {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -225,15 +253,6 @@ function RegisterPanel({ logoUrl, selectedTenantName, onRegistered }: { logoUrl:
 
   return (
     <form className="mt-4 grid gap-3" onSubmit={submit}>
-      <div className="mb-1 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
-        <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <img src={logoUrl} alt={`${selectedTenantName} logo`} className="h-full w-full object-contain p-1.5" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-950">注册运营管理员账号</p>
-          <p className="truncate text-xs text-slate-500">{selectedTenantName}</p>
-        </div>
-      </div>
       <Input value={email} type="email" placeholder="邮箱" onChange={(event) => setEmail(event.target.value)} />
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
         <Input value={code} inputMode="numeric" placeholder="邮箱验证码" onChange={(event) => setCode(event.target.value)} />
