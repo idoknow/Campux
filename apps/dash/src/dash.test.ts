@@ -177,6 +177,25 @@ describe("computeStats", () => {
     expect(stats.dailyNewUsers).toHaveLength(30);
   });
 
+  test("counter deltas count intraday growth on an instance's first observed day", () => {
+    // Regression: the prior (instance, day)-MAX + day-over-day approach dropped
+    // the entire first observed day, so a brand-new instance that gained users
+    // the same day it first reported showed 0. Consecutive-report deltas fix it.
+    const db = freshDb();
+    const a = "11111111-1111-4111-8111-111111111111";
+    const at = (daysAgo: number, hour: number) => new Date(NOW.getTime() - daysAgo * DAY_MS + hour * 60 * 60 * 1000 - 9 * 60 * 60 * 1000);
+    // First report ever lands today at 10:00 with 3344, then climbs 3344->3346
+    // across the same day — exactly the prod shape that read as a flat 0.
+    ingestReport(db, report({ instanceId: a, counts: { users: 3344, postsTotal: 12651 } }), { receivedAt: at(0, 10), country: null });
+    ingestReport(db, report({ instanceId: a, counts: { users: 3345, postsTotal: 12652 } }), { receivedAt: at(0, 12), country: null });
+    ingestReport(db, report({ instanceId: a, counts: { users: 3346, postsTotal: 12657 } }), { receivedAt: at(0, 14), country: null });
+    const stats = computeStats(db, "production", NOW);
+    const usersToday = new Map(stats.dailyNewUsers.map((p) => [p.day, p.count])).get(formatDay(at(0, 10)));
+    const postsToday = new Map(stats.dailyNewPosts.map((p) => [p.day, p.count])).get(formatDay(at(0, 10)));
+    expect(usersToday).toBe(2); // 3344->3345->3346, only the very first report is baseline
+    expect(postsToday).toBe(6); // 12651->12652->12657
+  });
+
   test("province distribution groups instances by resolved province, sorted desc", () => {
     const db = freshDb();
     // `region` now holds a resolved Chinese province name (filled at ingest from
