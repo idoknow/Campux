@@ -34,7 +34,8 @@ docker build -f apps/dash/Dockerfile -t rockchin/campux-dash .
 2. 可选：在 stack 环境里设置 `CAMPUX_DASH_ACCESS_KEY` —— 设置后看板和 `GET /api/v1/stats` 需要密钥，`POST /api/v1/report` 始终开放（野生实例必须能继续上报）。**不设置则看板公开**，当前决策是公开聚合数据。
 3. DNS：`dash.campux.top` → 服务器，建议走 Cloudflare 橙云代理：
    - 自动拿到 TLS；
-   - 收集器会读取 `CF-IPCountry` 头，看板实例表的「地区」列才有数据。
+   - 收集器读取 `CF-IPCountry`（国家）与 `CF-Region-Code`（省/州级行政区）头，看板的「省份」列与「省份分布」面板才有数据。
+   - `CF-Region-Code` 需要在 Cloudflare 该域名上启用 **Managed Transforms → Add visitor location headers**（默认不发），否则只有国家、无省份。Campux 为中国大陆产品，省份码（如 `GD`→广东、`11`→北京）在中心端映射为中文省名。
 4. 反代到容器 `8990` 端口（Caddy 示例）：
 
    ```
