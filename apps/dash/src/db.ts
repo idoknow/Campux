@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS instances (
   environment    TEXT NOT NULL,
   deploy_mode    TEXT NOT NULL,
   country        TEXT,
+  region         TEXT,
   tenants        INTEGER NOT NULL DEFAULT 0,
   users          INTEGER NOT NULL DEFAULT 0,
   posts_total    INTEGER NOT NULL DEFAULT 0,
@@ -65,6 +66,16 @@ export function openDashDatabase(path: string): Database {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(schema);
+  // Lightweight forward migrations for existing databases (CREATE TABLE IF NOT
+  // EXISTS won't add a new column). Each ALTER is wrapped because SQLite has no
+  // "ADD COLUMN IF NOT EXISTS"; a duplicate-column error just means it's done.
+  for (const alter of ["ALTER TABLE instances ADD COLUMN region TEXT"]) {
+    try {
+      db.exec(alter);
+    } catch {
+      /* column already exists */
+    }
+  }
   return db;
 }
 
@@ -90,6 +101,11 @@ export type IngestMeta = {
   receivedAt: Date;
   // ISO 3166-1 alpha-2, from the CDN edge (e.g. CF-IPCountry) when available.
   country: string | null;
+  // ISO 3166-2 subdivision code without the country prefix (e.g. "GD" for
+  // 广东), from the CDN edge (e.g. CF-Region-Code) when available. Used to
+  // surface a province-level distribution; China-only deployment so these map
+  // to Chinese provinces. Optional: older callers / tests may omit it.
+  region?: string | null;
 };
 
 export function ingestReport(db: Database, report: TelemetryReport, meta: IngestMeta): void {
@@ -99,9 +115,9 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
     db.query(
       `INSERT INTO instances (
          instance_id, instance_name, first_seen_at, first_seen_day, last_seen_at, report_count,
-         version, environment, deploy_mode, country,
+         version, environment, deploy_mode, country, region,
          tenants, users, posts_total, posts_last_24h, bots_enabled, last_payload
-       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(instance_id) DO UPDATE SET
          instance_name = excluded.instance_name,
          last_seen_at = excluded.last_seen_at,
@@ -110,6 +126,7 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
          environment = excluded.environment,
          deploy_mode = excluded.deploy_mode,
          country = COALESCE(excluded.country, instances.country),
+         region = COALESCE(excluded.region, instances.region),
          tenants = excluded.tenants,
          users = excluded.users,
          posts_total = excluded.posts_total,
@@ -126,6 +143,7 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
       report.environment,
       report.deployMode,
       meta.country,
+      meta.region ?? null,
       report.counts.tenants,
       report.counts.users,
       report.counts.postsTotal,

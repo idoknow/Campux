@@ -163,6 +163,50 @@ describe("computeStats", () => {
     expect(byDay.get(formatDay(at(2)))).toBe(0); // baselines contribute nothing
   });
 
+  test("daily new users come from the same counter-delta logic", () => {
+    const db = freshDb();
+    const a = "11111111-1111-4111-8111-111111111111";
+    const at = (daysAgo: number, hour = 9) => new Date(NOW.getTime() - daysAgo * DAY_MS + hour * 60 * 60 * 1000 - 9 * 60 * 60 * 1000);
+    ingestReport(db, report({ instanceId: a, counts: { users: 100 } }), { receivedAt: at(2), country: null });
+    ingestReport(db, report({ instanceId: a, counts: { users: 130 } }), { receivedAt: at(1), country: null });
+    ingestReport(db, report({ instanceId: a, counts: { users: 135 } }), { receivedAt: at(0), country: null });
+    const stats = computeStats(db, "production", NOW);
+    const byDay = new Map(stats.dailyNewUsers.map((p) => [p.day, p.count]));
+    expect(byDay.get(formatDay(at(1)))).toBe(30);
+    expect(byDay.get(formatDay(at(0)))).toBe(5);
+    expect(stats.dailyNewUsers).toHaveLength(30);
+  });
+
+  test("province distribution maps CN region codes to Chinese provinces, sorted desc", () => {
+    const db = freshDb();
+    ingestReport(db, report({ instanceId: "a1111111-1111-4111-8111-111111111111" }), { receivedAt: NOW, country: "CN", region: "GD" });
+    ingestReport(db, report({ instanceId: "a2222222-2222-4222-8222-222222222222" }), { receivedAt: NOW, country: "CN", region: "GD" });
+    ingestReport(db, report({ instanceId: "a3333333-3333-4333-8333-333333333333" }), { receivedAt: NOW, country: "CN", region: "11" });
+    ingestReport(db, report({ instanceId: "a4444444-4444-4444-8444-444444444444" }), { receivedAt: NOW, country: "CN", region: null });
+    const stats = computeStats(db, "production", NOW);
+    expect(stats.regionDistribution).toEqual([
+      { key: "广东", count: 2 },
+      { key: "北京", count: 1 },
+    ]);
+    // the instance row carries the resolved province
+    const gd = stats.instances.find((i) => i.idShort === "a1111111");
+    expect(gd?.province).toBe("广东");
+  });
+
+  test("size distribution buckets instances by user count", () => {
+    const db = freshDb();
+    ingestReport(db, report({ instanceId: "b1111111-1111-4111-8111-111111111111", counts: { users: 50 } }), { receivedAt: NOW, country: null });
+    ingestReport(db, report({ instanceId: "b2222222-2222-4222-8222-222222222222", counts: { users: 500 } }), { receivedAt: NOW, country: null });
+    ingestReport(db, report({ instanceId: "b3333333-3333-4333-8333-333333333333", counts: { users: 3000 } }), { receivedAt: NOW, country: null });
+    ingestReport(db, report({ instanceId: "b4444444-4444-4444-8444-444444444444", counts: { users: 30000 } }), { receivedAt: NOW, country: null });
+    const stats = computeStats(db, "production", NOW);
+    const byBucket = new Map(stats.sizeDistribution.map((d) => [d.key, d.count]));
+    expect(byBucket.get("<100 用户")).toBe(1);
+    expect(byBucket.get("100–1k")).toBe(1);
+    expect(byBucket.get("1k–5k")).toBe(1);
+    expect(byBucket.get("20k+")).toBe(1);
+  });
+
   test("charts are zero-filled across the full window", () => {
     const db = freshDb();
     const stats = computeStats(db, "production", NOW);
@@ -208,6 +252,17 @@ describe("collector HTTP API", () => {
     const app = createDashServer({ db, now: () => NOW });
     await app.inject({ method: "POST", url: "/api/v1/report", payload: report(), headers: { "cf-ipcountry": "cn" } });
     expect((db.query("SELECT country FROM instances").get() as { country: string }).country).toBe("CN");
+    await app.close();
+  });
+
+  test("stores the CDN region header and resolves it to a province", async () => {
+    const db = freshDb();
+    const app = createDashServer({ db, now: () => NOW });
+    await app.inject({ method: "POST", url: "/api/v1/report", payload: report(), headers: { "cf-ipcountry": "cn", "cf-region-code": "gd" } });
+    expect((db.query("SELECT region FROM instances").get() as { region: string }).region).toBe("GD");
+    const stats = computeStats(db, "production", NOW);
+    expect(stats.regionDistribution).toEqual([{ key: "广东", count: 1 }]);
+    expect(stats.instances[0]!.province).toBe("广东");
     await app.close();
   });
 
