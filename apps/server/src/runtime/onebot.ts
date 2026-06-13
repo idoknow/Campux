@@ -1004,6 +1004,37 @@ export class OneBotRuntime {
           delayMs: options.delayMs,
         },
       });
+
+      // 好友请求通过后自动注册账号，省去用户发送 #注册账号
+      try {
+        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, options.tenantId);
+        const result = await registerUserViaBot({
+          botQqUin: options.botQqUin,
+          userQqUin: options.userQqUin,
+        });
+        const message = result.password
+          ? formatRegisterSuccess(result.password, stylishEnabled)
+          : result.alreadyHadTenantAccess
+            ? formatRegisterAlready(stylishEnabled)
+            : formatRegisterExtended(stylishEnabled);
+        await this.sendPrivateMessage(options.botQqUin, options.userQqUin, message);
+        this.logger.info(
+          {
+            botAccountId: options.botAccountId,
+            tenantId: options.tenantId,
+            botQqUin: options.botQqUin,
+            userQqUin: options.userQqUin,
+            alreadyHadAccount: result.alreadyHadAccount,
+            alreadyHadTenantAccess: result.alreadyHadTenantAccess,
+          },
+          "onebot friend request auto registration completed",
+        );
+      } catch (registerError) {
+        this.logger.warn(
+          { error: registerError, botAccountId: options.botAccountId, tenantId: options.tenantId, userQqUin: options.userQqUin },
+          "onebot friend request auto registration failed",
+        );
+      }
     } finally {
       this.pendingFriendRequestFlags.delete(options.flag);
     }
