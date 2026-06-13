@@ -252,3 +252,12 @@ export function normalizeEnableMarkdownRender(value: unknown): boolean {
   if (typeof value === "string") return value === "true" || value === "1";
   return enableMarkdownRenderDefault;
 }
+
+export const enableFontSelectionKey = "enable_font_selection";
+export const enableFontSelectionDefault = false;
+
+export function normalizeEnableFontSelection(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return enableFontSelectionDefault;
+}

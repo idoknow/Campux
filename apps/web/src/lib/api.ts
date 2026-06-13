@@ -42,6 +42,7 @@ export function createPostWithAttachments(
   remoteGifUrls?: string[],
   bgColor?: string,
   textColor?: string,
+  font?: string,
 ): Promise<CreatePostResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -88,6 +89,9 @@ export function createPostWithAttachments(
     }
     if (textColor) {
       formData.append("textColor", textColor);
+    }
+    if (font) {
+      formData.append("font", font);
     }
     for (const file of files) {
       formData.append("images", file, file.name);

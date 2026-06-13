@@ -28,6 +28,7 @@ export type RawFeedPost = {
   author: RawFeedAuthor;
   bgColor: string | null;
   textColor: string | null;
+  font: string | null;
   createdAt: Date;
 };
 
@@ -45,6 +46,7 @@ export type PublishedFeedPost = {
   author: PublishedFeedAuthor;
   bgColor: string | null;
   textColor: string | null;
+  font: string | null;
   createdAt: string;
 };
 
@@ -85,6 +87,7 @@ function toFeedPost(post: RawFeedPost, viewerIsReviewer: boolean): PublishedFeed
     author: redactAuthor(post, viewerIsReviewer),
     bgColor: post.bgColor,
     textColor: post.textColor,
+    font: post.font,
     createdAt: post.createdAt.toISOString(),
   };
 }

@@ -47,6 +47,7 @@ export function toPostListItem(post: {
   anonymous: boolean;
   bgColor?: string | null;
   textColor?: string | null;
+  font?: string | null;
   status: string;
   recallIgnored?: boolean;
   recallIgnoredAt?: Date | null;
@@ -81,6 +82,7 @@ export function toPostListItem(post: {
     anonymous: post.anonymous,
     bgColor: post.bgColor ?? null,
     textColor: post.textColor ?? null,
+    font: post.font ?? null,
     status: post.status,
     recallIgnored: Boolean(post.recallIgnored),
     recallIgnoredAt: post.recallIgnoredAt?.toISOString() ?? null,
