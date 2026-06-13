@@ -76,10 +76,26 @@ const FONT_FILES: Record<string, string> = {
 
 let cachedFontCss: string | null = null;
 
+/**
+ * 定位 font/ 目录。
+ *
+ * 运行时 CWD 不固定（`bun --cwd apps/server` 等），所以不能用 process.cwd()。
+ * 用 import.meta.dirname（本文件所在目录）向上找到项目根再拼接 font。
+ *   本文件: packages/render/src/index.ts
+ *   → 项目根: packages/render/src/../../..
+ *   → font:   <项目根>/font
+ */
+function resolveFontDir(): string {
+  // import.meta.dirname 是 Bun/Node 提供的当前模块目录绝对路径
+  const renderDir = import.meta.dirname!;
+  const projectRoot = path.resolve(renderDir, "..", "..", "..");
+  return path.join(projectRoot, "font");
+}
+
 function getFontCss(): string {
   if (cachedFontCss) return cachedFontCss;
 
-  const fontDir = path.resolve(process.cwd(), "font");
+  const fontDir = resolveFontDir();
   const rules: string[] = [];
 
   for (const [name, fileName] of Object.entries(FONT_FILES)) {
