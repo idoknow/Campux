@@ -101,7 +101,7 @@ export function AppShell({
           <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} />
 
           <main className="min-h-0 flex-1 overflow-hidden">
-            <TabsContent value="post" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <TabsContent value="post" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <PostPage
                 busy={busy}
                 loading={dataLoading}
@@ -122,7 +122,7 @@ export function AppShell({
               />
             </TabsContent>
 
-            <TabsContent value="posts" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <TabsContent value="posts" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <PostsPage
                 tenantId={me.currentTenant.id}
                 posts={posts}
@@ -138,19 +138,19 @@ export function AppShell({
               />
             </TabsContent>
 
-            <TabsContent value="services" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <TabsContent value="services" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
             </TabsContent>
 
-            <TabsContent value="ai" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <TabsContent value="ai" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <AiPage me={me} />
             </TabsContent>
 
-            <TabsContent value="stats" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <StatsPage tenantId={me.currentTenant.id} loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
             </TabsContent>
 
-            <TabsContent value="admin" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <TabsContent value="admin" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <AdminPage
                 activeTab={adminTab}
                 selectedTenant={me.currentTenant}
