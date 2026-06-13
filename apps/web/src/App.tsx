@@ -94,6 +94,8 @@ export function App() {
   const [tenantDataLoading, setTenantDataLoading] = useState(false);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
+  const [bgColor, setBgColor] = useState("#ffffff");
+  const [textColor, setTextColor] = useState("#000000");
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -465,6 +467,8 @@ export function App() {
       await createPostWithAttachments(
         postText,
         anonymous,
+        bgColor,
+        textColor,
         files,
         (totalPercent) => {
           setProgress(totalPercent);
@@ -618,6 +622,8 @@ export function App() {
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? defaultPostsTab : defaultPostsTab}
       postsPagination={postsPagination}
       anonymous={anonymous}
+      bgColor={bgColor}
+      textColor={textColor}
       pendingAttachments={pendingAttachments}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
@@ -637,6 +643,8 @@ export function App() {
       onRefreshTenantData={() => refreshTenantData(postsPage)}
       onRemoveAttachment={removeAttachment}
       onSubmitPost={submitPost}
+      onBgColorChange={setBgColor}
+      onTextColorChange={setTextColor}
     />
   );
 }

@@ -18,6 +18,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
+import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
 import type { OneBotRuntime } from "../runtime/onebot";
 
 const fileQuerySchema = z.object({
@@ -34,7 +35,7 @@ const listQuerySchema = z.object({
 });
 
 const recallRequestSchema = z.object({
-  reason: z.string().trim().min(1, "请填写撤回理由").max(500),
+  reason: z.string().trim().max(500).optional(),
 });
 
 class PendingPostLimitError extends Error {
@@ -276,6 +277,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     const uploadedKeys: string[] = [];
     let text = "";
     let anonymous = false;
+    let bgColor = "#ffffff";
+    let textColor = "#000000";
     const staged: PostAttachment[] = [];
     const remoteGifUrls: string[] = [];
 
@@ -287,6 +290,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             text = String(part.value ?? "");
           } else if (part.fieldname === "anonymous") {
             anonymous = part.value === "true" || part.value === true;
+          } else if (part.fieldname === "bgColor") {
+            bgColor = String(part.value ?? "#ffffff");
+          } else if (part.fieldname === "textColor") {
+            textColor = String(part.value ?? "#000000");
           } else if (part.fieldname === "remoteGifUrls") {
             // Accept JSON array of GIF URLs from 失控图床 API conversion
             try {
@@ -457,6 +464,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   displayId,
                   text,
                   anonymous,
+                  bgColor,
+                  textColor,
                   attachments: staged,
                   status: "pending_approval",
                   logs: {
@@ -794,6 +803,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       text: post.text,
       createdAt: post.createdAt,
       anonymous: post.anonymous,
+      bgColor: post.bgColor ?? "#ffffff",
+      textColor: post.textColor ?? "#000000",
     });
 
     reply.header("Cache-Control", "private, max-age=60");
@@ -859,73 +870,40 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (!post) {
       return reply.code(404).send({ message: "稿件不存在" });
     }
-    if (post.status === "pending_recall") {
-      return {
-        post: toPostListItem(post),
-      };
+    if (post.status === "recalled") {
+      return reply.code(409).send({ message: "该稿件已被撤回" });
     }
     if (post.status !== "published") {
-      return reply.code(409).send({ message: "只有已发表稿件可以申请撤回" });
+      return reply.code(409).send({ message: "只有已发表稿件可以撤回" });
     }
-    const batchItem = await prisma.publishBatchItem.findUnique({
-      where: { postId: post.id },
-      select: { id: true },
-    });
-    if (batchItem) {
-      return reply.code(409).send({ message: "批量发布的稿件不支持程序撤回，请联系管理员手动到 QQ 空间删除对应说说" });
+
+    try {
+      const result = await executePostRecall({
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        actorId: context.user.id,
+        logger: app.log,
+      });
+      oneBot?.notifyPostRecalled(result.post.id, result.results.length, { skipAuthor: true }).catch((error) => {
+        app.log.warn({ error, postId: result.post.id }, "failed to notify post recalled");
+      });
+      return {
+        ok: true,
+        post: toPostListItem(result.post),
+        results: result.results,
+      };
+    } catch (error) {
+      if (error instanceof PostRecallNotSupportedError) {
+        return reply.code(409).send({ message: error.message });
+      }
+      if (error instanceof PostRecallExecutionError) {
+        return reply.code(502).send({
+          message: "撤回失败，部分发布目标未成功隐藏",
+          results: error.results,
+        });
+      }
+      throw error;
     }
-    const body = recallRequestSchema.parse(request.body ?? {});
-    const reason = body.reason.trim();
-
-    const updated = await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      include: {
-        logs: {
-          where: {
-            oldStatus: "published",
-            newStatus: "pending_recall",
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-          take: 1,
-        },
-      },
-      data: {
-        status: "pending_recall",
-        recallIgnored: false,
-        recallIgnoredAt: null,
-        logs: {
-          create: {
-            tenantId: context.selectedTenant.id,
-            actorId: context.user.id,
-            oldStatus: post.status,
-            newStatus: "pending_recall",
-            comment: `用户申请撤回：${reason}`,
-          },
-        },
-      },
-    });
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.recall.request",
-      targetType: "post",
-      targetId: post.id,
-      detail: {
-        displayId: post.displayId,
-        reason,
-      },
-    });
-    oneBot?.notifyPostRecallRequested(updated.id).catch((error) => {
-      app.log.warn({ error, postId: updated.id }, "failed to notify post recall request");
-    });
-
-    return {
-      post: toPostListItem(updated),
-    };
   });
 
   app.post("/api/posts/:id/follow", async (request, reply) => {
