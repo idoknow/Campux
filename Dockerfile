@@ -10,6 +10,7 @@ RUN apk add --no-cache openssl
 COPY package.json bun.lock tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
+COPY font ./font
 
 RUN bun install --frozen-lockfile
 RUN bun run db:generate
