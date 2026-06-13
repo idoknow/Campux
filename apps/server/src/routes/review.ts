@@ -198,6 +198,69 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     };
   });
 
+  // 一键通过当前墙下所有待审核稿件。前端会在调用前弹确认框，要求审核员确认已逐个审核过。
+  app.post("/api/review/posts/approve-all", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "reviewer");
+    const pending = await prisma.post.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+        status: "pending_approval",
+      },
+      select: { id: true, displayId: true, status: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (pending.length === 0) {
+      return { ok: true, approved: 0 };
+    }
+
+    const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
+    let approved = 0;
+
+    for (const post of pending) {
+      // 逐个用 updateMany 带状态守卫，避免并发下重复通过已被处理的稿件。
+      const result = await prisma.post.updateMany({
+        where: { id: post.id, status: "pending_approval" },
+        data: { status: "approved" },
+      });
+      if (result.count === 0) {
+        continue;
+      }
+
+      await prisma.postLog.create({
+        data: {
+          postId: post.id,
+          tenantId: context.selectedTenant.id,
+          actorId: context.user.id,
+          oldStatus: "pending_approval",
+          newStatus: "approved",
+          comment: "一键通过",
+        },
+      });
+
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.approve",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          bulk: true,
+        },
+      });
+
+      if (publishMode.mode === "accumulate") {
+        await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
+      } else {
+        await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+      }
+      approved += 1;
+    }
+
+    return { ok: true, approved };
+  });
+
   app.post("/api/review/posts/:id/reject", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
