@@ -248,6 +248,8 @@ export function PostsPage({
   const [busyRecallPostId, setBusyRecallPostId] = useState("");
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
   const [autoFollowBusy, setAutoFollowBusy] = useState(false);
+  const [approveAllOpen, setApproveAllOpen] = useState(false);
+  const [approveAllBusy, setApproveAllBusy] = useState(false);
   const [rejectDialog, setRejectDialog] = useState<RejectDialogState>(() => ({
     open: false,
     postId: "",
@@ -394,6 +396,23 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "审核失败");
     } finally {
       setBusyPostId("");
+    }
+  }
+
+  async function approveAllPosts() {
+    setApproveAllBusy(true);
+    try {
+      const data = await api<{ ok: boolean; approved: number }>("/api/review/posts/approve-all", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast.success(data.approved > 0 ? `已通过 ${data.approved} 条稿件，正在生成发布任务。` : "当前没有待审核稿件。");
+      setApproveAllOpen(false);
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "一键通过失败");
+    } finally {
+      setApproveAllBusy(false);
     }
   }
 
@@ -788,6 +807,21 @@ export function PostsPage({
                 筛选
               </Button>
             </div>
+            {reviewStatus === "pending_approval" && reviewKeyword.trim().length === 0 && filteredReviewPosts.length > 0 ? (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                <p className="min-w-0 text-xs font-medium text-green-800">
+                  确认本墙待审核稿件均已逐个审核后，可一键全部通过。
+                </p>
+                <Button
+                  className="h-9 shrink-0 bg-green-600 font-bold text-white hover:bg-green-700"
+                  disabled={reviewLoading || approveAllBusy}
+                  onClick={() => setApproveAllOpen(true)}
+                >
+                  <CheckIcon className="mr-1 size-4" />
+                  一键通过全部
+                </Button>
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <PendingRecallQueue
                 posts={pendingRecallPosts}
@@ -1064,6 +1098,28 @@ export function PostsPage({
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "确认静默撤回"
                       : "提交申请"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={approveAllOpen} onOpenChange={(open) => { if (!approveAllBusy) setApproveAllOpen(open); }}>
+        <DialogContent className="w-[min(460px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>一键通过全部待审核稿件？</DialogTitle>
+            <DialogDescription>
+              此操作会把当前校园墙下所有「待审核」稿件全部通过并进入发布流程，无法撤销。请确认你已经逐个审核过这些稿件，确保内容均符合发布要求。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={approveAllBusy} onClick={() => setApproveAllOpen(false)}>
+              取消
+            </Button>
+            <Button
+              className="bg-green-600 font-bold text-white hover:bg-green-700"
+              disabled={approveAllBusy}
+              onClick={() => void approveAllPosts()}
+            >
+              我已逐个审核，全部通过
             </Button>
           </DialogFooter>
         </DialogContent>
