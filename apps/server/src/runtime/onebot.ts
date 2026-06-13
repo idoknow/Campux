@@ -181,6 +181,8 @@ const reviewHelp = [
   "#拒绝 <理由> <稿件id>",
   "#重发 <稿件id>",
   "#回复 <内容> （引用转发私信后使用）",
+  "#发布 <内容> （可附带图片，文字+图片一起发布到空间）",
+  "#好友数",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
 ].join("\n");
@@ -1485,6 +1487,35 @@ export class OneBotRuntime {
     throw new BotWorkflowError("无法读取图片附件，请重新发送图片", 400);
   }
 
+  private async resolveReviewGroupImageSource(botQqUin: string, segment: { data?: Record<string, unknown> }) {
+    const data = segment.data ?? {};
+    const fileName = normalizeImageFileName(data.file_name ?? data.filename ?? data.name ?? data.file ?? data.url);
+    const directSource = typeof (data.url ?? data.file) === "string" ? String(data.url ?? data.file).trim() : null;
+    if (directSource?.startsWith("base64://")) {
+      return await fetchPrivatePostImage(directSource, fileName);
+    }
+
+    const directUrl = readImageUrlCandidate(data.url ?? data.file);
+    if (directUrl) {
+      return await fetchPrivatePostImage(directUrl, fileName);
+    }
+
+    const fileToken = readImageTokenCandidate(data.file);
+    if (fileToken) {
+      try {
+        const response = await this.callAction(botQqUin, "get_image", { file: fileToken });
+        const resolvedUrl = extractImageUrlFromOneBotResponse(response);
+        if (resolvedUrl) {
+          return await fetchPrivatePostImage(resolvedUrl, fileName);
+        }
+      } catch (error) {
+        this.logger.debug({ error, botQqUin }, "onebot get_image fallback failed");
+      }
+    }
+
+    throw new BotWorkflowError("无法读取图片附件，请重新发送图片", 400);
+  }
+
   private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean, stylishEnabled = false) {
     void text;
     void attachmentCount;
@@ -1919,11 +1950,26 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, "发布内容太长，请控制在 1000 字以内");
           return;
         }
+        // 提取消息中的图片
+        const imageSegments = extractOneBotImageSegments(event.message);
+        let images: Array<{ name: string; bytes: Uint8Array }> | undefined;
+        if (imageSegments.length > 0) {
+          if (imageSegments.length > 9) {
+            await this.sendGroupMessage(botQqUin, groupId, "最多 9 张图片");
+            return;
+          }
+          images = [];
+          for (const segment of imageSegments) {
+            const source = await this.resolveReviewGroupImageSource(botQqUin, segment);
+            images.push({ name: source.fileName || "image.jpg", bytes: source.bytes });
+          }
+        }
         const result = await publishTextDirectViaBot({
           botQqUin,
           groupId,
           operatorQqUin,
           text: publishText,
+          ...(images ? { images } : {}),
         });
         await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled));
         return;
