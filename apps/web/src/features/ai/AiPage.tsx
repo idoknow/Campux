@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { AuthenticatedMe, AiAnalysisItem, AiBackfillBatch, AiEntity, AiEntityDetail, AiEntityEvidence, AiOverview, AiRules, TenantAiSettings } from "@/types/app";
 import {
@@ -886,7 +886,7 @@ function OverviewPanel({ overview, recentAnalyses }: { overview: AiOverview; rec
   );
 }
 
-function SettingsPanel({
+const SettingsPanel = memo(function SettingsPanel({
   overview,
   form,
   busy,
@@ -908,7 +908,7 @@ function SettingsPanel({
   onTest: () => Promise<void>;
 }) {
   return (
-    <div className="space-y-2.5">
+    <form className="space-y-2.5" onSubmit={(event) => { event.preventDefault(); void onSave(); }}>
       <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
         <div>
           <div className="text-xs font-bold text-slate-900">启用 AI 分析</div>
@@ -942,7 +942,7 @@ function SettingsPanel({
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
           API 密钥
-          <Input type="password" value={form.apiKey} placeholder={overview.settings.apiKeyConfigured ? "保持不变" : "未配置"} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, apiKey: event.target.value, clearApiKey: false })} />
+          <Input type="password" name="apiKey" value={form.apiKey} placeholder={overview.settings.apiKeyConfigured ? "保持不变" : "未配置"} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, apiKey: event.target.value, clearApiKey: false })} />
         </label>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
           随机度
@@ -992,15 +992,15 @@ function SettingsPanel({
             <TestTube2Icon data-icon="inline-start" />
             {testing ? "测试中" : "测试连接"}
           </Button>
-          <Button type="button" disabled={busy || testing} onClick={() => void onSave()}>
+          <Button type="submit" disabled={busy || testing}>
             <SaveIcon data-icon="inline-start" />
             保存
           </Button>
         </div>
       ) : null}
-    </div>
+    </form>
   );
-}
+});
 
 function BackfillPanel({
   batches,
@@ -1089,7 +1089,7 @@ function BackfillPanel({
   );
 }
 
-function GraphPanel({
+const GraphPanel = memo(function GraphPanel({
   overview,
   selectedEntityId,
   searchQuery,
@@ -1455,7 +1455,7 @@ function GraphPanel({
       />
     </div>
   );
-}
+});
 
 function EntityDetailPanel({ entity, loading }: { entity: AiEntity; loading: boolean }) {
   const aliases = toStrings(entity.aliases);
@@ -1979,10 +1979,17 @@ function useOrganicGraphLayout(
     if (!livePhysics) return;
     let frame = 0;
     let active = true;
+    let skipCounter = 0;
     const tick = () => {
       if (!active) return;
       stepOrganicGraph(positionsRef.current, velocitiesRef.current, edges, bounds, fixedPositionsRef.current);
-      setPositioned([...positionsRef.current.values()].map((node) => ({ ...node })));
+      // Throttle React state updates to every 4 frames (~15fps) to
+      // avoid overwhelming React's reconciler with 60fps re-renders
+      // that can race with Portal-based component reconciliation.
+      skipCounter = (skipCounter + 1) % 4;
+      if (skipCounter === 0) {
+        setPositioned([...positionsRef.current.values()].map((node) => ({ ...node })));
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);

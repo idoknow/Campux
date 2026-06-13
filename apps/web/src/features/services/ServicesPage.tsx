@@ -217,11 +217,11 @@ function PasswordPanel({ onDone }: { onDone: (message: string) => void }) {
         <KeyRoundIcon className="size-5 text-slate-500" />
         <p className="text-base font-semibold">修改密码</p>
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Input type="password" placeholder="当前密码" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
-        <Input type="password" placeholder="新密码，至少 6 位" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-      </div>
-      <Button className="mt-3 w-full font-medium sm:w-auto" disabled={busy || currentPassword.length === 0 || newPassword.length < 6} onClick={() => void submit()}>
+      <form className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+        <Input type="password" name="currentPassword" placeholder="当前密码" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+        <Input type="password" name="newPassword" placeholder="新密码，至少 6 位" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+      </form>
+      <Button className="mt-3 w-full font-medium sm:w-auto" type="submit" disabled={busy || currentPassword.length === 0 || newPassword.length < 6} onClick={() => void submit()}>
         <CheckIcon data-icon="inline-start" />
         保存新密码
       </Button>
