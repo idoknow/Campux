@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "marked": "^15.0.0",
     "playwright-core": "^1.60.0"
   }
 }
