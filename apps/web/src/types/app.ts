@@ -159,6 +159,8 @@ export type PostItem = {
   text: string;
   attachments: unknown;
   anonymous: boolean;
+  bgColor: string | null;
+  textColor: string | null;
   status: string;
   recallIgnored: boolean;
   recallIgnoredAt: string | null;

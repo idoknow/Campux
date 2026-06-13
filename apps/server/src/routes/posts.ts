@@ -276,6 +276,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     const uploadedKeys: string[] = [];
     let text = "";
     let anonymous = false;
+    let bgColor: string | null = null;
+    let textColor: string | null = null;
     const staged: PostAttachment[] = [];
     const remoteGifUrls: string[] = [];
 
@@ -287,6 +289,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             text = String(part.value ?? "");
           } else if (part.fieldname === "anonymous") {
             anonymous = part.value === "true" || part.value === true;
+          } else if (part.fieldname === "bgColor") {
+            bgColor = String(part.value ?? "") || null;
+          } else if (part.fieldname === "textColor") {
+            textColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "remoteGifUrls") {
             // Accept JSON array of GIF URLs from 失控图床 API conversion
             try {
@@ -457,6 +463,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   displayId,
                   text,
                   anonymous,
+                  bgColor,
+                  textColor,
                   attachments: staged,
                   status: "pending_approval",
                   logs: {
@@ -794,6 +802,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       text: post.text,
       createdAt: post.createdAt,
       anonymous: post.anonymous,
+      bgColor: post.bgColor ?? null,
+      textColor: post.textColor ?? null,
     });
 
     reply.header("Cache-Control", "private, max-age=60");

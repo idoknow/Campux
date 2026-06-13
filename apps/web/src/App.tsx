@@ -94,6 +94,8 @@ export function App() {
   const [tenantDataLoading, setTenantDataLoading] = useState(false);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
+  const [postBgColor, setPostBgColor] = useState<string>("");
+  const [postTextColor, setPostTextColor] = useState<string>("");
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -470,10 +472,14 @@ export function App() {
           setProgress(totalPercent);
         },
         remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
+        postBgColor || undefined,
+        postTextColor || undefined,
       );
       clearAttachments();
       setPostText("");
       setAnonymous(false);
+      setPostBgColor("");
+      setPostTextColor("");
       toast.success("投稿已提交，等待审核。");
       const data = await api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10");
       setPosts(data.posts);
@@ -615,6 +621,8 @@ export function App() {
       busy={busy}
       dataLoading={tenantDataLoading}
       postText={postText}
+      postBgColor={postBgColor}
+      postTextColor={postTextColor}
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? defaultPostsTab : defaultPostsTab}
       postsPagination={postsPagination}
       anonymous={anonymous}
@@ -622,6 +630,8 @@ export function App() {
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={setAnonymous}
+      onBgColorChange={setPostBgColor}
+      onTextColorChange={setPostTextColor}
       onFilesSelected={handleUploadFiles}
       onLogout={logout}
       onOpenOps={showOpsUi && canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}

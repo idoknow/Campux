@@ -39,6 +39,8 @@ export type RenderPostCardInput = {
   text: string;
   createdAt: Date;
   anonymous: boolean;
+  bgColor?: string | null;
+  textColor?: string | null;
 };
 
 let browserPromise: Promise<Browser> | null = null;
@@ -103,6 +105,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const avatar = input.anonymous ? anonymousAvatarDataUrl() : await qqAvatarDataUrl(input.authorQq);
   const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
   const banner = "";
+  const bgColor = input.bgColor || "#FFFFFF";
+  const textColor = input.textColor || "#1a1a1a";
 
   return `<!DOCTYPE html>
 <html>
@@ -315,7 +319,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
     }
   </style>
 </head>
-<body style="margin: 0">
+<body style="margin: 0; background-color: ${bgColor};">
   <div id="title-bar" style="background-color: #1E88E5; height: 5%; width: calc(100% + 50px); padding: 16px; border-radius: 0 0 8px 8px; font-weight: bold">
     <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
   </div>
@@ -323,8 +327,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
     <div style="display: flex;">
       <img id="avatar" src="${avatar}" />
       <div style="margin-left: 32px; margin-top: 32px">
-        <span id="nickname">${escapeHtml(author)}</span>
-        <div id="content">${renderMarkdown(input.text)}</div>
+        <span id="nickname" style="color: ${textColor};">${escapeHtml(author)}</span>
+        <div id="content" style="color: ${textColor};">${renderMarkdown(input.text)}</div>
       </div>
     </div>
   </div>
