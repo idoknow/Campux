@@ -1388,7 +1388,7 @@ export class OneBotRuntime {
     if (emojiModeration === "approve") {
       await this.sendPrivateMessage(botQqUin, userQqUin, formatReviewApproved(post.displayId, stylishEnabled));
     } else if (emojiModeration === "reject") {
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatReviewRejected(post.displayId, "表情包自动拒绝", stylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatReviewRejected(post.displayId, "莫须有", stylishEnabled));
     } else {
       await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
     }
@@ -2360,7 +2360,7 @@ export class OneBotRuntime {
         await this.sendGroupMessage(botQqUin, groupId, formatReviewApprovedGroup(displayId, stylishEnabled));
         await this.notifyReviewResult(result.post.id, "approved").catch(() => undefined);
       } else {
-        const reason = "表情包自动拒绝";
+        const reason = "莫须有";
         const result = await reviewPostViaBot({
           queue: this.queue,
           botQqUin,
