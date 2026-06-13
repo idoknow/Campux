@@ -177,11 +177,11 @@ export const publishWaitingResumeHint = "系统不会继续发布这条稿件，
 
 // ── 注册成功 ──────────────────────────────────────────
 
-const registerSuccessDefault = (password: string) => `注册成功，初始密码：\n${password}`;
+const registerSuccessDefault = (password: string) => `注册成功，初始密码：\n${password}\n\n发 #投稿 开始投稿吧~`;
 
 const registerSuccessStylish = [
-  (password: string) => `🎉 注册成功！这是你的初始密码：\n${password}\n建议登录后尽快修改哦~`,
-  (password: string) => `✅ 注册完成！初始密码已送到：\n${password}\n收好它~`,
+  (password: string) => `🎉 注册成功！这是你的初始密码：\n${password}\n建议登录后尽快修改哦~\n\n发 #投稿 开始投稿吧~`,
+  (password: string) => `✅ 注册完成！初始密码已送到：\n${password}\n收好它~\n\n发 #投稿 开始投稿吧~`,
   registerSuccessDefault,
 ];
 
@@ -190,11 +190,11 @@ export function formatRegisterSuccess(password: string, stylishEnabled = false):
   return pick(registerSuccessStylish)(password);
 }
 
-const registerAlreadyDefault = () => `这个 QQ 已经注册过啦。如果忘记密码，可以发 #重置密码。`;
+const registerAlreadyDefault = () => `这个 QQ 已经注册过啦。发 #投稿 开始投稿，忘记密码可以发 #重置密码。`;
 
 const registerAlreadyStylish = [
-  () => `🤔 这个 QQ 早就注册过了呀~ 忘记密码了？发 #重置密码 试试。`,
-  () => `📌 已经注册过啦。密码忘了？#重置密码 安排一下~`,
+  () => `🤔 这个 QQ 早就注册过了呀~ 发 #投稿 开始投稿吧，忘记密码了？发 #重置密码 试试。`,
+  () => `📌 已经注册过啦。发 #投稿 开始投稿，密码忘了？#重置密码 安排一下~`,
   registerAlreadyDefault,
 ];
 
@@ -204,16 +204,49 @@ export function formatRegisterAlready(stylishEnabled = false): string {
 }
 
 const registerExtendedDefault = () =>
-  `已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。忘记密码就发 #重置密码。`;
+  `已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。发 #投稿 开始投稿，忘记密码就发 #重置密码。`;
 
 const registerExtendedStylish = [
-  () => `🔓 已开通本墙权限，密码和原来一样。忘了就 #重置密码~`,
+  () => `🔓 已开通本墙权限，密码和原来一样。发 #投稿 开始投稿吧，忘了就 #重置密码~`,
   registerExtendedDefault,
 ];
 
 export function formatRegisterExtended(stylishEnabled = false): string {
   if (!stylishEnabled) return registerExtendedDefault();
   return pick(registerExtendedStylish)();
+}
+
+// ── 对话投稿正文编辑引导（选择模式后一次性提示） ──────
+
+const privatePostBodyStartDefault =
+  "好的，以下是正文内容，直接发送文字或图片即可添加。发送 #撤回 可撤回上一条，发送 #结束 提交投稿。（发送 #取消 取消本次投稿）";
+
+const privatePostBodyStartStylish = [
+  "📝 好的，以下是正文内容~ 直接发文字或图片就行，发完记得 #结束 提交！",
+  "✏️ 好嘞，直接发送正文内容和图片吧。发 #撤回 删上一条，发 #结束 完成投稿~",
+  "✨ 开始编辑正文吧~ 直接发送文字或图片添加内容。发 #撤回 撤回上一条，发 #结束 提交投稿。",
+  privatePostBodyStartDefault,
+];
+
+export function formatPrivatePostBodyStart(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostBodyStartDefault;
+  return pick(privatePostBodyStartStylish);
+}
+
+// ── 对话投稿追加确认（简短版，不重复完整内容） ────────
+
+const privatePostAppendAckDefault = "已添加 ✓";
+
+const privatePostAppendAckStylish = [
+  "✅ 已添加 ✓",
+  "📎 收到~已添加 ✓",
+  "好的，已添加 ✓",
+  privatePostAppendAckDefault,
+];
+
+export function formatPrivatePostAppendAck(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostAppendAckDefault;
+  return pick(privatePostAppendAckStylish);
 }
 
 // ── 重置密码 ──────────────────────────────────────────
