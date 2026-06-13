@@ -874,23 +874,28 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       },
     });
 
-    const bytes = await renderPostCard({
-      tenantName: context.selectedTenant.name,
-      displayHost: context.selectedTenant.host,
-      authorName: context.user.displayName ?? context.user.qqUin.toString(),
-      authorQq: context.user.qqUin.toString(),
-      cornerQq: previewBot?.qqUin.toString(),
-      text: body.text,
-      createdAt: new Date(),
-      anonymous: body.anonymous ?? false,
-      bgColor: body.bgColor ?? null,
-      textColor: body.textColor ?? null,
-      font: body.font ?? null,
-    });
+    try {
+      const bytes = await renderPostCard({
+        tenantName: context.selectedTenant.name,
+        displayHost: context.selectedTenant.host,
+        authorName: context.user.displayName ?? context.user.qqUin.toString(),
+        authorQq: context.user.qqUin.toString(),
+        cornerQq: previewBot?.qqUin.toString(),
+        text: body.text,
+        createdAt: new Date(),
+        anonymous: body.anonymous ?? false,
+        bgColor: body.bgColor ?? null,
+        textColor: body.textColor ?? null,
+        font: body.font ?? null,
+      });
 
-    reply.header("Cache-Control", "no-store");
-    reply.type("image/jpeg");
-    return reply.send(Buffer.from(bytes));
+      reply.header("Cache-Control", "no-store");
+      reply.type("image/jpeg");
+      return reply.send(Buffer.from(bytes));
+    } catch (err) {
+      app.log.error({ err, font: body.font }, "render-preview failed");
+      return reply.code(500).send({ message: "渲染预览失败，请稍后重试" });
+    }
   });
 
   app.post("/api/posts/:id/cancel", async (request, reply) => {
