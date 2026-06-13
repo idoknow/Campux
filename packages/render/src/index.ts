@@ -1,4 +1,6 @@
 import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { chromium, type Browser } from "playwright-core";
 import { marked, Tokens } from "marked";
 
@@ -62,12 +64,38 @@ const underlineExtension = {
 
 marked.use(underlineExtension);
 
-export const FONT_CSS_LINKS = `@font-face { font-family: "beinidekeaitianyunle"; src: url("/fonts/beinidekeaitianyunle.ttf") format("truetype"); }
-@font-face { font-family: "dunhuangfeitiankai"; src: url("/fonts/dunhuangfeitiankai.ttf") format("truetype"); }
-@font-face { font-family: "mengxiangchaoyanningti"; src: url("/fonts/mengxiangchaoyanningti.ttf") format("truetype"); }
-@font-face { font-family: "unifontdianzhenhei"; src: url("/fonts/unifontdianzhenhei.ttf") format("truetype"); }
-@font-face { font-family: "zhuoteqingyati"; src: url("/fonts/zhuoteqingyati.ttf") format("truetype"); }
-@font-face { font-family: "zihuisongkexietiw4"; src: url("/fonts/zihuisongkexietiw4.ttf") format("truetype"); }`;
+// ── 字体 base64 内联（Playwright 无 HTTP 服务，URL 无法解析） ──────────
+const FONT_FILES: Record<string, string> = {
+  beinidekeaitianyunle: "beinidekeaitianyunle.ttf",
+  dunhuangfeitiankai: "dunhuangfeitiankai.ttf",
+  mengxiangchaoyanningti: "mengxiangchaoyanningti.ttf",
+  unifontdianzhenhei: "unifontdianzhenhei.ttf",
+  zhuoteqingyati: "zhuoteqingyati.ttf",
+  zihuisongkexietiw4: "zihuisongkexietiw4.ttf",
+};
+
+let cachedFontCss: string | null = null;
+
+function getFontCss(): string {
+  if (cachedFontCss) return cachedFontCss;
+
+  const fontDir = path.resolve(process.cwd(), "font");
+  const rules: string[] = [];
+
+  for (const [name, fileName] of Object.entries(FONT_FILES)) {
+    const filePath = path.join(fontDir, fileName);
+    try {
+      const buffer = readFileSync(filePath);
+      const b64 = buffer.toString("base64");
+      rules.push(`@font-face { font-family: "${name}"; src: url("data:font/ttf;base64,${b64}") format("truetype"); }`);
+    } catch {
+      // 字体文件不可用时跳过，回退系统字体
+    }
+  }
+
+  cachedFontCss = rules.join("\n");
+  return cachedFontCss;
+}
 
 export type RenderPostCardInput = {
   tenantName: string;
@@ -156,7 +184,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <style>
-    ${font ? FONT_CSS_LINKS : ""}
+    ${font ? getFontCss() : ""}
     :root {
       font-family: ${font ? `"${font}", ` : ""}"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
     }
