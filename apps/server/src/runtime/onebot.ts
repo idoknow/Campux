@@ -2302,12 +2302,35 @@ export class OneBotRuntime {
     operatorQqUin: string,
   ): Promise<boolean> {
     try {
-      const rawText = typeof event.raw_message === "string" ? event.raw_message : "";
-      if (!rawText) {
+      // 从多种来源拼接待审核文本，确保不论是 Unicode emoji 还是 OneBot face 段都能抓到
+      const textsToCheck: string[] = [];
+
+      // 1. raw_message（通常包含 CQ 码和 Unicode 字符）
+      if (typeof event.raw_message === "string" && event.raw_message) {
+        textsToCheck.push(event.raw_message);
+      }
+
+      // 2. 消息段中的 text 内容（提取纯文本）
+      if (Array.isArray(event.message)) {
+        for (const seg of event.message) {
+          if (!seg || typeof seg !== "object") continue;
+          const item = seg as { type?: string; data?: Record<string, unknown> };
+          if (item.type === "text" && typeof item.data?.text === "string") {
+            textsToCheck.push(item.data.text);
+          }
+          // 3. face 段中的表情名称（超级表情如 [表情/打call] 可能走 face 段）
+          if (item.type === "face" && typeof item.data?.text === "string") {
+            textsToCheck.push(item.data.text);
+          }
+        }
+      }
+
+      const joinedText = textsToCheck.join(" ");
+      if (!joinedText) {
         return false;
       }
 
-      const emojiAction = evaluateEmojiModeration(rawText);
+      const emojiAction = evaluateEmojiModeration(joinedText);
       if (!emojiAction) {
         return false;
       }
