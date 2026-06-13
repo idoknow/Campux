@@ -65,6 +65,8 @@ import {
   formatPrivatePostModePrompt,
   formatPrivatePostDraftPrompt,
   formatPrivatePostContinuePrompt,
+  formatPrivatePostBodyStart,
+  formatPrivatePostAppendAck,
   formatPrivatePostCancelled,
   formatPrivateHelp,
   formatPrivateReplySent,
@@ -1126,7 +1128,7 @@ export class OneBotRuntime {
           const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft });
           if (appended) {
             const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled));
+            await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostAppendAck(privateStylishEnabled));
             return;
           }
 
@@ -1596,7 +1598,7 @@ export class OneBotRuntime {
     });
 
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostContinuePrompt(privateStylishEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled));
   }
 
   private async undoPrivatePostDraftEntry({

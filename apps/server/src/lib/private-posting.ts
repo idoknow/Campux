@@ -18,15 +18,26 @@ function matchKeyword(input: string, keyword: string): string | null {
 export function parsePrivatePostStartText(input: string, extraKeywords?: string[] | undefined) {
   const trimmed = input.trim();
 
-  // 默认支持 #投稿
+  // 默认支持 #投稿（也可不带 # 前缀走下面兜底）
   const defaultMatch = matchKeyword(trimmed, "投稿");
   if (defaultMatch !== null) return defaultMatch;
 
-  // 额外的触发关键词
+  // 额外的触发关键词（支持 # 前缀）
   if (extraKeywords && extraKeywords.length > 0) {
     for (const kw of extraKeywords) {
       const match = matchKeyword(trimmed, kw);
       if (match !== null) return match;
+    }
+  }
+
+  // 也支持不带 # 前缀：直接输入关键词即可触发投稿流程
+  const plainKeywords = ["投稿", "墙墙投稿", "墙墙"];
+  for (const kw of plainKeywords) {
+    if (trimmed === kw) return "";
+  }
+  if (extraKeywords && extraKeywords.length > 0) {
+    for (const kw of extraKeywords) {
+      if (trimmed === kw) return "";
     }
   }
 
