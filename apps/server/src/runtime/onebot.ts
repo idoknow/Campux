@@ -2297,7 +2297,7 @@ export class OneBotRuntime {
   }
 
   private isSkippablePrivateMessage(text: string): boolean {
-    return /请求添加(你为)?好友/.test(text) || /^我是/.test(text);
+    return /请求添加(你为)?好友/.test(text) || /^我是\d+$/.test(text);
   }
 
   /**
