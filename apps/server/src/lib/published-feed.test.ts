@@ -9,6 +9,7 @@ function makePost(overrides: Partial<RawFeedPost> & { id: string; displayId: num
     anonymous: false,
     bgColor: null,
     textColor: null,
+    font: null,
     author: { displayName: `用户${overrides.displayId}`, qqUin: BigInt(10000 + overrides.displayId) },
     createdAt: new Date("2026-06-08T00:00:00Z"),
     ...overrides,

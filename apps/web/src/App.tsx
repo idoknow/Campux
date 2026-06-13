@@ -96,6 +96,7 @@ export function App() {
   const [anonymous, setAnonymous] = useState(false);
   const [postBgColor, setPostBgColor] = useState<string>("");
   const [postTextColor, setPostTextColor] = useState<string>("");
+  const [postFont, setPostFont] = useState<string>("");
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -474,12 +475,14 @@ export function App() {
         remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
         postBgColor || undefined,
         postTextColor || undefined,
+        postFont || undefined,
       );
       clearAttachments();
       setPostText("");
       setAnonymous(false);
       setPostBgColor("");
       setPostTextColor("");
+      setPostFont("");
       toast.success("投稿已提交，等待审核。");
       const data = await api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10");
       setPosts(data.posts);
@@ -623,6 +626,7 @@ export function App() {
       postText={postText}
       postBgColor={postBgColor}
       postTextColor={postTextColor}
+      postFont={postFont}
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? defaultPostsTab : defaultPostsTab}
       postsPagination={postsPagination}
       anonymous={anonymous}
@@ -632,6 +636,7 @@ export function App() {
       onAnonymousChange={setAnonymous}
       onBgColorChange={setPostBgColor}
       onTextColorChange={setPostTextColor}
+      onFontChange={setPostFont}
       onFilesSelected={handleUploadFiles}
       onLogout={logout}
       onOpenOps={showOpsUi && canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}

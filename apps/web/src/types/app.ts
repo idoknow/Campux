@@ -126,6 +126,7 @@ export type TenantMetadata = {
   publishLlmSummaryEnabled: boolean;
   enableColorSelection: boolean;
   enableMarkdownRender: boolean;
+  enableFontSelection: boolean;
 };
 
 export type PostAttachment = {
@@ -163,6 +164,7 @@ export type PostItem = {
   anonymous: boolean;
   bgColor: string | null;
   textColor: string | null;
+  font: string | null;
   status: string;
   recallIgnored: boolean;
   recallIgnoredAt: string | null;
@@ -247,6 +249,7 @@ export type PublishedFeedPost = {
   author: PublishedFeedAuthor;
   bgColor: string | null;
   textColor: string | null;
+  font: string | null;
   createdAt: string;
 };
 

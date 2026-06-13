@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
-import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { FONT_OPTIONS } from "@campux/domain";
+import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon, EyeIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,15 @@ const TEXT_COLOR_OPTIONS = [
   { value: "dark_orange", label: "深橙", hex: "#CC5500" },
 ] as const;
 
+const fontCssLinks = FONT_OPTIONS
+  .filter((f) => f.value !== "default")
+  .map((f) => {
+    const name = f.value;
+    const url = `/fonts/${f.fileName}`;
+    return `@font-face { font-family: "${name}"; src: url("${url}") format("truetype"); }`;
+  })
+  .join("\n");
+
 export function PostPage({
   busy,
   loading,
@@ -39,12 +49,14 @@ export function PostPage({
   postText,
   postBgColor,
   postTextColor,
+  postFont,
   anonymous,
   pendingAttachments,
   onPostTextChange,
   onAnonymousChange,
   onBgColorChange,
   onTextColorChange,
+  onFontChange,
   onFilesSelected,
   onRemoveAttachment,
   onSubmit,
@@ -55,6 +67,7 @@ export function PostPage({
   postText: string;
   postBgColor: string;
   postTextColor: string;
+  postFont: string;
   anonymous: boolean;
   selectedTenant: TenantSummary;
   pendingAttachments: PendingAttachment[];
@@ -62,16 +75,20 @@ export function PostPage({
   onAnonymousChange: (value: boolean) => void;
   onBgColorChange: (value: string) => void;
   onTextColorChange: (value: string) => void;
+  onFontChange: (value: string) => void;
   onFilesSelected: (files: ArrayLike<File> | null) => void;
   onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [attachmentToRemove, setAttachmentToRemove] = useState<PendingAttachment | null>(null);
+  const [fontPreviewOpen, setFontPreviewOpen] = useState(false);
+  const [pendingSubmit, setPendingSubmit] = useState(false);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
+  const hasNonDefaultFont = postFont && postFont !== "default";
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.items)
@@ -92,6 +109,23 @@ export function PostPage({
     onRemoveAttachment(attachmentToRemove.id);
     setAttachmentToRemove(null);
   }
+
+  function handleSubmit() {
+    if (hasNonDefaultFont) {
+      setPendingSubmit(true);
+      setFontPreviewOpen(true);
+    } else {
+      onSubmit();
+    }
+  }
+
+  function confirmFontPreview() {
+    setFontPreviewOpen(false);
+    setPendingSubmit(false);
+    onSubmit();
+  }
+
+  const selectedFontOption = FONT_OPTIONS.find((f) => f.value === postFont) ?? FONT_OPTIONS[0];
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
@@ -193,58 +227,87 @@ export function PostPage({
           </div>
         </div>
 
-        {metadata.enableColorSelection ? (
+        {metadata.enableColorSelection || metadata.enableFontSelection ? (
           <details className="mt-3 rounded-md border border-slate-200 bg-slate-50">
             <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-slate-700 [&::-webkit-details-marker]:hidden">
               <span>高级功能</span>
               <ChevronDownIcon className="size-4 text-slate-400 transition-transform ui-open:rotate-180" />
             </summary>
             <div className="grid gap-2 border-t border-slate-200 p-3">
-              <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
-                <div className="mb-2">
-                  <span className="block font-semibold">背景颜色</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {BG_COLOR_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
-                        postBgColor === opt.value
-                          ? "border-slate-700 bg-slate-700 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                      onClick={() => onBgColorChange(postBgColor === opt.value ? "" : opt.value)}
-                    >
-                      <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {metadata.enableColorSelection ? (
+                <>
+                  <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
+                    <div className="mb-2">
+                      <span className="block font-semibold">背景颜色</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {BG_COLOR_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                            postBgColor === opt.value
+                              ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                          onClick={() => onBgColorChange(postBgColor === opt.value ? "" : opt.value)}
+                        >
+                          <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
-                <div className="mb-2">
-                  <span className="block font-semibold">文字颜色</span>
+                  <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
+                    <div className="mb-2">
+                      <span className="block font-semibold">文字颜色</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {TEXT_COLOR_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                            postTextColor === opt.value
+                              ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                          onClick={() => onTextColorChange(postTextColor === opt.value ? "" : opt.value)}
+                        >
+                          <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {metadata.enableFontSelection ? (
+                <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
+                  <div className="mb-2">
+                    <span className="block font-semibold">字体</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {FONT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                          postFont === opt.value
+                            ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                        onClick={() => onFontChange(postFont === opt.value ? "" : opt.value)}
+                        style={opt.value !== "default" && postFont === opt.value ? { fontFamily: opt.value } : {}}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {TEXT_COLOR_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
-                        postTextColor === opt.value
-                          ? "border-slate-700 bg-slate-700 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                      onClick={() => onTextColorChange(postTextColor === opt.value ? "" : opt.value)}
-                    >
-                      <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              ) : null}
             </div>
           </details>
         ) : null}
@@ -252,7 +315,7 @@ export function PostPage({
         <PostRulesAction rules={rules} />
 
         <div className="mt-4 flex items-center gap-3">
-          <button className="campux-postbtn" disabled={busy || hasUploading || hasConverting || postText.trim().length === 0} onClick={onSubmit}>
+          <button className="campux-postbtn" disabled={busy || hasUploading || hasConverting || postText.trim().length === 0} onClick={handleSubmit}>
             <span>
               <SendIcon className="mr-1 inline size-4" />
               {busy ? "提交中" : "提交投稿"}
@@ -300,6 +363,35 @@ export function PostPage({
             </Button>
             <Button variant="destructive" onClick={confirmRemoveAttachment}>
               {attachmentToRemove?.status === "failed" ? "移除" : "删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={fontPreviewOpen} onOpenChange={(open) => { if (!open) setFontPreviewOpen(false); }}>
+        <DialogContent className="w-[min(560px,calc(100vw-32px))] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>字体预览</DialogTitle>
+            <DialogDescription>
+              你选择了「{selectedFontOption?.label}」，以下是使用该字体渲染的效果。确认无误后提交进入审核。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-2">
+            <style>{fontCssLinks}</style>
+            <div
+              className="min-h-[120px] rounded-md border border-slate-200 bg-white p-4 text-base leading-7 whitespace-pre-wrap break-words"
+              style={{ fontFamily: hasNonDefaultFont ? postFont : undefined }}
+            >
+              {postText || <span className="text-slate-400">（正文为空）</span>}
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setFontPreviewOpen(false); setPendingSubmit(false); }}>
+              取消
+            </Button>
+            <Button onClick={confirmFontPreview} disabled={busy || postText.trim().length === 0}>
+              <SendIcon className="mr-1 inline size-4" />
+              确认投稿
             </Button>
           </DialogFooter>
         </DialogContent>

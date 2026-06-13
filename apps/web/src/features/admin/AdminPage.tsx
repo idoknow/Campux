@@ -60,6 +60,7 @@ type TenantSettingsForm = {
   publishLlmSummaryEnabled: boolean;
   enableColorSelection: boolean;
   enableMarkdownRender: boolean;
+  enableFontSelection: boolean;
 };
 
 type BanForm = {
@@ -523,6 +524,7 @@ export function AdminPage({
           publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
           enableColorSelection: form.enableColorSelection,
           enableMarkdownRender: form.enableMarkdownRender,
+          enableFontSelection: form.enableFontSelection,
         }),
       });
       await onSaved();
@@ -1904,6 +1906,18 @@ function MetadataPanel({
                   disabled={busy}
                   onCheckedChange={(value) => onFormChange({ ...form, enableColorSelection: value })}
                   aria-label="启用多彩投稿"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">字体选择</p>
+                  <p className="text-xs text-slate-500">开启后，投稿页"高级功能"中可选字体（含多种艺术字体），选择非默认字体投稿前需预览确认。</p>
+                </div>
+                <Switch
+                  checked={form.enableFontSelection}
+                  disabled={busy}
+                  onCheckedChange={(value) => onFormChange({ ...form, enableFontSelection: value })}
+                  aria-label="启用字体选择"
                 />
               </div>
             </div>
@@ -3425,6 +3439,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
     enableColorSelection: metadata.enableColorSelection,
     enableMarkdownRender: metadata.enableMarkdownRender,
+    enableFontSelection: metadata.enableFontSelection,
   };
 }
 

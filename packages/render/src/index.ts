@@ -62,6 +62,13 @@ const underlineExtension = {
 
 marked.use(underlineExtension);
 
+export const FONT_CSS_LINKS = `@font-face { font-family: "beinidekeaitianyunle"; src: url("/fonts/beinidekeaitianyunle.ttf") format("truetype"); }
+@font-face { font-family: "dunhuangfeitiankai"; src: url("/fonts/dunhuangfeitiankai.ttf") format("truetype"); }
+@font-face { font-family: "mengxiangchaoyanningti"; src: url("/fonts/mengxiangchaoyanningti.ttf") format("truetype"); }
+@font-face { font-family: "unifontdianzhenhei"; src: url("/fonts/unifontdianzhenhei.ttf") format("truetype"); }
+@font-face { font-family: "zhuoteqingyati"; src: url("/fonts/zhuoteqingyati.ttf") format("truetype"); }
+@font-face { font-family: "zihuisongkexietiw4"; src: url("/fonts/zihuisongkexietiw4.ttf") format("truetype"); }`;
+
 export type RenderPostCardInput = {
   tenantName: string;
   authorName: string;
@@ -74,6 +81,7 @@ export type RenderPostCardInput = {
   anonymous: boolean;
   bgColor?: string | null;
   textColor?: string | null;
+  font?: string | null;
 };
 
 let browserPromise: Promise<Browser> | null = null;
@@ -140,6 +148,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const banner = "";
   const bgColor = resolveBgColor(input.bgColor);
   const textColor = resolveTextColor(input.textColor);
+  const font = input.font && input.font !== "default" ? input.font : null;
 
   return `<!DOCTYPE html>
 <html>
@@ -147,8 +156,9 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <style>
+    ${font ? FONT_CSS_LINKS : ""}
     :root {
-      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+      font-family: ${font ? `"${font}", ` : ""}"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
     }
 
     body {

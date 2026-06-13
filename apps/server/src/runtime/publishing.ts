@@ -626,6 +626,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         anonymous: target.anonymous,
         bgColor: (target as { bgColor?: string | null }).bgColor ?? null,
         textColor: (target as { textColor?: string | null }).textColor ?? null,
+        font: (target as { font?: string | null }).font ?? null,
       });
       captionParts.push(
         renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {

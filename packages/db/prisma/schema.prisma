@@ -246,6 +246,7 @@ model Post {
   anonymous       Boolean          @default(false)
   bgColor         String?
   textColor       String?
+  font            String?
   status          PostStatus       @default(pending_approval)
   publishSummary  String?
   recallIgnored   Boolean          @default(false)

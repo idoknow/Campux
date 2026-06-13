@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./fonts";
+
 export const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
 export type TenantStatus = z.infer<typeof tenantStatusSchema>;
 

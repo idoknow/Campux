@@ -279,6 +279,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     let anonymous = false;
     let bgColor: string | null = null;
     let textColor: string | null = null;
+    let font: string | null = null;
     const staged: PostAttachment[] = [];
     const remoteGifUrls: string[] = [];
 
@@ -294,6 +295,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             bgColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "textColor") {
             textColor = String(part.value ?? "") || null;
+          } else if (part.fieldname === "font") {
+            font = String(part.value ?? "") || null;
           } else if (part.fieldname === "remoteGifUrls") {
             // Accept JSON array of GIF URLs from 失控图床 API conversion
             try {
@@ -480,6 +483,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   anonymous,
                   bgColor,
                   textColor,
+                  font: font || null,
                   attachments: staged,
                   status: initialStatus,
                   logs: {
@@ -752,6 +756,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       anonymous: boolean;
       bgColor: string | null;
       textColor: string | null;
+      font: string | null;
       createdAt: Date;
       author: { displayName: string | null; qqUin: bigint } | null;
     }): RawFeedPost => ({
@@ -762,6 +767,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       anonymous: post.anonymous,
       bgColor: post.bgColor,
       textColor: post.textColor,
+      font: post.font,
       author: post.author ? { displayName: post.author.displayName ?? "", qqUin: post.author.qqUin } : null,
       createdAt: post.createdAt,
     });
@@ -836,6 +842,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       anonymous: post.anonymous,
       bgColor: post.bgColor ?? null,
       textColor: post.textColor ?? null,
+      font: post.font ?? null,
     });
 
     reply.header("Cache-Control", "private, max-age=60");

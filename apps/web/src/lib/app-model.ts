@@ -43,6 +43,7 @@ export const defaultMetadata: TenantMetadata = {
   publishLlmSummaryEnabled: false,
   enableColorSelection: false,
   enableMarkdownRender: false,
+  enableFontSelection: false,
 };
 
 export const navItems = [
