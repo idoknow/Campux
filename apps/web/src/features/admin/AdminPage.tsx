@@ -1973,7 +1973,7 @@ function AdminAiSettingsPanel({
           action={<Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">实验性</Badge>}
         />
 
-        <div className="mt-4 grid gap-4">
+        <form className="mt-4 grid gap-4" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
             <div>
               <p className="text-sm font-semibold text-slate-950">启用 AI 建模</p>
@@ -2009,6 +2009,7 @@ function AdminAiSettingsPanel({
               API 密钥
               <Input
                 type="password"
+                name="apiKey"
                 value={form.apiKey}
                 placeholder={overview.settings.apiKeyConfigured ? "保持不变" : "未配置"}
                 disabled={busy || testing}
@@ -2073,12 +2074,12 @@ function AdminAiSettingsPanel({
               <TestTube2Icon data-icon="inline-start" />
               {testing ? "测试中" : "测试连接"}
             </Button>
-            <Button type="button" disabled={busy || testing} onClick={onSave}>
+            <Button type="submit" disabled={busy || testing}>
               <SaveIcon data-icon="inline-start" />
               保存 AI 设置
             </Button>
           </div>
-        </div>
+        </form>
       </CardContent>
     </Card>
   );
