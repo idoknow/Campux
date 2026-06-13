@@ -54,7 +54,7 @@ function snapshot(overrides: Partial<TelemetrySnapshot> = {}): TelemetrySnapshot
     setupCompleted: true,
     uptimeSeconds: 123.9,
     emailConfigured: true,
-    counts: { tenants: 1, users: 230, memberships: 231, postsTotal: 5400, postsLast24h: 12, botsEnabled: 1, publishTargets: 1 },
+    counts: { tenants: 1, users: 230, memberships: 231, postsTotal: 5400, postsLast24h: 12, botsEnabled: 1, publishTargets: 1, privateMessagesReceived: 0, adminRepliesSent: 0 },
     aiTenants: 0,
     ...overrides,
   };

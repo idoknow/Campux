@@ -111,7 +111,7 @@ export function buildTelemetryReport(snapshot: TelemetrySnapshot, now: Date): Te
 // numbers, hosts, or content) is ever read into the report.
 export async function collectTelemetryReport(config: CampuxConfig): Promise<TelemetryReport> {
   const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [instanceId, deployMode, setupCompleted, tenants, users, memberships, postsTotal, postsLast24h, botsEnabled, publishTargets, aiTenants] =
+  const [instanceId, deployMode, setupCompleted, tenants, users, memberships, postsTotal, postsLast24h, botsEnabled, publishTargets, aiTenants, privateMessagesReceived, adminRepliesSent] =
     await Promise.all([
       getOrCreateTelemetryInstanceId(),
       getDeployMode(),
@@ -124,6 +124,14 @@ export async function collectTelemetryReport(config: CampuxConfig): Promise<Tele
       prisma.botAccount.count({ where: { enabled: true } }),
       prisma.publishTarget.count({ where: { enabled: true } }),
       prisma.tenantAiSettings.count({ where: { enabled: true } }),
+      (async () => {
+        const result = await prisma.botAccount.aggregate({ _sum: { privateMessagesReceived: true } });
+        return result._sum.privateMessagesReceived ?? 0;
+      })(),
+      (async () => {
+        const result = await prisma.botAccount.aggregate({ _sum: { adminRepliesSent: true } });
+        return result._sum.adminRepliesSent ?? 0;
+      })(),
     ]);
 
   return buildTelemetryReport(
@@ -136,7 +144,7 @@ export async function collectTelemetryReport(config: CampuxConfig): Promise<Tele
       setupCompleted,
       uptimeSeconds: process.uptime(),
       emailConfigured: Boolean(config.resend.apiKey),
-      counts: { tenants, users, memberships, postsTotal, postsLast24h, botsEnabled, publishTargets },
+      counts: { tenants, users, memberships, postsTotal, postsLast24h, botsEnabled, publishTargets, privateMessagesReceived, adminRepliesSent },
       aiTenants,
     },
     new Date(),
