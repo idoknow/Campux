@@ -13,9 +13,10 @@ import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/
 import { toPostListItem } from "../lib/posts";
 import { buildPublishedFeed, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
 import { prisma } from "../lib/prisma";
-import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
+import { readTenantPendingPostLimit, readTenantImageCompression, readTenantPublishMode } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
+import { evaluateEmojiModeration } from "../lib/emoji-moderation";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -421,23 +422,37 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         };
       }
 
+      // 检查超级表情包自动审核
+      const emojiResult = evaluateEmojiModeration(text);
+      const initialStatus: "pending_approval" | "approved" | "rejected" =
+        emojiResult === "approve" ? "approved" : emojiResult === "reject" ? "rejected" : "pending_approval";
+      const logComment =
+        emojiResult === "approve"
+          ? "投稿创建，表情包自动通过"
+          : emojiResult === "reject"
+            ? "投稿创建，表情包自动拒绝"
+            : "投稿创建";
+
       // Create post in transaction with retry logic
       let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           post = await prisma.$transaction(
             async (tx) => {
-              const pendingPostLimit = await readTenantPendingPostLimit(tx, context.selectedTenant.id);
-              if (pendingPostLimit > 0) {
-                const pendingCount = await tx.post.count({
-                  where: {
-                    tenantId: context.selectedTenant.id,
-                    authorId: context.user.id,
-                    status: "pending_approval",
-                  },
-                });
-                if (pendingCount >= pendingPostLimit) {
-                  throw new PendingPostLimitError(pendingCount, pendingPostLimit);
+              // 只有待审核状态才受待审核数量限制
+              if (initialStatus === "pending_approval") {
+                const pendingPostLimit = await readTenantPendingPostLimit(tx, context.selectedTenant.id);
+                if (pendingPostLimit > 0) {
+                  const pendingCount = await tx.post.count({
+                    where: {
+                      tenantId: context.selectedTenant.id,
+                      authorId: context.user.id,
+                      status: "pending_approval",
+                    },
+                  });
+                  if (pendingCount >= pendingPostLimit) {
+                    throw new PendingPostLimitError(pendingCount, pendingPostLimit);
+                  }
                 }
               }
 
@@ -466,13 +481,13 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   bgColor,
                   textColor,
                   attachments: staged,
-                  status: "pending_approval",
+                  status: initialStatus,
                   logs: {
                     create: {
                       tenantId: context.selectedTenant.id,
                       actorId: context.user.id,
-                      newStatus: "pending_approval",
-                      comment: "投稿创建",
+                      newStatus: initialStatus,
+                      comment: logComment,
                     },
                   },
                 },
@@ -499,9 +514,22 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         };
       }
 
-      oneBot?.notifyNewPost(post.id).catch((error) => {
-        app.log.warn({ error, postId: post.id }, "failed to notify review group");
-      });
+      // 表情包自动通过：直接触发发布
+      if (emojiResult === "approve") {
+        const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
+        if (publishMode.mode === "accumulate") {
+          const { addApprovedPostToBatch } = await import("../runtime/publish-batching");
+          await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id);
+        } else {
+          const { enqueuePublishFanout } = await import("../runtime/publishing");
+          await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+        }
+      } else {
+        // 非自动通过的稿件才需要通知审核群
+        oneBot?.notifyNewPost(post.id).catch((error) => {
+          app.log.warn({ error, postId: post.id }, "failed to notify review group");
+        });
+      }
       enqueueAiAnalyzePost(queue, context.selectedTenant.id, post.id);
 
       return {

@@ -23,7 +23,8 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
-import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
+import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled, readTenantPublishMode } from "../lib/tenant-metadata";
+import { evaluateEmojiModeration } from "../lib/emoji-moderation";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
@@ -1369,23 +1370,35 @@ export class OneBotRuntime {
       return;
     }
 
-    const post = await this.createPostFromPrivateDraft(bot, userQqUin, draft).catch(async (error) => {
+    const result = await this.createPostFromPrivateDraft(bot, userQqUin, draft).catch(async (error) => {
       if (error instanceof BotWorkflowError) {
         await this.sendPrivateMessage(botQqUin, userQqUin, error.message).catch(() => undefined);
         return null;
       }
       throw error;
     });
-    if (!post) {
+    if (!result) {
       return;
     }
 
+    const { post, emojiModeration } = result;
     this.privatePostDrafts.delete(draftKey);
     const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
-    this.notifyNewPost(post.id).catch((error) => {
-      this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
-    });
+
+    if (emojiModeration === "approve") {
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatReviewApproved(post.displayId, stylishEnabled));
+    } else if (emojiModeration === "reject") {
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatReviewRejected(post.displayId, "表情包自动拒绝", stylishEnabled));
+    } else {
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
+    }
+
+    // 非自动通过的稿件才需要通知审核群
+    if (!emojiModeration) {
+      this.notifyNewPost(post.id).catch((error) => {
+        this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
+      });
+    }
   }
 
   private async ensurePrivatePostingAllowed(tenantId: string, userQqUin: string) {
@@ -1686,25 +1699,37 @@ export class OneBotRuntime {
       throw new BotWorkflowError("正文太长了，请控制在 1000 字以内，再发送 #结束。", 400);
     }
 
+    // 检查超级表情包自动审核
+    const emojiResult = evaluateEmojiModeration(text);
+    const initialStatus = emojiResult === "approve" ? "approved" : emojiResult === "reject" ? "rejected" : "pending_approval";
+    const logComment =
+      emojiResult === "approve"
+        ? "QQ 私聊投稿，表情包自动通过"
+        : emojiResult === "reject"
+          ? "QQ 私聊投稿，表情包自动拒绝"
+          : "QQ 私聊投稿创建";
+
     let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         post = await prisma.$transaction(
           async (tx) => {
-            const pendingPostLimit = await readTenantPendingPostLimit(tx, bot.tenantId);
-            if (pendingPostLimit > 0) {
-              const pendingCount = await tx.post.count({
-                where: {
-                  tenantId: bot.tenantId,
-                  authorId: access.operator.id,
-                  status: "pending_approval",
-                },
-              });
-              if (pendingCount >= pendingPostLimit) {
-                throw new BotWorkflowError(
-                  `你还有 ${pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${pendingPostLimit} 条待审核稿件。`,
-                  409,
-                );
+            if (initialStatus === "pending_approval") {
+              const pendingPostLimit = await readTenantPendingPostLimit(tx, bot.tenantId);
+              if (pendingPostLimit > 0) {
+                const pendingCount = await tx.post.count({
+                  where: {
+                    tenantId: bot.tenantId,
+                    authorId: access.operator.id,
+                    status: "pending_approval",
+                  },
+                });
+                if (pendingCount >= pendingPostLimit) {
+                  throw new BotWorkflowError(
+                    `你还有 ${pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${pendingPostLimit} 条待审核稿件。`,
+                    409,
+                  );
+                }
               }
             }
 
@@ -1731,13 +1756,13 @@ export class OneBotRuntime {
                 text,
                 anonymous: draft.anonymous,
                 attachments: draft.attachments,
-                status: "pending_approval",
+                status: initialStatus,
                 logs: {
                   create: {
                     tenantId: bot.tenantId,
                     actorId: access.operator.id,
-                    newStatus: "pending_approval",
-                    comment: "QQ 私聊投稿创建",
+                    newStatus: initialStatus,
+                    comment: logComment,
                   },
                 },
               },
@@ -1771,10 +1796,23 @@ export class OneBotRuntime {
         botQqUin: bot.qqUin.toString(),
         userQqUin,
         attachmentCount: draft.attachments.length,
+        emojiModeration: emojiResult ?? undefined,
       },
     });
 
-    return post;
+    // 表情包自动通过：直接触发发布
+    if (emojiResult === "approve") {
+      const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
+      if (publishMode.mode === "accumulate") {
+        const { addApprovedPostToBatch } = await import("./publish-batching");
+        await addApprovedPostToBatch(this.queue, bot.tenantId, post.id, access.operator.id);
+      } else {
+        const { enqueuePublishFanout } = await import("./publishing");
+        await enqueuePublishFanout(this.queue, bot.tenantId, post.id, access.operator.id);
+      }
+    }
+
+    return { post, emojiModeration: emojiResult };
   }
 
   private async handleGroupMessage(event: OneBotMessageEvent) {
@@ -1803,6 +1841,14 @@ export class OneBotRuntime {
         if (rejectMatch) {
           command = { name: "拒绝", args: (rejectMatch[2] ?? "").trim() };
         }
+      }
+    }
+
+    // 支持引用稿件后单回一个表情审核（无需命令前缀、无需 @ 机器人）
+    if (!command) {
+      const handledByEmoji = await this.tryEmojiReplyReview(event, botQqUin, groupId, operatorQqUin);
+      if (handledByEmoji) {
+        return;
       }
     }
 
@@ -2242,6 +2288,73 @@ export class OneBotRuntime {
       }
     } catch (error) {
       this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "转发私聊消息到审核群失败");
+    }
+  }
+
+  /**
+   * 检查消息是否引用了机器人发的审核通知，且消息本身只包含一个超级表情。
+   * 如果是，根据表情的积极/消极自动通过或拒绝。
+   */
+  private async tryEmojiReplyReview(
+    event: OneBotMessageEvent,
+    botQqUin: string,
+    groupId: string,
+    operatorQqUin: string,
+  ): Promise<boolean> {
+    try {
+      const rawText = typeof event.raw_message === "string" ? event.raw_message : "";
+      if (!rawText) {
+        return false;
+      }
+
+      const emojiAction = evaluateEmojiModeration(rawText);
+      if (!emojiAction) {
+        return false;
+      }
+
+      // 只有引用消息才触发（回复了机器人的审核通知）
+      const displayId = await this.tryResolveDisplayIdFromReply(event, botQqUin);
+      if (!displayId) {
+        return false;
+      }
+
+      const bot = await findEnabledBot(botQqUin).catch(() => null);
+      if (!bot) {
+        return false;
+      }
+
+      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+
+      if (emojiAction === "approve") {
+        const result = await reviewPostViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          displayId,
+          action: "approve",
+        });
+        await this.sendGroupMessage(botQqUin, groupId, formatReviewApprovedGroup(displayId, stylishEnabled));
+        await this.notifyReviewResult(result.post.id, "approved").catch(() => undefined);
+      } else {
+        const reason = "表情包自动拒绝";
+        const result = await reviewPostViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          displayId,
+          action: "reject",
+          comment: reason,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, formatReviewRejectedGroup(displayId, reason, stylishEnabled));
+        await this.notifyReviewResult(result.post.id, "rejected", reason).catch(() => undefined);
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.warn({ error, botQqUin, groupId }, "表情包回复审核失败");
+      return false;
     }
   }
 
