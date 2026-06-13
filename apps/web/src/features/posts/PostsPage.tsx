@@ -110,12 +110,12 @@ const defaultPostCardPalette = "border-slate-200 bg-white";
 // ── 颜色映射（与 packages/render 同步） ────────────────
 
 const BG_CARD_STYLE_MAP: Record<string, string> = {
-  pink:    "background: linear-gradient(135deg, #fff8f9 0%, #fff0f3 50%, #ffe8ed 100%)",
-  blue:    "background: linear-gradient(135deg, #f5faff 0%, #ebf5ff 50%, #e0f0ff 100%)",
-  green:   "background: linear-gradient(135deg, #f5faf5 0%, #ebf5eb 50%, #e0f0e0 100%)",
-  yellow:  "background: linear-gradient(135deg, #fffff5 0%, #fffceb 50%, #fffae0 100%)",
-  orange:  "background: linear-gradient(135deg, #fffaf5 0%, #fff5eb 50%, #fff0e0 100%)",
-  purple:  "background: linear-gradient(135deg, #faf5ff 0%, #f5ebff 50%, #f0e0ff 100%)",
+  pink:    "background: linear-gradient(135deg, #fef6f8 0%, #fdeef2 50%, #fce6ec 100%)",
+  blue:    "background: linear-gradient(135deg, #f6fafe 0%, #eef6fd 50%, #e6f2fc 100%)",
+  green:   "background: linear-gradient(135deg, #f6faf6 0%, #eef6ee 50%, #e6f2e6 100%)",
+  yellow:  "background: linear-gradient(135deg, #fefcf5 0%, #fdfaed 50%, #fcf8e5 100%)",
+  orange:  "background: linear-gradient(135deg, #fef9f5 0%, #fdf4ed 50%, #fcefe5 100%)",
+  purple:  "background: linear-gradient(135deg, #f9f6fe 0%, #f3eefd 50%, #ede6fc 100%)",
 };
 
 const TEXT_CARD_COLOR_MAP: Record<string, string> = {

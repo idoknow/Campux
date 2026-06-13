@@ -6,13 +6,13 @@ import { marked, Tokens } from "marked";
 // CampuxNext 前端用语义名称传 bgColor/textColor，这里转成实际 CSS 值。
 
 const BG_COLOR_MAP: Record<string, string> = {
-  white:  "",
-  pink:   "linear-gradient(135deg, #fff8f9 0%, #fff0f3 50%, #ffe8ed 100%)",
-  blue:   "linear-gradient(135deg, #f5faff 0%, #ebf5ff 50%, #e0f0ff 100%)",
-  green:  "linear-gradient(135deg, #f5faf5 0%, #ebf5eb 50%, #e0f0e0 100%)",
-  yellow: "linear-gradient(135deg, #fffff5 0%, #fffceb 50%, #fffae0 100%)",
-  orange: "linear-gradient(135deg, #fffaf5 0%, #fff5eb 50%, #fff0e0 100%)",
-  purple: "linear-gradient(135deg, #faf5ff 0%, #f5ebff 50%, #f0e0ff 100%)",
+  white:  "#FFFFFF",
+  pink:   "linear-gradient(135deg, #fef6f8 0%, #fdeef2 50%, #fce6ec 100%)",
+  blue:   "linear-gradient(135deg, #f6fafe 0%, #eef6fd 50%, #e6f2fc 100%)",
+  green:  "linear-gradient(135deg, #f6faf6 0%, #eef6ee 50%, #e6f2e6 100%)",
+  yellow: "linear-gradient(135deg, #fefcf5 0%, #fdfaed 50%, #fcf8e5 100%)",
+  orange: "linear-gradient(135deg, #fef9f5 0%, #fdf4ed 50%, #fcefe5 100%)",
+  purple: "linear-gradient(135deg, #f9f6fe 0%, #f3eefd 50%, #ede6fc 100%)",
 };
 
 const TEXT_COLOR_MAP: Record<string, string> = {
@@ -26,7 +26,7 @@ const TEXT_COLOR_MAP: Record<string, string> = {
 };
 
 function resolveBgColor(raw: string | null | undefined): string {
-  if (!raw) return "";
+  if (!raw) return "#FFFFFF";
   return BG_COLOR_MAP[raw] ?? raw;
 }
 
@@ -349,14 +349,14 @@ async function renderPostHtml(input: RenderPostCardInput) {
     }
   </style>
 </head>
-<body style="margin: 0; background: #FFFFFF;">
+<body style="margin: 0; background: ${bgColor};">
   <div id="title-bar" style="background-color: #1E88E5; height: 5%; width: calc(100% + 50px); padding: 16px; border-radius: 0 0 8px 8px; font-weight: bold">
     <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
   </div>
   <div style="padding: 2.5rem; min-height: 550px; position: relative;">
     <div style="display: flex; align-items: flex-start;">
       <img id="avatar" src="${avatar}" style="flex-shrink: 0; width: 18%; height: 18%; border-radius: 50%; box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);" />
-      <div style="margin-left: 32px; margin-top: 32px; flex: 1; min-width: 0; border-radius: 16px;${bgColor ? ` padding: 20px 28px; background: ${bgColor};` : ""}">
+      <div style="margin-left: 32px; margin-top: 32px; flex: 1; min-width: 0;">
         <span id="nickname" style="color: ${textColor};">${escapeHtml(author)}</span>
         <div id="content" style="color: ${textColor};">${renderMarkdown(input.text)}</div>
       </div>
