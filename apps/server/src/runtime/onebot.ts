@@ -1093,7 +1093,7 @@ export class OneBotRuntime {
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
-        // 跳过好友请求、「我是XXX」等系统消息，不转发
+        // 跳过好友请求等系统消息，不转发
         if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
           return;
         }
@@ -2297,7 +2297,7 @@ export class OneBotRuntime {
   }
 
   private isSkippablePrivateMessage(text: string): boolean {
-    return /请求添加(你为)?好友/.test(text) || /^我是\d+$/.test(text);
+    return /请求添加(你为)?好友/.test(text);
   }
 
   /**
