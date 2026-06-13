@@ -21,6 +21,8 @@ export function AppShell({
   busy,
   dataLoading,
   postText,
+  postBgColor,
+  postTextColor,
   postsTab,
   postsPagination,
   anonymous,
@@ -28,6 +30,8 @@ export function AppShell({
   onActiveTabChange,
   onAdminTabChange,
   onAnonymousChange,
+  onBgColorChange,
+  onTextColorChange,
   onFilesSelected,
   onLogout,
   onOpenOps,
@@ -53,6 +57,8 @@ export function AppShell({
   busy: boolean;
   dataLoading: boolean;
   postText: string;
+  postBgColor: string;
+  postTextColor: string;
   postsTab: PostsTab;
   postsPagination: Pagination;
   anonymous: boolean;
@@ -60,6 +66,8 @@ export function AppShell({
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
+  onBgColorChange: (value: string) => void;
+  onTextColorChange: (value: string) => void;
   onFilesSelected: (files: ArrayLike<File> | null) => void;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
@@ -99,10 +107,14 @@ export function AppShell({
                 loading={dataLoading}
                 metadata={metadata}
                 postText={postText}
+                postBgColor={postBgColor}
+                postTextColor={postTextColor}
                 anonymous={anonymous}
                 selectedTenant={me.currentTenant}
                 pendingAttachments={pendingAttachments}
                 onAnonymousChange={onAnonymousChange}
+                onBgColorChange={onBgColorChange}
+                onTextColorChange={onTextColorChange}
                 onFilesSelected={onFilesSelected}
                 onPostTextChange={onPostTextChange}
                 onSubmit={onSubmitPost}

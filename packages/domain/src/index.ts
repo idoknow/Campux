@@ -33,6 +33,30 @@ export const publishAttemptStatusSchema = z.enum([
 ]);
 export type PublishAttemptStatus = z.infer<typeof publishAttemptStatusSchema>;
 
+export const postBgColorSchema = z.enum(["white", "pink", "blue", "green", "yellow", "orange", "purple"]);
+export type PostBgColor = z.infer<typeof postBgColorSchema>;
+export const postBgColorMap: Record<PostBgColor, string> = {
+  white: "#FFFFFF",
+  pink: "#FFE4E1",
+  blue: "#E0F0FF",
+  green: "#E0FFE0",
+  yellow: "#FFFDE0",
+  orange: "#FFE8D0",
+  purple: "#F0E0FF",
+};
+
+export const postTextColorSchema = z.enum(["black", "dark_red", "dark_blue", "dark_green", "dark_pink", "dark_purple", "dark_orange"]);
+export type PostTextColor = z.infer<typeof postTextColorSchema>;
+export const postTextColorMap: Record<PostTextColor, string> = {
+  black: "#1a1a1a",
+  dark_red: "#8B0000",
+  dark_blue: "#00008B",
+  dark_green: "#006400",
+  dark_pink: "#C71585",
+  dark_purple: "#4B0082",
+  dark_orange: "#CC5500",
+};
+
 export const tenantSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),

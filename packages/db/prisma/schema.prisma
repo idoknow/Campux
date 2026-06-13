@@ -244,6 +244,8 @@ model Post {
   text            String
   attachments     Json             @default("[]")
   anonymous       Boolean          @default(false)
+  bgColor         String?
+  textColor       String?
   status          PostStatus       @default(pending_approval)
   publishSummary  String?
   recallIgnored   Boolean          @default(false)

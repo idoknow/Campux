@@ -12,15 +12,39 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 
+const BG_COLOR_OPTIONS = [
+  { value: "white", label: "白", hex: "#FFFFFF" },
+  { value: "pink", label: "浅粉", hex: "#FFE4E1" },
+  { value: "blue", label: "浅蓝", hex: "#E0F0FF" },
+  { value: "green", label: "浅绿", hex: "#E0FFE0" },
+  { value: "yellow", label: "浅黄", hex: "#FFFDE0" },
+  { value: "orange", label: "浅橙", hex: "#FFE8D0" },
+  { value: "purple", label: "浅紫", hex: "#F0E0FF" },
+] as const;
+
+const TEXT_COLOR_OPTIONS = [
+  { value: "black", label: "黑", hex: "#1a1a1a" },
+  { value: "dark_red", label: "深红", hex: "#8B0000" },
+  { value: "dark_blue", label: "深蓝", hex: "#00008B" },
+  { value: "dark_green", label: "深绿", hex: "#006400" },
+  { value: "dark_pink", label: "深粉", hex: "#C71585" },
+  { value: "dark_purple", label: "深紫", hex: "#4B0082" },
+  { value: "dark_orange", label: "深橙", hex: "#CC5500" },
+] as const;
+
 export function PostPage({
   busy,
   loading,
   metadata,
   postText,
+  postBgColor,
+  postTextColor,
   anonymous,
   pendingAttachments,
   onPostTextChange,
   onAnonymousChange,
+  onBgColorChange,
+  onTextColorChange,
   onFilesSelected,
   onRemoveAttachment,
   onSubmit,
@@ -29,11 +53,15 @@ export function PostPage({
   loading: boolean;
   metadata: TenantMetadata;
   postText: string;
+  postBgColor: string;
+  postTextColor: string;
   anonymous: boolean;
   selectedTenant: TenantSummary;
   pendingAttachments: PendingAttachment[];
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
+  onBgColorChange: (value: string) => void;
+  onTextColorChange: (value: string) => void;
   onFilesSelected: (files: ArrayLike<File> | null) => void;
   onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
@@ -162,6 +190,52 @@ export function PostPage({
               <span className="block text-xs font-normal opacity-80">审核员仍可查看必要的投稿记录。</span>
             </span>
             <Switch checked={anonymous} onCheckedChange={onAnonymousChange} disabled={busy} aria-label="匿名展示" />
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-blue">
+          <div className="mb-2">
+            <span className="block font-semibold">背景颜色</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {BG_COLOR_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                  postBgColor === opt.value
+                    ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+                onClick={() => onBgColorChange(postBgColor === opt.value ? "" : opt.value)}
+              >
+                <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-2 rounded-md border px-3 py-2 text-sm product-accent-blue">
+          <div className="mb-2">
+            <span className="block font-semibold">文字颜色</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {TEXT_COLOR_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                  postTextColor === opt.value
+                    ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+                onClick={() => onTextColorChange(postTextColor === opt.value ? "" : opt.value)}
+              >
+                <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
