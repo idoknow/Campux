@@ -1279,6 +1279,25 @@ type PublishCaptionTemplate = {
   includeLinks?: boolean;
 };
 
+/**
+ * 从稿件正文中提取 @QQ号 格式的提及，转换为 QZone @mention 格式。
+ * 匹配 @ 后跟至少 5 位数字的模式并去重。
+ */
+export function extractQZoneMentions(text: string): string[] {
+  const mentionRegex = /@(\d{5,})/g;
+  const seen = new Set<string>();
+  const mentions: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = mentionRegex.exec(text)) !== null) {
+    const qq = match[1];
+    if (qq && !seen.has(qq)) {
+      seen.add(qq);
+      mentions.push(`@{uin:${qq},nick:,who:1}`);
+    }
+  }
+  return mentions;
+}
+
 export function renderPublishCaption(
   value: Prisma.JsonValue | null | undefined,
   post: { postId: number; text: string; anonymous: boolean; authorQq: string; omitFixedText?: boolean; summary?: string | null },
@@ -1296,6 +1315,15 @@ export function renderPublishCaption(
   const summary = post.summary?.trim();
   if (summary) {
     parts.push(summary);
+  }
+  // 从稿件正文提取 @QQ 提及，转为 QZone @mention 格式（去重，且跳过已在 includeAuthorMention 中的 QQ）。
+  const authorQq = post.anonymous ? null : post.authorQq;
+  const qqMentions = extractQZoneMentions(post.text).filter((m) => {
+    if (!authorQq || !template.includeAuthorMention) return true;
+    return !m.includes(`uin:${authorQq},`);
+  });
+  if (qqMentions.length > 0) {
+    parts.push(...qqMentions);
   }
   // 批量时省略固定前缀 customText（整条说说只在外层加一次）；单稿保持原行为。
   const firstLineParts = omitFixed ? parts : [template.customText?.trim(), ...parts];
