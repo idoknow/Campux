@@ -41,6 +41,8 @@ export const defaultMetadata: TenantMetadata = {
     staleMinutes: 30,
   },
   publishLlmSummaryEnabled: false,
+  enableColorSelection: false,
+  enableMarkdownRender: false,
 };
 
 export const navItems = [

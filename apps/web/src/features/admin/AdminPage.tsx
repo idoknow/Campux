@@ -59,6 +59,8 @@ type TenantSettingsForm = {
   publishAccumulateMaxImages: number;
   publishAccumulateStaleMinutes: number;
   publishLlmSummaryEnabled: boolean;
+  enableColorSelection: boolean;
+  enableMarkdownRender: boolean;
 };
 
 type BanForm = {
@@ -520,6 +522,8 @@ export function AdminPage({
           publishAccumulateMaxImages: form.publishAccumulateMaxImages,
           publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
           publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
+          enableColorSelection: form.enableColorSelection,
+          enableMarkdownRender: form.enableMarkdownRender,
         }),
       });
       await onSaved();
@@ -1888,6 +1892,35 @@ function MetadataPanel({
               aria-label="启用对话投稿多彩消息"
             />
           </div>
+          <details className="rounded-md border border-slate-200 bg-slate-50 md:col-span-2">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">高级功能</summary>
+            <div className="grid gap-3 border-t border-slate-200 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Markdown 渲染</p>
+                  <p className="text-xs text-slate-500">开启后，稿件正文中的 Markdown 语法（表格、列表、引用、代码等）会渲染为对应样式。</p>
+                </div>
+                <Switch
+                  checked={form.enableMarkdownRender}
+                  disabled={busy}
+                  onCheckedChange={(value) => onFormChange({ ...form, enableMarkdownRender: value })}
+                  aria-label="启用 Markdown 渲染"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">颜色选择</p>
+                  <p className="text-xs text-slate-500">开启后，投稿页显示背景颜色和文字颜色选择器，用户可选择投稿卡片颜色。</p>
+                </div>
+                <Switch
+                  checked={form.enableColorSelection}
+                  disabled={busy}
+                  onCheckedChange={(value) => onFormChange({ ...form, enableColorSelection: value })}
+                  aria-label="启用颜色选择"
+                />
+              </div>
+            </div>
+          </details>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
@@ -3403,6 +3436,8 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,
     publishAccumulateStaleMinutes: metadata.publishAccumulate.staleMinutes,
     publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
+    enableColorSelection: metadata.enableColorSelection,
+    enableMarkdownRender: metadata.enableMarkdownRender,
   };
 }
 

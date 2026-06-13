@@ -124,6 +124,8 @@ export type TenantMetadata = {
     staleMinutes: number;
   };
   publishLlmSummaryEnabled: boolean;
+  enableColorSelection: boolean;
+  enableMarkdownRender: boolean;
 };
 
 export type PostAttachment = {

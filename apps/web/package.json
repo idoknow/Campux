@@ -17,6 +17,7 @@
     "clsx": "^2.1.1",
     "gif.js": "^0.2.0",
     "lucide-react": "^1.14.0",
+    "marked": "^18.0.5",
     "radix-ui": "^1.4.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@types/gif.js": "^0.2.5",
+    "@types/marked": "^6.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "typescript": "^5.8.3"
