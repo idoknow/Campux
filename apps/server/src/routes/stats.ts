@@ -391,6 +391,8 @@ export function registerStatsRoutes(app: FastifyInstance) {
           enabled: bot.enabled,
           reviewGroupId: bot.reviewGroupId,
           publishTargetCount: bot.publishTargets.length,
+          privateMessagesReceived: bot.privateMessagesReceived,
+          adminRepliesSent: bot.adminRepliesSent,
           lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
           qzoneSession: qzoneSession
             ? {

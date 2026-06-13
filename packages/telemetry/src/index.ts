@@ -32,6 +32,8 @@ export const telemetryCountsSchema = z.object({
   postsLast24h: count,
   botsEnabled: count,
   publishTargets: count,
+  privateMessagesReceived: count,
+  adminRepliesSent: count,
 });
 
 export const telemetryFeaturesSchema = z.object({

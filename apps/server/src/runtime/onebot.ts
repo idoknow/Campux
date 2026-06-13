@@ -1956,6 +1956,14 @@ export class OneBotRuntime {
     userNickname: string;
     text: string;
   }) {
+    // 异步递增私信接收计数
+    prisma.botAccount.update({
+      where: { id: bot.id },
+      data: { privateMessagesReceived: { increment: 1 } },
+    }).catch((error) => {
+      this.logger.warn({ error, botId: bot.id }, "failed to increment private message counter");
+    });
+
     const key = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     let buffer = this.privateForwardBuffers.get(key);
     if (!buffer) {
@@ -2256,6 +2264,14 @@ export class OneBotRuntime {
 
     await this.sendPrivateMessage(botQqUin, target.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
     await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(target.userNickname, target.userQqUin, stylishEnabled));
+
+    // 异步递增管理员回复计数
+    prisma.botAccount.update({
+      where: { id: bot.id },
+      data: { adminRepliesSent: { increment: 1 } },
+    }).catch((error) => {
+      this.logger.warn({ error, botId: bot.id }, "failed to increment admin reply counter");
+    });
   }
 
   private storePrivateForwardMapping(msgId: string, userQqUin: string, userNickname: string, botQqUin: string) {

@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS instances (
   posts_total    INTEGER NOT NULL DEFAULT 0,
   posts_last_24h INTEGER NOT NULL DEFAULT 0,
   bots_enabled   INTEGER NOT NULL DEFAULT 0,
+  private_messages_received INTEGER NOT NULL DEFAULT 0,
+  admin_replies_sent        INTEGER NOT NULL DEFAULT 0,
   last_payload   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS instances_last_seen_idx ON instances(last_seen_at);
@@ -41,7 +43,9 @@ CREATE TABLE IF NOT EXISTS reports (
   users          INTEGER NOT NULL,
   posts_total    INTEGER NOT NULL,
   posts_last_24h INTEGER NOT NULL,
-  bots_enabled   INTEGER NOT NULL
+  bots_enabled   INTEGER NOT NULL,
+  private_messages_received INTEGER NOT NULL DEFAULT 0,
+  admin_replies_sent        INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS reports_day_idx ON reports(day, instance_id);
 CREATE INDEX IF NOT EXISTS reports_instance_idx ON reports(instance_id, received_at);
@@ -69,7 +73,13 @@ export function openDashDatabase(path: string): Database {
   // Lightweight forward migrations for existing databases (CREATE TABLE IF NOT
   // EXISTS won't add a new column). Each ALTER is wrapped because SQLite has no
   // "ADD COLUMN IF NOT EXISTS"; a duplicate-column error just means it's done.
-  for (const alter of ["ALTER TABLE instances ADD COLUMN region TEXT"]) {
+  for (const alter of [
+    "ALTER TABLE instances ADD COLUMN region TEXT",
+    "ALTER TABLE instances ADD COLUMN private_messages_received INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE instances ADD COLUMN admin_replies_sent INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE reports ADD COLUMN private_messages_received INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE reports ADD COLUMN admin_replies_sent INTEGER NOT NULL DEFAULT 0",
+  ]) {
     try {
       db.exec(alter);
     } catch {
@@ -115,8 +125,9 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
       `INSERT INTO instances (
          instance_id, instance_name, first_seen_at, first_seen_day, last_seen_at, report_count,
          version, environment, deploy_mode, country, region,
-         tenants, users, posts_total, posts_last_24h, bots_enabled, last_payload
-       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         tenants, users, posts_total, posts_last_24h, bots_enabled,
+         private_messages_received, admin_replies_sent, last_payload
+       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(instance_id) DO UPDATE SET
          instance_name = excluded.instance_name,
          last_seen_at = excluded.last_seen_at,
@@ -131,6 +142,8 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
          posts_total = excluded.posts_total,
          posts_last_24h = excluded.posts_last_24h,
          bots_enabled = excluded.bots_enabled,
+         private_messages_received = excluded.private_messages_received,
+         admin_replies_sent = excluded.admin_replies_sent,
          last_payload = excluded.last_payload`,
     ).run(
       report.instanceId,
@@ -148,14 +161,17 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
       report.counts.postsTotal,
       report.counts.postsLast24h,
       report.counts.botsEnabled,
+      report.counts.privateMessagesReceived,
+      report.counts.adminRepliesSent,
       JSON.stringify(report),
     );
 
     db.query(
       `INSERT INTO reports (
          instance_id, received_at, day, environment, version, deploy_mode,
-         tenants, users, posts_total, posts_last_24h, bots_enabled
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         tenants, users, posts_total, posts_last_24h, bots_enabled,
+         private_messages_received, admin_replies_sent
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       report.instanceId,
       receivedAt,
@@ -168,6 +184,8 @@ export function ingestReport(db: Database, report: TelemetryReport, meta: Ingest
       report.counts.postsTotal,
       report.counts.postsLast24h,
       report.counts.botsEnabled,
+      report.counts.privateMessagesReceived,
+      report.counts.adminRepliesSent,
     );
   });
   ingest();

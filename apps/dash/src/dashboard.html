@@ -293,7 +293,9 @@
       card("全网校园墙", s.fleet.tenants, "30 天活跃实例合计") +
       card("全网用户", s.fleet.users, "30 天活跃实例合计") +
       card("全网稿件", s.fleet.postsTotal, todayPosts ? `今日 +${nf.format(todayPosts.count)}` : "") +
-      card("在线 Bot", s.fleet.botsEnabled, "已启用");
+      card("在线 Bot", s.fleet.botsEnabled, "已启用") +
+      card("私信总数", s.fleet.privateMessagesReceived, "累计 Bot 收到私信") +
+      card("管理员回复", s.fleet.adminRepliesSent, "累计管理员回复私信");
     lineChart($("chart-active"), s.dailyActiveInstances, "#0190d5", "活跃实例");
     barChart($("chart-posts"), s.dailyNewPosts, "#0190d5", "新增稿件");
     lineChart($("chart-users"), s.dailyNewUsers, "#7c3aed", "新增用户");

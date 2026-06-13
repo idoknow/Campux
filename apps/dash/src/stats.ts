@@ -53,6 +53,8 @@ export type DashStats = {
     users: number;
     postsTotal: number;
     botsEnabled: number;
+    privateMessagesReceived: number;
+    adminRepliesSent: number;
   };
   versionDistribution: DistributionEntry[];
   deployModeDistribution: DistributionEntry[];
@@ -88,7 +90,9 @@ export function computeStats(db: Database, scope: StatsEnvScope, now: Date): Das
   const fleetRow = db
     .query(
       `SELECT COALESCE(SUM(tenants), 0) AS tenants, COALESCE(SUM(users), 0) AS users,
-              COALESCE(SUM(posts_total), 0) AS postsTotal, COALESCE(SUM(bots_enabled), 0) AS botsEnabled
+              COALESCE(SUM(posts_total), 0) AS postsTotal, COALESCE(SUM(bots_enabled), 0) AS botsEnabled,
+              COALESCE(SUM(private_messages_received), 0) AS privateMessagesReceived,
+              COALESCE(SUM(admin_replies_sent), 0) AS adminRepliesSent
        FROM instances WHERE last_seen_at >= ? ${envClause}`,
     )
     .get(since(30 * DAY_MS)) as DashStats["fleet"];

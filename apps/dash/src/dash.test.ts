@@ -40,6 +40,8 @@ function report(overrides: ReportOverrides = {}): TelemetryReport {
       memberships: 100,
       botsEnabled: 1,
       publishTargets: 1,
+      privateMessagesReceived: 0,
+      adminRepliesSent: 0,
       ...counts,
     },
     features: { emailConfigured: false, aiTenants: 0 },
@@ -114,6 +116,8 @@ describe("computeStats", () => {
     expect(stats.totals.active30d).toBe(2);
     expect(stats.fleet.users).toBe(150);
     expect(stats.fleet.postsTotal).toBe(1200);
+    expect(stats.fleet.privateMessagesReceived).toBe(0);
+    expect(stats.fleet.adminRepliesSent).toBe(0);
     expect(stats.versionDistribution).toEqual([
       { key: "main-ab12cd3", count: 1 },
       { key: "v2.1.0", count: 1 },
