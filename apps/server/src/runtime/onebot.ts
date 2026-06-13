@@ -8,6 +8,7 @@ import {
   BotWorkflowError,
   findEnabledBot,
   qzoneCookieDomain,
+  publishTextShuoShuoViaBot,
   refreshQZoneCookiesForBot,
   refreshQZoneCookiesViaBot,
   registerUserViaBot,
@@ -15,6 +16,7 @@ import {
   reviewPostViaBot,
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
+import { parseFriendListCount } from "../lib/bot-friend-stats";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
@@ -67,6 +69,9 @@ import {
   formatPrivateReplySent,
   formatPrivateReplyReceived,
   formatPrivateReplyNoTarget,
+  formatFriendCount,
+  formatShuoShuoPublished,
+  formatShuoShuoHelp,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -1889,6 +1894,39 @@ export class OneBotRuntime {
           replyText: command.args,
           stylishEnabled,
         });
+        return;
+      }
+
+      if (["好友数", "好友数量"].includes(command.name)) {
+        await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+        const data = await this.callAction(botQqUin, "get_friend_list", {}, 45_000);
+        const friendCount = parseFriendListCount(data);
+        if (friendCount === null) {
+          await this.sendGroupMessage(botQqUin, groupId, "获取好友列表失败，返回数据格式异常");
+          return;
+        }
+        await this.sendGroupMessage(botQqUin, groupId, formatFriendCount(bot.displayName ?? `QQ ${botQqUin}`, friendCount, stylishEnabled));
+        return;
+      }
+
+      if (command.name === "说说") {
+        const shuoShuoText = command.args.trim();
+        if (!shuoShuoText) {
+          await this.sendGroupMessage(botQqUin, groupId, formatShuoShuoHelp(stylishEnabled));
+          return;
+        }
+        if (shuoShuoText.length > 1_000) {
+          await this.sendGroupMessage(botQqUin, groupId, "说说内容太长，请控制在 1000 字以内");
+          return;
+        }
+        const result = await publishTextShuoShuoViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          text: shuoShuoText,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, formatShuoShuoPublished(result.post.displayId, stylishEnabled));
         return;
       }
 

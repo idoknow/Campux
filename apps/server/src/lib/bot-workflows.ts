@@ -412,6 +412,83 @@ export async function requireBotTenantRole(tenantId: string, qqUin: string, requ
   };
 }
 
+export async function publishTextShuoShuoViaBot({
+  queue,
+  botQqUin,
+  groupId,
+  operatorQqUin,
+  text,
+}: {
+  queue: RuntimeQueue;
+  botQqUin: string;
+  groupId?: string | null | undefined;
+  operatorQqUin: string;
+  text: string;
+}) {
+  const bot = await findEnabledBot(botQqUin);
+  assertReviewGroup(bot, groupId);
+  const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+
+  if (!text.trim()) {
+    throw new BotWorkflowError("说说内容不能为空", 400);
+  }
+  if (text.length > 1_000) {
+    throw new BotWorkflowError("说说内容太长，请控制在 1000 字以内", 400);
+  }
+
+  // 创建稿件并直接置为 approved（审核群命令发布的说说跳过审核流程）
+  const tenant = await prisma.tenant.update({
+    where: { id: bot.tenantId },
+    data: { nextPostDisplayId: { increment: 1 } },
+    select: { nextPostDisplayId: true },
+  });
+  const displayId = tenant.nextPostDisplayId - 1;
+
+  const post = await prisma.post.create({
+    data: {
+      tenantId: bot.tenantId,
+      authorId: operator.id,
+      displayId,
+      text: text.trim(),
+      anonymous: false,
+      attachments: [],
+      status: "approved",
+      logs: {
+        create: {
+          tenantId: bot.tenantId,
+          actorId: operator.id,
+          oldStatus: "pending_approval",
+          newStatus: "approved",
+          comment: "审核群命令发布说说，跳过审核",
+        },
+      },
+    },
+  });
+
+  await markBotSeen(bot.id);
+  await writeAuditLog({
+    tenantId: bot.tenantId,
+    actorId: operator.id,
+    action: "bot.shuoshuo.publish",
+    targetType: "post",
+    targetId: post.id,
+    detail: {
+      displayId: post.displayId,
+      groupId: groupId ?? null,
+      textLength: text.length,
+    },
+  });
+
+  // 立即推送到所有启用的发布目标
+  await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+
+  return {
+    bot,
+    post,
+    operator: serializeUser(operator),
+  };
+}
+
 export class BotWorkflowError extends Error {
   constructor(
     message: string,
