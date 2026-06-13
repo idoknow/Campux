@@ -53,7 +53,6 @@ type TenantSettingsForm = {
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
   botStylishMessagesEnabled: boolean;
-  botPrivatePostStylishEnabled: boolean;
   publishMode: "single" | "accumulate";
   publishAccumulateMinImages: number;
   publishAccumulateMaxImages: number;
@@ -516,7 +515,7 @@ export function AdminPage({
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
           botStylishMessagesEnabled: form.botStylishMessagesEnabled,
-          botPrivatePostStylishEnabled: form.botPrivatePostStylishEnabled,
+          botPrivatePostStylishEnabled: form.botStylishMessagesEnabled,
           publishMode: form.publishMode,
           publishAccumulateMinImages: form.publishAccumulateMinImages,
           publishAccumulateMaxImages: form.publishAccumulateMaxImages,
@@ -1871,25 +1870,13 @@ function MetadataPanel({
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <div>
               <p className="text-sm font-medium text-slate-900">Bot 多彩消息</p>
-              <p className="text-xs text-slate-500">开启后机器人反馈消息将使用多风格随机语句，更具趣味性。</p>
+              <p className="text-xs text-slate-500">开启后机器人反馈消息和对话框投稿流程中的提示语均使用多风格随机语句，更具趣味性。</p>
             </div>
             <Switch
               checked={form.botStylishMessagesEnabled}
               disabled={busy}
               onCheckedChange={(value) => onFormChange({ ...form, botStylishMessagesEnabled: value })}
               aria-label="启用 Bot 多彩消息"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div>
-              <p className="text-sm font-medium text-slate-900">对话投稿多彩消息</p>
-              <p className="text-xs text-slate-500">开启后对话框投稿流程中的提示语将使用多风格随机语句。</p>
-            </div>
-            <Switch
-              checked={form.botPrivatePostStylishEnabled}
-              disabled={busy}
-              onCheckedChange={(value) => onFormChange({ ...form, botPrivatePostStylishEnabled: value })}
-              aria-label="启用对话投稿多彩消息"
             />
           </div>
           <details className="rounded-md border border-slate-200 bg-slate-50 md:col-span-2">
@@ -3431,7 +3418,6 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
     botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
-    botPrivatePostStylishEnabled: metadata.botPrivatePostStylishEnabled,
     publishMode: metadata.publishMode,
     publishAccumulateMinImages: metadata.publishAccumulate.minImages,
     publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,
