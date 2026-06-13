@@ -149,16 +149,14 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
       timeout: 10_000,
     });
 
-    // 通过 evaluate 注入 @font-face（base64 data URI），避免 data: URL 长度限制
+    // 通过 addStyleTag 注入 @font-face（base64 data URI），避免 data: URL 长度限制
+    // 注意：不能用 page.evaluate 传大字符串（CDP 序列化可能超时），
+    //       addStyleTag 走的是页面内部路径，不会被序列化限制。
     if (fontCss) {
-      await page.evaluate((css) => {
-        const style = document.createElement("style");
-        style.textContent = css;
-        document.head.appendChild(style);
-      }, fontCss);
+      await page.addStyleTag({ content: fontCss });
 
       // 等待自定义字体加载并 rasterize
-      await page.evaluate(() => document.fonts.ready);
+      await page.waitForFunction(() => document.fonts.status === "loaded", undefined, { timeout: 15_000 });
       await page.evaluate(() => new Promise(requestAnimationFrame));
     }
 
