@@ -1,27 +1,26 @@
 import { Buffer } from "node:buffer";
 import { chromium, type Browser } from "playwright-core";
-import { marked } from "marked";
+import { marked, Tokens } from "marked";
 
 // 自定义 marked 扩展：++下划线++
 const underlineExtension = {
   extensions: [
     {
       name: "underline",
-      level: "inline",
+      level: "inline" as const,
       start(src: string) {
         return src.indexOf("++");
       },
-      tokenizer(this: { tokens: marked.Tokens.Generic[] }, src: string) {
+      tokenizer(this: unknown, src: string): Tokens.Generic | undefined {
         const match = src.match(/^\+\+(.+?)\+\+/);
-        if (match) {
-          return {
-            type: "underline",
-            raw: match[0],
-            text: match[1].trim(),
-          };
-        }
+        if (!match) return;
+        return {
+          type: "underline",
+          raw: match[0],
+          text: match[1]?.trim() ?? "",
+        };
       },
-      renderer(token: marked.Tokens.Generic) {
+      renderer(token: Tokens.Generic) {
         return `<u>${token.text}</u>`;
       },
     },
