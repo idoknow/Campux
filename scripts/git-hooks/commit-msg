@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# commit-msg hook —— 本地校验提交信息是否符合 Conventional Commits 规范。
+#
+# 规则与仓库根目录 commitlint.config.cjs 保持一致：
+#   <type>(<scope>): <subject>
+#   type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}
+#   scope 选填；header 长度上限 120。
+#
+# 安装（在仓库根目录执行）：
+#   bash scripts/git-hooks/install.sh
+# 或手动：
+#   cp scripts/git-hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+#
+# 这是本地便利工具，权威校验仍以 CI（.github/workflows/pr-lint.yml）为准。
+
+msg_file="$1"
+# 取第一行非注释内容作为 header
+header="$(grep -vE '^\s*#' "$msg_file" | sed '/^\s*$/d' | head -n1)"
+
+# 放行 merge / revert / fixup / squash 等自动生成的提交
+case "$header" in
+  "Merge "*|"Revert "*|"fixup! "*|"squash! "*|"Reapply "*)
+    exit 0
+    ;;
+esac
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+pattern="^(${types})(\([a-z0-9_.\-]+\))?!?: .+"
+
+if [[ ! "$header" =~ $pattern ]]; then
+  echo "✗ 提交信息不符合 Conventional Commits 规范。" >&2
+  echo "" >&2
+  echo "  你写的标题：$header" >&2
+  echo "" >&2
+  echo "  正确格式：  <type>(<scope>): <subject>" >&2
+  echo "  允许的 type：feat fix docs style refactor perf test build ci chore revert" >&2
+  echo "  示例：      feat(web): 登录页拆分为双视图" >&2
+  echo "" >&2
+  echo "  详见 CONTRIBUTING.md" >&2
+  exit 1
+fi
+
+# header 长度上限 120（与 commitlint header-max-length 一致）
+if [ "${#header}" -gt 120 ]; then
+  echo "✗ 提交标题过长（${#header} > 120 字符）：$header" >&2
+  exit 1
+fi
+
+exit 0
