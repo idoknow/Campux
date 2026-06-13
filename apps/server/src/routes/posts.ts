@@ -850,6 +850,49 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     return reply.send(Buffer.from(bytes));
   });
 
+  // ── 投稿前字体预览 ──────────────────────────────────────
+  // 用户在选择了非默认字体时，提交前先调此接口生成渲染图确认效果。
+  const renderPreviewBodySchema = z.object({
+    text: z.string().min(1).max(1000),
+    font: z.string().optional(),
+    bgColor: z.string().optional(),
+    textColor: z.string().optional(),
+    anonymous: z.boolean().optional(),
+  });
+
+  app.post("/api/posts/render-preview", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    const body = renderPreviewBodySchema.parse(request.body);
+
+    const previewBot = await prisma.botAccount.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        enabled: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
+    const bytes = await renderPostCard({
+      tenantName: context.selectedTenant.name,
+      displayHost: context.selectedTenant.host,
+      authorName: context.user.displayName ?? context.user.qqUin.toString(),
+      authorQq: context.user.qqUin.toString(),
+      cornerQq: previewBot?.qqUin.toString(),
+      text: body.text,
+      createdAt: new Date(),
+      anonymous: body.anonymous ?? false,
+      bgColor: body.bgColor ?? null,
+      textColor: body.textColor ?? null,
+      font: body.font ?? null,
+    });
+
+    reply.header("Cache-Control", "no-store");
+    reply.type("image/jpeg");
+    return reply.send(Buffer.from(bytes));
+  });
+
   app.post("/api/posts/:id/cancel", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
     const params = postParamsSchema.parse(request.params);
