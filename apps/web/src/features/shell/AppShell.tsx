@@ -43,10 +43,6 @@ export function AppShell({
   onOpenPostDetailFromAdmin,
   onRemoveAttachment,
   onSubmitPost,
-  bgColor,
-  textColor,
-  onBgColorChange,
-  onTextColorChange,
 }: {
   activeTab: MainTab;
   adminTab: AdminTab;
@@ -60,8 +56,6 @@ export function AppShell({
   postsTab: PostsTab;
   postsPagination: Pagination;
   anonymous: boolean;
-  bgColor: string;
-  textColor: string;
   pendingAttachments: PendingAttachment[];
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
@@ -81,8 +75,6 @@ export function AppShell({
   onOpenPostDetailFromAdmin: (post: { id: string; displayId: number; status: string }) => void;
   onRemoveAttachment: (id: string) => void;
   onSubmitPost: () => void;
-  onBgColorChange: (color: string) => void;
-  onTextColorChange: (color: string) => void;
 }) {
   return (
     <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as MainTab)} className="h-dvh overflow-hidden">
@@ -108,8 +100,6 @@ export function AppShell({
                 metadata={metadata}
                 postText={postText}
                 anonymous={anonymous}
-                bgColor={bgColor}
-                textColor={textColor}
                 selectedTenant={me.currentTenant}
                 pendingAttachments={pendingAttachments}
                 onAnonymousChange={onAnonymousChange}
@@ -117,8 +107,6 @@ export function AppShell({
                 onPostTextChange={onPostTextChange}
                 onSubmit={onSubmitPost}
                 onRemoveAttachment={onRemoveAttachment}
-                onBgColorChange={onBgColorChange}
-                onTextColorChange={onTextColorChange}
               />
             </TabsContent>
 

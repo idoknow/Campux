@@ -442,16 +442,14 @@ export function PostsPage({
   async function requestRecallPost(post: PostItem, reason: string) {
     setBusyRecallPostId(post.id);
     try {
-      const body: Record<string, string> = {};
-      if (reason) body.reason = reason;
       await api(`/api/posts/${post.id}/recall/request`, {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify({ reason }),
       });
-      toast.success("已撤回稿件。");
+      toast.success("已提交撤回申请，等待审核处理。");
       await refreshAll();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "撤回失败");
+      toast.error(caught instanceof Error ? caught.message : "申请撤回失败");
     } finally {
       setBusyRecallPostId("");
     }
@@ -526,10 +524,15 @@ export function PostsPage({
       return;
     }
     const { mode, post } = recallConfirm;
+    const reason = recallReason.trim();
+    if (mode === "request" && reason.length === 0) {
+      toast.error("请填写撤回理由。");
+      return;
+    }
     setRecallConfirm({ open: false, mode: null, post: null });
     setRecallReason("");
     if (mode === "request") {
-      await requestRecallPost(post, recallReason.trim());
+      await requestRecallPost(post, reason);
       return;
     }
     if (mode === "reject") {
@@ -1011,10 +1014,19 @@ export function PostsPage({
                 : recallConfirm.open && recallConfirm.mode === "admin-silent"
                   ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被隐藏，但不会私聊通知作者；审核群仍会收到记录。`
                 : recallConfirm.open
-                  ? `确认撤回稿件 #${recallConfirm.post.displayId} 吗？撤回后内容将被隐藏。`
+                  ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
                   : ""}
             </DialogDescription>
           </DialogHeader>
+          {recallConfirm.open && recallConfirm.mode === "request" ? (
+            <div className="px-5 pb-2">
+              <Textarea
+                className="min-h-24 bg-white"
+                value={recallReason}
+                onChange={(event) => setRecallReason(event.target.value)}
+              />
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               variant="outline"
@@ -1032,7 +1044,8 @@ export function PostsPage({
                   (recallConfirm.mode === "approve" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "reject" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin" && busyPostId === recallConfirm.post.id) ||
-                  (recallConfirm.mode === "admin-silent" && busyPostId === recallConfirm.post.id))
+                  (recallConfirm.mode === "admin-silent" && busyPostId === recallConfirm.post.id) ||
+                  (recallConfirm.mode === "request" && recallReason.trim().length === 0))
               }
               onClick={() => void confirmRecallAction()}
             >
@@ -1044,7 +1057,7 @@ export function PostsPage({
                     ? "确认撤回"
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "确认静默撤回"
-                      : "确认撤回"}
+                      : "提交申请"}
             </Button>
           </DialogFooter>
         </DialogContent>
