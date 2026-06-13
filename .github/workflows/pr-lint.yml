@@ -1,0 +1,70 @@
+name: PR Lint
+
+# 对 Pull Request 强制 Semantic / Conventional Commits 规范：
+#   1. PR 标题必须符合规范（squash 合并时标题会成为最终 commit message）
+#   2. PR 内每一条 commit 的 message 也必须符合规范
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: Lint PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title (Conventional Commits)
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # 允许的 type 集合，与 commitlint.config.cjs 保持一致
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          # scope 选填，不做白名单限制
+          requireScope: false
+          # subject 不强制首字母大小写（兼容中文标题）
+          subjectPattern: ".+"
+
+  commits:
+    name: Lint Commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # commitlint-github-action 需要完整历史以比对 PR 区间内的 commit
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install commitlint
+        run: npm install --no-save @commitlint/cli @commitlint/config-conventional
+
+      - name: Lint commits in this PR
+        run: |
+          npx commitlint \
+            --config commitlint.config.cjs \
+            --from "${{ github.event.pull_request.base.sha }}" \
+            --to "${{ github.event.pull_request.head.sha }}" \
+            --verbose
