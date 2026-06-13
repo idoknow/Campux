@@ -662,19 +662,52 @@ export function formatFriendCount(displayName: string, count: number, stylishEna
 
 // ── 直接发布成功（审核群 #发布 命令） ──────────────────
 
-const botPublishSuccessDefault = () =>
-  `✅ 已发布到 QQ 空间！`;
+const botPublishSuccessDefault = (qzoneTid?: string) =>
+  qzoneTid ? `✅ 已发布到 QQ 空间！(tid:${qzoneTid})` : `✅ 已发布到 QQ 空间！`;
 
 const botPublishSuccessStylish = [
-  () => `📢 发布成功！内容已推送至 QQ 空间~`,
-  () => `✍️ 内容已经发出去啦，等着大家围观吧~`,
-  () => `📯 号外号外！已发布到 QQ 空间~`,
+  (qzoneTid?: string) => qzoneTid ? `📢 发布成功！内容已推送至 QQ 空间~ (tid:${qzoneTid})` : `📢 发布成功！内容已推送至 QQ 空间~`,
+  (qzoneTid?: string) => qzoneTid ? `✍️ 内容已经发出去啦，回复 #撤回 可以撤回这条说说~ (tid:${qzoneTid})` : `✍️ 内容已经发出去啦，等着大家围观吧~`,
+  (qzoneTid?: string) => qzoneTid ? `📯 号外号外！已发布到 QQ 空间~ (tid:${qzoneTid})` : `📯 号外号外！已发布到 QQ 空间~`,
   botPublishSuccessDefault,
 ];
 
-export function formatBotPublishSuccess(stylishEnabled = false): string {
-  if (!stylishEnabled) return botPublishSuccessDefault();
-  return pick(botPublishSuccessStylish)();
+export function formatBotPublishSuccess(stylishEnabled = false, qzoneTid?: string): string {
+  if (!stylishEnabled) return botPublishSuccessDefault(qzoneTid);
+  return pick(botPublishSuccessStylish)(qzoneTid);
+}
+
+// ── 直接发布撤回成功（审核群 #撤回 命令） ─────────────
+
+const botRecallSuccessDefault = () =>
+  `✅ 已撤回，QQ 空间说说已设为仅自己可见。`;
+
+const botRecallSuccessStylish = [
+  () => `🗑️ 已撤回！说说已从空间隐藏~`,
+  () => `↩️ 撤回成功，相关内容已设为仅自己可见。`,
+  () => `✅ 搞定！那条说说已经安静地藏起来啦~`,
+  botRecallSuccessDefault,
+];
+
+export function formatBotRecallSuccess(stylishEnabled = false): string {
+  if (!stylishEnabled) return botRecallSuccessDefault();
+  return pick(botRecallSuccessStylish)();
+}
+
+// ── 直接发布撤回失败 ─────────────────────────────────
+
+const botRecallFailedDefault = (reason: string) =>
+  `❌ 撤回失败：${reason}`;
+
+const botRecallFailedStylish = [
+  (reason: string) => `😵 撤回翻车了…… ${reason}`,
+  (reason: string) => `🚫 撤回失败：${reason}`,
+  botRecallFailedDefault,
+];
+
+export function formatBotRecallFailed(reason: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return botRecallFailedDefault(reason);
+  return pick(botRecallFailedStylish)(reason);
 }
 
 // ── 直接发布帮助提示（审核群 #发布 命令） ───────────────
