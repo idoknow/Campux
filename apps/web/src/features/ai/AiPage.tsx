@@ -51,6 +51,8 @@ type AiSettingsForm = {
   allowedCategoriesText: string;
   modelingKeywordsText: string;
   modelingNotes: string;
+  privatePostAiEnabled: boolean;
+  postTriggerKeywordsText: string;
 };
 
 type PanelTab = "overview" | "backfill" | "recent";
@@ -322,6 +324,8 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
       allowedCategories: lines(form.allowedCategoriesText),
       modelingKeywords: lines(form.modelingKeywordsText),
       modelingNotes: form.modelingNotes.trim(),
+      privatePostAiEnabled: form.privatePostAiEnabled,
+      postTriggerKeywords: lines(form.postTriggerKeywordsText),
     };
     return {
       enabled: form.enabled,
@@ -970,6 +974,26 @@ const SettingsPanel = memo(function SettingsPanel({
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
           建模备注
           <Input value={form.modelingNotes} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, modelingNotes: event.target.value })} />
+        </label>
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-bold text-slate-700">AI 语义收稿</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">自动判断私聊投稿、匿名、分段和提交。</p>
+            </div>
+            <Switch checked={form.privatePostAiEnabled} disabled={!isAdmin || busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, privatePostAiEnabled: checked })} aria-label="启用 AI 语义收稿" />
+          </div>
+        </div>
+        <label className="space-y-1 text-[11px] font-bold text-slate-600">
+          投稿触发关键词
+          <Textarea
+            className="min-h-16"
+            value={form.postTriggerKeywordsText}
+            disabled={!isAdmin || busy || testing}
+            onChange={(event) => onFormChange({ ...form, postTriggerKeywordsText: event.target.value })}
+            placeholder="每行一个关键词，如 发帖、吐槽、表白"
+          />
+          <span className="text-xs font-semibold text-slate-500">发送 #关键词 可显式开始投稿，默认 #投稿 始终生效。</span>
         </label>
       </div>
 
@@ -1705,6 +1729,8 @@ function toForm(settings: TenantAiSettings): AiSettingsForm {
     allowedCategoriesText: (settings.rules.allowedCategories ?? []).join("\n"),
     modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
     modelingNotes: settings.rules.modelingNotes ?? "",
+    privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
+    postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
   };
 }
 

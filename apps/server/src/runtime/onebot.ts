@@ -23,8 +23,10 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
+import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled, readTenantPublishMode } from "../lib/tenant-metadata";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
+import { readTenantAiSettings } from "./campus-modeling";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
@@ -1054,12 +1056,10 @@ export class OneBotRuntime {
       const bot = await findEnabledBot(botQqUin);
       const plainText = extractOneBotPlainText(event.message, event.raw_message).trim();
 
-      // 读取租户配置的额外投稿触发关键词
-      const aiRulesRecord = await prisma.tenantAiSettings.findUnique({
-        where: { tenantId: bot.tenantId },
-        select: { rules: true },
-      });
-      const extraKeywords = (aiRulesRecord?.rules as { postTriggerKeywords?: string[] } | null)?.postTriggerKeywords;
+      // 读取租户 AI 规则：额外投稿关键词与私聊语义收稿开关。
+      const aiSettings = await readTenantAiSettings(bot.tenantId);
+      const privatePostAiEnabled = aiSettings.rules.privatePostAiEnabled === true;
+      const extraKeywords = aiSettings.rules.postTriggerKeywords;
 
       const startBody = parsePrivatePostStartText(plainText, extraKeywords);
       if (startBody !== null) {
@@ -1126,18 +1126,67 @@ export class OneBotRuntime {
 
       const draft = this.privatePostDrafts.get(draftKey);
       if (draft) {
-          const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft });
-          if (appended) {
-            const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-            await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostAppendAck(privateStylishEnabled));
-            return;
-          }
+        const semantic = privatePostAiEnabled
+          ? await analyzePrivatePostSemantics({
+              tenantId: bot.tenantId,
+              messageText: plainText,
+              currentDraftText: draft.text,
+              hasCurrentDraft: true,
+              imageCount: draft.attachments.length + extractOneBotImageSegments(event.message).length,
+              logger: this.logger,
+            })
+          : undefined;
 
+        if (semantic?.intent === "post" && semantic.anonymous !== null) {
+          draft.anonymous = semantic.anonymous;
+        }
+
+        const shouldSubmitBySemantic = semantic?.intent === "post" && semantic.shouldSubmit;
+        if (shouldSubmitBySemantic && semantic.text) {
+          draft.text = semantic.text;
+        }
+
+        const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft, semantic });
+        if (shouldSubmitBySemantic) {
+          await this.finishPrivatePostDraft({
+            bot,
+            botQqUin,
+            userQqUin,
+          });
           return;
+        }
+        if (appended) {
+          const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostAppendAck(privateStylishEnabled));
+          return;
+        }
+
+        return;
       }
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
+        if (privatePostAiEnabled) {
+          const semantic = await analyzePrivatePostSemantics({
+            tenantId: bot.tenantId,
+            messageText: plainText,
+            hasCurrentDraft: false,
+            imageCount: extractOneBotImageSegments(event.message).length,
+            logger: this.logger,
+          });
+          if (semantic.intent === "post" && semantic.confidence >= 0.55 && (semantic.text || extractOneBotImageSegments(event.message).length > 0)) {
+            await this.startPrivatePostDraft({
+              bot,
+              botQqUin,
+              userQqUin,
+              event,
+              body: semantic.text || plainText,
+              semantic,
+            });
+            return;
+          }
+        }
+
         // 跳过好友请求等系统消息，不转发
         if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
           return;
@@ -1204,12 +1253,14 @@ export class OneBotRuntime {
     userQqUin,
     event,
     body,
+    semantic,
   }: {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
     botQqUin: string;
     userQqUin: string;
     event: OneBotMessageEvent;
     body: string;
+    semantic?: PrivatePostSemanticResult | undefined;
   }) {
     await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
 
@@ -1222,7 +1273,7 @@ export class OneBotRuntime {
 
     await this.clearPrivatePostPending(draftKey);
     await this.clearPrivatePostDraft(draftKey);
-    const text = body.trim();
+    const text = (semantic?.intent === "post" && semantic.text ? semantic.text : body).trim();
     const attachments = staged.attachments;
     const history: PrivatePostHistoryEntry[] = [];
     if (text) {
@@ -1231,6 +1282,25 @@ export class OneBotRuntime {
     if (attachments.length > 0) {
       history.push({ type: "images", attachmentCount: attachments.length, uploadedKeys: staged.uploadedKeys });
     }
+    if (semantic?.intent === "post" && semantic.anonymous !== null) {
+      this.privatePostDrafts.set(draftKey, {
+        tenantId: bot.tenantId,
+        text,
+        anonymous: semantic.anonymous,
+        attachments,
+        uploadedKeys: staged.uploadedKeys,
+        updatedAt: Date.now(),
+        history,
+      });
+      if (semantic.shouldSubmit) {
+        await this.finishPrivatePostDraft({ bot, botQqUin, userQqUin });
+        return;
+      }
+      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled));
+      return;
+    }
+
     this.privatePostPendingModes.set(draftKey, {
       tenantId: bot.tenantId,
       text,
@@ -1251,16 +1321,19 @@ export class OneBotRuntime {
     userQqUin,
     event,
     target,
+    semantic,
   }: {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
     botQqUin: string;
     userQqUin: string;
     event: OneBotMessageEvent;
     target: PrivatePostDraft | PrivatePostPendingMode;
+    semantic?: PrivatePostSemanticResult | undefined;
   }) {
     await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
 
-    const draftText = extractOneBotPlainText(event.message, event.raw_message).trim();
+    const rawDraftText = extractOneBotPlainText(event.message, event.raw_message).trim();
+    const draftText = semantic?.intent === "post" ? this.extractSemanticAppendText(target.text, semantic.text) : rawDraftText;
     const imageSegments = extractOneBotImageSegments(event.message);
 
     if (draftText.length > 0) {
@@ -1682,6 +1755,24 @@ export class OneBotRuntime {
       .map((entry) => entry.text)
       .join("\n")
       .trim();
+  }
+
+  private extractSemanticAppendText(currentText: string, semanticText: string) {
+    const current = currentText.trim();
+    const next = semanticText.trim();
+    if (!next) {
+      return "";
+    }
+    if (!current) {
+      return next;
+    }
+    if (next === current) {
+      return "";
+    }
+    if (next.startsWith(current)) {
+      return next.slice(current.length).replace(/^\s+/, "").trim();
+    }
+    return next;
   }
 
   private async createPostFromPrivateDraft(
