@@ -2,6 +2,39 @@ import { Buffer } from "node:buffer";
 import { chromium, type Browser } from "playwright-core";
 import { marked, Tokens } from "marked";
 
+// ── 颜色映射 ──────────────────────────────────────────
+// CampuxNext 前端用语义名称传 bgColor/textColor，这里转成实际 CSS 值。
+
+const BG_COLOR_MAP: Record<string, string> = {
+  white: "#FFFFFF",
+  pink:   "linear-gradient(135deg, #fff5f7 0%, #ffe4e8 50%, #ffdde6 100%)",
+  blue:   "linear-gradient(135deg, #f0f7ff 0%, #dceeff 50%, #d0e8ff 100%)",
+  green:  "linear-gradient(135deg, #f0faf0 0%, #dcf5dc 50%, #d0f0d0 100%)",
+  yellow: "linear-gradient(135deg, #fffff0 0%, #fffce0 50%, #fff9d0 100%)",
+  orange: "linear-gradient(135deg, #fff8f0 0%, #ffedd5 50%, #ffe5c0 100%)",
+  purple: "linear-gradient(135deg, #f8f0ff 0%, #ede0ff 50%, #e5d5ff 100%)",
+};
+
+const TEXT_COLOR_MAP: Record<string, string> = {
+  black:       "#1a1a1a",
+  dark_red:    "#8B0000",
+  dark_blue:   "#00008B",
+  dark_green:  "#006400",
+  dark_pink:   "#C71585",
+  dark_purple: "#4B0082",
+  dark_orange: "#CC5500",
+};
+
+function resolveBgColor(raw: string | null | undefined): string {
+  if (!raw) return "#FFFFFF";
+  return BG_COLOR_MAP[raw] ?? raw;
+}
+
+function resolveTextColor(raw: string | null | undefined): string {
+  if (!raw) return "#1a1a1a";
+  return TEXT_COLOR_MAP[raw] ?? raw;
+}
+
 // 自定义 marked 扩展：++下划线++
 const underlineExtension = {
   extensions: [
@@ -105,8 +138,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const avatar = input.anonymous ? anonymousAvatarDataUrl() : await qqAvatarDataUrl(input.authorQq);
   const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
   const banner = "";
-  const bgColor = input.bgColor || "#FFFFFF";
-  const textColor = input.textColor || "#1a1a1a";
+  const bgColor = resolveBgColor(input.bgColor);
+  const textColor = resolveTextColor(input.textColor);
 
   return `<!DOCTYPE html>
 <html>
@@ -319,7 +352,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
     }
   </style>
 </head>
-<body style="margin: 0; background-color: ${bgColor};">
+<body style="margin: 0; background: ${bgColor};">
   <div id="title-bar" style="background-color: #1E88E5; height: 5%; width: calc(100% + 50px); padding: 16px; border-radius: 0 0 8px 8px; font-weight: bold">
     <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
   </div>

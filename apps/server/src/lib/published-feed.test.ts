@@ -7,6 +7,8 @@ function makePost(overrides: Partial<RawFeedPost> & { id: string; displayId: num
     text: `稿件 ${overrides.displayId}`,
     attachments: [],
     anonymous: false,
+    bgColor: null,
+    textColor: null,
     author: { displayName: `用户${overrides.displayId}`, qqUin: BigInt(10000 + overrides.displayId) },
     createdAt: new Date("2026-06-08T00:00:00Z"),
     ...overrides,

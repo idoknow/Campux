@@ -750,6 +750,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       text: string;
       attachments: unknown;
       anonymous: boolean;
+      bgColor: string | null;
+      textColor: string | null;
       createdAt: Date;
       author: { displayName: string | null; qqUin: bigint } | null;
     }): RawFeedPost => ({
@@ -758,6 +760,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       text: post.text,
       attachments: post.attachments,
       anonymous: post.anonymous,
+      bgColor: post.bgColor,
+      textColor: post.textColor,
       author: post.author ? { displayName: post.author.displayName ?? "", qqUin: post.author.qqUin } : null,
       createdAt: post.createdAt,
     });

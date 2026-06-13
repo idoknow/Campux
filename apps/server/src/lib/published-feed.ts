@@ -26,6 +26,8 @@ export type RawFeedPost = {
   attachments: unknown;
   anonymous: boolean;
   author: RawFeedAuthor;
+  bgColor: string | null;
+  textColor: string | null;
   createdAt: Date;
 };
 
@@ -41,6 +43,8 @@ export type PublishedFeedPost = {
   attachments: unknown;
   anonymous: boolean;
   author: PublishedFeedAuthor;
+  bgColor: string | null;
+  textColor: string | null;
   createdAt: string;
 };
 
@@ -79,6 +83,8 @@ function toFeedPost(post: RawFeedPost, viewerIsReviewer: boolean): PublishedFeed
     attachments: post.attachments,
     anonymous: post.anonymous,
     author: redactAuthor(post, viewerIsReviewer),
+    bgColor: post.bgColor,
+    textColor: post.textColor,
     createdAt: post.createdAt.toISOString(),
   };
 }
