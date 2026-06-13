@@ -1880,7 +1880,7 @@ function MetadataPanel({
             />
           </div>
           <details className="rounded-md border border-slate-200 bg-slate-50 md:col-span-2">
-            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">高级功能</summary>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">多彩稿件</summary>
             <div className="grid gap-3 border-t border-slate-200 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>

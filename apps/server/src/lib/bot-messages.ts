@@ -680,11 +680,11 @@ export function formatBotPublishSuccess(stylishEnabled = false): string {
 // ── 直接发布帮助提示（审核群 #发布 命令） ───────────────
 
 const botPublishHelpDefault = () =>
-  `发送 #发布 <内容> 来直接发布文字到 QQ 空间。`;
+  `发送 #发布 <内容> 来直接发布文字到 QQ 空间，图文一起发送时图片也会一起发布。`;
 
 const botPublishHelpStylish = [
-  () => `📝 想发点东西？试试 #发布 今天天气真不错~`,
-  () => `💡 用 #发布 <内容> 可以直接发布一条文字到 QQ 空间哦~`,
+  () => `📝 想发点东西？试试 #发布 今天天气真不错~ 带上图片也能一起发~`,
+  () => `💡 用 #发布 <内容> 可以直接发布文字和图片到 QQ 空间哦~`,
   botPublishHelpDefault,
 ];
 

@@ -418,11 +418,13 @@ export async function publishTextDirectViaBot({
   groupId,
   operatorQqUin,
   text,
+  images,
 }: {
   botQqUin: string;
   groupId?: string | null | undefined;
   operatorQqUin: string;
   text: string;
+  images?: Array<{ name: string; bytes: Uint8Array }>;
 }) {
   const bot = await findEnabledBot(botQqUin);
   assertReviewGroup(bot, groupId);
@@ -454,8 +456,12 @@ export async function publishTextDirectViaBot({
     throw new BotWorkflowError("机器人 QZone cookies 解析失败", 502);
   }
 
-  // 直接发布纯文本说说到 QQ 空间，不走稿件流程
-  const result = await publishToQZone({
+  if (images && images.length > 9) {
+    throw new BotWorkflowError("最多 9 张图片", 400);
+  }
+
+  // 直接发布文本+图片说说到 QQ 空间，不走稿件流程
+  const qzoneInput: Parameters<typeof publishToQZone>[0] = {
     tenantId: bot.tenantId,
     postId: "direct",
     targetId: "direct",
@@ -463,7 +469,11 @@ export async function publishTextDirectViaBot({
     text: text.trim(),
     imageUrls: [],
     cookies,
-  });
+  };
+  if (images) {
+    qzoneInput.images = images;
+  }
+  const result = await publishToQZone(qzoneInput);
 
   await markBotSeen(bot.id);
   await writeAuditLog({
@@ -475,6 +485,7 @@ export async function publishTextDirectViaBot({
     detail: {
       groupId: groupId ?? null,
       textLength: text.length,
+      imageCount: images?.length ?? 0,
       externalId: result.externalId,
       qzoneTid: result.qzoneTid,
     },
