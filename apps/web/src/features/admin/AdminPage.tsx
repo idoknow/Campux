@@ -1909,14 +1909,14 @@ function MetadataPanel({
               </div>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-slate-900">颜色选择</p>
-                  <p className="text-xs text-slate-500">开启后，投稿页显示背景颜色和文字颜色选择器，用户可选择投稿卡片颜色。</p>
+                  <p className="text-sm font-medium text-slate-900">多彩投稿</p>
+                  <p className="text-xs text-slate-500">开启后，投稿页"高级功能"中可选背景颜色和文字颜色，需展开后使用。</p>
                 </div>
                 <Switch
                   checked={form.enableColorSelection}
                   disabled={busy}
                   onCheckedChange={(value) => onFormChange({ ...form, enableColorSelection: value })}
-                  aria-label="启用颜色选择"
+                  aria-label="启用多彩投稿"
                 />
               </div>
             </div>
