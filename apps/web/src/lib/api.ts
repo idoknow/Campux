@@ -37,6 +37,8 @@ export type CreatePostResponse = {
 export function createPostWithAttachments(
   text: string,
   anonymous: boolean,
+  bgColor: string,
+  textColor: string,
   files: File[],
   onProgress?: (totalPercent: number) => void,
   remoteGifUrls?: string[],
@@ -81,6 +83,8 @@ export function createPostWithAttachments(
     const formData = new FormData();
     formData.append("text", text);
     formData.append("anonymous", String(anonymous));
+    formData.append("bgColor", bgColor);
+    formData.append("textColor", textColor);
     for (const file of files) {
       formData.append("images", file, file.name);
     }

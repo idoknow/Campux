@@ -551,6 +551,21 @@ export function formatPrivatePostContinuePrompt(stylishEnabled = false): string 
   return pick(privatePostContinueStylish);
 }
 
+// ── 投稿颜色设置提示 ──────────────────────────────────
+
+const privatePostColorHintDefault = "可发送 #背景色 <颜色> 或 #文字色 <颜色> 设置配色";
+
+const privatePostColorHintStylish = [
+  "🎨 想换个风格？试试 #背景色 浅粉 或 #文字色 深红~",
+  "🌈 支持设置背景色和文字色，发送 #背景色 <颜色名> 或 #文字色 <颜色名> 即可~",
+  privatePostColorHintDefault,
+];
+
+export function formatPrivatePostColorHint(stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostColorHintDefault;
+  return pick(privatePostColorHintStylish);
+}
+
 // ── 对话投稿取消提示 ──────────────────────────────────
 
 const privatePostCancelledDefault = "已取消发布";
@@ -574,6 +589,7 @@ const privateHelpDefault = [
   "想投稿时先发 #投稿，然后回复 #匿名 或 #实名 选择投稿方式。",
   "选择后继续发送添加稿件正文及图片，删除上一句话请发送 #撤回，结束投稿并发布请发送 #结束。",
   "取消本次投稿请发送 #取消。",
+  "可发送 #背景色 <颜色> 或 #文字色 <颜色> 设置配色。",
 ].join("\n");
 
 const privateHelpStylish = [
@@ -642,4 +658,30 @@ const privateReplyNoTargetStylish = [
 export function formatPrivateReplyNoTarget(stylishEnabled = false): string {
   if (!stylishEnabled) return privateReplyNoTargetDefault();
   return pick(privateReplyNoTargetStylish)();
+}
+
+const friendCountDefault = (count: number, botName: string) => `当前 ${botName} 的好友数量：${count}`;
+
+const friendCountStylish = [
+  (count: number, botName: string) => `👥 ${botName} 目前有 ${count} 位好友~`,
+  (count: number, botName: string) => `📊 ${botName} 好友统计：${count} 人`,
+  friendCountDefault,
+];
+
+export function formatFriendCount(count: number, botName: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return friendCountDefault(count, botName);
+  return pick(friendCountStylish)(count, botName);
+}
+
+const directPublishDefault = (displayId: number) => `说说已发布，编号 #${displayId}`;
+
+const directPublishStylish = [
+  (displayId: number) => `📢 说说已发布！编号 #${displayId}`,
+  (displayId: number) => `✨ 文字说说已成功发布，编号 #${displayId}`,
+  directPublishDefault,
+];
+
+export function formatDirectPublish(displayId: number, stylishEnabled = false): string {
+  if (!stylishEnabled) return directPublishDefault(displayId);
+  return pick(directPublishStylish)(displayId);
 }

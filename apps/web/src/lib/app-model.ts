@@ -33,7 +33,7 @@ export const defaultMetadata: TenantMetadata = {
     maxDimension: 2048,
   },
   botStylishMessagesEnabled: false,
-  botPrivatePostStylishEnabled: false,
+
   publishMode: "single",
   publishAccumulate: {
     minImages: 6,
