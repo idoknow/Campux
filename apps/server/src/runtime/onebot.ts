@@ -8,7 +8,7 @@ import {
   BotWorkflowError,
   findEnabledBot,
   qzoneCookieDomain,
-  publishTextShuoShuoViaBot,
+  publishTextDirectViaBot,
   refreshQZoneCookiesForBot,
   refreshQZoneCookiesViaBot,
   registerUserViaBot,
@@ -70,8 +70,8 @@ import {
   formatPrivateReplyReceived,
   formatPrivateReplyNoTarget,
   formatFriendCount,
-  formatShuoShuoPublished,
-  formatShuoShuoHelp,
+  formatBotPublishSuccess,
+  formatBotPublishHelp,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -1909,24 +1909,23 @@ export class OneBotRuntime {
         return;
       }
 
-      if (command.name === "说说") {
-        const shuoShuoText = command.args.trim();
-        if (!shuoShuoText) {
-          await this.sendGroupMessage(botQqUin, groupId, formatShuoShuoHelp(stylishEnabled));
+      if (command.name === "发布") {
+        const publishText = command.args.trim();
+        if (!publishText) {
+          await this.sendGroupMessage(botQqUin, groupId, formatBotPublishHelp(stylishEnabled));
           return;
         }
-        if (shuoShuoText.length > 1_000) {
-          await this.sendGroupMessage(botQqUin, groupId, "说说内容太长，请控制在 1000 字以内");
+        if (publishText.length > 1_000) {
+          await this.sendGroupMessage(botQqUin, groupId, "发布内容太长，请控制在 1000 字以内");
           return;
         }
-        const result = await publishTextShuoShuoViaBot({
-          queue: this.queue,
+        const result = await publishTextDirectViaBot({
           botQqUin,
           groupId,
           operatorQqUin,
-          text: shuoShuoText,
+          text: publishText,
         });
-        await this.sendGroupMessage(botQqUin, groupId, formatShuoShuoPublished(result.post.displayId, stylishEnabled));
+        await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled));
         return;
       }
 

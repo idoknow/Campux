@@ -660,35 +660,35 @@ export function formatFriendCount(displayName: string, count: number, stylishEna
   return pick(friendCountStylish)(displayName, count);
 }
 
-// ── 说说发布成功 ──────────────────────────────────────
+// ── 直接发布成功（审核群 #发布 命令） ──────────────────
 
-const shuoShuoPublishedDefault = (id: number) =>
-  `📝 说说已发布！稿件编号 #${id}`;
+const botPublishSuccessDefault = () =>
+  `✅ 已发布到 QQ 空间！`;
 
-const shuoShuoPublishedStylish = [
-  (id: number) => `📢 说说发布成功！编号 #${id}，正在推送中~`,
-  (id: number) => `✍️ 你的说说（#${id}）已经发出去啦，等着大家围观吧~`,
-  (id: number) => `📯 号外号外！说说 #${id} 已发布到 QQ 空间~`,
-  shuoShuoPublishedDefault,
+const botPublishSuccessStylish = [
+  () => `📢 发布成功！内容已推送至 QQ 空间~`,
+  () => `✍️ 内容已经发出去啦，等着大家围观吧~`,
+  () => `📯 号外号外！已发布到 QQ 空间~`,
+  botPublishSuccessDefault,
 ];
 
-export function formatShuoShuoPublished(displayId: number, stylishEnabled = false): string {
-  if (!stylishEnabled) return shuoShuoPublishedDefault(displayId);
-  return pick(shuoShuoPublishedStylish)(displayId);
+export function formatBotPublishSuccess(stylishEnabled = false): string {
+  if (!stylishEnabled) return botPublishSuccessDefault();
+  return pick(botPublishSuccessStylish)();
 }
 
-// ── 说说帮助提示 ──────────────────────────────────────
+// ── 直接发布帮助提示（审核群 #发布 命令） ───────────────
 
-const shuoShuoHelpDefault = () =>
-  `发送 #说说 <内容> 来发布文字说说到 QQ 空间。`;
+const botPublishHelpDefault = () =>
+  `发送 #发布 <内容> 来直接发布文字到 QQ 空间。`;
 
-const shuoShuoHelpStylish = [
-  () => `📝 想发说说？试试 #说说 今天天气真不错~`,
-  () => `💡 用 #说说 <内容> 可以直接发布一条文字说说哦~`,
-  shuoShuoHelpDefault,
+const botPublishHelpStylish = [
+  () => `📝 想发点东西？试试 #发布 今天天气真不错~`,
+  () => `💡 用 #发布 <内容> 可以直接发布一条文字到 QQ 空间哦~`,
+  botPublishHelpDefault,
 ];
 
-export function formatShuoShuoHelp(stylishEnabled = false): string {
-  if (!stylishEnabled) return shuoShuoHelpDefault();
-  return pick(shuoShuoHelpStylish)();
+export function formatBotPublishHelp(stylishEnabled = false): string {
+  if (!stylishEnabled) return botPublishHelpDefault();
+  return pick(botPublishHelpStylish)();
 }
