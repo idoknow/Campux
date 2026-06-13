@@ -141,16 +141,26 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
   });
 
   try {
-    const html = await renderPostHtml(input);
-    // 用 data URI 代替 setContent（about:blank 下 @font-face data URI 可能不生效）
-    await page.goto(`data:text/html,${encodeURIComponent(html)}`, {
+    const font = input.font && input.font !== "default" ? input.font : null;
+    const fontCss = font ? getFontCss() : "";
+
+    await page.setContent(await renderPostHtml(input), {
       waitUntil: "load",
       timeout: 10_000,
     });
 
-    // 等待自定义字体加载并 rasterize
-    await page.evaluate(() => document.fonts.ready);
-    await page.evaluate(() => new Promise(requestAnimationFrame));
+    // 通过 evaluate 注入 @font-face（base64 data URI），避免 data: URL 长度限制
+    if (fontCss) {
+      await page.evaluate((css) => {
+        const style = document.createElement("style");
+        style.textContent = css;
+        document.head.appendChild(style);
+      }, fontCss);
+
+      // 等待自定义字体加载并 rasterize
+      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+    }
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     return await page.screenshot({
@@ -207,7 +217,6 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <style>
-    ${font ? getFontCss() : ""}
     :root {
       font-family: ${font ? `"${font}", ` : ""}"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
     }
