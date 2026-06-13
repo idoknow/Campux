@@ -1,5 +1,34 @@
 import { Buffer } from "node:buffer";
 import { chromium, type Browser } from "playwright-core";
+import { marked } from "marked";
+
+// 自定义 marked 扩展：++下划线++
+const underlineExtension = {
+  extensions: [
+    {
+      name: "underline",
+      level: "inline",
+      start(src: string) {
+        return src.indexOf("++");
+      },
+      tokenizer(this: { tokens: marked.Tokens.Generic[] }, src: string) {
+        const match = src.match(/^\+\+(.+?)\+\+/);
+        if (match) {
+          return {
+            type: "underline",
+            raw: match[0],
+            text: match[1].trim(),
+          };
+        }
+      },
+      renderer(token: marked.Tokens.Generic) {
+        return `<u>${token.text}</u>`;
+      },
+    },
+  ],
+};
+
+marked.use(underlineExtension);
 
 export type RenderPostCardInput = {
   tenantName: string;
@@ -97,18 +126,158 @@ async function renderPostHtml(input: RenderPostCardInput) {
       margin-bottom: 0;
     }
 
-    #words {
+    #content {
       font-family: inherit;
       font-size: 3.3rem;
-      display: block;
       width: 65rem;
       margin-top: 4rem;
       word-spacing: 0.3rem;
       letter-spacing: 0.3rem;
-      white-space: pre-wrap;
       overflow-wrap: break-word;
       word-wrap: break-word;
+      line-height: 1.6;
     }
+
+    #content p {
+      margin: 0 0 1.2rem;
+      white-space: pre-wrap;
+    }
+
+    #content p:last-child {
+      margin-bottom: 0;
+    }
+
+    #content strong {
+      font-weight: 700;
+    }
+
+    #content em {
+      font-style: italic;
+    }
+
+    #content s,
+    #content del {
+      text-decoration: line-through;
+    }
+
+    #content u,
+    #content ins {
+      text-decoration: underline;
+    }
+
+    #content blockquote {
+      margin: 0 0 1.2rem;
+      padding: 0.8rem 1.5rem;
+      border-left: 6px solid #1E88E5;
+      background: #f0f7ff;
+      border-radius: 4px;
+      color: #333;
+    }
+
+    #content blockquote p {
+      margin: 0;
+      white-space: normal;
+    }
+
+    #content ul,
+    #content ol {
+      margin: 0 0 1.2rem;
+      padding-left: 2.5rem;
+    }
+
+    #content li {
+      margin-bottom: 0.4rem;
+    }
+
+    #content ul ul,
+    #content ol ol,
+    #content ul ol,
+    #content ol ul {
+      margin-bottom: 0;
+    }
+
+    #content table {
+      border-collapse: collapse;
+      margin: 0 0 1.2rem;
+      width: 100%;
+      font-size: 0.85em;
+    }
+
+    #content th,
+    #content td {
+      border: 2px solid #c0c4c8;
+      padding: 0.6rem 1rem;
+      text-align: left;
+    }
+
+    #content th {
+      background: #e8f2fd;
+      font-weight: 600;
+    }
+
+    #content tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+
+    #content input[type="checkbox"] {
+      width: 1.2em;
+      height: 1.2em;
+      margin-right: 0.6em;
+      accent-color: #16a34a;
+      transform: translateY(0.1em);
+    }
+
+    #content a {
+      color: #1E88E5;
+      text-decoration: underline;
+      word-break: break-all;
+    }
+
+    #content hr {
+      border: none;
+      border-top: 2px solid #d0d4d8;
+      margin: 1.2rem 0;
+    }
+
+    #content code {
+      font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", ui-monospace, monospace;
+      background: #f1f5f9;
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+
+    #content pre {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 1rem;
+      margin: 0 0 1.2rem;
+      overflow-x: auto;
+    }
+
+    #content pre code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      font-size: 0.8em;
+    }
+
+    #content h1,
+    #content h2,
+    #content h3,
+    #content h4,
+    #content h5,
+    #content h6 {
+      margin: 1.4rem 0 0.8rem;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+
+    #content h1 { font-size: 1.3em; }
+    #content h2 { font-size: 1.2em; }
+    #content h3 { font-size: 1.1em; }
+    #content h4 { font-size: 1.05em; }
 
     img {
       width: 18%;
@@ -156,7 +325,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
       <img id="avatar" src="${avatar}" />
       <div style="margin-left: 32px; margin-top: 32px">
         <span id="nickname">${escapeHtml(author)}</span>
-        <span id="words">${escapeHtml(input.text)}</span>
+        <div id="content">${renderMarkdown(input.text)}</div>
       </div>
     </div>
   </div>
@@ -175,6 +344,10 @@ async function renderPostHtml(input: RenderPostCardInput) {
   }
 </script>
 </html>`;
+}
+
+function renderMarkdown(text: string): string {
+  return marked.parse(text, { gfm: true, breaks: true }) as string;
 }
 
 function normalizeDisplayHost(value: string | null | undefined) {
