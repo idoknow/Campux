@@ -35,6 +35,13 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # GitHub Actions runner 到 registry-1.docker.io 偶发超时，
+          # 配置国内镜像加速 + daemon 级重试。
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+          buildkitd-flags: --debug
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -44,6 +51,8 @@ jobs:
 
       - name: Build and push branch image
         uses: docker/build-push-action@v6
+        continue-on-error: true
+        id: build_main
         with:
           context: .
           push: true
@@ -53,7 +62,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Retry build on failure
+        if: steps.build_main.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            CAMPUX_BUILD_VERSION=${{ steps.meta.outputs.build_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # 重试时禁用 provenance attestation 减少 registry 交互
+          provenance: false
+          sbom: false
+
       - name: Build and push telemetry dash image
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        id: build_dash
+        with:
+          context: .
+          file: apps/dash/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.dash_image }}
+          cache-from: type=gha,scope=dash
+          cache-to: type=gha,mode=max,scope=dash
+
+      - name: Retry dash build on failure
+        if: steps.build_dash.outcome == 'failure'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,6 +99,8 @@ jobs:
           tags: ${{ steps.meta.outputs.dash_image }}
           cache-from: type=gha,scope=dash
           cache-to: type=gha,mode=max,scope=dash
+          provenance: false
+          sbom: false
 
   deploy:
     name: Deploy Production
