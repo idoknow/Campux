@@ -203,14 +203,16 @@ function parseColorOption(args: string): { text: string; bgColor: string; textCo
   let rest = args;
   // 解析 --bg <颜色名>
   const bgMatch = rest.match(/--bg\s+(\S+)/);
-  if (bgMatch && BG_COLORS[bgMatch[1]]) {
-    bgColor = BG_COLORS[bgMatch[1]];
+  const bgName = bgMatch?.[1];
+  if (bgName && bgName in BG_COLORS) {
+    bgColor = BG_COLORS[bgName]!;
     rest = rest.replace(bgMatch[0], "").trim();
   }
   // 解析 --text <颜色名>
   const textMatch = rest.match(/--text\s+(\S+)/);
-  if (textMatch && TEXT_COLORS[textMatch[1]]) {
-    textColor = TEXT_COLORS[textMatch[1]];
+  const textName = textMatch?.[1];
+  if (textName && textName in TEXT_COLORS) {
+    textColor = TEXT_COLORS[textName]!;
     rest = rest.replace(textMatch[0], "").trim();
   }
   return { text: rest, bgColor, textColor };
