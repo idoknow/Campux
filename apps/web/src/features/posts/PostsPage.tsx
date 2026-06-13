@@ -110,17 +110,16 @@ const defaultPostCardPalette = "border-slate-200 bg-white";
 // ── 颜色映射（与 packages/render 同步） ────────────────
 
 const BG_CARD_STYLE_MAP: Record<string, string> = {
-  white:   "",
-  pink:    "background: linear-gradient(135deg, #fff5f7 0%, #ffe4e8 50%, #ffdde6 100%)",
-  blue:    "background: linear-gradient(135deg, #f0f7ff 0%, #dceeff 50%, #d0e8ff 100%)",
-  green:   "background: linear-gradient(135deg, #f0faf0 0%, #dcf5dc 50%, #d0f0d0 100%)",
-  yellow:  "background: linear-gradient(135deg, #fffff0 0%, #fffce0 50%, #fff9d0 100%)",
-  orange:  "background: linear-gradient(135deg, #fff8f0 0%, #ffedd5 50%, #ffe5c0 100%)",
-  purple:  "background: linear-gradient(135deg, #f8f0ff 0%, #ede0ff 50%, #e5d5ff 100%)",
+  pink:    "background: linear-gradient(135deg, #fff8f9 0%, #fff0f3 50%, #ffe8ed 100%)",
+  blue:    "background: linear-gradient(135deg, #f5faff 0%, #ebf5ff 50%, #e0f0ff 100%)",
+  green:   "background: linear-gradient(135deg, #f5faf5 0%, #ebf5eb 50%, #e0f0e0 100%)",
+  yellow:  "background: linear-gradient(135deg, #fffff5 0%, #fffceb 50%, #fffae0 100%)",
+  orange:  "background: linear-gradient(135deg, #fffaf5 0%, #fff5eb 50%, #fff0e0 100%)",
+  purple:  "background: linear-gradient(135deg, #faf5ff 0%, #f5ebff 50%, #f0e0ff 100%)",
 };
 
 const TEXT_CARD_COLOR_MAP: Record<string, string> = {
-  black:       "",
+  black:       "#1a1a1a",
   dark_red:    "#8B0000",
   dark_blue:   "#00008B",
   dark_green:  "#006400",
@@ -130,12 +129,12 @@ const TEXT_CARD_COLOR_MAP: Record<string, string> = {
 };
 
 function postCardBgStyle(bgColor: string | null): string | undefined {
-  if (!bgColor) return undefined;
+  if (!bgColor || bgColor === "white") return undefined;
   return BG_CARD_STYLE_MAP[bgColor] ?? undefined;
 }
 
 function postCardTextColor(textColor: string | null): string | undefined {
-  if (!textColor) return undefined;
+  if (!textColor || textColor === "black") return undefined;
   return TEXT_CARD_COLOR_MAP[textColor] ?? undefined;
 }
 

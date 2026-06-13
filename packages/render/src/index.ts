@@ -6,13 +6,13 @@ import { marked, Tokens } from "marked";
 // CampuxNext 前端用语义名称传 bgColor/textColor，这里转成实际 CSS 值。
 
 const BG_COLOR_MAP: Record<string, string> = {
-  white: "#FFFFFF",
-  pink:   "linear-gradient(135deg, #fff5f7 0%, #ffe4e8 50%, #ffdde6 100%)",
-  blue:   "linear-gradient(135deg, #f0f7ff 0%, #dceeff 50%, #d0e8ff 100%)",
-  green:  "linear-gradient(135deg, #f0faf0 0%, #dcf5dc 50%, #d0f0d0 100%)",
-  yellow: "linear-gradient(135deg, #fffff0 0%, #fffce0 50%, #fff9d0 100%)",
-  orange: "linear-gradient(135deg, #fff8f0 0%, #ffedd5 50%, #ffe5c0 100%)",
-  purple: "linear-gradient(135deg, #f8f0ff 0%, #ede0ff 50%, #e5d5ff 100%)",
+  white:  "",
+  pink:   "linear-gradient(135deg, #fff8f9 0%, #fff0f3 50%, #ffe8ed 100%)",
+  blue:   "linear-gradient(135deg, #f5faff 0%, #ebf5ff 50%, #e0f0ff 100%)",
+  green:  "linear-gradient(135deg, #f5faf5 0%, #ebf5eb 50%, #e0f0e0 100%)",
+  yellow: "linear-gradient(135deg, #fffff5 0%, #fffceb 50%, #fffae0 100%)",
+  orange: "linear-gradient(135deg, #fffaf5 0%, #fff5eb 50%, #fff0e0 100%)",
+  purple: "linear-gradient(135deg, #faf5ff 0%, #f5ebff 50%, #f0e0ff 100%)",
 };
 
 const TEXT_COLOR_MAP: Record<string, string> = {
@@ -26,7 +26,7 @@ const TEXT_COLOR_MAP: Record<string, string> = {
 };
 
 function resolveBgColor(raw: string | null | undefined): string {
-  if (!raw) return "#FFFFFF";
+  if (!raw) return "";
   return BG_COLOR_MAP[raw] ?? raw;
 }
 
@@ -174,6 +174,10 @@ async function renderPostHtml(input: RenderPostCardInput) {
       line-height: 1.6;
     }
 
+    #content * {
+      color: inherit;
+    }
+
     #content p {
       margin: 0 0 1.2rem;
       white-space: pre-wrap;
@@ -315,13 +319,6 @@ async function renderPostHtml(input: RenderPostCardInput) {
     #content h3 { font-size: 1.1em; }
     #content h4 { font-size: 1.05em; }
 
-    img {
-      width: 18%;
-      height: 18%;
-      border-radius: 50%;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
-    }
-
     #footer {
       display: flex;
       justify-content: space-between;
@@ -352,14 +349,14 @@ async function renderPostHtml(input: RenderPostCardInput) {
     }
   </style>
 </head>
-<body style="margin: 0; background: ${bgColor};">
+<body style="margin: 0; background: #FFFFFF;">
   <div id="title-bar" style="background-color: #1E88E5; height: 5%; width: calc(100% + 50px); padding: 16px; border-radius: 0 0 8px 8px; font-weight: bold">
     <span style="color: white; font-size: 2.5rem; padding: 1rem;">${escapeHtml(banner)}</span>
   </div>
   <div style="padding: 2.5rem; min-height: 550px; position: relative;">
-    <div style="display: flex;">
-      <img id="avatar" src="${avatar}" />
-      <div style="margin-left: 32px; margin-top: 32px">
+    <div style="display: flex; align-items: flex-start;">
+      <img id="avatar" src="${avatar}" style="flex-shrink: 0; width: 18%; height: 18%; border-radius: 50%; box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);" />
+      <div style="margin-left: 32px; margin-top: 32px; flex: 1; min-width: 0; border-radius: 16px;${bgColor ? ` padding: 20px 28px; background: ${bgColor};` : ""}">
         <span id="nickname" style="color: ${textColor};">${escapeHtml(author)}</span>
         <div id="content" style="color: ${textColor};">${renderMarkdown(input.text)}</div>
       </div>
