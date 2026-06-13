@@ -32,6 +32,10 @@ import {
   readTenantPublishMode,
   publishLlmSummaryEnabledKey,
   normalizePublishLlmSummaryEnabled,
+  enableColorSelectionKey,
+  normalizeEnableColorSelection,
+  enableMarkdownRenderKey,
+  normalizeEnableMarkdownRender,
 } from "../lib/tenant-metadata";
 
 const publicMetadataKeys = [
@@ -51,6 +55,8 @@ const publicMetadataKeys = [
   publishAccumulateMaxImagesKey,
   publishAccumulateStaleMinutesKey,
   publishLlmSummaryEnabledKey,
+  enableColorSelectionKey,
+  enableMarkdownRenderKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -79,6 +85,8 @@ const patchMetadataSchema = z.object({
   publishAccumulateMaxImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
   publishAccumulateStaleMinutes: z.number().int().min(1).max(1440).optional(),
   publishLlmSummaryEnabled: z.boolean().optional(),
+  enableColorSelection: z.boolean().optional(),
+  enableMarkdownRender: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -114,6 +122,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
       staleMinutes: normalizeAccumulateStaleMinutes(record[publishAccumulateStaleMinutesKey]),
     },
     publishLlmSummaryEnabled: normalizePublishLlmSummaryEnabled(record[publishLlmSummaryEnabledKey]),
+    enableColorSelection: normalizeEnableColorSelection(record[enableColorSelectionKey]),
+    enableMarkdownRender: normalizeEnableMarkdownRender(record[enableMarkdownRenderKey]),
   };
 }
 
@@ -353,6 +363,12 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.publishLlmSummaryEnabled !== undefined) {
       updates.push({ key: publishLlmSummaryEnabledKey, value: body.publishLlmSummaryEnabled });
+    }
+    if (body.enableColorSelection !== undefined) {
+      updates.push({ key: enableColorSelectionKey, value: body.enableColorSelection });
+    }
+    if (body.enableMarkdownRender !== undefined) {
+      updates.push({ key: enableMarkdownRenderKey, value: body.enableMarkdownRender });
     }
 
     await prisma.$transaction(

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
-import { ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
@@ -193,51 +193,61 @@ export function PostPage({
           </div>
         </div>
 
-        <div className="mt-3 rounded-md border px-3 py-2 text-sm product-accent-blue">
-          <div className="mb-2">
-            <span className="block font-semibold">背景颜色</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {BG_COLOR_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
-                  postBgColor === opt.value
-                    ? "border-slate-700 bg-slate-700 text-white shadow-sm"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                }`}
-                onClick={() => onBgColorChange(postBgColor === opt.value ? "" : opt.value)}
-              >
-                <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {metadata.enableColorSelection ? (
+          <details className="mt-3 rounded-md border border-slate-200 bg-slate-50">
+            <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-slate-700 [&::-webkit-details-marker]:hidden">
+              <span>高级功能</span>
+              <ChevronDownIcon className="size-4 text-slate-400 transition-transform ui-open:rotate-180" />
+            </summary>
+            <div className="grid gap-2 border-t border-slate-200 p-3">
+              <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
+                <div className="mb-2">
+                  <span className="block font-semibold">背景颜色</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {BG_COLOR_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                        postBgColor === opt.value
+                          ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                      onClick={() => onBgColorChange(postBgColor === opt.value ? "" : opt.value)}
+                    >
+                      <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-        <div className="mt-2 rounded-md border px-3 py-2 text-sm product-accent-blue">
-          <div className="mb-2">
-            <span className="block font-semibold">文字颜色</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {TEXT_COLOR_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
-                  postTextColor === opt.value
-                    ? "border-slate-700 bg-slate-700 text-white shadow-sm"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                }`}
-                onClick={() => onTextColorChange(postTextColor === opt.value ? "" : opt.value)}
-              >
-                <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+              <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
+                <div className="mb-2">
+                  <span className="block font-semibold">文字颜色</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {TEXT_COLOR_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                        postTextColor === opt.value
+                          ? "border-slate-700 bg-slate-700 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                      onClick={() => onTextColorChange(postTextColor === opt.value ? "" : opt.value)}
+                    >
+                      <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </details>
+        ) : null}
 
         <PostRulesAction rules={rules} />
 

@@ -234,3 +234,21 @@ export async function readTenantPublishLlmSummaryEnabled(client: MetadataClient,
 
   return normalizePublishLlmSummaryEnabled(entry?.value);
 }
+
+export const enableColorSelectionKey = "enable_color_selection";
+export const enableColorSelectionDefault = false;
+
+export function normalizeEnableColorSelection(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return enableColorSelectionDefault;
+}
+
+export const enableMarkdownRenderKey = "enable_markdown_render";
+export const enableMarkdownRenderDefault = false;
+
+export function normalizeEnableMarkdownRender(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return enableMarkdownRenderDefault;
+}

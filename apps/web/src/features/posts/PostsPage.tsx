@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { renderMarkdown } from "@/lib/markdown";
 import type { Pagination, PostItem, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
@@ -90,6 +91,8 @@ type ImagePreviewState = {
 // 让深层嵌套的评论配图也能复用顶层看图浮窗，避免逐层透传回调
 type ImageLightbox = (images: PostImage[], index: number, title: string) => void;
 const ImageLightboxContext = createContext<ImageLightbox | null>(null);
+
+const MarkdownContext = createContext(false);
 
 function useImageLightbox(): ImageLightbox {
   const open = useContext(ImageLightboxContext);
@@ -205,6 +208,7 @@ export function PostsPage({
   minePagination,
   mineLoading,
   autoFollowOwnPosts,
+  enableMarkdownRender,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -217,6 +221,7 @@ export function PostsPage({
   minePagination: Pagination;
   mineLoading: boolean;
   autoFollowOwnPosts: boolean;
+  enableMarkdownRender?: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -664,6 +669,7 @@ export function PostsPage({
   }
 
   return (
+    <MarkdownContext.Provider value={Boolean(enableMarkdownRender)}>
     <ImageLightboxContext.Provider value={openImagePreview}>
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as PostsTab)} className="min-h-0 flex-1">
@@ -1064,6 +1070,7 @@ export function PostsPage({
       </Dialog>
     </div>
     </ImageLightboxContext.Provider>
+    </MarkdownContext.Provider>
   );
 }
 
@@ -1768,7 +1775,27 @@ function PublishedFeedCard({
 }
 
 function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: string; createdAt: string; updatedAt?: string; compact?: boolean }) {
+  const enableMarkdown = useContext(MarkdownContext);
+
   if (compact) {
+    if (enableMarkdown) {
+      return (
+        <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2">
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
+            <span className="inline-flex items-center gap-1">
+              <FileTextIcon className="size-3" />
+              {text.length} 字
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <ClockIcon className="size-3" />
+              {formatFullDateTime(createdAt)}
+            </span>
+            {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
+          </div>
+          <div className="markdown-content line-clamp-3 text-sm font-medium leading-5 text-slate-800 md:line-clamp-4" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+        </div>
+      );
+    }
     return (
       <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2">
         <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
@@ -1783,6 +1810,25 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: 
           {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
         </div>
         <p className="line-clamp-3 whitespace-pre-wrap text-sm font-medium leading-5 text-slate-800 md:line-clamp-4">{text}</p>
+      </div>
+    );
+  }
+
+  if (enableMarkdown) {
+    return (
+      <div className="product-row-card p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+          <span className="inline-flex items-center gap-1">
+            <FileTextIcon className="size-3.5" />
+            {text.length} 字
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <ClockIcon className="size-3.5" />
+            {formatFullDateTime(createdAt)}
+          </span>
+          {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
+        </div>
+        <div className="markdown-content text-[15px] font-medium leading-7 text-slate-800" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
       </div>
     );
   }
