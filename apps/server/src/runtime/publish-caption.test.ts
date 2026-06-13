@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderPublishCaption, wrapBatchCaptionWithFixedText } from "./publishing";
+import { renderPublishCaption, wrapBatchCaptionWithFixedText, extractQZoneMentions } from "./publishing";
 import { joinBatchCaptions } from "./publish-batching";
 
 const template = {
@@ -90,5 +90,68 @@ describe("LLM 极短总结：位于 @原作者 之后、固定后缀之前", () 
     expect(renderPublishCaption(withMention, { ...namedPost, postId: 6449, summary: null })).toBe(
       "【沙塘大遭墙】 #6449 @{uin:10001,nick:,who:1}\n投稿请私聊本号",
     );
+  });
+});
+
+describe("extractQZoneMentions", () => {
+  test("从文本中提取 @QQ 号，转为 QZone @mention 格式", () => {
+    expect(extractQZoneMentions("@123456789 你好")).toEqual([
+      "@{uin:123456789,nick:,who:1}",
+    ]);
+  });
+
+  test("多个提及去重", () => {
+    expect(extractQZoneMentions("@123456789 @123456789 @987654321")).toEqual([
+      "@{uin:123456789,nick:,who:1}",
+      "@{uin:987654321,nick:,who:1}",
+    ]);
+  });
+
+  test("无提及返回空数组", () => {
+    expect(extractQZoneMentions("今天天气不错")).toEqual([]);
+  });
+
+  test("忽略少于 5 位数字", () => {
+    expect(extractQZoneMentions("@1234")).toEqual([]);
+  });
+});
+
+describe("稿件正文含 @QQ 提及时配文中加入 QZone @mention", () => {
+  const withMention = { ...template, includeAuthorMention: false };
+  const namedPost = { text: "找 @123456789 同学", anonymous: false, authorQq: "10001" };
+
+  test("单稿：前缀 #号 + @QQ 提及 + 后缀", () => {
+    expect(renderPublishCaption(withMention, { ...namedPost, postId: 6449 })).toBe(
+      "【沙塘大遭墙】 #6449 @{uin:123456789,nick:,who:1}\n投稿请私聊本号",
+    );
+  });
+
+  test("与 includeAuthorMention 共存时跳过重复 QQ", () => {
+    const withAuthorMention = { ...withMention, includeAuthorMention: true };
+    // post.text 中的 @10001 是作者自己，不应重复出现
+    const post = { text: "找 @10001 同学", anonymous: false, authorQq: "10001" };
+    const result = renderPublishCaption(withAuthorMention, { ...post, postId: 6449 });
+    expect(result).toContain("@{uin:10001,nick:,who:1}");
+    // 只出现一次
+    expect(result.match(/@\{uin:10001,nick:,who:1\}/g)?.length).toBe(1);
+  });
+
+  test("匿名稿件不跳过作者 QQ 去重（因为没有 includeAuthorMention）", () => {
+    const anonPost = { text: "捞 @987654321", anonymous: true, authorQq: "10001" };
+    expect(renderPublishCaption(withMention, { ...anonPost, postId: 6449 })).toBe(
+      "【沙塘大遭墙】 #6449 @{uin:987654321,nick:,who:1}\n投稿请私聊本号",
+    );
+  });
+
+  test("批量模式：每条子稿件各自携带 @QQ 提及", () => {
+    const parts = [
+      renderPublishCaption(withMention, { text: "找 @111111", anonymous: true, authorQq: "10001", postId: 1, omitFixedText: true }),
+      renderPublishCaption(withMention, { text: "捞 @222222", anonymous: true, authorQq: "10001", postId: 2, omitFixedText: true }),
+    ];
+    const full = wrapBatchCaptionWithFixedText(withMention, joinBatchCaptions(parts));
+    expect(full).toBe(
+      "【沙塘大遭墙】\n#1 @{uin:111111,nick:,who:1}\n———\n#2 @{uin:222222,nick:,who:1}\n投稿请私聊本号",
+    );
+    expect(full.match(/投稿请私聊本号/g)?.length).toBe(1);
   });
 });
