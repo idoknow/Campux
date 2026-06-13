@@ -38,6 +38,8 @@ export function registerStatsRoutes(app: FastifyInstance) {
       qzoneVisitorSnapshots,
       botFriendSnapshots,
       sourceLogCount,
+      privateForwardedLogs,
+      privateRepliedLogs,
     ] = await Promise.all([
       prisma.post.findMany({
         where: { tenantId },
@@ -214,6 +216,30 @@ export function registerStatsRoutes(app: FastifyInstance) {
           oldStatus: null,
           comment: { contains: "私聊" },
         },
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          tenantId,
+          action: "bot.private_message.forwarded",
+          createdAt: { gte: sinceRange },
+        },
+        select: {
+          createdAt: true,
+          detail: true,
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          tenantId,
+          action: "bot.private_message.replied",
+          createdAt: { gte: sinceRange },
+        },
+        select: {
+          createdAt: true,
+          detail: true,
+        },
+        orderBy: { createdAt: "asc" },
       }),
     ]);
 
@@ -402,6 +428,16 @@ export function registerStatsRoutes(app: FastifyInstance) {
             : null,
         };
       }),
+      privateMessages: {
+        forwarded: {
+          total: privateForwardedLogs.length,
+          daily: buildAuditDailySeries(privateForwardedLogs, sinceRange, now),
+        },
+        replied: {
+          total: privateRepliedLogs.length,
+          daily: buildAuditDailySeries(privateRepliedLogs, sinceRange, now),
+        },
+      },
       audit: {
         actions30d: auditGroups
           .map((group) => ({
@@ -507,6 +543,25 @@ function buildTopAuthors(
     })
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
+}
+
+function buildAuditDailySeries(logs: Array<{ createdAt: Date }>, start: Date, end: Date) {
+  const startDay = startOfDay(start);
+  const endDay = startOfDay(end);
+  const days = [];
+  for (let time = startDay.getTime(); time <= endDay.getTime(); time += dayMs) {
+    days.push({
+      date: formatDayKey(new Date(time)),
+      total: 0,
+    });
+  }
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  for (const log of logs) {
+    const day = byDate.get(formatDayKey(log.createdAt));
+    if (!day) continue;
+    day.total += 1;
+  }
+  return days;
 }
 
 function startOfDay(date: Date) {

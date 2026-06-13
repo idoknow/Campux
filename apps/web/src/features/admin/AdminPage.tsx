@@ -53,7 +53,6 @@ type TenantSettingsForm = {
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
   botStylishMessagesEnabled: boolean;
-  botPrivatePostStylishEnabled: boolean;
   publishMode: "single" | "accumulate";
   publishAccumulateMinImages: number;
   publishAccumulateMaxImages: number;
@@ -514,7 +513,6 @@ export function AdminPage({
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
           botStylishMessagesEnabled: form.botStylishMessagesEnabled,
-          botPrivatePostStylishEnabled: form.botPrivatePostStylishEnabled,
           publishMode: form.publishMode,
           publishAccumulateMinImages: form.publishAccumulateMinImages,
           publishAccumulateMaxImages: form.publishAccumulateMaxImages,
@@ -1876,18 +1874,6 @@ function MetadataPanel({
               aria-label="启用 Bot 多彩消息"
             />
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div>
-              <p className="text-sm font-medium text-slate-900">对话投稿多彩消息</p>
-              <p className="text-xs text-slate-500">开启后对话框投稿流程中的提示语将使用多风格随机语句。</p>
-            </div>
-            <Switch
-              checked={form.botPrivatePostStylishEnabled}
-              disabled={busy}
-              onCheckedChange={(value) => onFormChange({ ...form, botPrivatePostStylishEnabled: value })}
-              aria-label="启用对话投稿多彩消息"
-            />
-          </div>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
@@ -1940,7 +1926,7 @@ function AdminAiSettingsPanel({
           action={<Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">实验性</Badge>}
         />
 
-        <div className="mt-4 grid gap-4">
+        <form className="mt-4 grid gap-4">
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
             <div>
               <p className="text-sm font-semibold text-slate-950">启用 AI 建模</p>
@@ -2045,7 +2031,7 @@ function AdminAiSettingsPanel({
               保存 AI 设置
             </Button>
           </div>
-        </div>
+        </form>
       </CardContent>
     </Card>
   );
@@ -3397,7 +3383,6 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
     botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
-    botPrivatePostStylishEnabled: metadata.botPrivatePostStylishEnabled,
     publishMode: metadata.publishMode,
     publishAccumulateMinImages: metadata.publishAccumulate.minImages,
     publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,

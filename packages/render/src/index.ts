@@ -1,5 +1,12 @@
 import { Buffer } from "node:buffer";
 import { chromium, type Browser } from "playwright-core";
+import { marked } from "marked";
+
+// 配置 marked：启用 GFM（表格、删除线、自动链接等）
+marked.setOptions({
+  gfm: true,
+  breaks: true, // 尊重换行
+});
 
 export type RenderPostCardInput = {
   tenantName: string;
@@ -11,6 +18,8 @@ export type RenderPostCardInput = {
   text: string;
   createdAt: Date;
   anonymous: boolean;
+  bgColor?: string;
+  textColor?: string;
 };
 
 let browserPromise: Promise<Browser> | null = null;
@@ -60,6 +69,14 @@ function findChromiumExecutable() {
   );
 }
 
+/**
+ * 预处理器：将 `++下划线内容++` 转为 `<u>下划线内容</u>`，
+ * marked 原生不支持下划线，用此方式补充。
+ */
+function preprocessMarkdown(text: string): string {
+  return text.replace(/\+\+(.+?)\+\+/g, "<u>$1</u>");
+}
+
 async function renderPostHtml(input: RenderPostCardInput) {
   const createdAt = new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
@@ -76,18 +93,38 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
   const banner = "";
 
+  // 将 Markdown 转为 HTML
+  const processedText = preprocessMarkdown(input.text);
+  const bodyHtml = await marked.parse(processedText);
+
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <style>
+    @font-face {
+      font-family: "Emoji Fallback";
+      src: local("Noto Color Emoji"), local("Apple Color Emoji"), local("Segoe UI Emoji"), local("Twitter Color Emoji"), url("https://fonts.gstatic.com/s/notocoloremoji/v30/Yq6P-KqIXTD0t4D9z1EY1nFp2O3I8aD9xQ.woff2") format("woff2");
+      unicode-range: U+1F000-1FFFF, U+200D, U+FE0F, U+2600-27BF, U+2B50, U+2B55, U+2700-27BF, U+2300-23FF, U+2934-2935, U+2B05-2B07, U+2B1B-2B1C, U+3030, U+303D, U+3297, U+3299;
+      font-display: swap;
+    }
+
     :root {
-      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+      /* emoji 字体置于最前：不含 CJK 字形，遇汉字自动回退到后续 CJK 字体 */
+      font-family: "Emoji Fallback", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "EmojiOne Color", "Twemoji Mozilla", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      --text-color: ${escapeHtml(input.textColor ?? "#000000")};
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
 
     body {
       font-family: inherit;
+      background-color: ${escapeHtml(input.bgColor ?? "#ffffff")};
     }
 
     #nickname {
@@ -103,11 +140,150 @@ async function renderPostHtml(input: RenderPostCardInput) {
       display: block;
       width: 65rem;
       margin-top: 4rem;
-      word-spacing: 0.3rem;
-      letter-spacing: 0.3rem;
-      white-space: pre-wrap;
+      color: var(--text-color);
+      line-height: 1.6;
       overflow-wrap: break-word;
       word-wrap: break-word;
+    }
+
+    /* ── 加粗 ── */
+    #words strong {
+      font-weight: 900;
+    }
+
+    /* ── 斜体 ── */
+    #words em {
+      font-style: italic;
+    }
+
+    /* ── 删除线 ── */
+    #words del {
+      text-decoration: line-through;
+    }
+
+    /* ── 下划线 ── */
+    #words u {
+      text-decoration: underline;
+    }
+
+    /* ── 链接 ── */
+    #words a {
+      color: #1E88E5;
+      text-decoration: underline;
+      font-weight: 500;
+    }
+
+    /* ── 段落 ── */
+    #words p {
+      margin-bottom: 1.2rem;
+      word-spacing: 0.3rem;
+      letter-spacing: 0.3rem;
+    }
+
+    /* ── 引用 ── */
+    #words blockquote {
+      border-left: 6px solid ${escapeHtml(input.textColor ?? "#000000")};
+      padding: 0.8rem 1.5rem;
+      margin: 1rem 0;
+      opacity: 0.85;
+      font-style: italic;
+    }
+
+    /* ── 无序列表 ── */
+    #words ul {
+      list-style: disc;
+      padding-left: 3rem;
+      margin-bottom: 1.2rem;
+    }
+
+    #words ul ul {
+      list-style: circle;
+    }
+
+    #words ul ul ul {
+      list-style: square;
+    }
+
+    /* ── 有序列表 ── */
+    #words ol {
+      list-style: decimal;
+      padding-left: 3rem;
+      margin-bottom: 1.2rem;
+    }
+
+    #words li {
+      margin-bottom: 0.5rem;
+    }
+
+    /* ── 清单勾选 ── */
+    #words ul.task-list {
+      list-style: none;
+      padding-left: 0.5rem;
+    }
+
+    #words .task-list-item {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+    }
+
+    #words .task-list-item input[type="checkbox"] {
+      width: 2.5rem;
+      height: 2.5rem;
+      flex-shrink: 0;
+      accent-color: ${escapeHtml(input.textColor ?? "#000000")};
+    }
+
+    /* ── 表格 ── */
+    #words table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1.5rem 0;
+      font-size: 0.9em;
+    }
+
+    #words th,
+    #words td {
+      border: 2px solid var(--text-color);
+      padding: 0.8rem 1.2rem;
+      text-align: left;
+    }
+
+    #words th {
+      font-weight: bold;
+      opacity: 0.9;
+    }
+
+    #words tr:nth-child(even) {
+      opacity: 0.85;
+    }
+
+    /* ── 代码块 ── */
+    #words code {
+      font-family: "Fira Code", "Cascadia Code", "JetBrains Mono", monospace;
+      font-size: 0.85em;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+    }
+
+    #words pre {
+      margin: 1rem 0;
+      padding: 1.2rem;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+
+    #words pre code {
+      padding: 0;
+      background: none;
+    }
+
+    /* ── 水平分割线 ── */
+    #words hr {
+      border: none;
+      border-top: 2px solid var(--text-color);
+      margin: 2rem 0;
+      opacity: 0.3;
     }
 
     img {
@@ -155,8 +331,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
     <div style="display: flex;">
       <img id="avatar" src="${avatar}" />
       <div style="margin-left: 32px; margin-top: 32px">
-        <span id="nickname">${escapeHtml(author)}</span>
-        <span id="words">${escapeHtml(input.text)}</span>
+        <div id="nickname">${escapeHtml(author)}</div>
+        <div id="words">${bodyHtml}</div>
       </div>
     </div>
   </div>

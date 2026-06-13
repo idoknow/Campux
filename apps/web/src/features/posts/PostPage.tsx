@@ -1,6 +1,35 @@
 import { useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
+
+const BG_COLORS = [
+  { name: "白色", hex: "#ffffff" },
+  { name: "浅粉", hex: "#FFE4E1" },
+  { name: "浅蓝", hex: "#E3F2FD" },
+  { name: "浅绿", hex: "#E8F5E9" },
+  { name: "浅黄", hex: "#FFFDE7" },
+  { name: "浅橙", hex: "#FFF3E0" },
+  { name: "浅紫", hex: "#F3E5F5" },
+];
+
+const TEXT_COLORS = [
+  { name: "黑色", hex: "#000000" },
+  { name: "深红", hex: "#8B0000" },
+  { name: "深蓝", hex: "#00008B" },
+  { name: "深绿", hex: "#006400" },
+  { name: "深粉", hex: "#C71585" },
+  { name: "深紫", hex: "#4A148C" },
+  { name: "深橙", hex: "#E65100" },
+];
+
+function getTextContrastColor(hex: string): string {
+  // 简单亮度判断：深色背景用白色文字，浅色背景用黑色文字
+  const r = Number.parseInt(hex.slice(1, 3), 16);
+  const g = Number.parseInt(hex.slice(3, 5), 16);
+  const b = Number.parseInt(hex.slice(5, 7), 16);
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  return luminance > 140 ? "#333333" : "#ffffff";
+}
 import { ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
@@ -18,18 +47,24 @@ export function PostPage({
   metadata,
   postText,
   anonymous,
+  bgColor,
+  textColor,
   pendingAttachments,
   onPostTextChange,
   onAnonymousChange,
   onFilesSelected,
   onRemoveAttachment,
   onSubmit,
+  onBgColorChange,
+  onTextColorChange,
 }: {
   busy: boolean;
   loading: boolean;
   metadata: TenantMetadata;
   postText: string;
   anonymous: boolean;
+  bgColor: string;
+  textColor: string;
   selectedTenant: TenantSummary;
   pendingAttachments: PendingAttachment[];
   onPostTextChange: (value: string) => void;
@@ -37,6 +72,8 @@ export function PostPage({
   onFilesSelected: (files: ArrayLike<File> | null) => void;
   onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
+  onBgColorChange: (color: string) => void;
+  onTextColorChange: (color: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [attachmentToRemove, setAttachmentToRemove] = useState<PendingAttachment | null>(null);
@@ -163,6 +200,54 @@ export function PostPage({
             </span>
             <Switch checked={anonymous} onCheckedChange={onAnonymousChange} disabled={busy} aria-label="匿名展示" />
           </div>
+        </div>
+
+        {/* 颜色选择 */}
+        <div className="mt-3 space-y-2">
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-700">
+              配色设置 <span className="ml-1 opacity-50 group-open:rotate-180 inline-block transition-transform">▾</span>
+            </summary>
+            <div className="mt-2 space-y-3">
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-slate-500">背景色</p>
+                <div className="flex flex-wrap gap-2">
+                  {BG_COLORS.map((c) => (
+                    <button
+                      key={c.hex}
+                      className={`h-7 w-7 rounded-full border-2 transition-all ${
+                        bgColor === c.hex ? "border-slate-700 scale-110 shadow-sm" : "border-slate-200 hover:border-slate-400"
+                      }`}
+                      style={{ backgroundColor: c.hex }}
+                      title={c.name}
+                      onClick={() => onBgColorChange(c.hex)}
+                      aria-label={`背景色 ${c.name}`}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-slate-500">文字色</p>
+                <div className="flex flex-wrap gap-2">
+                  {TEXT_COLORS.map((c) => (
+                    <button
+                      key={c.hex}
+                      className={`flex h-7 w-7 items-center justify-center rounded-full border-2 text-[10px] font-bold transition-all ${
+                        textColor === c.hex ? "border-slate-700 scale-110 shadow-sm" : "border-slate-200 hover:border-slate-400"
+                      }`}
+                      style={{ backgroundColor: c.hex, color: c.hex === "#000000" ? "#fff" : "#fff" }}
+                      title={c.name}
+                      onClick={() => onTextColorChange(c.hex)}
+                      aria-label={`文字色 ${c.name}`}
+                    >
+                      {/* 深色背景显示 A，浅色背景显示 A 用高对比 */}
+                      <span style={{ color: getTextContrastColor(c.hex) }}>A</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
 
         <PostRulesAction rules={rules} />

@@ -19,8 +19,8 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
-import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
+import { extractOneBotImageSegments, extractOneBotPlainText, extractOneBotDisplayText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
+import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled } from "../lib/tenant-metadata";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
@@ -62,11 +62,14 @@ import {
   formatPrivatePostModePrompt,
   formatPrivatePostDraftPrompt,
   formatPrivatePostContinuePrompt,
+  formatPrivatePostColorHint,
   formatPrivatePostCancelled,
   formatPrivateHelp,
   formatPrivateReplySent,
   formatPrivateReplyReceived,
   formatPrivateReplyNoTarget,
+  formatFriendCount,
+  formatDirectPublish,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -125,6 +128,8 @@ type PrivatePostDraft = {
   uploadedKeys: string[];
   updatedAt: number;
   history: PrivatePostHistoryEntry[];
+  bgColor: string;
+  textColor: string;
 };
 
 type PrivatePostPendingMode = {
@@ -134,6 +139,8 @@ type PrivatePostPendingMode = {
   uploadedKeys: string[];
   updatedAt: number;
   history: PrivatePostHistoryEntry[];
+  bgColor: string;
+  textColor: string;
 };
 
 type PrivateForwardEntry = {
@@ -170,6 +177,47 @@ type OneBotMessageEvent = {
   // but we treat them as part of `message` / `raw_message` as fallback.
 };
 
+const BG_COLORS: Record<string, string> = {
+  "白色": "#ffffff",
+  "浅粉": "#FFE4E1",
+  "浅蓝": "#E3F2FD",
+  "浅绿": "#E8F5E9",
+  "浅黄": "#FFFDE7",
+  "浅橙": "#FFF3E0",
+  "浅紫": "#F3E5F5",
+};
+
+const TEXT_COLORS: Record<string, string> = {
+  "黑色": "#000000",
+  "深红": "#8B0000",
+  "深蓝": "#00008B",
+  "深绿": "#006400",
+  "深粉": "#C71585",
+  "深紫": "#4A148C",
+  "深橙": "#E65100",
+};
+
+function parseColorOption(args: string): { text: string; bgColor: string; textColor: string } {
+  let bgColor = "#ffffff";
+  let textColor = "#000000";
+  let rest = args;
+  // 解析 --bg <颜色名>
+  const bgMatch = rest.match(/--bg\s+(\S+)/);
+  const bgName = bgMatch?.[1];
+  if (bgName && bgName in BG_COLORS) {
+    bgColor = BG_COLORS[bgName]!;
+    rest = rest.replace(bgMatch[0], "").trim();
+  }
+  // 解析 --text <颜色名>
+  const textMatch = rest.match(/--text\s+(\S+)/);
+  const textName = textMatch?.[1];
+  if (textName && textName in TEXT_COLORS) {
+    textColor = TEXT_COLORS[textName]!;
+    rest = rest.replace(textMatch[0], "").trim();
+  }
+  return { text: rest, bgColor, textColor };
+}
+
 const reviewHelp = [
   "审核命令：",
   "#通过 <稿件id>",
@@ -178,6 +226,8 @@ const reviewHelp = [
   "#回复 <内容> （引用转发私信后使用）",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
+  "#好友数量",
+  "#发布说说 <内容> （可选 --bg 颜色 --text 颜色）",
 ].join("\n");
 
 function readRecallReason(comment: string | undefined): string | null {
@@ -1038,6 +1088,36 @@ export class OneBotRuntime {
       }
 
       const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+
+      // 处理颜色选择命令
+      const colorMatch = plainText.match(/^#(背景色|文字色)\s+(.+)/);
+      if (colorMatch) {
+        const draft = this.privatePostDrafts.get(draftKey) || this.privatePostPendingModes.get(draftKey);
+        if (!draft) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, "请先开始投稿后再设置颜色。");
+          return;
+        }
+        const colorName = colorMatch[2]!.trim();
+        if (colorMatch[1] === "背景色") {
+          const hex = BG_COLORS[colorName];
+          if (!hex) {
+            await this.sendPrivateMessage(botQqUin, userQqUin, `可选背景色：${Object.keys(BG_COLORS).join("、")}`);
+            return;
+          }
+          draft.bgColor = hex;
+        } else {
+          const hex = TEXT_COLORS[colorName];
+          if (!hex) {
+            await this.sendPrivateMessage(botQqUin, userQqUin, `可选文字色：${Object.keys(TEXT_COLORS).join("、")}`);
+            return;
+          }
+          draft.textColor = hex;
+        }
+        const colorLabel = colorMatch[1] === "背景色" ? "背景色" : "文字色";
+        await this.sendPrivateMessage(botQqUin, userQqUin, `✅ 已设置${colorLabel}：${colorName}`);
+        return;
+      }
+
       if (isPrivatePostUndoText(plainText)) {
         await this.undoPrivatePostDraftEntry({
           bot,
@@ -1049,9 +1129,9 @@ export class OneBotRuntime {
 
       const pendingMode = this.privatePostPendingModes.get(draftKey);
       if (pendingMode) {
-        const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
         if (isPrivatePostFinishText(plainText)) {
-          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(stylishEnabled));
           return;
         }
 
@@ -1066,7 +1146,7 @@ export class OneBotRuntime {
           return;
         }
 
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(stylishEnabled));
         return;
       }
 
@@ -1083,8 +1163,8 @@ export class OneBotRuntime {
       if (draft) {
           const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft });
           if (appended) {
-            const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled));
+            const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+            await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, stylishEnabled));
             return;
           }
 
@@ -1093,7 +1173,7 @@ export class OneBotRuntime {
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
-        // 跳过好友请求、「我是XXX」等系统消息，不转发
+        // 跳过好友请求、「我是 + QQ昵称」等自我介绍消息，不转发
         if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
           return;
         }
@@ -1105,7 +1185,7 @@ export class OneBotRuntime {
             botQqUin,
             userQqUin,
             userNickname: event.sender?.card || event.sender?.nickname || userQqUin,
-            text: plainText || event.raw_message || "（不支持的消息类型）",
+            text: extractOneBotDisplayText(event.message, event.raw_message) || plainText || "（不支持的消息类型）",
           });
         }
 
@@ -1193,10 +1273,12 @@ export class OneBotRuntime {
       uploadedKeys: staged.uploadedKeys,
       updatedAt: Date.now(),
       history,
+      bgColor: "#ffffff",
+      textColor: "#000000",
     });
 
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-    const summary = this.formatPrivatePostPendingSummary(text, attachments.length, privateStylishEnabled);
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const summary = this.formatPrivatePostPendingSummary(text, attachments.length, stylishEnabled);
     await this.sendPrivateMessage(botQqUin, userQqUin, summary);
   }
 
@@ -1281,8 +1363,8 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       await this.clearPrivatePostPending(draftKey);
-      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
+      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(stylishEnabled));
       return;
     }
 
@@ -1293,8 +1375,8 @@ export class OneBotRuntime {
     }
 
     await this.clearPrivatePostDraft(draftKey);
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(stylishEnabled));
   }
 
   private async finishPrivatePostDraft({
@@ -1522,10 +1604,13 @@ export class OneBotRuntime {
       uploadedKeys: pending.uploadedKeys,
       updatedAt: Date.now(),
       history: pending.history,
+      bgColor: pending.bgColor,
+      textColor: pending.textColor,
     });
 
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostContinuePrompt(privateStylishEnabled));
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostContinuePrompt(stylishEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostColorHint(stylishEnabled));
   }
 
   private async undoPrivatePostDraftEntry({
@@ -1543,13 +1628,12 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
       const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
       if (!undone) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(stylishEnabled));
         return;
       }
-      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, privateStylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, stylishEnabled));
       return;
     }
 
@@ -1560,13 +1644,12 @@ export class OneBotRuntime {
     }
 
     const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
     const undone = await this.popPrivatePostHistoryEntry(draftKey, draft, stylishEnabled);
     if (!undone) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(privateStylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(stylishEnabled));
       return;
     }
-    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, stylishEnabled));
   }
 
   private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode, stylishEnabled = false) {
@@ -1658,6 +1741,8 @@ export class OneBotRuntime {
                 text,
                 anonymous: draft.anonymous,
                 attachments: draft.attachments,
+                bgColor: draft.bgColor,
+                textColor: draft.textColor,
                 status: "pending_approval",
                 logs: {
                   create: {
@@ -1892,6 +1977,106 @@ export class OneBotRuntime {
         return;
       }
 
+      if (command.name === "发布说说" || command.name === "发布") {
+        const { text, bgColor, textColor } = parseColorOption(command.args);
+        if (!text) {
+          await this.sendGroupMessage(botQqUin, groupId, "请发送 #发布说说 <内容> 来发布文字说说，支持 --bg 颜色 --text 颜色 选择配色");
+          return;
+        }
+        if (text.length > 1_000) {
+          await this.sendGroupMessage(botQqUin, groupId, "内容太长了，请控制在 1000 字以内");
+          return;
+        }
+
+        const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+
+        // 使用事务创建 Post（状态直接设为 approved，跳过审核）
+        const post = await prisma.$transaction(async (tx) => {
+          const tenant = await tx.tenant.update({
+            where: { id: bot.tenantId },
+            data: { nextPostDisplayId: { increment: 1 } },
+            select: { nextPostDisplayId: true },
+          });
+          const displayId = tenant.nextPostDisplayId - 1;
+
+          return tx.post.create({
+            data: {
+              tenantId: bot.tenantId,
+              authorId: operator.id,
+              displayId,
+              text,
+              anonymous: false,
+              attachments: [],
+              bgColor,
+              textColor,
+              status: "approved",
+              logs: {
+                create: [
+                  {
+                    tenantId: bot.tenantId,
+                    actorId: operator.id,
+                    oldStatus: null,
+                    newStatus: "pending_approval",
+                    comment: "管理员直接发布文字说说",
+                  },
+                  {
+                    tenantId: bot.tenantId,
+                    actorId: operator.id,
+                    oldStatus: "pending_approval",
+                    newStatus: "approved",
+                    comment: "管理员直接发布，跳过审核",
+                  },
+                ],
+              },
+            },
+          });
+        });
+
+        const { enqueuePublishFanout } = await import("./publishing");
+        await enqueuePublishFanout(this.queue, bot.tenantId, post.id, operator.id);
+
+        await this.sendGroupMessage(botQqUin, groupId, formatDirectPublish(post.displayId, stylishEnabled));
+        return;
+      }
+
+      if (command.name === "好友数量" || command.name === "好友数") {
+        try {
+          const data = await this.callAction(botQqUin, "get_friend_list", {}, 30_000);
+          const { parseFriendListCount, botFriendSnapshotDate } = await import("../lib/bot-friend-stats");
+          const friendCount = parseFriendListCount(data);
+          if (friendCount === null) {
+            await this.sendGroupMessage(botQqUin, groupId, "获取好友列表失败，返回数据格式异常");
+            return;
+          }
+          // 同时保存快照，便于统计页面展示趋势
+          const today = botFriendSnapshotDate(new Date());
+          await prisma.botFriendSnapshot.upsert({
+            where: {
+              botAccountId_date: {
+                botAccountId: bot.id,
+                date: today,
+              },
+            },
+            create: {
+              tenantId: bot.tenantId,
+              botAccountId: bot.id,
+              date: today,
+              friendCount,
+              checkedAt: new Date(),
+            },
+            update: {
+              friendCount,
+              checkedAt: new Date(),
+            },
+          });
+          await this.sendGroupMessage(botQqUin, groupId, formatFriendCount(friendCount, bot.displayName || botQqUin, stylishEnabled));
+        } catch (error) {
+          this.logger.warn({ error, botQqUin }, "获取好友数量失败");
+          await this.sendGroupMessage(botQqUin, groupId, `获取好友数量失败：${error}`);
+        }
+        return;
+      }
+
       await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
     } catch (error) {
       await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
@@ -2062,6 +2247,19 @@ export class OneBotRuntime {
 
       if (msgId) {
         this.storePrivateForwardMapping(msgId, buffer.userQqUin, buffer.userNickname, buffer.botQqUin);
+        // 记录私信转发统计
+        writeAuditLog({
+          tenantId: buffer.tenantId,
+          actorId: null,
+          action: "bot.private_message.forwarded",
+          targetType: "bot_account",
+          targetId: buffer.botQqUin,
+          detail: {
+            userQqUin: buffer.userQqUin,
+            userNickname: buffer.userNickname,
+            messageCount: buffer.messages.length,
+          },
+        }).catch((error) => this.logger.warn({ error, tenantId: buffer.tenantId }, "failed to write private message forward audit log"));
       }
     } catch (error) {
       this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "转发私聊消息到审核群失败");
@@ -2256,6 +2454,21 @@ export class OneBotRuntime {
 
     await this.sendPrivateMessage(botQqUin, target.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
     await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(target.userNickname, target.userQqUin, stylishEnabled));
+
+    // 记录管理员回复统计
+    writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: null,
+      action: "bot.private_message.replied",
+      targetType: "bot_account",
+      targetId: botQqUin,
+      detail: {
+        userQqUin: target.userQqUin,
+        userNickname: target.userNickname,
+        groupId,
+        replyPreview: text.slice(0, 100),
+      },
+    }).catch((error) => this.logger.warn({ error, tenantId: bot.tenantId }, "failed to write private reply audit log"));
   }
 
   private storePrivateForwardMapping(msgId: string, userQqUin: string, userNickname: string, botQqUin: string) {
@@ -2297,7 +2510,8 @@ export class OneBotRuntime {
   }
 
   private isSkippablePrivateMessage(text: string): boolean {
-    return /请求添加(你为)?好友/.test(text) || /^我是/.test(text);
+    // 好友请求系统消息，或「我是 + QQ昵称」格式的自我介绍消息，不转发
+    return /请求添加(你为)?好友/.test(text) || /^我是[\u4e00-\u9fff]+/.test(text);
   }
 
   /**
