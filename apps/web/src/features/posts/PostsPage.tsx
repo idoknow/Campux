@@ -107,6 +107,38 @@ const postCardPalettes = [
 ];
 const defaultPostCardPalette = "border-slate-200 bg-white";
 
+// ── 颜色映射（与 packages/render 同步） ────────────────
+
+const BG_CARD_STYLE_MAP: Record<string, string> = {
+  white:   "",
+  pink:    "background: linear-gradient(135deg, #fff5f7 0%, #ffe4e8 50%, #ffdde6 100%)",
+  blue:    "background: linear-gradient(135deg, #f0f7ff 0%, #dceeff 50%, #d0e8ff 100%)",
+  green:   "background: linear-gradient(135deg, #f0faf0 0%, #dcf5dc 50%, #d0f0d0 100%)",
+  yellow:  "background: linear-gradient(135deg, #fffff0 0%, #fffce0 50%, #fff9d0 100%)",
+  orange:  "background: linear-gradient(135deg, #fff8f0 0%, #ffedd5 50%, #ffe5c0 100%)",
+  purple:  "background: linear-gradient(135deg, #f8f0ff 0%, #ede0ff 50%, #e5d5ff 100%)",
+};
+
+const TEXT_CARD_COLOR_MAP: Record<string, string> = {
+  black:       "",
+  dark_red:    "#8B0000",
+  dark_blue:   "#00008B",
+  dark_green:  "#006400",
+  dark_pink:   "#C71585",
+  dark_purple: "#4B0082",
+  dark_orange: "#CC5500",
+};
+
+function postCardBgStyle(bgColor: string | null): string | undefined {
+  if (!bgColor) return undefined;
+  return BG_CARD_STYLE_MAP[bgColor] ?? undefined;
+}
+
+function postCardTextColor(textColor: string | null): string | undefined {
+  if (!textColor) return undefined;
+  return TEXT_CARD_COLOR_MAP[textColor] ?? undefined;
+}
+
 const statusStyles: Record<string, string> = {
   pending_approval: "bg-amber-100 text-amber-900 ring-1 ring-amber-300",
   approved: "bg-green-100 text-green-900 ring-1 ring-green-300",
@@ -1432,9 +1464,11 @@ function ReviewCard({
   const canReviewPost = post.status === "pending_approval";
   const canApproveRecall = post.status === "pending_recall";
   const canDirectRecallPost = canDirectRecall && post.status === "published" && Boolean(onRecallDirect);
+  const cardBg = postCardBgStyle(post.bgColor);
+  const cardTextColor = postCardTextColor(post.textColor);
 
   return (
-    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
+    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`} style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
       <CardContent className="grid gap-2 p-2.5 md:gap-3 md:p-3">
         <PostMetaHeader
           displayId={`稿件 ${post.displayId}`}
@@ -1458,7 +1492,7 @@ function ReviewCard({
           <span>QQ {authorQq}</span>
         </div>
 
-        <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact />
+        <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact {...(cardTextColor ? { textColor: cardTextColor } : {})} />
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
@@ -1590,9 +1624,11 @@ function PostCard({
   const canCancel = post.status === "pending_approval";
   const canRecall = post.status === "published";
   const canFollow = post.status === "published";
+  const cardBg = postCardBgStyle(post.bgColor);
+  const cardTextColor = postCardTextColor(post.textColor);
 
   return (
-    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`}>
+    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`} style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
       <CardContent className="grid gap-2 p-2.5 md:gap-3 md:p-3">
         <PostMetaHeader
           displayId={post.displayId}
@@ -1614,7 +1650,7 @@ function PostCard({
           }
         />
 
-        <PostTextBlock text={post.text} createdAt={post.createdAt} compact />
+        <PostTextBlock text={post.text} createdAt={post.createdAt} compact {...(cardTextColor ? { textColor: cardTextColor } : {})} />
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
 
@@ -1775,13 +1811,15 @@ function PublishedFeedPostBlock({
   onImagePreview: (images: PostImage[], index: number, title: string) => void;
 }) {
   const images = getPostImages(post.attachments);
+  const cardBg = postCardBgStyle(post.bgColor);
+  const cardTextColor = postCardTextColor(post.textColor);
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-2" style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center rounded bg-sky-50 px-1.5 py-0.5 text-xs font-bold text-sky-700">稿件 {post.displayId}</span>
       </div>
       <PublishedFeedAuthorLine post={post} canViewIdentity={canViewIdentity} />
-      <PostTextBlock text={post.text} createdAt={post.createdAt} />
+      <PostTextBlock text={post.text} createdAt={post.createdAt} {...(cardTextColor ? { textColor: cardTextColor } : {})} />
       {images.length > 0 ? (
         <ImageGallery images={images} compact onImageClick={(imgs, index) => onImagePreview(imgs, index, `稿件 ${post.displayId} 上传图片`)} />
       ) : null}
@@ -1830,13 +1868,13 @@ function PublishedFeedCard({
   );
 }
 
-function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: string; createdAt: string; updatedAt?: string; compact?: boolean }) {
+function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor }: { text: string; createdAt: string; updatedAt?: string; compact?: boolean; textColor?: string }) {
   const enableMarkdown = useContext(MarkdownContext);
 
   if (compact) {
     if (enableMarkdown) {
       return (
-        <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2">
+        <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2" style={textColor ? { color: textColor } : undefined}>
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
             <span className="inline-flex items-center gap-1">
               <FileTextIcon className="size-3" />
@@ -1848,12 +1886,12 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: 
             </span>
             {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
           </div>
-          <div className="markdown-content line-clamp-3 text-sm font-medium leading-5 text-slate-800 md:line-clamp-4" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+          <div className="markdown-content line-clamp-3 text-sm font-medium leading-5 md:line-clamp-4" style={textColor ? { color: textColor } : undefined} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
         </div>
       );
     }
     return (
-      <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2">
+      <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2" style={textColor ? { color: textColor } : undefined}>
         <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
           <span className="inline-flex items-center gap-1">
             <FileTextIcon className="size-3" />
@@ -1865,7 +1903,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: 
           </span>
           {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
         </div>
-        <p className="line-clamp-3 whitespace-pre-wrap text-sm font-medium leading-5 text-slate-800 md:line-clamp-4">{text}</p>
+        <p className="line-clamp-3 whitespace-pre-wrap text-sm font-medium leading-5 md:line-clamp-4" style={textColor ? { color: textColor } : undefined}>{text}</p>
       </div>
     );
   }
@@ -1884,7 +1922,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: 
           </span>
           {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
         </div>
-        <div className="markdown-content text-[15px] font-medium leading-7 text-slate-800" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+        <div className="markdown-content text-[15px] font-medium leading-7" style={textColor ? { color: textColor } : undefined} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
       </div>
     );
   }
@@ -1902,7 +1940,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false }: { text: 
         </span>
         {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
       </div>
-      <p className="whitespace-pre-wrap text-[15px] font-medium leading-7 text-slate-800">{text}</p>
+      <p className="whitespace-pre-wrap text-[15px] font-medium leading-7" style={textColor ? { color: textColor } : undefined}>{text}</p>
     </div>
   );
 }

@@ -245,6 +245,8 @@ export type PublishedFeedPost = {
   attachments: unknown;
   anonymous: boolean;
   author: PublishedFeedAuthor;
+  bgColor: string | null;
+  textColor: string | null;
   createdAt: string;
 };
 
