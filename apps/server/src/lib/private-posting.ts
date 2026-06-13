@@ -30,15 +30,10 @@ export function parsePrivatePostStartText(input: string, extraKeywords?: string[
     }
   }
 
-  // 也支持不带 # 前缀：直接输入关键词即可触发投稿流程
+  // 也支持内置关键词不带 # 前缀：直接输入关键词即可触发投稿流程
   const plainKeywords = ["投稿", "墙墙投稿", "墙墙"];
   for (const kw of plainKeywords) {
     if (trimmed === kw) return "";
-  }
-  if (extraKeywords && extraKeywords.length > 0) {
-    for (const kw of extraKeywords) {
-      if (trimmed === kw) return "";
-    }
   }
 
   return null;

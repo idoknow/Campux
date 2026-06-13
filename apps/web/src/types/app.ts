@@ -434,6 +434,8 @@ export type AiRules = {
   allowedCategories?: string[];
   modelingKeywords?: string[];
   modelingNotes?: string;
+  /** 是否启用私聊投稿 AI 语义收稿 */
+  privatePostAiEnabled?: boolean;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"] */
   postTriggerKeywords?: string[];
 };

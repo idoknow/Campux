@@ -142,6 +142,7 @@ type AiSettingsForm = {
   allowedCategoriesText: string;
   modelingKeywordsText: string;
   modelingNotes: string;
+  privatePostAiEnabled: boolean;
   postTriggerKeywordsText: string;
 };
 
@@ -560,6 +561,7 @@ export function AdminPage({
       allowedCategories: lines(aiForm.allowedCategoriesText),
       modelingKeywords: lines(aiForm.modelingKeywordsText),
       modelingNotes: aiForm.modelingNotes.trim(),
+      privatePostAiEnabled: aiForm.privatePostAiEnabled,
       postTriggerKeywords: lines(aiForm.postTriggerKeywordsText),
     };
     return {
@@ -2044,6 +2046,15 @@ function AdminAiSettingsPanel({
               建模关键词
               <Textarea className="min-h-24" value={form.modelingKeywordsText} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, modelingKeywordsText: event.target.value })} />
             </label>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">AI 语义收稿</p>
+                  <p className="text-xs text-slate-500">开启后，私聊可由 AI 自动判断投稿内容、匿名意图、分段和是否提交；关闭时仅保留 #投稿 等显式命令。</p>
+                </div>
+                <Switch checked={form.privatePostAiEnabled} disabled={busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, privatePostAiEnabled: checked })} aria-label="启用 AI 语义收稿" />
+              </div>
+            </div>
             <label className="grid gap-1 text-sm font-medium">
               投稿触发关键词
               <Textarea
@@ -3459,6 +3470,7 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     allowedCategoriesText: (settings.rules.allowedCategories ?? []).join("\n"),
     modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
     modelingNotes: settings.rules.modelingNotes ?? "",
+    privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
   };
 }

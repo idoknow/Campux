@@ -22,6 +22,8 @@ export type AiRules = {
   allowedCategories?: string[] | undefined;
   modelingKeywords?: string[] | undefined;
   modelingNotes?: string | undefined;
+  /** 是否启用私聊投稿 AI 语义收稿 */
+  privatePostAiEnabled?: boolean | undefined;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
   postTriggerKeywords?: string[] | undefined;
 };
@@ -87,6 +89,8 @@ const defaultAiSettings: TenantAiSettingsPayload = {
     allowedCategories: ["表白", "失物招领", "二手", "活动宣传", "树洞", "校园生活", "求助", "社团活动"],
     modelingKeywords: [],
     modelingNotes: "仅用于校园建模，专注实体、话题和关系抽取",
+    privatePostAiEnabled: false,
+    postTriggerKeywords: [],
   },
 };
 
@@ -1244,6 +1248,8 @@ function normalizeRules(value: unknown): AiRules {
     allowedCategories: normalizeStringArray(candidate.allowedCategories ?? defaultAiSettings.rules.allowedCategories),
     modelingKeywords: normalizeStringArray(candidate.modelingKeywords ?? defaultAiSettings.rules.modelingKeywords),
     modelingNotes: typeof candidate.modelingNotes === "string" ? candidate.modelingNotes : defaultAiSettings.rules.modelingNotes,
+    privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
+    postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
   };
 }
 
