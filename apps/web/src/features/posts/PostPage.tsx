@@ -33,14 +33,6 @@ const TEXT_COLOR_OPTIONS = [
   { value: "dark_orange", label: "深橙", hex: "#CC5500" },
 ] as const;
 
-const fontCssLinks = FONT_OPTIONS
-  .filter((f) => f.value !== "default")
-  .map((f) => {
-    const name = f.value;
-    const url = `/fonts/${f.fileName}`;
-    return `@font-face { font-family: "${name}"; src: url("${url}") format("truetype"); }`;
-  })
-  .join("\n");
 
 export function PostPage({
   busy,
@@ -83,7 +75,8 @@ export function PostPage({
   const inputRef = useRef<HTMLInputElement>(null);
   const [attachmentToRemove, setAttachmentToRemove] = useState<PendingAttachment | null>(null);
   const [fontPreviewOpen, setFontPreviewOpen] = useState(false);
-  const [pendingSubmit, setPendingSubmit] = useState(false);
+  const [fontPreviewUrl, setFontPreviewUrl] = useState<string | null>(null);
+  const [fontPreviewLoading, setFontPreviewLoading] = useState(false);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
@@ -110,22 +103,51 @@ export function PostPage({
     setAttachmentToRemove(null);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (hasNonDefaultFont) {
-      setPendingSubmit(true);
+      setFontPreviewLoading(true);
       setFontPreviewOpen(true);
+      try {
+        const resp = await fetch("/api/posts/render-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: postText,
+            font: postFont || undefined,
+            bgColor: postBgColor || undefined,
+            textColor: postTextColor || undefined,
+            anonymous,
+          }),
+        });
+        if (!resp.ok) throw new Error("预览生成失败");
+        const blob = await resp.blob();
+        setFontPreviewUrl(URL.createObjectURL(blob));
+      } catch {
+        setFontPreviewUrl(null);
+      } finally {
+        setFontPreviewLoading(false);
+      }
     } else {
       onSubmit();
     }
   }
 
   function confirmFontPreview() {
+    if (fontPreviewUrl) URL.revokeObjectURL(fontPreviewUrl);
+    setFontPreviewUrl(null);
     setFontPreviewOpen(false);
-    setPendingSubmit(false);
     onSubmit();
   }
 
   const selectedFontOption = FONT_OPTIONS.find((f) => f.value === postFont) ?? FONT_OPTIONS[0];
+
+  function handleFontPreviewClose() {
+    setFontPreviewOpen(false);
+    if (fontPreviewUrl) {
+      URL.revokeObjectURL(fontPreviewUrl);
+      setFontPreviewUrl(null);
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
@@ -368,28 +390,36 @@ export function PostPage({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={fontPreviewOpen} onOpenChange={(open) => { if (!open) setFontPreviewOpen(false); }}>
-        <DialogContent className="w-[min(560px,calc(100vw-32px))] max-h-[80vh] overflow-y-auto">
+      <Dialog open={fontPreviewOpen} onOpenChange={(open) => { if (!open) handleFontPreviewClose(); }}>
+        <DialogContent className="w-[min(560px,calc(100vw-32px))]">
           <DialogHeader>
             <DialogTitle>字体预览</DialogTitle>
             <DialogDescription>
-              你选择了「{selectedFontOption?.label}」，以下是使用该字体渲染的效果。确认无误后提交进入审核。
+              你选择了「{selectedFontOption?.label}」，以下是使用该字体渲染的效果图。确认无误后提交进入审核。
             </DialogDescription>
           </DialogHeader>
-          <div className="px-2">
-            <style>{fontCssLinks}</style>
-            <div
-              className="min-h-[120px] rounded-md border border-slate-200 bg-white p-4 text-base leading-7 whitespace-pre-wrap break-words"
-              style={{ fontFamily: hasNonDefaultFont ? postFont : undefined }}
-            >
-              {postText || <span className="text-slate-400">（正文为空）</span>}
-            </div>
+          <div className="flex items-center justify-center px-2">
+            {fontPreviewLoading ? (
+              <div className="flex min-h-[200px] items-center justify-center">
+                <LoaderIcon className="size-6 animate-spin text-slate-400" />
+              </div>
+            ) : fontPreviewUrl ? (
+              <img
+                src={fontPreviewUrl}
+                alt="字体预览"
+                className="max-h-[60vh] w-full rounded-md border border-slate-200 object-contain"
+              />
+            ) : (
+              <div className="flex min-h-[120px] items-center justify-center text-sm text-red-500">
+                预览生成失败，请重试或取消后直接投稿。
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setFontPreviewOpen(false); setPendingSubmit(false); }}>
+            <Button variant="outline" onClick={handleFontPreviewClose}>
               取消
             </Button>
-            <Button onClick={confirmFontPreview} disabled={busy || postText.trim().length === 0}>
+            <Button onClick={confirmFontPreview} disabled={busy || fontPreviewLoading || postText.trim().length === 0}>
               <SendIcon className="mr-1 inline size-4" />
               确认投稿
             </Button>

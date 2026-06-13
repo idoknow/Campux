@@ -141,10 +141,17 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
   });
 
   try {
-    await page.setContent(await renderPostHtml(input), {
+    const html = await renderPostHtml(input);
+    // 用 data URI 代替 setContent（about:blank 下 @font-face data URI 可能不生效）
+    await page.goto(`data:text/html,${encodeURIComponent(html)}`, {
       waitUntil: "load",
       timeout: 10_000,
     });
+
+    // 等待自定义字体加载并 rasterize
+    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+
     await page.emulateMedia({ reducedMotion: "reduce" });
     return await page.screenshot({
       type: "jpeg",
@@ -210,6 +217,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
     }
 
     #nickname {
+      font-family: inherit;
       font-weight: bold;
       font-size: 4.5rem;
       line-height: 1.2;
