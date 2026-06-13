@@ -18,7 +18,8 @@ import {
   imageCompressionMaxDimensionKey,
   botStylishMessagesEnabledKey,
   normalizeBotStylishMessagesEnabled,
-
+  botPrivatePostStylishEnabledKey,
+  normalizeBotPrivatePostStylishEnabled,
   readTenantImageCompression,
   publishModeKey,
   publishAccumulateMinImagesKey,
@@ -44,6 +45,7 @@ const publicMetadataKeys = [
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
   botStylishMessagesEnabledKey,
+  botPrivatePostStylishEnabledKey,
   publishModeKey,
   publishAccumulateMinImagesKey,
   publishAccumulateMaxImagesKey,
@@ -71,6 +73,7 @@ const patchMetadataSchema = z.object({
   imageCompressionQuality: z.number().int().min(40).max(95).optional(),
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
   botStylishMessagesEnabled: z.boolean().optional(),
+  botPrivatePostStylishEnabled: z.boolean().optional(),
   publishMode: z.enum(["single", "accumulate"]).optional(),
   publishAccumulateMinImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
   publishAccumulateMaxImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
@@ -104,6 +107,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
       maxDimension: normalizeMaxDimension(record[imageCompressionMaxDimensionKey]),
     },
     botStylishMessagesEnabled: normalizeBotStylishMessagesEnabled(record[botStylishMessagesEnabledKey]),
+    botPrivatePostStylishEnabled: normalizeBotPrivatePostStylishEnabled(record[botPrivatePostStylishEnabledKey]),
     publishMode: normalizePublishMode(record[publishModeKey]),
     publishAccumulate: {
       ...normalizeAccumulateImages(record[publishAccumulateMinImagesKey], record[publishAccumulateMaxImagesKey]),
@@ -328,6 +332,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.botStylishMessagesEnabled !== undefined) {
       updates.push({ key: botStylishMessagesEnabledKey, value: body.botStylishMessagesEnabled });
+    }
+    if (body.botPrivatePostStylishEnabled !== undefined) {
+      updates.push({ key: botPrivatePostStylishEnabledKey, value: body.botPrivatePostStylishEnabled });
     }
     if (body.publishMode !== undefined) {
       updates.push({ key: publishModeKey, value: body.publishMode });

@@ -624,8 +624,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         text: target.text,
         createdAt: target.createdAt,
         anonymous: target.anonymous,
-        bgColor: target.bgColor ?? "#ffffff",
-        textColor: target.textColor ?? "#000000",
       });
       captionParts.push(
         renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
@@ -1299,11 +1297,6 @@ export function renderPublishCaption(
   if (summary) {
     parts.push(summary);
   }
-  // 提取稿件中的 @QQ 并转为 QZone @ 格式，追加到正文
-  const atMentions = extractAtMentions(post.text);
-  if (atMentions.length > 0) {
-    parts.push(...atMentions);
-  }
   // 批量时省略固定前缀 customText（整条说说只在外层加一次）；单稿保持原行为。
   const firstLineParts = omitFixed ? parts : [template.customText?.trim(), ...parts];
   const firstLine = firstLineParts.filter(Boolean).join(" ").trim();
@@ -1361,23 +1354,4 @@ function defaultPublishCaptionTemplate(): Required<PublishCaptionTemplate> {
 
 function extractLinks(text: string) {
   return text.match(/https?:\/\/[^\s]+/g) ?? [];
-}
-
-/**
- * 从稿件文本中提取 CQ:at QQ 艾特，转为 QZone 可识别的 @{uin:QQ号,nick:,who:1} 格式。
- * 例如 [CQ:at,qq=123456] → @{uin:123456,nick:,who:1}
- */
-function extractAtMentions(text: string): string[] {
-  const matches = text.match(/\[CQ:at,qq=(\d+)\]/g);
-  if (!matches) return [];
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const match of matches) {
-    const qq = match.match(/\[CQ:at,qq=(\d+)\]/)?.[1];
-    if (qq && !seen.has(qq)) {
-      seen.add(qq);
-      result.push(`@{uin:${qq},nick:,who:1}`);
-    }
-  }
-  return result;
 }
