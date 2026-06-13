@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { createS3Client } from "@campux/integrations";
+import { createS3Client, setQZoneEmotionPrivate } from "@campux/integrations";
 import { Prisma } from "@campux/db";
 import {
   BotWorkflowError,
@@ -18,6 +18,7 @@ import {
 } from "../lib/bot-workflows";
 import { parseFriendListCount } from "../lib/bot-friend-stats";
 import { writeAuditLog } from "../lib/audit";
+import { decryptJson } from "../lib/secret-json";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
@@ -72,6 +73,8 @@ import {
   formatFriendCount,
   formatBotPublishSuccess,
   formatBotPublishHelp,
+  formatBotRecallSuccess,
+  formatBotRecallFailed,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -182,6 +185,7 @@ const reviewHelp = [
   "#重发 <稿件id>",
   "#回复 <内容> （引用转发私信后使用）",
   "#发布 <内容> （可附带图片，文字+图片一起发布到空间）",
+  "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
   "#好友数",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
@@ -1971,7 +1975,56 @@ export class OneBotRuntime {
           text: publishText,
           ...(images ? { images } : {}),
         });
-        await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled));
+        await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled, result.qzoneTid ?? undefined));
+        return;
+      }
+
+      if (command.name === "撤回") {
+        await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+
+        // 尝试从回复消息中提取 qzoneTid
+        let qzoneTid: string | null = command.args.trim();
+        if (!qzoneTid) {
+          // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
+          qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
+        }
+        if (!qzoneTid) {
+          await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+          return;
+        }
+
+        // 获取 QZone cookies
+        const session = await prisma.botSession.findFirst({
+          where: {
+            botAccountId: bot.id,
+            type: "qzone",
+            domain: qzoneCookieDomain,
+          },
+          orderBy: { refreshedAt: "desc" },
+        });
+
+        if (!session || session.healthStatus !== "available") {
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed("机器人 QZone 登录态不可用", stylishEnabled));
+          return;
+        }
+
+        const cookies = decryptJson(session.cookies) as Record<string, string> | null;
+        if (!cookies) {
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed("QZone cookies 解析失败", stylishEnabled));
+          return;
+        }
+
+        try {
+          await setQZoneEmotionPrivate({
+            targetName: bot.displayName ?? `QQ ${botQqUin}`,
+            externalId: qzoneTid,
+            cookies,
+          });
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "未知错误";
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed(message, stylishEnabled));
+        }
         return;
       }
 
@@ -2216,6 +2269,66 @@ export class OneBotRuntime {
       if (!m) return null;
       const id = Number(m[1]);
       return Number.isInteger(id) && id > 0 ? id : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private async tryResolveQZoneTidFromReply(event: OneBotMessageEvent, botQqUin: string): Promise<string | null> {
+    try {
+      const replyId = (() => {
+        if (typeof event.raw_message === "string") {
+          const m = event.raw_message.match(/\[CQ:reply,id=(\d+)(?:,.*)?\]/);
+          if (m) return m[1];
+        }
+        if (Array.isArray(event.message)) {
+          for (const seg of event.message as any[]) {
+            if (!seg || typeof seg !== "object") continue;
+            if (seg.type === "reply") {
+              const id = seg.data?.id ?? seg.data?.msg_id ?? seg.data?.message_id;
+              if (id) return String(id);
+            }
+          }
+        }
+        if (event.message_id) {
+          return String(event.message_id);
+        }
+        return null;
+      })();
+
+      if (!replyId) {
+        return null;
+      }
+
+      const data = await this.callAction(botQqUin, "get_msg", { message_id: replyId }).catch(() => null);
+      if (!data) return null;
+
+      // Verify the replied message was sent by the bot itself
+      const sender = (data as any).sender ?? (data as any).user ?? null;
+      const senderId = sender
+        ? normalizeId(sender.user_id ?? sender.userId ?? sender.uin ?? sender.qq ?? sender.id)
+        : null;
+      if (!senderId || senderId !== botQqUin) {
+        return null;
+      }
+
+      // Extract text from the replied message
+      let text = "";
+      if (Array.isArray((data as any).message)) {
+        text = (data as any).message
+          .map((seg: any) => (seg?.type === "text" ? seg?.data?.text ?? "" : ""))
+          .join("");
+      } else if (typeof (data as any).message === "string") {
+        text = (data as any).message;
+      } else if (typeof (data as any).raw_message === "string") {
+        text = (data as any).raw_message;
+      }
+
+      if (!text) return null;
+
+      // Extract qzoneTid from pattern `tid:xxxxx`
+      const m = text.match(/tid:(\S+)/);
+      return m ? (m[1] ?? null) : null;
     } catch (error) {
       return null;
     }
