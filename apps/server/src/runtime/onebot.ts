@@ -173,11 +173,16 @@ type PrivatePostAggregateBuffer = {
   messages: PrivateForwardEntry[];
   delayMs: number;
   timer: Timer | null;
+  typingTimer: Timer | null;
+  userTyping: boolean;
 };
 
 type OneBotMessageEvent = {
   post_type?: string;
   request_type?: string;
+  notice_type?: string;
+  sub_type?: string;
+  status?: unknown;
   message_type?: "private" | "group";
   self_id?: number | string;
   user_id?: number | string;
@@ -883,6 +888,11 @@ export class OneBotRuntime {
       return;
     }
 
+    if ((event as OneBotMessageEvent).post_type === "notice") {
+      this.handlePrivateInputStatusEvent(event as OneBotMessageEvent);
+      return;
+    }
+
     if ((event as OneBotMessageEvent).post_type !== "message") {
       return;
     }
@@ -894,6 +904,41 @@ export class OneBotRuntime {
     if (messageEvent.message_type === "group") {
       await this.handleGroupMessage(messageEvent);
     }
+  }
+
+  private handlePrivateInputStatusEvent(event: OneBotMessageEvent) {
+    const inputStatus = readPrivateInputStatus(event);
+    if (!inputStatus) {
+      return;
+    }
+    const botQqUin = normalizeId(event.self_id);
+    const userQqUin = normalizeId(event.user_id);
+    if (!botQqUin || !userQqUin || botQqUin === userQqUin) {
+      return;
+    }
+    const key = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const buffer = this.privatePostAggregateBuffers.get(key);
+    if (!buffer) {
+      return;
+    }
+    if (buffer.timer) {
+      clearTimeout(buffer.timer);
+      buffer.timer = null;
+    }
+    if (buffer.typingTimer) {
+      clearTimeout(buffer.typingTimer);
+      buffer.typingTimer = null;
+    }
+    buffer.userTyping = inputStatus.typing;
+    if (inputStatus.typing) {
+      buffer.typingTimer = setTimeout(() => {
+        buffer.userTyping = false;
+        buffer.typingTimer = null;
+        this.schedulePrivatePostAggregateFlush(key, buffer);
+      }, 15_000);
+      return;
+    }
+    this.schedulePrivatePostAggregateFlush(key, buffer);
   }
 
   private async handleRequestEvent(connection: OneBotConnection, event: OneBotRequestEvent) {
@@ -2325,6 +2370,8 @@ export class OneBotRuntime {
         messages: [],
         delayMs: delaySeconds * 1000,
         timer: null,
+        typingTimer: null,
+        userTyping: false,
       };
       this.privatePostAggregateBuffers.set(key, buffer);
     }
@@ -2333,12 +2380,20 @@ export class OneBotRuntime {
     buffer.delayMs = delaySeconds * 1000;
     buffer.events.push(event);
     buffer.messages.push({ time: Math.floor(Date.now() / 1000), text });
+    this.schedulePrivatePostAggregateFlush(key, buffer);
+  }
+
+  private schedulePrivatePostAggregateFlush(key: string, buffer: PrivatePostAggregateBuffer) {
     if (buffer.timer) {
       clearTimeout(buffer.timer);
+      buffer.timer = null;
+    }
+    if (buffer.userTyping) {
+      return;
     }
     buffer.timer = setTimeout(() => {
       this.flushPrivatePostAggregateBuffer(key).catch((error) => {
-        this.logger.warn({ error, botQqUin, userQqUin }, "AI 聚合私聊投稿失败");
+        this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "AI 聚合私聊投稿失败");
       });
     }, buffer.delayMs);
   }
@@ -2348,6 +2403,9 @@ export class OneBotRuntime {
     if (!buffer) return;
     if (buffer.timer) {
       clearTimeout(buffer.timer);
+    }
+    if (buffer.typingTimer) {
+      clearTimeout(buffer.typingTimer);
     }
     this.privatePostAggregateBuffers.delete(key);
   }
@@ -3137,6 +3195,28 @@ function parseRejectArgs(args: string) {
     comment: comment.trim(),
     displayId,
   };
+}
+
+function readPrivateInputStatus(event: OneBotMessageEvent): { typing: boolean } | null {
+  const notice = String(event.notice_type ?? "").toLowerCase();
+  const subType = String(event.sub_type ?? "").toLowerCase();
+  const status = event.status;
+  const normalizedStatus = typeof status === "string" ? status.toLowerCase() : typeof status === "number" ? String(status) : "";
+  const raw = [notice, subType, normalizedStatus].filter(Boolean).join(" ");
+  if (!raw) {
+    return null;
+  }
+  const isInputNotice = raw.includes("input") || raw.includes("typing") || raw.includes("input_status") || raw.includes("inputstatus");
+  if (!isInputNotice) {
+    return null;
+  }
+  if (raw.includes("stop") || raw.includes("end") || raw.includes("idle") || raw.includes("false") || raw.includes("0") || raw.includes("off")) {
+    return { typing: false };
+  }
+  if (raw.includes("start") || raw.includes("begin") || raw.includes("typing") || raw.includes("input") || raw.includes("true") || raw.includes("1") || raw.includes("on")) {
+    return { typing: true };
+  }
+  return null;
 }
 
 function mergePrivatePostAggregateEvents(events: OneBotMessageEvent[], text: string): OneBotMessageEvent {
