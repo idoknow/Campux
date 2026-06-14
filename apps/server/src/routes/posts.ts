@@ -18,6 +18,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
+import { formatBanNotify } from "../lib/bot-messages";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -444,6 +445,15 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           userId: context.user.id,
           operatorId: context.user.id,
           reason: injectionResult.reason,
+          onBan: async (userId) => {
+            const user = await prisma.user.findUnique({ where: { id: userId } });
+            if (!user) return;
+            const qqUin = user.qqUin.toString();
+            const endsAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            oneBot?.sendPrivateMessageViaTenantBots(context.selectedTenant.id, qqUin, formatBanNotify(context.selectedTenant.name, injectionResult.reason, endsAt)).catch((notifyErr) => {
+              app.log.warn({ error: notifyErr }, "failed to send ban notification");
+            });
+          },
         }).catch((banErr) => {
           app.log.warn({ error: banErr }, "failed to create auto ban");
         });
