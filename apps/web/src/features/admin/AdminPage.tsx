@@ -1891,7 +1891,7 @@ function MetadataPanel({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-slate-900">Markdown 渲染</p>
-                  <p className="text-xs text-slate-500">开启后，稿件正文中的 Markdown 语法（表格、列表、引用、代码等）会渲染为对应样式。</p>
+                  <p className="text-xs text-slate-500">开启后，稿件正文中的 Markdown 语法（表格、列表、引用等）会渲染为对应样式（图片和代码块不会渲染）。</p>
                 </div>
                 <Switch
                   checked={form.enableMarkdownRender}
