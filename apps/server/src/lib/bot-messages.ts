@@ -421,6 +421,14 @@ export function formatPostRecalledGroup(displayId: number, targetCount: number, 
   return pick(postRecalledGroupStylish)(displayId, targetCount);
 }
 
+export function formatPostManuallyMarkedRecalledGroup(displayId: number, stylishEnabled = false): string {
+  const prefix = stylishEnabled ? "✅ " : "";
+  return [
+    `${prefix}稿件已标记为已撤回：#${displayId}`,
+    "未执行系统撤回，请确认已手动处理发布内容。",
+  ].join("\n");
+}
+
 // ── 撤回申请拒绝（审核群通知） ─────────────────────────
 
 export function formatRecallRejectedNotification(displayId: number, reason: string, stylishEnabled = false): string {

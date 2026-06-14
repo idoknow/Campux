@@ -479,6 +479,59 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     };
   });
 
+  app.post("/api/review/posts/:id/recall/mark-recalled", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: {
+        id: params.id,
+        tenantId: context.selectedTenant.id,
+      },
+    });
+
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "pending_recall") {
+      return reply.code(409).send({ message: "只有待撤回稿件可以标记为已撤回" });
+    }
+
+    await prisma.post.update({
+      where: { id: post.id },
+      data: {
+        status: "recalled",
+        recallIgnored: false,
+        recallIgnoredAt: null,
+        logs: {
+          create: {
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            oldStatus: post.status,
+            newStatus: "recalled",
+            comment: "手动标记为已撤回（未执行系统撤回）",
+          },
+        },
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "post.recall.mark-recalled",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+      },
+    });
+
+    oneBot?.notifyPostManuallyMarkedRecalled(post.id).catch((error) => {
+      app.log.warn({ error, postId: post.id }, "failed to notify post recall marked");
+    });
+
+    return { ok: true };
+  });
+
   const adminRecallBodySchema = z.object({
     silent: z.boolean().optional(),
   });

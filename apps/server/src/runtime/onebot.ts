@@ -39,6 +39,7 @@ import {
   formatPostCancelled,
   formatRecallRequestNotification,
   formatPostRecalledGroup,
+  formatPostManuallyMarkedRecalledGroup,
   formatRecallSuccess,
   formatRecallRejectedNotification,
   formatRecallRejected,
@@ -417,6 +418,19 @@ export class OneBotRuntime {
         this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify post recalled");
       });
     }
+  }
+
+  async notifyPostManuallyMarkedRecalled(postId: string) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    await this.sendTenantReviewNotification(post.tenantId, formatPostManuallyMarkedRecalledGroup(post.displayId, stylishEnabled));
   }
 
   async notifyPostRecallRejected(postId: string, reason: string) {

@@ -77,7 +77,7 @@ type RecallConfirmState =
     }
   | {
       open: true;
-      mode: "approve" | "reject" | "admin" | "admin-silent";
+      mode: "approve" | "reject" | "admin" | "admin-silent" | "mark-recalled";
       post: ReviewPostItem;
     };
 
@@ -557,6 +557,20 @@ export function PostsPage({
     }
   }
 
+  async function markRecallPost(post: ReviewPostItem) {
+    setBusyPostId(post.id);
+    try {
+      await api(`/api/review/posts/${post.id}/recall/mark-recalled`, { method: "POST" });
+      toast.success("已标记为已撤回。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "标记失败");
+      await refreshAll();
+    } finally {
+      setBusyPostId("");
+    }
+  }
+
   async function adminRecallPost(post: ReviewPostItem, options: { silent?: boolean } = {}) {
     setBusyPostId(post.id);
     try {
@@ -600,6 +614,10 @@ export function PostsPage({
     }
     if (mode === "admin-silent") {
       await adminRecallPost(post, { silent: true });
+      return;
+    }
+    if (mode === "mark-recalled") {
+      await markRecallPost(post);
       return;
     }
     await approveRecallPost(post);
@@ -863,6 +881,7 @@ export function PostsPage({
                 onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                 onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
                 onRecallIgnore={(post) => void ignoreRecallPost(post)}
+                onRecallMarkRecalled={(post) => setRecallConfirm({ open: true, mode: "mark-recalled", post })}
                 onDetail={(post) => openPostDetail(post.id)}
               />
               {reviewLoading ? (
@@ -881,6 +900,7 @@ export function PostsPage({
                     onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
                     onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
                     onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
+                    onRecallMarkRecalled={(post) => setRecallConfirm({ open: true, mode: "mark-recalled", post })}
                     onDetail={(post) => openPostDetail(post.id)}
                     emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
                   />
@@ -1073,7 +1093,9 @@ export function PostsPage({
                     ? "直接撤回稿件？"
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "静默撤回稿件？"
-                      : "申请撤回稿件？"}
+                      : recallConfirm.open && recallConfirm.mode === "mark-recalled"
+                        ? "标记为已撤回？"
+                        : "申请撤回稿件？"}
             </DialogTitle>
             <DialogDescription>
               {recallConfirm.open && recallConfirm.mode === "approve"
@@ -1084,6 +1106,8 @@ export function PostsPage({
                   ? `确认直接撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被设置为仅自己可见，无需作者申请。`
                 : recallConfirm.open && recallConfirm.mode === "admin-silent"
                   ? `确认静默撤回稿件 #${recallConfirm.post.displayId} 吗？已发布内容会被隐藏，但不会私聊通知作者；审核群仍会收到记录。`
+                : recallConfirm.open && recallConfirm.mode === "mark-recalled"
+                  ? `确认将稿件 #${recallConfirm.post.displayId} 标记为已撤回吗？此操作不会执行系统撤回，仅将状态改为已撤回。`
                 : recallConfirm.open
                   ? `确认申请撤回稿件 #${recallConfirm.post.displayId} 吗？审核员同意后，已发布内容会被隐藏。`
                   : ""}
@@ -1116,6 +1140,7 @@ export function PostsPage({
                   (recallConfirm.mode === "reject" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "admin-silent" && busyPostId === recallConfirm.post.id) ||
+                  (recallConfirm.mode === "mark-recalled" && busyPostId === recallConfirm.post.id) ||
                   (recallConfirm.mode === "request" && recallReason.trim().length === 0))
               }
               onClick={() => void confirmRecallAction()}
@@ -1128,7 +1153,9 @@ export function PostsPage({
                     ? "确认撤回"
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "确认静默撤回"
-                      : "提交申请"}
+                      : recallConfirm.open && recallConfirm.mode === "mark-recalled"
+                        ? "确认标记"
+                        : "提交申请"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1317,6 +1344,7 @@ function ReviewList({
   onRecallReject,
   onRecallDirect,
   onRecallDirectSilent,
+  onRecallMarkRecalled,
   onDetail,
 }: {
   posts: ReviewPostItem[];
@@ -1331,6 +1359,7 @@ function ReviewList({
   onRecallReject: (post: ReviewPostItem) => void;
   onRecallDirect: (post: ReviewPostItem) => void;
   onRecallDirectSilent: (post: ReviewPostItem) => void;
+  onRecallMarkRecalled: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
@@ -1354,6 +1383,7 @@ function ReviewList({
           onRecallReject={() => onRecallReject(post)}
           onRecallDirect={() => onRecallDirect(post)}
           onRecallDirectSilent={() => onRecallDirectSilent(post)}
+          onRecallMarkRecalled={() => onRecallMarkRecalled(post)}
           onDetail={() => onDetail(post)}
         />
       ))}
@@ -1370,6 +1400,7 @@ function PendingRecallQueue({
   onRecallApprove,
   onRecallReject,
   onRecallIgnore,
+  onRecallMarkRecalled,
   onDetail,
 }: {
   posts: ReviewPostItem[];
@@ -1380,6 +1411,7 @@ function PendingRecallQueue({
   onRecallApprove: (post: ReviewPostItem) => void;
   onRecallReject: (post: ReviewPostItem) => void;
   onRecallIgnore: (post: ReviewPostItem) => void;
+  onRecallMarkRecalled: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (loading && posts.length === 0) {
@@ -1417,6 +1449,7 @@ function PendingRecallQueue({
             onRecallApprove={() => onRecallApprove(post)}
             onRecallReject={() => onRecallReject(post)}
             onRecallIgnore={() => onRecallIgnore(post)}
+            onRecallMarkRecalled={() => onRecallMarkRecalled(post)}
             onDetail={() => onDetail(post)}
           />
         ))}
@@ -1439,6 +1472,7 @@ function ReviewCard({
   onRecallIgnore,
   onRecallDirect,
   onRecallDirectSilent,
+  onRecallMarkRecalled,
   onDetail,
 }: {
   post: ReviewPostItem;
@@ -1454,6 +1488,7 @@ function ReviewCard({
   onRecallIgnore?: () => void;
   onRecallDirect?: () => void;
   onRecallDirectSilent?: () => void;
+  onRecallMarkRecalled?: () => void;
   onDetail: () => void;
 }) {
   const images = getPostImages(post.attachments);
@@ -1522,6 +1557,11 @@ function ReviewCard({
               {!post.recallIgnored && onRecallIgnore ? (
                 <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallIgnore}>
                   忽略
+                </Button>
+              ) : null}
+              {onRecallMarkRecalled ? (
+                <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallMarkRecalled}>
+                  标记为已撤回
                 </Button>
               ) : null}
               <Button size="sm" className="font-medium" disabled={busy} onClick={onRecallApprove}>
