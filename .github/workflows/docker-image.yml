@@ -182,38 +182,22 @@ jobs:
               }'
           )"
 
-          # Portainer CE 2.21+ 改用 POST /api/stacks/{id}?action=redeploy
-          # 旧版用 PUT /api/stacks/{id}/git/redeploy
-          # 先试新版，失败再试旧版
-          echo "--- Trying Portainer redeploy (new API) ---" >&2
-          new_url="$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id&action=redeploy"
-          new_response="$(curl -sS -w '\n%{http_code}' \
-            -X POST "$new_url" \
+          # 使用 Portainer 旧版 Git redeploy API
+          # PUT /api/stacks/{id}/git/redeploy?endpointId={endpoint_id}
+          echo "--- Redeploying stack via Portainer API ---" >&2
+          redeploy_url="$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id"
+          redeploy_response="$(curl -sS -w '\n%{http_code}' \
+            -X PUT "$redeploy_url" \
             -H "Authorization: Bearer $jwt" \
             -H 'Content-Type: application/json' \
-            --data-binary "$redeploy_payload" 2>&1 || true)"
-          new_http_code="$(printf '%s' "$new_response" | tail -1)"
-          new_body="$(printf '%s' "$new_response" | sed '$d')"
-          if [ "$new_http_code" = "200" ]; then
-            echo "Redeploy succeeded via new API (POST ...?action=redeploy)" >&2
+            --data-binary "$redeploy_payload" 2>&1)"
+          redeploy_http_code="$(printf '%s' "$redeploy_response" | tail -1)"
+          redeploy_body="$(printf '%s' "$redeploy_response" | sed '$d')"
+          if [ "$redeploy_http_code" = "200" ]; then
+            echo "Redeploy succeeded (HTTP $redeploy_http_code)" >&2
           else
-            echo "New API failed (HTTP $new_http_code): $new_body" >&2
-            echo "--- Trying Portainer redeploy (old API) ---" >&2
-            old_url="$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id"
-            old_response="$(curl -sS -w '\n%{http_code}' \
-              -X PUT "$old_url" \
-              -H "Authorization: Bearer $jwt" \
-              -H 'Content-Type: application/json' \
-              --data-binary "$redeploy_payload" 2>&1 || true)"
-            old_http_code="$(printf '%s' "$old_response" | tail -1)"
-            old_body="$(printf '%s' "$old_response" | sed '$d')"
-            if [ "$old_http_code" = "200" ]; then
-              echo "Redeploy succeeded via old API (PUT .../git/redeploy)" >&2
-            else
-              echo "Both API attempts failed." >&2
-              echo "Old API failed (HTTP $old_http_code): $old_body" >&2
-              exit 1
-            fi
+            echo "Redeploy failed (HTTP $redeploy_http_code): $redeploy_body" >&2
+            exit 1
           fi
 
       - name: Check production health
