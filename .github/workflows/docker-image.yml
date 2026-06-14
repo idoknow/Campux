@@ -149,6 +149,18 @@ jobs:
             exit 1
           fi
 
+          # 先查询 stack 信息，确认存在并获取配置
+          echo "--- Fetching stack info ---" >&2
+          if ! stack_info="$(curl -sS \
+            -X GET "$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id" \
+            -H "Authorization: Bearer $jwt" 2>&1)"; then
+            echo "Failed to fetch stack info. Check stack_id ($stack_id) and endpoint_id ($endpoint_id)." >&2
+            echo "$stack_info" >&2
+            exit 1
+          fi
+          echo "Stack name: $(printf '%s' "$stack_info" | jq -r '.Name // "unknown"')" >&2
+          echo "Stack type: $(printf '%s' "$stack_info" | jq -r '.Type // "unknown"')" >&2
+
           # 构造 redeploy payload
           redeploy_payload="$(
             jq -n \
@@ -168,35 +180,33 @@ jobs:
           # Portainer CE 2.21+ 改用 POST /api/stacks/{id}?action=redeploy
           # 旧版用 PUT /api/stacks/{id}/git/redeploy
           # 先试新版，失败再试旧版
-          redeploy_stack() {
-            local method="$1" url="$2"
-            curl -fsS \
-              -X "$method" "$url" \
-              -H "Authorization: Bearer $jwt" \
-              -H 'Content-Type: application/json' \
-              --data-binary "$redeploy_payload" 2>&1
-          }
-
+          echo "--- Trying Portainer redeploy (new API) ---" >&2
           new_url="$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id&action=redeploy"
-          old_url="$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id"
-
-          echo "Trying Portainer redeploy (new API)..." >&2
-          if response="$(redeploy_stack POST "$new_url" 2>/dev/null)"; then
+          new_response="$(curl -sS -w '\n%{http_code}' \
+            -X POST "$new_url" \
+            -H "Authorization: Bearer $jwt" \
+            -H 'Content-Type: application/json' \
+            --data-binary "$redeploy_payload" 2>&1 || true)"
+          new_http_code="$(printf '%s' "$new_response" | tail -1)"
+          new_body="$(printf '%s' "$new_response" | sed '$d')"
+          if [ "$new_http_code" = "200" ]; then
             echo "Redeploy succeeded via new API (POST ...?action=redeploy)" >&2
           else
-            echo "New API failed, trying old API..." >&2
-            if response="$(redeploy_stack PUT "$old_url" 2>/dev/null)"; then
+            echo "New API failed (HTTP $new_http_code): $new_body" >&2
+            echo "--- Trying Portainer redeploy (old API) ---" >&2
+            old_url="$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id"
+            old_response="$(curl -sS -w '\n%{http_code}' \
+              -X PUT "$old_url" \
+              -H "Authorization: Bearer $jwt" \
+              -H 'Content-Type: application/json' \
+              --data-binary "$redeploy_payload" 2>&1 || true)"
+            old_http_code="$(printf '%s' "$old_response" | tail -1)"
+            old_body="$(printf '%s' "$old_response" | sed '$d')"
+            if [ "$old_http_code" = "200" ]; then
               echo "Redeploy succeeded via old API (PUT .../git/redeploy)" >&2
             else
               echo "Both API attempts failed." >&2
-              # 再试一次旧版并输出详细错误
-              echo "--- Last attempt with verbose output ---" >&2
-              curl -fsS \
-                -X PUT "$old_url" \
-                -H "Authorization: Bearer $jwt" \
-                -H 'Content-Type: application/json' \
-                --data-binary "$redeploy_payload" \
-              || true
+              echo "Old API failed (HTTP $old_http_code): $old_body" >&2
               exit 1
             fi
           fi
