@@ -22,7 +22,7 @@ import { decryptJson } from "../lib/secret-json";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled, readTenantPublishMode } from "../lib/tenant-metadata";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
@@ -1285,6 +1285,17 @@ export class OneBotRuntime {
           return;
         }
 
+        // 跳过纯 QQ 表情包（贴图/动画表情），不转发也不回复
+        if (this.isStickerOnlyMessage(event)) {
+          return;
+        }
+
+        // 跳过 "我是<昵称>" 的自我介绍消息
+        const senderNickname = event.sender?.card || event.sender?.nickname;
+        if (senderNickname && this.isSelfIntroMessage(plainText, senderNickname)) {
+          return;
+        }
+
         // 非投稿、非命令消息：缓存到缓冲区，1 分钟无新消息后合并转发到审核群
         if (bot.reviewGroupId) {
           this.bufferPrivateForwardMessage({
@@ -2462,6 +2473,18 @@ export class OneBotRuntime {
     if (this.isSkippablePrivateMessage(messageText)) {
       return;
     }
+
+    // 跳过纯表情包消息
+    const firstEvent = buffer.events[0];
+    if (firstEvent && this.isStickerOnlyMessage(firstEvent)) {
+      return;
+    }
+
+    // 跳过 "我是<昵称>" 的自我介绍消息
+    if (buffer.userNickname && this.isSelfIntroMessage(messageText, buffer.userNickname)) {
+      return;
+    }
+
     if (buffer.bot.reviewGroupId) {
       for (const entry of buffer.messages) {
         this.bufferPrivateForwardMessage({
@@ -3000,6 +3023,68 @@ export class OneBotRuntime {
 
   private isSkippablePrivateMessage(text: string): boolean {
     return /请求添加(你为)?好友/.test(text);
+  }
+
+  /**
+   * 检查消息是否仅包含 QQ 表情包（[CQ:image,sub_type=1]）和/或普通表情（[CQ:face]）。
+   * 这类消息由 NapCat 在接收 QQ 动画表情/贴图时产生，无需转发或处理。
+   */
+  private isStickerOnlyMessage(event: OneBotMessageEvent): boolean {
+    // 优先从消息段数组判断
+    if (Array.isArray(event.message)) {
+      const segments = event.message as OneBotMessageSegment[];
+      if (segments.length === 0) return false;
+
+      const hasStickerImage = segments.some(
+        (seg) => seg.type === "image" && String(seg.data?.sub_type ?? "") === "1",
+      );
+      if (!hasStickerImage) return false;
+
+      const allStickerOrFaceOrEmpty = segments.every((seg) => {
+        if (seg.type === "text") {
+          return String(seg.data?.text ?? "").trim().length === 0;
+        }
+        if (seg.type === "face") return true;
+        if (seg.type === "image") {
+          return String(seg.data?.sub_type ?? "") === "1";
+        }
+        return false;
+      });
+
+      return allStickerOrFaceOrEmpty;
+    }
+
+    // 兜底：从 raw_message 判断（NapCat 某些场景可能只给字符串）
+    if (typeof event.raw_message === "string" && event.raw_message) {
+      const stickerImageRe = /\[CQ:image,[^\]]*sub_type=1[^\]]*\]/;
+      if (!stickerImageRe.test(event.raw_message)) return false;
+
+      // 如果包含普通图片（非 sticker），保留不处理
+      const normalImageRe = /\[CQ:image,[^\]]*sub_type=(?!1)\d+[^\]]*\]|\[CQ:image,(?!.*sub_type)[^\]]*\]/;
+      if (normalImageRe.test(event.raw_message)) return false;
+
+      // 移除所有 sticker image 和 face 段后，剩下的是纯表情包消息
+      const cleaned = event.raw_message
+        .replace(stickerImageRe, "")
+        .replace(/\[CQ:face,[^\]]*\]/g, "")
+        .replace(/\[CQ:text,[^\]]*\]/g, "")
+        .trim();
+
+      return cleaned.length === 0;
+    }
+
+    return false;
+  }
+
+  /**
+   * 检查消息是否为 "我是<昵称>" 的自我介绍消息，这类消息无需转发。
+   * 匹配时忽略前后空白、标点符号差异。
+   */
+  private isSelfIntroMessage(text: string, nickname: string): boolean {
+    const intro = `我是${nickname}`;
+    // 精确匹配：允许前后空白，允许昵称后有标点符号结束
+    const pattern = new RegExp(`^我是${escapeRegex(nickname)}[，。！？,.\!?]?$`);
+    return text.trim() === intro || pattern.test(text.trim());
   }
 
   /**
