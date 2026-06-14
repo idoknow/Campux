@@ -127,6 +127,7 @@ export type TenantMetadata = {
   enableColorSelection: boolean;
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
+  enableAnonymousAvatarSelection: boolean;
 };
 
 export type PostAttachment = {
@@ -162,6 +163,7 @@ export type PostItem = {
   text: string;
   attachments: unknown;
   anonymous: boolean;
+  anonymousAvatar: string | null;
   bgColor: string | null;
   textColor: string | null;
   font: string | null;

@@ -35,6 +35,7 @@ import { registerPostRoutes } from "./routes/posts";
 import { registerReviewRoutes } from "./routes/review";
 import { registerSetupRoutes } from "./routes/setup";
 import { registerStatsRoutes } from "./routes/stats";
+import { registerSvgRoutes } from "./routes/svg";
 import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
 import { runDatabaseMigrations } from "./lib/migrations";
@@ -80,6 +81,7 @@ registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
 registerPostRoutes(app, config, queue, oneBot);
 registerReviewRoutes(app, queue, oneBot);
+registerSvgRoutes(app);
 registerStatsRoutes(app);
 registerSystemRoutes(app, queue);
 

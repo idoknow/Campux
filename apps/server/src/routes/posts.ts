@@ -18,6 +18,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
+import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { formatBanNotify } from "../lib/bot-messages";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -279,6 +280,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     const uploadedKeys: string[] = [];
     let text = "";
     let anonymous = false;
+    let anonymousAvatar: string | null = null;
     let bgColor: string | null = null;
     let textColor: string | null = null;
     let font: string | null = null;
@@ -293,6 +295,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             text = String(part.value ?? "");
           } else if (part.fieldname === "anonymous") {
             anonymous = part.value === "true" || part.value === true;
+          } else if (part.fieldname === "anonymousAvatar") {
+            anonymousAvatar = String(part.value ?? "") || null;
           } else if (part.fieldname === "bgColor") {
             bgColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "textColor") {
@@ -520,6 +524,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   displayId,
                   text,
                   anonymous,
+                  anonymousAvatar,
                   bgColor,
                   textColor,
                   font: font || null,
@@ -869,6 +874,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       },
     });
 
+    const anonymousAvatar = post.anonymous && post.anonymousAvatar
+      ? readSvgAvatarDataUrl(post.anonymousAvatar)
+      : undefined;
+
     const bytes = await renderPostCard({
       tenantName: post.tenant.name,
       displayHost: post.tenant.host,
@@ -879,6 +888,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       text: post.text,
       createdAt: post.createdAt,
       anonymous: post.anonymous,
+      anonymousAvatar: anonymousAvatar ?? undefined,
       bgColor: post.bgColor ?? null,
       textColor: post.textColor ?? null,
       font: post.font ?? null,
@@ -923,6 +933,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         text: body.text,
         createdAt: new Date(),
         anonymous: body.anonymous ?? false,
+        anonymousAvatar: undefined,
         bgColor: body.bgColor ?? null,
         textColor: body.textColor ?? null,
         font: body.font ?? null,

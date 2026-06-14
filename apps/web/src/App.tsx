@@ -94,6 +94,7 @@ export function App() {
   const [tenantDataLoading, setTenantDataLoading] = useState(false);
   const [postText, setPostText] = useState("");
   const [anonymous, setAnonymous] = useState(false);
+  const [anonymousAvatar, setAnonymousAvatar] = useState<string>("");
   const [postBgColor, setPostBgColor] = useState<string>("");
   const [postTextColor, setPostTextColor] = useState<string>("");
   const [postFont, setPostFont] = useState<string>("");
@@ -425,6 +426,7 @@ export function App() {
     clearAttachments();
     setPostText("");
     setAnonymous(false);
+    setAnonymousAvatar("");
     setMe((current) => current?.authenticated ? {
       ...current,
       currentTenant: data.currentTenant,
@@ -476,10 +478,12 @@ export function App() {
         postBgColor || undefined,
         postTextColor || undefined,
         postFont || undefined,
+        anonymousAvatar || undefined,
       );
       clearAttachments();
       setPostText("");
       setAnonymous(false);
+      setAnonymousAvatar("");
       setPostBgColor("");
       setPostTextColor("");
       setPostFont("");
@@ -630,10 +634,12 @@ export function App() {
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? defaultPostsTab : defaultPostsTab}
       postsPagination={postsPagination}
       anonymous={anonymous}
+      anonymousAvatar={anonymousAvatar}
       pendingAttachments={pendingAttachments}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={setAnonymous}
+      onAnonymousAvatarChange={setAnonymousAvatar}
       onBgColorChange={setPostBgColor}
       onTextColorChange={setPostTextColor}
       onFontChange={setPostFont}

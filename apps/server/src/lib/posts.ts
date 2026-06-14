@@ -45,6 +45,7 @@ export function toPostListItem(post: {
   text: string;
   attachments: unknown;
   anonymous: boolean;
+  anonymousAvatar?: string | null;
   bgColor?: string | null;
   textColor?: string | null;
   font?: string | null;
@@ -80,6 +81,7 @@ export function toPostListItem(post: {
     text: post.text,
     attachments: post.attachments,
     anonymous: post.anonymous,
+    anonymousAvatar: post.anonymousAvatar ?? null,
     bgColor: post.bgColor ?? null,
     textColor: post.textColor ?? null,
     font: post.font ?? null,

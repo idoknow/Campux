@@ -123,6 +123,8 @@ export type RenderPostCardInput = {
   text: string;
   createdAt: Date;
   anonymous: boolean;
+  /** Base64 data URL of the selected anonymous SVG avatar, or undefined to use the default anonymous avatar. */
+  anonymousAvatar: string | null | undefined;
   bgColor?: string | null;
   textColor?: string | null;
   font?: string | null;
@@ -202,7 +204,9 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const footer = input.anonymous ? `匿名用户 发表于 ${createdAt}` : `${input.authorQq ?? input.authorName} 发表于 ${createdAt}`;
   const postIdTag = typeof input.displayId === "number" ? `#${input.displayId}` : "";
   const displayHost = normalizeDisplayHost(input.displayHost);
-  const avatar = input.anonymous ? anonymousAvatarDataUrl() : await qqAvatarDataUrl(input.authorQq);
+  const avatar = input.anonymous
+    ? (input.anonymousAvatar ?? anonymousAvatarDataUrl())
+    : await qqAvatarDataUrl(input.authorQq);
   const corner = await qqAvatarDataUrl(input.cornerQq ?? process.env.CAMPUX_RENDER_CORNER_QQ);
   const banner = "";
   const bgColor = resolveBgColor(input.bgColor);

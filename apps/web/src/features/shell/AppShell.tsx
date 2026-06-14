@@ -27,10 +27,12 @@ export function AppShell({
   postsTab,
   postsPagination,
   anonymous,
+  anonymousAvatar,
   pendingAttachments,
   onActiveTabChange,
   onAdminTabChange,
   onAnonymousChange,
+  onAnonymousAvatarChange,
   onBgColorChange,
   onTextColorChange,
   onFontChange,
@@ -65,10 +67,12 @@ export function AppShell({
   postsTab: PostsTab;
   postsPagination: Pagination;
   anonymous: boolean;
+  anonymousAvatar: string;
   pendingAttachments: PendingAttachment[];
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
+  onAnonymousAvatarChange: (value: string) => void;
   onBgColorChange: (value: string) => void;
   onTextColorChange: (value: string) => void;
   onFontChange: (value: string) => void;
@@ -115,9 +119,11 @@ export function AppShell({
                 postTextColor={postTextColor}
                 postFont={postFont}
                 anonymous={anonymous}
+                anonymousAvatar={anonymousAvatar}
                 selectedTenant={me.currentTenant}
                 pendingAttachments={pendingAttachments}
                 onAnonymousChange={onAnonymousChange}
+                onAnonymousAvatarChange={onAnonymousAvatarChange}
                 onBgColorChange={onBgColorChange}
                 onTextColorChange={onTextColorChange}
                 onFontChange={onFontChange}

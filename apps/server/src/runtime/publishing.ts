@@ -13,6 +13,7 @@ import { isQZoneProtocolAutoRefreshCooldownError } from "../lib/qzone-auto-refre
 import { joinBatchCaptions } from "./publish-batching";
 import { generatePublishSummary } from "./publish-summary";
 import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
+import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -614,6 +615,11 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       const summary = summaryEnabled
         ? await ensurePostPublishSummary(attempt.tenantId, target.id, target.text, target.publishSummary, logger)
         : null;
+      const avatarFilename = target.anonymous
+        ? (target as Record<string, unknown>).anonymousAvatar as string | null | undefined
+        : undefined;
+      const anonymousAvatar = avatarFilename ? readSvgAvatarDataUrl(avatarFilename) : undefined;
+
       const renderedCard = await renderPostCard({
         tenantName: target.tenant.name,
         displayHost: target.tenant.host,
@@ -624,6 +630,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         text: target.text,
         createdAt: target.createdAt,
         anonymous: target.anonymous,
+        anonymousAvatar: anonymousAvatar ?? undefined,
         bgColor: (target as { bgColor?: string | null }).bgColor ?? null,
         textColor: (target as { textColor?: string | null }).textColor ?? null,
         font: (target as { font?: string | null }).font ?? null,

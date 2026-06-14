@@ -244,6 +244,7 @@ model Post {
   text            String
   attachments     Json             @default("[]")
   anonymous       Boolean          @default(false)
+  anonymousAvatar String?
   bgColor         String?
   textColor       String?
   font            String?
