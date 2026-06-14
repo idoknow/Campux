@@ -131,6 +131,7 @@ jobs:
           endpoint_id="${PORTAINER_ENDPOINT_ID:-10}"
           portainer_url="${PORTAINER_URL%/}"
 
+          # 认证
           jwt="$(
             jq -n \
               --arg username "$PORTAINER_USERNAME" \
@@ -148,23 +149,57 @@ jobs:
             exit 1
           fi
 
-          jq -n \
-            --arg repositoryUsername "$PORTAINER_REPOSITORY_USERNAME" \
-            --arg repositoryPassword "$PORTAINER_REPOSITORY_PASSWORD" \
-            '{
-              env: [],
-              prune: false,
-              pullImage: true,
-              repositoryAuthentication: true,
-              repositoryUsername: $repositoryUsername,
-              repositoryPassword: $repositoryPassword,
-              repositoryReferenceName: "refs/heads/main"
-            }' \
-          | curl -fsS \
-              -X PUT "$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id" \
+          # 构造 redeploy payload
+          redeploy_payload="$(
+            jq -n \
+              --arg repositoryUsername "$PORTAINER_REPOSITORY_USERNAME" \
+              --arg repositoryPassword "$PORTAINER_REPOSITORY_PASSWORD" \
+              '{
+                env: [],
+                prune: false,
+                pullImage: true,
+                repositoryAuthentication: true,
+                repositoryUsername: $repositoryUsername,
+                repositoryPassword: $repositoryPassword,
+                repositoryReferenceName: "refs/heads/main"
+              }'
+          )"
+
+          # Portainer CE 2.21+ 改用 POST /api/stacks/{id}?action=redeploy
+          # 旧版用 PUT /api/stacks/{id}/git/redeploy
+          # 先试新版，失败再试旧版
+          redeploy_stack() {
+            local method="$1" url="$2"
+            curl -fsS \
+              -X "$method" "$url" \
               -H "Authorization: Bearer $jwt" \
               -H 'Content-Type: application/json' \
-              --data-binary @-
+              --data-binary "$redeploy_payload" 2>&1
+          }
+
+          new_url="$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id&action=redeploy"
+          old_url="$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id"
+
+          echo "Trying Portainer redeploy (new API)..." >&2
+          if response="$(redeploy_stack POST "$new_url" 2>/dev/null)"; then
+            echo "Redeploy succeeded via new API (POST ...?action=redeploy)" >&2
+          else
+            echo "New API failed, trying old API..." >&2
+            if response="$(redeploy_stack PUT "$old_url" 2>/dev/null)"; then
+              echo "Redeploy succeeded via old API (PUT .../git/redeploy)" >&2
+            else
+              echo "Both API attempts failed." >&2
+              # 再试一次旧版并输出详细错误
+              echo "--- Last attempt with verbose output ---" >&2
+              curl -fsS \
+                -X PUT "$old_url" \
+                -H "Authorization: Bearer $jwt" \
+                -H 'Content-Type: application/json' \
+                --data-binary "$redeploy_payload" \
+              || true
+              exit 1
+            fi
+          fi
 
       - name: Check production health
         run: |
