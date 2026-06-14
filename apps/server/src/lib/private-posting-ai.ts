@@ -31,10 +31,6 @@ const defaultSemanticResult: PrivatePostSemanticResult = {
   reason: "not_analyzed",
 };
 
-const submitKeywords = ["提交", "发出", "发出去", "投递", "投稿", "结束", "就这样", "可以发", "帮我发", "直接发"];
-const anonymousKeywords = ["匿名", "别署名", "不要署名", "隐藏身份", "匿了", "匿名发", "匿名投稿"];
-const realNameKeywords = ["实名", "署名", "用我名字", "不要匿名", "不匿名"];
-const postIntentKeywords = ["投稿", "发墙", "墙墙", "表白墙", "树洞", "帮我发", "想发", "吐槽", "求助", "失物招领", "捞人", "扩列"];
 const commandLikePattern = /^\s*(?:#|＃|\/|！|!)[\s\S]{1,40}$/;
 
 export function fallbackAnalyzePrivatePostSemantics(input: {
@@ -43,25 +39,14 @@ export function fallbackAnalyzePrivatePostSemantics(input: {
   hasCurrentDraft?: boolean | undefined;
 }): PrivatePostSemanticResult {
   const messageText = input.messageText.trim();
-  if (!messageText || commandLikePattern.test(messageText)) {
-    return { ...defaultSemanticResult, intent: commandLikePattern.test(messageText) ? "command" : "chat", reason: "empty_or_command" };
+  if (commandLikePattern.test(messageText)) {
+    return { ...defaultSemanticResult, intent: "command", reason: "command_like_without_llm" };
   }
-
-  const anonymous = includesAny(messageText, anonymousKeywords) ? true : includesAny(messageText, realNameKeywords) ? false : null;
-  const hasPostIntent = includesAny(messageText, postIntentKeywords);
-  const shouldSubmit = includesAny(messageText, submitKeywords) && (Boolean(input.hasCurrentDraft) || hasPostIntent);
-  const intent = input.hasCurrentDraft || hasPostIntent ? "post" : "chat";
-  const text = stripMetaPhrases(messageText);
-  const combinedText = input.currentDraftText && text ? `${input.currentDraftText.trim()}\n${text}`.trim() : text || input.currentDraftText?.trim() || "";
-
   return {
-    intent,
-    text: combinedText,
-    anonymous,
-    shouldSubmit,
-    sections: splitPostSections(combinedText),
-    confidence: intent === "post" ? 0.56 : 0.35,
-    reason: "local_fallback",
+    ...defaultSemanticResult,
+    text: input.hasCurrentDraft ? input.currentDraftText?.trim() || "" : "",
+    sections: input.hasCurrentDraft ? splitPostSections(input.currentDraftText?.trim() || "") : [],
+    reason: messageText ? "llm_unavailable" : "empty_message",
   };
 }
 
@@ -109,10 +94,13 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
             role: "system",
             content: [
               "你是校园墙 QQ 私聊投稿语义解析器。只返回 JSON，不要 Markdown。",
-              "任务：从用户消息和当前草稿中判断是否是投稿、提取最终投稿正文、自动分段、判断匿名/实名、判断是否已经表达提交。",
+              "任务：基于整句语义和上下文判断是否是投稿、提取最终投稿正文、自动分段、判断匿名/实名、判断是否已经表达提交。",
               "返回标准格式：{\"intent\":\"post|chat|command\",\"text\":\"最终正文\",\"anonymous\":true|false|null,\"shouldSubmit\":true|false,\"sections\":[\"分段1\"],\"confidence\":0到1,\"reason\":\"简短原因\"}。",
-              "规则：命令、注册、重置密码、闲聊不是投稿；若用户说匿名/匿了/别署名则 anonymous=true；说实名/不匿名/署名则 anonymous=false；未表达则 null；只有明确说提交、发出去、结束、就这样、可以发等才 shouldSubmit=true。",
-              "text 必须是不含投稿指令、匿名/提交指令的可发布正文；sections 是按语义自然分段后的正文段落。",
+              "不要用关键词表或单个词命中做判断；必须理解用户真实意图，例如咨询如何匿名、注册、重置密码、闲聊、机器人命令都不是投稿。",
+              "anonymous 表示用户希望本条投稿如何发布：明确希望匿名则 true，明确希望署名/实名则 false，未表达则 null。",
+              "shouldSubmit 表示用户是否已经表达可以结束并提交当前投稿；没有明确完成意图时必须 false。",
+              "text 只能包含适合发布到校园墙的正文；去掉对机器人的请求、匿名/实名要求、提交指令、解释性废话和非正文信息。",
+              "sections 是按语义自然分段后的正文段落；如果不是投稿，text 为空、sections 为空、shouldSubmit=false。",
             ].join("\n"),
           },
           {
@@ -206,17 +194,6 @@ function splitPostSections(text: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 20);
-}
-
-function stripMetaPhrases(text: string) {
-  let result = text.trim();
-  const phrasePattern = new RegExp([...anonymousKeywords, ...realNameKeywords, ...submitKeywords, "帮我发", "帮我", "我要投稿", "想投稿", "投稿"].join("|"), "g");
-  result = result.replace(phrasePattern, "");
-  return result.replace(/^[，。,.;；：:\s]+|[，。,.;；：:\s]+$/g, "").trim();
-}
-
-function includesAny(text: string, keywords: string[]) {
-  return keywords.some((keyword) => text.includes(keyword));
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number) {
