@@ -2436,7 +2436,7 @@ export class OneBotRuntime {
         botQqUin: buffer.botQqUin,
         userQqUin: buffer.userQqUin,
         event: mergePrivatePostAggregateEvents(buffer.events, messageText),
-        body: semantic.text || messageText,
+        body: messageText,
         semantic,
       });
       return;
