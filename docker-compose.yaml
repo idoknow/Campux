@@ -2,7 +2,7 @@ services:
   campux:
     build:
       context: .
-    image: rockchin/campux:local
+    image: rockchin/campux:${CAMPUX_IMAGE_TAG:-local}
     container_name: campux
     restart: unless-stopped
     depends_on:
