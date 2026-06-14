@@ -27,6 +27,25 @@ const underlineExtension = {
 
 marked.use(underlineExtension);
 
+/** Override renderer to strip images, code blocks, and inline code. */
+const safeRenderer = new marked.Renderer();
+safeRenderer.image = (token: Tokens.Image): string => {
+  // Strip image, keep alt text only
+  return token.text || "";
+};
+safeRenderer.code = (_token: Tokens.Code): string => {
+  // Strip code blocks entirely
+  return "";
+};
+safeRenderer.codespan = (token: Tokens.Codespan): string => {
+  // Strip inline code formatting, keep raw text
+  return token.text;
+};
+
 export function renderMarkdown(text: string): string {
-  return marked.parse(text, { gfm: true, breaks: true }) as string;
+  return marked.parse(text, {
+    gfm: true,
+    breaks: true,
+    renderer: safeRenderer,
+  }) as string;
 }
