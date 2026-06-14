@@ -31,10 +31,6 @@ const defaultSemanticResult: PrivatePostSemanticResult = {
   reason: "not_analyzed",
 };
 
-const submitKeywords = ["提交", "发出", "发出去", "投递", "投稿", "结束", "就这样", "可以发", "帮我发", "直接发"];
-const anonymousKeywords = ["匿名", "别署名", "不要署名", "隐藏身份", "匿了", "匿名发", "匿名投稿"];
-const realNameKeywords = ["实名", "署名", "用我名字", "不要匿名", "不匿名"];
-const postIntentKeywords = ["投稿", "发墙", "墙墙", "表白墙", "树洞", "帮我发", "想发", "吐槽", "求助", "失物招领", "捞人", "扩列"];
 const commandLikePattern = /^\s*(?:#|＃|\/|！|!)[\s\S]{1,40}$/;
 
 export function fallbackAnalyzePrivatePostSemantics(input: {
@@ -46,22 +42,11 @@ export function fallbackAnalyzePrivatePostSemantics(input: {
   if (commandLikePattern.test(messageText)) {
     return { ...defaultSemanticResult, intent: "command", reason: "command_like_without_llm" };
   }
-
-  const anonymous = includesAny(messageText, anonymousKeywords) ? true : includesAny(messageText, realNameKeywords) ? false : null;
-  const hasPostIntent = includesAny(messageText, postIntentKeywords);
-  const shouldSubmit = includesAny(messageText, submitKeywords) && (Boolean(input.hasCurrentDraft) || hasPostIntent);
-  const intent = input.hasCurrentDraft || hasPostIntent ? "post" : "chat";
-  const text = stripMetaPhrases(messageText);
-  const combinedText = input.currentDraftText && text ? `${input.currentDraftText.trim()}\n${text}`.trim() : text || input.currentDraftText?.trim() || "";
-
   return {
-    intent,
-    text: combinedText,
-    anonymous,
-    shouldSubmit,
-    sections: splitPostSections(combinedText),
-    confidence: intent === "post" ? 0.56 : 0.35,
-    reason: messageText ? "local_fallback" : "empty_message",
+    ...defaultSemanticResult,
+    text: input.hasCurrentDraft ? input.currentDraftText?.trim() || "" : "",
+    sections: input.hasCurrentDraft ? splitPostSections(input.currentDraftText?.trim() || "") : [],
+    reason: messageText ? "llm_unavailable" : "empty_message",
   };
 }
 
@@ -209,17 +194,6 @@ function splitPostSections(text: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 20);
-}
-
-function stripMetaPhrases(text: string) {
-  let result = text.trim();
-  const phrasePattern = new RegExp([...anonymousKeywords, ...realNameKeywords, ...submitKeywords, "帮我发", "帮我", "我要投稿", "想投稿", "投稿"].join("|"), "g");
-  result = result.replace(phrasePattern, "");
-  return result.replace(/^[，。,.;；：:\s]+|[，。,.;；：:\s]+$/g, "").trim();
-}
-
-function includesAny(text: string, keywords: string[]) {
-  return keywords.some((keyword) => text.includes(keyword));
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number) {

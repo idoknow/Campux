@@ -1100,6 +1100,26 @@ export class OneBotRuntime {
           return;
         }
 
+        const semantic = privatePostAiEnabled
+          ? await analyzePrivatePostSemantics({
+              tenantId: bot.tenantId,
+              messageText: plainText,
+              currentDraftText: pendingMode.text,
+              hasCurrentDraft: true,
+              imageCount: pendingMode.attachments.length + extractOneBotImageSegments(event.message).length,
+              logger: this.logger,
+            })
+          : undefined;
+        if (semantic?.intent === "post" && semantic.anonymous !== null) {
+          await this.selectPrivatePostMode({
+            bot,
+            botQqUin,
+            userQqUin,
+            anonymous: semantic.anonymous,
+          });
+          return;
+        }
+
         const selection = parsePrivatePostModeText(plainText);
         if (selection) {
           await this.selectPrivatePostMode({
