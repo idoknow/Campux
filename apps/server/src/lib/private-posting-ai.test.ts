@@ -40,12 +40,13 @@ describe("private post AI semantic parsing", () => {
     expect(parsed?.sections).toEqual(["内容"]);
   });
 
-  test("fallback detects anonymous direct submission", () => {
+  test("fallback does not infer post intent from keywords without LLM", () => {
     const result = fallbackAnalyzePrivatePostSemantics({ messageText: "帮我匿名投稿：今天食堂阿姨特别好，可以直接发" });
-    expect(result.intent).toBe("post");
-    expect(result.anonymous).toBe(true);
-    expect(result.shouldSubmit).toBe(true);
-    expect(result.text).toBe("今天食堂阿姨特别好，可以");
+    expect(result.intent).toBe("chat");
+    expect(result.anonymous).toBe(null);
+    expect(result.shouldSubmit).toBe(false);
+    expect(result.text).toBe("");
+    expect(result.reason).toBe("llm_unavailable");
   });
 
   test("fallback keeps ordinary chat with anonymity words out of post flow", () => {
