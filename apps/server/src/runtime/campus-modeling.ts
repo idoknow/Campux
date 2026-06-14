@@ -24,6 +24,8 @@ export type AiRules = {
   modelingNotes?: string | undefined;
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean | undefined;
+  /** 私聊 AI 聚合收稿等待秒数，0 表示不聚合 */
+  privatePostAggregateDelaySeconds?: number | undefined;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
   postTriggerKeywords?: string[] | undefined;
 };
@@ -90,6 +92,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
     modelingKeywords: [],
     modelingNotes: "仅用于校园建模，专注实体、话题和关系抽取",
     privatePostAiEnabled: false,
+    privatePostAggregateDelaySeconds: 8,
     postTriggerKeywords: [],
   },
 };
@@ -1249,12 +1252,17 @@ function normalizeRules(value: unknown): AiRules {
     modelingKeywords: normalizeStringArray(candidate.modelingKeywords ?? defaultAiSettings.rules.modelingKeywords),
     modelingNotes: typeof candidate.modelingNotes === "string" ? candidate.modelingNotes : defaultAiSettings.rules.modelingNotes,
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
+    privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
   };
 }
 
 function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function normalizeNumber(value: unknown, min: number, max: number, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.trunc(value))) : fallback;
 }
 
 function normalizeBackfillMode(value: unknown): AiBackfillMode {

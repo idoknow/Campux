@@ -436,6 +436,8 @@ export type AiRules = {
   modelingNotes?: string;
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;
+  /** 私聊 AI 聚合收稿等待秒数，0 表示不聚合 */
+  privatePostAggregateDelaySeconds?: number;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"] */
   postTriggerKeywords?: string[];
 };
