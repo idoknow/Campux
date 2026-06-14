@@ -17,6 +17,7 @@ import { readTenantPendingPostLimit, readTenantImageCompression, readTenantPubli
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
+import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
 import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -381,6 +382,15 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         fileIndex += 1;
       }
 
+      // 检查远程 GIF URL 的 SSRF 风险
+      const urlValidation = validateRemoteGifUrls(remoteGifUrls);
+      if (!urlValidation.valid) {
+        throw {
+          status: 400,
+          message: urlValidation.reason,
+        };
+      }
+
       // Process remote GIF URLs (from 失控图床 API conversion)
       for (const gifUrl of remoteGifUrls) {
         if (staged.length >= 9) {
@@ -422,6 +432,25 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         throw {
           status: 400,
           message: "正文最多 1000 字",
+        };
+      }
+
+      // 注入检测：XSS、CSS、代码、CQ 码
+      const injectionResult = detectPostInjection({ text, bgColor, textColor, font });
+      if (injectionResult.detected) {
+        // 自动封禁一天
+        await createAutoBan({
+          tenantId: context.selectedTenant.id,
+          userId: context.user.id,
+          operatorId: context.user.id,
+          reason: injectionResult.reason,
+        }).catch((banErr) => {
+          app.log.warn({ error: banErr }, "failed to create auto ban");
+        });
+
+        throw {
+          status: 403,
+          message: `投稿包含不安全内容，账号已被封禁 24 小时：${injectionResult.reason}`,
         };
       }
 
