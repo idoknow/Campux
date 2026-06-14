@@ -12,6 +12,14 @@ function pick<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)]!;
 }
 
+/**
+ * 转义 QQ/OneBot CQ 码，防止投稿文本中的 [CQ:...] 被解析为消息段。
+ * OneBot 使用 XML/JSON 风格的消息段格式，将 [ 替换为全角即可破坏解析。
+ */
+export function escapeCqCode(text: string): string {
+  return text.replace(/\[/g, "&#91;").replace(/\]/g, "&#93;");
+}
+
 // ── 投稿成功 ──────────────────────────────────────────
 
 const submissionSuccessDefault = (id: number) => `投稿成功！当前稿件编号#${id}`;
@@ -372,7 +380,7 @@ export function formatNewPostReviewNotification(
     `来源：${channelLabel}`,
     attachmentSummary,
     "",
-    text,
+    escapeCqCode(text),
     "",
     `通过：#通过 ${displayId}`,
     `拒绝：#拒绝 <理由> ${displayId}`,

@@ -26,6 +26,7 @@ import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancel
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled, readTenantPublishMode } from "../lib/tenant-metadata";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
+import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./campus-modeling";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
@@ -1880,6 +1881,22 @@ export class OneBotRuntime {
     }
     if (text.length > 1_000) {
       throw new BotWorkflowError("正文太长了，请控制在 1000 字以内，再发送 #结束。", 400);
+    }
+
+    // 注入检测：XSS、CSS、代码、CQ 码
+    const injectionResult = detectPostInjection({ text });
+    if (injectionResult.detected) {
+      // 自动封禁一天
+      await createAutoBan({
+        tenantId: bot.tenantId,
+        userId: access.operator.id,
+        operatorId: access.operator.id,
+        reason: injectionResult.reason,
+      }).catch((banErr: unknown) => {
+        this.logger.warn({ error: banErr }, "failed to create auto ban");
+      });
+
+      throw new BotWorkflowError(`投稿包含不安全内容，账号已被封禁 24 小时：${injectionResult.reason}`, 403);
     }
 
     // 检查超级表情包自动审核

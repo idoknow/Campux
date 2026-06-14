@@ -1,4 +1,5 @@
 import { marked, type Tokens } from "marked";
+import DOMPurify from "dompurify";
 
 // Custom marked extension: ++underline++
 const underlineExtension = {
@@ -42,10 +43,21 @@ safeRenderer.codespan = (token: Tokens.Codespan): string => {
   return token.text;
 };
 
+// DOMPurify 配置：只允许基本的文本格式化标签，禁止 script、事件处理器等
 export function renderMarkdown(text: string): string {
-  return marked.parse(text, {
+  const raw = marked.parse(text, {
     gfm: true,
     breaks: true,
     renderer: safeRenderer,
   }) as string;
+
+  return DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: [
+      "p", "br", "strong", "em", "u", "s", "del", "ins",
+      "ul", "ol", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
+      "pre", "code", "hr", "span", "div",
+    ],
+    ALLOWED_ATTR: [],
+    ALLOW_DATA_ATTR: false,
+  });
 }

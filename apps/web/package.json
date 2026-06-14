@@ -15,6 +15,7 @@
     "@vitejs/plugin-react": "5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dompurify": "^3.4.10",
     "gif.js": "^0.2.0",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.5",
@@ -30,6 +31,7 @@
     "vite": "^6.3.5"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.2.0",
     "@types/gif.js": "^0.2.5",
     "@types/marked": "^6.0.0",
     "@types/react": "^19.2.14",
