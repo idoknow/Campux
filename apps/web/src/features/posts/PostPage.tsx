@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS } from "@campux/domain";
@@ -43,9 +43,11 @@ export function PostPage({
   postTextColor,
   postFont,
   anonymous,
+  anonymousAvatar,
   pendingAttachments,
   onPostTextChange,
   onAnonymousChange,
+  onAnonymousAvatarChange,
   onBgColorChange,
   onTextColorChange,
   onFontChange,
@@ -61,10 +63,12 @@ export function PostPage({
   postTextColor: string;
   postFont: string;
   anonymous: boolean;
+  anonymousAvatar: string;
   selectedTenant: TenantSummary;
   pendingAttachments: PendingAttachment[];
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
+  onAnonymousAvatarChange: (value: string) => void;
   onBgColorChange: (value: string) => void;
   onTextColorChange: (value: string) => void;
   onFontChange: (value: string) => void;
@@ -77,11 +81,28 @@ export function PostPage({
   const [fontPreviewOpen, setFontPreviewOpen] = useState(false);
   const [fontPreviewUrl, setFontPreviewUrl] = useState<string | null>(null);
   const [fontPreviewLoading, setFontPreviewLoading] = useState(false);
+  const [svgAvatars, setSvgAvatars] = useState<string[]>([]);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
   const hasNonDefaultFont = postFont && postFont !== "default";
+
+  useEffect(() => {
+    if (metadata.enableAnonymousAvatarSelection) {
+      fetch("/api/svg/avatars")
+        .then((res) => res.json() as Promise<{ avatars: string[] }>)
+        .then((data) => setSvgAvatars(data.avatars))
+        .catch(() => { /* silently ignore */ });
+    }
+  }, [metadata.enableAnonymousAvatarSelection]);
+
+  // 关闭匿名时清除已选头像
+  useEffect(() => {
+    if (!anonymous && anonymousAvatar) {
+      onAnonymousAvatarChange("");
+    }
+  }, [anonymous]);
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.items)
@@ -249,7 +270,7 @@ export function PostPage({
           </div>
         </div>
 
-        {metadata.enableColorSelection || metadata.enableFontSelection ? (
+        {metadata.enableColorSelection || metadata.enableFontSelection || (metadata.enableAnonymousAvatarSelection && anonymous) ? (
           <details className="mt-3 rounded-md border border-slate-200 bg-slate-50">
             <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-slate-700 [&::-webkit-details-marker]:hidden">
               <span>高级功能</span>
@@ -304,6 +325,37 @@ export function PostPage({
                     </div>
                   </div>
                 </>
+              ) : null}
+
+              {metadata.enableAnonymousAvatarSelection && anonymous ? (
+                <div className="rounded-md border px-3 py-2 text-sm product-accent-green">
+                  <div className="mb-2">
+                    <span className="block font-semibold">匿名头像</span>
+                    <span className="block text-xs font-normal opacity-80">选择匿名展示时使用的头像。</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {svgAvatars.map((filename) => (
+                      <button
+                        key={filename}
+                        type="button"
+                        className={`relative h-12 w-12 overflow-hidden rounded-full border-2 transition-all ${
+                          anonymousAvatar === filename
+                            ? "border-green-500 ring-2 ring-green-200"
+                            : "border-slate-200 hover:border-slate-300"
+                        }`}
+                        onClick={() => onAnonymousAvatarChange(anonymousAvatar === filename ? "" : filename)}
+                        title={filename.replace(".svg", "")}
+                      >
+                        <img
+                          src={`/api/svg/${encodeURIComponent(filename)}`}
+                          alt={filename}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ) : null}
 
               {metadata.enableFontSelection ? (

@@ -61,6 +61,7 @@ type TenantSettingsForm = {
   enableColorSelection: boolean;
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
+  enableAnonymousAvatarSelection: boolean;
 };
 
 type BanForm = {
@@ -342,7 +343,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -527,6 +528,7 @@ export function AdminPage({
           enableColorSelection: form.enableColorSelection,
           enableMarkdownRender: form.enableMarkdownRender,
           enableFontSelection: form.enableFontSelection,
+          enableAnonymousAvatarSelection: form.enableAnonymousAvatarSelection,
         }),
       });
       await onSaved();
@@ -1922,6 +1924,18 @@ function MetadataPanel({
                   disabled={busy}
                   onCheckedChange={(value) => onFormChange({ ...form, enableFontSelection: value })}
                   aria-label="启用字体选择"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">匿名头像选择</p>
+                  <p className="text-xs text-slate-500">开启后，用户开启匿名展示时可在"高级功能"中选择匿名头像，稿件渲染时使用所选 SVG 头像。</p>
+                </div>
+                <Switch
+                  checked={form.enableAnonymousAvatarSelection}
+                  disabled={busy}
+                  onCheckedChange={(value) => onFormChange({ ...form, enableAnonymousAvatarSelection: value })}
+                  aria-label="启用匿名头像选择"
                 />
               </div>
             </div>
@@ -3465,6 +3479,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     enableColorSelection: metadata.enableColorSelection,
     enableMarkdownRender: metadata.enableMarkdownRender,
     enableFontSelection: metadata.enableFontSelection,
+    enableAnonymousAvatarSelection: metadata.enableAnonymousAvatarSelection,
   };
 }
 

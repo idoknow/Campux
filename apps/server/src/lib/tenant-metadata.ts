@@ -261,3 +261,28 @@ export function normalizeEnableFontSelection(value: unknown): boolean {
   if (typeof value === "string") return value === "true" || value === "1";
   return enableFontSelectionDefault;
 }
+
+export const enableAnonymousAvatarSelectionKey = "enable_anonymous_avatar_selection";
+export const enableAnonymousAvatarSelectionDefault = false;
+
+export function normalizeEnableAnonymousAvatarSelection(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return enableAnonymousAvatarSelectionDefault;
+}
+
+export async function readTenantEnableAnonymousAvatarSelection(client: MetadataClient, tenantId: string): Promise<boolean> {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: enableAnonymousAvatarSelectionKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizeEnableAnonymousAvatarSelection(entry?.value);
+}

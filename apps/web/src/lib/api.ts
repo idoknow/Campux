@@ -43,6 +43,7 @@ export function createPostWithAttachments(
   bgColor?: string,
   textColor?: string,
   font?: string,
+  anonymousAvatar?: string,
 ): Promise<CreatePostResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -84,6 +85,9 @@ export function createPostWithAttachments(
     const formData = new FormData();
     formData.append("text", text);
     formData.append("anonymous", String(anonymous));
+    if (anonymousAvatar) {
+      formData.append("anonymousAvatar", anonymousAvatar);
+    }
     if (bgColor) {
       formData.append("bgColor", bgColor);
     }
