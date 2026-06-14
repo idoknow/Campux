@@ -163,6 +163,18 @@ type PrivateForwardBuffer = {
   timer: Timer | null;
 };
 
+type PrivatePostAggregateBuffer = {
+  tenantId: string;
+  bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null; userMessageReply: string | null; userMessageReplyCooldownSeconds: number };
+  botQqUin: string;
+  userQqUin: string;
+  userNickname: string;
+  events: OneBotMessageEvent[];
+  messages: PrivateForwardEntry[];
+  delayMs: number;
+  timer: Timer | null;
+};
+
 type OneBotMessageEvent = {
   post_type?: string;
   request_type?: string;
@@ -209,6 +221,7 @@ export class OneBotRuntime {
   private readonly pendingActions = new Map<string, PendingAction>();
   private readonly privateAutoReplyAt = new Map<string, number>();
   private readonly privateForwardBuffers = new Map<string, PrivateForwardBuffer>();
+  private readonly privatePostAggregateBuffers = new Map<string, PrivatePostAggregateBuffer>();
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
   private readonly pendingFriendRequestFlags = new Set<string>();
@@ -1059,10 +1072,12 @@ export class OneBotRuntime {
       // 读取租户 AI 规则：额外投稿关键词与私聊语义收稿开关。
       const aiSettings = await readTenantAiSettings(bot.tenantId);
       const privatePostAiEnabled = aiSettings.rules.privatePostAiEnabled === true;
+      const privatePostAggregateDelaySeconds = Math.max(0, Math.min(120, Math.trunc(aiSettings.rules.privatePostAggregateDelaySeconds ?? 8)));
       const extraKeywords = aiSettings.rules.postTriggerKeywords;
 
       const startBody = parsePrivatePostStartText(plainText, extraKeywords);
       if (startBody !== null) {
+        this.clearPrivatePostAggregateBuffer(this.getPrivatePostDraftKey(botQqUin, userQqUin));
         await this.startPrivatePostDraft({
           bot,
           botQqUin,
@@ -1186,6 +1201,18 @@ export class OneBotRuntime {
 
       const command = parsePrivateCommand(plainText);
       if (!command) {
+        if (privatePostAiEnabled && privatePostAggregateDelaySeconds > 0) {
+          this.bufferPrivatePostAggregateMessage({
+            bot,
+            botQqUin,
+            userQqUin,
+            userNickname: event.sender?.card || event.sender?.nickname || userQqUin,
+            event,
+            delaySeconds: privatePostAggregateDelaySeconds,
+          });
+          return;
+        }
+
         if (privatePostAiEnabled) {
           const semantic = await analyzePrivatePostSemantics({
             tenantId: bot.tenantId,
@@ -2269,6 +2296,114 @@ export class OneBotRuntime {
     }
   }
 
+  private bufferPrivatePostAggregateMessage({
+    bot,
+    botQqUin,
+    userQqUin,
+    userNickname,
+    event,
+    delaySeconds,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null; userMessageReply: string | null; userMessageReplyCooldownSeconds: number };
+    botQqUin: string;
+    userQqUin: string;
+    userNickname: string;
+    event: OneBotMessageEvent;
+    delaySeconds: number;
+  }) {
+    const key = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    let buffer = this.privatePostAggregateBuffers.get(key);
+    const text = extractOneBotPlainText(event.message, event.raw_message).trim() || event.raw_message || "（不支持的消息类型）";
+    if (!buffer) {
+      buffer = {
+        tenantId: bot.tenantId,
+        bot,
+        botQqUin,
+        userQqUin,
+        userNickname,
+        events: [],
+        messages: [],
+        delayMs: delaySeconds * 1000,
+        timer: null,
+      };
+      this.privatePostAggregateBuffers.set(key, buffer);
+    }
+    buffer.bot = bot;
+    buffer.userNickname = userNickname;
+    buffer.delayMs = delaySeconds * 1000;
+    buffer.events.push(event);
+    buffer.messages.push({ time: Math.floor(Date.now() / 1000), text });
+    if (buffer.timer) {
+      clearTimeout(buffer.timer);
+    }
+    buffer.timer = setTimeout(() => {
+      this.flushPrivatePostAggregateBuffer(key).catch((error) => {
+        this.logger.warn({ error, botQqUin, userQqUin }, "AI 聚合私聊投稿失败");
+      });
+    }, buffer.delayMs);
+  }
+
+  private clearPrivatePostAggregateBuffer(key: string) {
+    const buffer = this.privatePostAggregateBuffers.get(key);
+    if (!buffer) return;
+    if (buffer.timer) {
+      clearTimeout(buffer.timer);
+    }
+    this.privatePostAggregateBuffers.delete(key);
+  }
+
+  private async flushPrivatePostAggregateBuffer(key: string) {
+    const buffer = this.privatePostAggregateBuffers.get(key);
+    if (!buffer || buffer.events.length === 0) {
+      this.privatePostAggregateBuffers.delete(key);
+      return;
+    }
+    this.clearPrivatePostAggregateBuffer(key);
+    if (this.privatePostDrafts.has(key) || this.privatePostPendingModes.has(key)) {
+      return;
+    }
+
+    const messageText = buffer.messages.map((entry) => entry.text).filter(Boolean).join("\n").trim();
+    const imageCount = buffer.events.reduce((count, item) => count + extractOneBotImageSegments(item.message).length, 0);
+    const semantic = await analyzePrivatePostSemantics({
+      tenantId: buffer.tenantId,
+      messageText,
+      hasCurrentDraft: false,
+      imageCount,
+      logger: this.logger,
+    });
+    if (semantic.intent === "post" && semantic.confidence >= 0.55 && (semantic.text || imageCount > 0)) {
+      await this.startPrivatePostDraft({
+        bot: buffer.bot,
+        botQqUin: buffer.botQqUin,
+        userQqUin: buffer.userQqUin,
+        event: mergePrivatePostAggregateEvents(buffer.events, messageText),
+        body: semantic.text || messageText,
+        semantic,
+      });
+      return;
+    }
+
+    if (this.isSkippablePrivateMessage(messageText)) {
+      return;
+    }
+    if (buffer.bot.reviewGroupId) {
+      for (const entry of buffer.messages) {
+        this.bufferPrivateForwardMessage({
+          bot: buffer.bot,
+          botQqUin: buffer.botQqUin,
+          userQqUin: buffer.userQqUin,
+          userNickname: buffer.userNickname,
+          text: entry.text,
+        });
+      }
+    }
+    if (this.shouldSendPrivateAutoReply(buffer.bot.id, buffer.userQqUin, buffer.bot.userMessageReplyCooldownSeconds)) {
+      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, buffer.tenantId);
+      await this.sendPrivateMessage(buffer.botQqUin, buffer.userQqUin, buffer.bot.userMessageReply || formatPrivateHelp(stylishEnabled)).catch(() => undefined);
+    }
+  }
+
   private bufferPrivateForwardMessage({
     bot,
     botQqUin,
@@ -3002,6 +3137,24 @@ function parseRejectArgs(args: string) {
     comment: comment.trim(),
     displayId,
   };
+}
+
+function mergePrivatePostAggregateEvents(events: OneBotMessageEvent[], text: string): OneBotMessageEvent {
+  const first = events[0] ?? {};
+  const message: unknown[] = text ? [{ type: "text", data: { text } }] : [];
+  for (const event of events) {
+    const images = extractOneBotImageSegments(event.message);
+    message.push(...images);
+  }
+  const merged: OneBotMessageEvent = {
+    ...first,
+    message,
+  };
+  const rawMessage = text || first.raw_message;
+  if (rawMessage) {
+    merged.raw_message = rawMessage;
+  }
+  return merged;
 }
 
 function normalizeId(value: string | number | undefined) {

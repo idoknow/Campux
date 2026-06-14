@@ -52,6 +52,7 @@ type AiSettingsForm = {
   modelingKeywordsText: string;
   modelingNotes: string;
   privatePostAiEnabled: boolean;
+  privatePostAggregateDelaySeconds: number;
   postTriggerKeywordsText: string;
 };
 
@@ -325,6 +326,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
       modelingKeywords: lines(form.modelingKeywordsText),
       modelingNotes: form.modelingNotes.trim(),
       privatePostAiEnabled: form.privatePostAiEnabled,
+      privatePostAggregateDelaySeconds: form.privatePostAggregateDelaySeconds,
       postTriggerKeywords: lines(form.postTriggerKeywordsText),
     };
     return {
@@ -983,6 +985,18 @@ const SettingsPanel = memo(function SettingsPanel({
             </div>
             <Switch checked={form.privatePostAiEnabled} disabled={!isAdmin || busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, privatePostAiEnabled: checked })} aria-label="启用 AI 语义收稿" />
           </div>
+          <label className="mt-3 block space-y-1 text-[11px] font-bold text-slate-600">
+            聚合等待时间（秒）
+            <Input
+              type="number"
+              min={0}
+              max={120}
+              value={form.privatePostAggregateDelaySeconds}
+              disabled={!isAdmin || busy || testing || !form.privatePostAiEnabled}
+              onChange={(event) => onFormChange({ ...form, privatePostAggregateDelaySeconds: Math.max(0, Math.min(120, Number(event.target.value) || 0)) })}
+            />
+            <span className="text-xs font-semibold text-slate-500">用户停顿达到该时间后，将同一会话合并交给 AI 判断；设为 0 则关闭聚合。</span>
+          </label>
         </div>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
           投稿触发关键词
@@ -1730,6 +1744,7 @@ function toForm(settings: TenantAiSettings): AiSettingsForm {
     modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
     modelingNotes: settings.rules.modelingNotes ?? "",
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
+    privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
   };
 }

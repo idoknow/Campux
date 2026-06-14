@@ -23,6 +23,7 @@ const aiSettingsSchema = z.object({
     modelingKeywords: z.array(z.string().trim().min(1).max(60)).max(80).optional(),
     modelingNotes: z.string().max(300).optional(),
     privatePostAiEnabled: z.boolean().optional(),
+    privatePostAggregateDelaySeconds: z.number().int().min(0).max(120).optional(),
     postTriggerKeywords: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
   }).optional(),
 });
