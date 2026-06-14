@@ -380,11 +380,13 @@ export async function createAutoBan({
   userId,
   operatorId,
   reason,
+  onBan,
 }: {
   tenantId: string;
   userId: string;
   operatorId?: string;
   reason: string;
+  onBan?: (userId: string, allTenantIds: string[], endsAt: Date) => Promise<void>;
 }): Promise<void> {
   const endsAt = new Date(Date.now() + BAN_DURATION_MS);
 
@@ -408,4 +410,9 @@ export async function createAutoBan({
       endsAt,
     })),
   });
+
+  // 封禁后回调（用于发送通知等）
+  if (onBan) {
+    await onBan(userId, allTenantIds, endsAt).catch(() => undefined);
+  }
 }

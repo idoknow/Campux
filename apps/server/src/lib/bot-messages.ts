@@ -766,3 +766,46 @@ export function formatBotPublishHelp(stylishEnabled = false): string {
   if (!stylishEnabled) return botPublishHelpDefault();
   return pick(botPublishHelpStylish)();
 }
+
+// ── 解封 ──────────────────────────────────────────
+
+const unbanSuccessDefault = (qqUin: string) => `已解封 QQ ${qqUin}`;
+
+const unbanSuccessStylish = [
+  (qqUin: string) => `🔓 已为 QQ ${qqUin} 解除封禁，欢迎回来~`,
+  (qqUin: string) => `✅ 解封成功！QQ ${qqUin} 现在可以正常使用啦~`,
+  (qqUin: string) => `🎉 QQ ${qqUin} 已解封，自由啦~`,
+  unbanSuccessDefault,
+];
+
+const unbanNotFoundDefault = (qqUin: string) => `未找到 QQ ${qqUin} 的封禁记录`;
+
+const unbanNotFoundStylish = [
+  (qqUin: string) => `🔍 没有找到 QQ ${qqUin} 的封禁记录，可能是没有被封禁哦~`,
+  (qqUin: string) => `🤔 QQ ${qqUin} 似乎没有被封禁，无需解封~`,
+  unbanNotFoundDefault,
+];
+
+export function formatUnbanSuccess(qqUin: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return unbanSuccessDefault(qqUin);
+  return pick(unbanSuccessStylish)(qqUin);
+}
+
+export function formatUnbanNotFound(qqUin: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return unbanNotFoundDefault(qqUin);
+  return pick(unbanNotFoundStylish)(qqUin);
+}
+
+// ── 封禁/解封通知（发给用户的私信）────────────────────
+
+export function formatBanNotify(tenantName: string, reason: string, endsAt: Date): string {
+  const remaining = Math.ceil((endsAt.getTime() - Date.now()) / (60 * 60 * 1000));
+  if (remaining > 1) {
+    return `你的账号在「${tenantName}」中被封禁，原因：${reason}，预计 ${remaining} 小时后解封。`;
+  }
+  return `你的账号在「${tenantName}」中被封禁，原因：${reason}，预计 1 小时内解封。`;
+}
+
+export function formatUnbanNotify(tenantName: string): string {
+  return `你的账号在「${tenantName}」中已被解封，现在可以正常使用。`;
+}

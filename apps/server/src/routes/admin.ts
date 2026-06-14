@@ -13,6 +13,7 @@ import type { RuntimeQueue } from "../runtime/queue";
 import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
+import { formatBanNotify, formatUnbanNotify } from "../lib/bot-messages";
 
 const roleSchema = z.enum(["submitter", "reviewer", "admin"]);
 
@@ -476,6 +477,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       },
     });
 
+    // 发私信通知用户被封禁
+    oneBot?.sendPrivateMessageViaTenantBots(context.selectedTenant.id, user.qqUin.toString(), formatBanNotify(context.selectedTenant.name, body.comment, endsAt)).catch((notifyErr) => {
+      app.log.warn({ error: notifyErr }, "failed to send ban notification");
+    });
+
     return {
       ban: (await toBanRecords([ban]))[0],
     };
@@ -510,6 +516,14 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       targetType: "user",
       targetId: ban.userId,
     });
+
+    // 发私信通知用户已解封
+    const targetUser = await prisma.user.findUnique({ where: { id: ban.userId } });
+    if (targetUser) {
+      oneBot?.sendPrivateMessageViaTenantBots(context.selectedTenant.id, targetUser.qqUin.toString(), formatUnbanNotify(context.selectedTenant.name)).catch((notifyErr) => {
+        app.log.warn({ error: notifyErr }, "failed to send unban notification");
+      });
+    }
 
     return {
       ban: (await toBanRecords([updated]))[0],

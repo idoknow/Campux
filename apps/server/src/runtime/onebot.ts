@@ -81,6 +81,10 @@ import {
   formatBotPublishHelp,
   formatBotRecallSuccess,
   formatBotRecallFailed,
+  formatUnbanSuccess,
+  formatUnbanNotFound,
+  formatBanNotify,
+  formatUnbanNotify,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 
@@ -209,6 +213,7 @@ const reviewHelp = [
   "#回复 <内容> （引用转发私信后使用）",
   "#发布 <内容> （可附带图片，文字+图片一起发布到空间）",
   "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
+  "#解封 <QQ号>",
   "#好友数",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
@@ -1903,6 +1908,14 @@ export class OneBotRuntime {
         userId: access.operator.id,
         operatorId: access.operator.id,
         reason: injectionResult.reason,
+        onBan: async (userId, allTenantIds, endsAt) => {
+          const user = await prisma.user.findUnique({ where: { id: userId } });
+          if (!user) return;
+          const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId } });
+          const tenantName = tenant?.name ?? "校园墙";
+          const qqUin = user.qqUin.toString();
+          await this.sendPrivateMessageViaTenantBots(bot.tenantId, qqUin, formatBanNotify(tenantName, injectionResult.reason, endsAt));
+        },
       }).catch((banErr: unknown) => {
         this.logger.warn({ error: banErr }, "failed to create auto ban");
       });
@@ -2266,6 +2279,46 @@ export class OneBotRuntime {
           ...(images ? { images } : {}),
         });
         await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled, result.qzoneTid ?? undefined));
+        return;
+      }
+
+      if (command.name === "解封") {
+        const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+        const qqUin = command.args.trim();
+        if (!qqUin || !/^\d+$/.test(qqUin)) {
+          await this.sendGroupMessage(botQqUin, groupId, "请提供要解封的 QQ 号，例如：#解封 123456789");
+          return;
+        }
+        const targetUser = await prisma.user.findUnique({
+          where: { qqUin: BigInt(qqUin) },
+        });
+        if (!targetUser) {
+          await this.sendGroupMessage(botQqUin, groupId, formatUnbanNotFound(qqUin, stylishEnabled));
+          return;
+        }
+        const activeBan = await findActiveBan(bot.tenantId, targetUser.id);
+        if (!activeBan) {
+          await this.sendGroupMessage(botQqUin, groupId, formatUnbanNotFound(qqUin, stylishEnabled));
+          return;
+        }
+        await prisma.banRecord.update({
+          where: { id: activeBan.id },
+          data: { endsAt: new Date() },
+        });
+        await writeAuditLog({
+          tenantId: bot.tenantId,
+          actorId: operator.id,
+          action: "ban.unban",
+          targetType: "user",
+          targetId: targetUser.id,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, formatUnbanSuccess(qqUin, stylishEnabled));
+        // 发私信通知用户已解封
+        const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId } });
+        const tenantName = tenant?.name ?? "校园墙";
+        await this.sendPrivateMessageViaTenantBots(bot.tenantId, qqUin, formatUnbanNotify(tenantName)).catch((error) => {
+          this.logger.warn({ error, qqUin }, "failed to send unban notification");
+        });
         return;
       }
 
