@@ -10,7 +10,9 @@ RUN apk add --no-cache openssl
 COPY package.json bun.lock tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
-COPY font ./font
+# 注：自定义字体（「字体选择」雕花功能）默认不随仓库分发，避免数十 MB TTF 进 git 历史。
+# packages/render 在 <项目根>/font 缺失时会自动回退到下方 apk 安装的 noto-cjk 系统字体。
+# 自托管者若需启用该功能，可自行在此 COPY 字体目录。
 
 RUN bun install --frozen-lockfile
 RUN bun run db:generate

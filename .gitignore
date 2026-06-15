@@ -45,3 +45,6 @@ legacy/data/
 
 # Locally-installed Claude skills (not part of the project)
 .claude/skills/
+
+# 自定义字体（雕花「字体选择」功能）默认不入库，避免数十 MB TTF 膨胀 git 历史
+/font/
