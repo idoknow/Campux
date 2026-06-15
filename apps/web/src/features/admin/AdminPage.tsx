@@ -62,6 +62,7 @@ type TenantSettingsForm = {
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
   enableAnonymousAvatarSelection: boolean;
+  enableEmojiModeration: boolean;
 };
 
 type BanForm = {
@@ -343,7 +344,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection, metadata.enableEmojiModeration]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -529,6 +530,7 @@ export function AdminPage({
           enableMarkdownRender: form.enableMarkdownRender,
           enableFontSelection: form.enableFontSelection,
           enableAnonymousAvatarSelection: form.enableAnonymousAvatarSelection,
+          enableEmojiModeration: form.enableEmojiModeration,
         }),
       });
       await onSaved();
@@ -1936,6 +1938,18 @@ function MetadataPanel({
                   disabled={busy}
                   onCheckedChange={(value) => onFormChange({ ...form, enableAnonymousAvatarSelection: value })}
                   aria-label="启用匿名头像选择"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">表情包自动审核</p>
+                  <p className="text-xs text-slate-500">开启后，纯表情包/超级表情稿件会被自动通过或拒绝。关闭时（默认）所有稿件一律走人工审核，避免误判。</p>
+                </div>
+                <Switch
+                  checked={form.enableEmojiModeration}
+                  disabled={busy}
+                  onCheckedChange={(value) => onFormChange({ ...form, enableEmojiModeration: value })}
+                  aria-label="启用表情包自动审核"
                 />
               </div>
             </div>
@@ -3480,6 +3494,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     enableMarkdownRender: metadata.enableMarkdownRender,
     enableFontSelection: metadata.enableFontSelection,
     enableAnonymousAvatarSelection: metadata.enableAnonymousAvatarSelection,
+    enableEmojiModeration: metadata.enableEmojiModeration,
   };
 }
 

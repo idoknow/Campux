@@ -132,7 +132,47 @@ export type RenderPostCardInput = {
 
 let browserPromise: Promise<Browser> | null = null;
 
+/** 单次卡片渲染的硬超时（含 newPage + setContent + 字体 + screenshot 全过程）。 */
+const RENDER_TOTAL_TIMEOUT_MS = 30_000;
+
+export class RenderTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`渲染卡片超时（>${ms}ms）`);
+    this.name = "RenderTimeoutError";
+  }
+}
+
+/**
+ * 给一个 Promise 套一层硬超时。超时后 reject（RenderTimeoutError），
+ * 但被包裹的底层操作仍可能在后台继续——调用方负责丢弃/重建相关资源。
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new RenderTimeoutError(ms)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/**
+ * 渲染稿件卡片为 JPEG。
+ *
+ * 稳定性保证（核心发布链路依赖此函数，绝不允许它无限挂起拖垮单 worker 队列）：
+ * - 整个渲染过程（newPage→setContent→字体→screenshot）受 RENDER_TOTAL_TIMEOUT_MS 硬超时约束；
+ * - 任何超时或异常都会强制销毁当前共享 browser 并重置 browserPromise，
+ *   使下一次调用重建一个干净的 chromium 实例（自愈），避免缓存的僵死实例导致后续 newPage 永久阻塞。
+ */
 export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8Array> {
+  try {
+    return await withTimeout(renderPostCardInner(input), RENDER_TOTAL_TIMEOUT_MS);
+  } catch (error) {
+    // 渲染失败/超时：销毁可能已僵死的 browser，下次 getBrowser() 会重建。
+    await resetBrowser();
+    throw error;
+  }
+}
+
+async function renderPostCardInner(input: RenderPostCardInput): Promise<Uint8Array> {
   const browser = await getBrowser();
   const page = await browser.newPage({
     viewport: {
@@ -171,7 +211,8 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
       caret: "hide",
     });
   } finally {
-    await page.close();
+    // page.close 本身也可能在僵死实例上挂起，给它一个短超时兜底，绝不阻塞外层。
+    await withTimeout(page.close(), 5_000).catch(() => undefined);
   }
 }
 
@@ -181,6 +222,21 @@ async function getBrowser() {
     headless: true,
   });
   return browserPromise;
+}
+
+/** 销毁当前共享 browser 并清空缓存，使下次 getBrowser() 重建一个干净实例。 */
+async function resetBrowser() {
+  const current = browserPromise;
+  browserPromise = null;
+  if (!current) {
+    return;
+  }
+  try {
+    const browser = await withTimeout(current, 3_000);
+    await withTimeout(browser.close(), 5_000).catch(() => undefined);
+  } catch {
+    // launch 本身就失败/超时 —— 已清空缓存即可，无需额外处理。
+  }
 }
 
 function findChromiumExecutable() {

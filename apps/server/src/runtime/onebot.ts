@@ -24,7 +24,7 @@ import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
-import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled, readTenantPublishMode } from "../lib/tenant-metadata";
+import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled, readTenantPublishMode, readTenantEnableEmojiModeration } from "../lib/tenant-metadata";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./campus-modeling";
@@ -1923,8 +1923,9 @@ export class OneBotRuntime {
       throw new BotWorkflowError(`投稿包含不安全内容，账号已被封禁 24 小时：${injectionResult.reason}`, 403);
     }
 
-    // 检查超级表情包自动审核
-    const emojiResult = evaluateEmojiModeration(text);
+    // 检查超级表情包自动审核（仅当本墙开启该开关时；默认关闭=一律走人工审核）
+    const emojiModerationEnabled = await readTenantEnableEmojiModeration(prisma, bot.tenantId);
+    const emojiResult = emojiModerationEnabled ? evaluateEmojiModeration(text) : null;
     const initialStatus = emojiResult === "approve" ? "approved" : emojiResult === "reject" ? "rejected" : "pending_approval";
     const logComment =
       emojiResult === "approve"

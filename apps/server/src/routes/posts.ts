@@ -13,7 +13,7 @@ import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/
 import { toPostListItem } from "../lib/posts";
 import { buildPublishedFeed, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
 import { prisma } from "../lib/prisma";
-import { readTenantPendingPostLimit, readTenantImageCompression, readTenantPublishMode } from "../lib/tenant-metadata";
+import { readTenantPendingPostLimit, readTenantImageCompression, readTenantPublishMode, readTenantEnableEmojiModeration } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { evaluateEmojiModeration } from "../lib/emoji-moderation";
@@ -468,8 +468,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         };
       }
 
-      // 检查超级表情包自动审核
-      const emojiResult = evaluateEmojiModeration(text);
+      // 检查超级表情包自动审核（仅当本墙开启该开关时；默认关闭=一律走人工审核）
+      const emojiModerationEnabled = await readTenantEnableEmojiModeration(prisma, context.selectedTenant.id);
+      const emojiResult = emojiModerationEnabled ? evaluateEmojiModeration(text) : null;
       const initialStatus: "pending_approval" | "approved" | "rejected" =
         emojiResult === "approve" ? "approved" : emojiResult === "reject" ? "rejected" : "pending_approval";
       const logComment =
