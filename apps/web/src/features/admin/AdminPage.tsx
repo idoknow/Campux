@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import {
   BotIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   CopyIcon,
   KeyRoundIcon,
   MegaphoneIcon,
@@ -304,6 +305,8 @@ export function AdminPage({
   const [aiTestResult, setAiTestResult] = useState<LlmTestResult | null>(null);
   const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
   const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
+  const [aiSectionOpen, setAiSectionOpen] = useState(false);
+  const [oauthSectionOpen, setOAuthSectionOpen] = useState(false);
   const [members, setMembers] = useState<AdminMember[]>([]);
   const [bots, setBots] = useState<AdminBotAccount[]>([]);
   const [botEvents, setBotEvents] = useState<AdminBotEvent[]>([]);
@@ -1101,27 +1104,37 @@ export function AdminPage({
               <div className="flex flex-col gap-4">
                 <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} onUploaded={onSaved} />
                 {aiOverview && aiForm ? (
-                  <details>
-                    <summary className="product-surface flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                  <div className="product-surface overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setAiSectionOpen((open) => !open)}
+                      aria-expanded={aiSectionOpen}
+                      className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
+                    >
                       <div>
                         <p className="text-base font-semibold text-slate-950">AI 实验功能</p>
                         <p className="mt-1 text-sm text-slate-600">校园建模、文本分析规则和 LLM 配置。</p>
                       </div>
-                      <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
-                    </summary>
-                    <div className="mt-3">
-                      <AdminAiSettingsPanel
-                        overview={aiOverview}
-                        form={aiForm}
-                        busy={busy}
-                        testing={aiTesting}
-                        testResult={aiTestResult}
-                        onFormChange={setAiForm}
-                        onSave={() => void saveAiSettings()}
-                        onTest={() => void testAiSettings()}
-                      />
-                    </div>
-                  </details>
+                      <div className="flex items-center gap-2">
+                        <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
+                        <ChevronDownIcon className={`size-4 shrink-0 text-slate-400 transition-transform ${aiSectionOpen ? "rotate-180" : ""}`} />
+                      </div>
+                    </button>
+                    {aiSectionOpen ? (
+                      <div className="border-t border-slate-200 p-3">
+                        <AdminAiSettingsPanel
+                          overview={aiOverview}
+                          form={aiForm}
+                          busy={busy}
+                          testing={aiTesting}
+                          testResult={aiTestResult}
+                          onFormChange={setAiForm}
+                          onSave={() => void saveAiSettings()}
+                          onTest={() => void testAiSettings()}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 ) : (
                   <Card className="rounded-md border-slate-200 bg-white shadow-none">
                     <CardContent className="p-4">
@@ -1129,28 +1142,38 @@ export function AdminPage({
                     </CardContent>
                   </Card>
                 )}
-                <details>
-                  <summary className="product-surface flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                <div className="product-surface overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setOAuthSectionOpen((open) => !open)}
+                    aria-expanded={oauthSectionOpen}
+                    className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
+                  >
                     <div>
                       <p className="text-base font-semibold text-slate-950">OAuth 服务</p>
                       <p className="mt-1 text-sm text-slate-600">第三方应用授权、令牌有效期和应用密钥。</p>
                     </div>
-                    <Badge className="rounded-full bg-slate-100 text-slate-600 shadow-none">按需展开</Badge>
-                  </summary>
-                  <div className="mt-3">
-                    <OAuthPanel
-                      settings={oauthSettings}
-                      clients={oauthClients}
-                      busy={busy}
-                      loading={adminLoading}
-                      onSaveSettings={saveOAuthSettings}
-                      onCreateClient={(clientForm) => createOAuthClient(clientForm)}
-                      onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
-                      onRotateSecret={(id) => rotateOAuthClientSecret(id)}
-                      onDeleteClient={(id) => deleteOAuthClient(id)}
-                    />
-                  </div>
-                </details>
+                    <div className="flex items-center gap-2">
+                      <Badge className="rounded-full bg-slate-100 text-slate-600 shadow-none">按需展开</Badge>
+                      <ChevronDownIcon className={`size-4 shrink-0 text-slate-400 transition-transform ${oauthSectionOpen ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+                  {oauthSectionOpen ? (
+                    <div className="border-t border-slate-200 p-3">
+                      <OAuthPanel
+                        settings={oauthSettings}
+                        clients={oauthClients}
+                        busy={busy}
+                        loading={adminLoading}
+                        onSaveSettings={saveOAuthSettings}
+                        onCreateClient={(clientForm) => createOAuthClient(clientForm)}
+                        onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
+                        onRotateSecret={(id) => rotateOAuthClientSecret(id)}
+                        onDeleteClient={(id) => deleteOAuthClient(id)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </TabsContent>
 
