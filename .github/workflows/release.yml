@@ -114,7 +114,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # 仅在打了 tag 时创建/更新 GitHub Release；手动 dispatch 只产出 artifacts。
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # 用 always() + 下方 success 校验,使「部分平台因 runner 排队/环境失败」时,
+    # 仍能用已成功构建的产物发布 Release(scarce 的 macos-13 不该卡住整个发布)。
+    if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -122,13 +124,20 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: List artifacts
+      - name: List artifacts & require at least one binary
         shell: bash
         run: |
           find dist -type f | sort
           echo "---- 合并所有 sha256 为一个 SHA256SUMS ----"
           (cd dist && cat *.sha256 2>/dev/null > SHA256SUMS || true)
           cat dist/SHA256SUMS 2>/dev/null || echo "(no sha256 files)"
+          # 至少要有一个可执行文件,否则没什么可发布的
+          count="$(find dist -type f -name 'campux-*' ! -name '*.sha256' | wc -l | tr -d ' ')"
+          echo "binary artifacts: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::没有任何平台构建成功,中止发布"
+            exit 1
+          fi
 
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
