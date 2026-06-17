@@ -8,6 +8,10 @@ name: Release Binaries
 # 产物（每个目标）：
 #   - campux-<os>-<arch>[.exe]          自包含可执行文件
 #   - campux-<os>-<arch>[.exe].sha256   校验和
+#
+# 关于 darwin-x64（macOS Intel / macos-13）：该 runner 在本账号下经常长时间排队/缺货。
+# 为了不让它卡住整条发布，它被拆成一个**独立、非必需**的 job（release 不 `needs` 它）。
+# 它若赶上构建完会被一并发布；若排队/失败，其余 4 个平台照常发布。
 on:
   push:
     tags:
@@ -23,39 +27,16 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    # 软失败目标（如稀缺的 macos-13）出错不计为 job 失败，不阻塞 release 收尾。
-    continue-on-error: ${{ matrix.soft_fail == true }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            runner: ubuntu-latest
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-          - target: darwin-x64
-            runner: macos-13
-            # macos-13（Intel）runner 经常长时间排队/缺货；设为非阻塞，
-            # 它即便失败/超时也不拖垮其余平台的发布（release 用 always() 收尾）。
-            soft_fail: true
-          - target: darwin-arm64
-            runner: macos-14
-          - target: windows-x64
-            runner: windows-latest
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v4
         with:
-          bun-version: 1.3.12
-
-      - name: Resolve version
-        id: ver
+          fetch-depth: 0
+      - id: ver
         shell: bash
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -68,60 +49,50 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $version"
 
-      - name: Install dependencies
-        shell: bash
-        run: bun install --frozen-lockfile
-
-      - name: Build standalone binary
-        shell: bash
-        env:
-          CAMPUX_BUILD_VERSION: ${{ steps.ver.outputs.version }}
-        run: bun run scripts/build-release.ts --version "${{ steps.ver.outputs.version }}" --out release
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+  # ── 必需平台：全部成功才算 release 的前置就绪 ─────────────────
+  build:
+    name: Build ${{ matrix.target }}
+    needs: resolve-version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin-arm64
+            runner: macos-14
+          - target: windows-x64
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-binary
         with:
-          name: campux-${{ matrix.target }}
-          path: |
-            release/campux-${{ matrix.target }}*
-          if-no-files-found: error
-          retention-days: 7
+          target: ${{ matrix.target }}
+          version: ${{ needs.resolve-version.outputs.version }}
 
-      - name: Smoke test (binary is executable & boots)
-        # 仅在 Unix 平台跑（bash 后台进程方式）；纯属附加校验，放在产物上传之后，
-        # 即便这步因环境差异失败，已构建/上传的二进制也不受影响。
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          # 无有效 DATABASE_URL：跳过迁移，期望 server 因连不上库而退出/卡住——
-          # 但「能打印 standalone 启动日志」即证明二进制可执行、原生插件已就绪。
-          # 不用 GNU `timeout`（macOS 默认没有），改用后台进程 + sleep + kill。
-          set +e
-          bin="./release/campux-${{ matrix.target }}"
-          CAMPUX_SKIP_AUTO_MIGRATE=1 CAMPUX_SERVER_PORT=18999 \
-            DATABASE_URL='postgresql://invalid:***@127.0.0.1:1/x' \
-            "$bin" > smoke.log 2>&1 &
-          pid=$!
-          sleep 8
-          kill "$pid" 2>/dev/null
-          wait "$pid" 2>/dev/null
-          echo "---- smoke.log ----"
-          head -40 smoke.log
-          if grep -q "campux standalone starting" smoke.log; then
-            echo "SMOKE_OK"
-          else
-            echo "SMOKE_FAIL"
-            exit 1
-          fi
+  # ── darwin-x64（Intel）：独立、非必需，runner 稀缺不阻塞发布 ──
+  build-darwin-x64:
+    name: Build darwin-x64 (best-effort)
+    needs: resolve-version
+    runs-on: macos-13
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-binary
+        with:
+          target: darwin-x64
+          version: ${{ needs.resolve-version.outputs.version }}
 
   release:
     name: Publish Release
+    # 只 `needs` 必需平台；darwin-x64 不在其中，所以它排队/失败都不会拖住发布。
+    # download-artifact 会把已上传的 darwin-x64 产物（若赶上了）一并带进来。
     needs: build
     runs-on: ubuntu-latest
-    # 仅在打了 tag 时创建/更新 GitHub Release；手动 dispatch 只产出 artifacts。
-    # 用 always() + 下方 success 校验,使「部分平台因 runner 排队/环境失败」时,
-    # 仍能用已成功构建的产物发布 Release(scarce 的 macos-13 不该卡住整个发布)。
-    if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -136,7 +107,6 @@ jobs:
           echo "---- 合并所有 sha256 为一个 SHA256SUMS ----"
           (cd dist && cat *.sha256 2>/dev/null > SHA256SUMS || true)
           cat dist/SHA256SUMS 2>/dev/null || echo "(no sha256 files)"
-          # 至少要有一个可执行文件,否则没什么可发布的
           count="$(find dist -type f -name 'campux-*' ! -name '*.sha256' | wc -l | tr -d ' ')"
           echo "binary artifacts: $count"
           if [ "$count" -eq 0 ]; then
@@ -165,9 +135,12 @@ jobs:
             | macOS arm64 (Apple Silicon) | `campux-darwin-arm64` |
             | Windows x64 | `campux-windows-x64.exe` |
 
+            > macOS Intel（`darwin-x64`）由独立的 best-effort 任务构建，偶尔会因 runner 排队
+            > 未能赶上本次发布；如缺失可在 Actions 重跑或用 `bun run build:binary` 自行构建。
+
             ### 快速开始
             ```bash
-            export DATABASE_URL="postgresql://user:pass@host:5432/campux"
+            export DATABASE_URL="postgresql://user:***@host:5432/campux"
             chmod +x campux-linux-x64
             ./campux-linux-x64
             ```

@@ -1,0 +1,64 @@
+name: Build Campux standalone binary
+description: 构建并上传某平台的 Campux 单可执行文件（含可选 smoke test）
+
+inputs:
+  target:
+    description: "目标标识，如 linux-x64 / darwin-arm64 / windows-x64"
+    required: true
+  version:
+    description: "版本号（如 v1.2.3）"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.3.12
+
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    - name: Build standalone binary
+      shell: bash
+      env:
+        CAMPUX_BUILD_VERSION: ${{ inputs.version }}
+      run: bun run scripts/build-release.ts --version "${{ inputs.version }}" --out release
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: campux-${{ inputs.target }}
+        path: |
+          release/campux-${{ inputs.target }}*
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Smoke test (binary is executable & boots)
+      # 仅在 Unix 平台跑（bash 后台进程方式）；纯属附加校验，放在产物上传之后，
+      # 即便这步因环境差异失败，已构建/上传的二进制也不受影响。
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        # 无有效 DATABASE_URL：跳过迁移，期望 server 因连不上库而退出/卡住——
+        # 但「能打印 standalone 启动日志」即证明二进制可执行、原生插件已就绪。
+        # 不用 GNU `timeout`（macOS 默认没有），改用后台进程 + sleep + kill。
+        set +e
+        bin="./release/campux-${{ inputs.target }}"
+        CAMPUX_SKIP_AUTO_MIGRATE=1 CAMPUX_SERVER_PORT=18999 \
+          DATABASE_URL='postgresql://invalid:***@127.0.0.1:1/x' \
+          "$bin" > smoke.log 2>&1 &
+        pid=$!
+        sleep 8
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        echo "---- smoke.log ----"
+        head -40 smoke.log
+        if grep -q "campux standalone starting" smoke.log; then
+          echo "SMOKE_OK"
+        else
+          echo "SMOKE_FAIL"
+          exit 1
+        fi
