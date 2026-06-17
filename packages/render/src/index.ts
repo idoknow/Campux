@@ -1,8 +1,25 @@
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { chromium, type Browser } from "playwright-core";
+import type { Browser } from "playwright-core";
 import { marked, Tokens } from "marked";
+
+/**
+ * 惰性加载 playwright-core 的 chromium。
+ *
+ * playwright-core 是带原生/外部依赖的重模块，在 `bun build --compile` 单文件形态下，
+ * 顶层 `import { chromium } from "playwright-core"` 会被打包器在构建机上「定址」——
+ * 它运行时读取自身 package.json 用的是构建时的绝对路径（如 CI 的 /home/runner/work/...），
+ * 在用户机上不存在 → 启动即 `Cannot find module '.../playwright-core/package.json'` 崩溃。
+ *
+ * 改为惰性 `import("playwright-core")`：只有真正渲染配图时才载入。失败由 renderPostCard
+ * 的 try/catch 兜底（销毁 browser 并抛出，发布链路把渲染当可选雕花跳过），单文件 server
+ * 因此能正常启动。Docker 形态下 playwright-core 正常安装，行为不变。
+ */
+async function loadChromium() {
+  const mod = await import("playwright-core");
+  return mod.chromium;
+}
 
 // ── 颜色映射 ──────────────────────────────────────────
 // CampuxNext 前端用语义名称传 bgColor/textColor，这里转成实际 CSS 值。
@@ -217,10 +234,14 @@ async function renderPostCardInner(input: RenderPostCardInput): Promise<Uint8Arr
 }
 
 async function getBrowser() {
-  browserPromise ??= chromium.launch({
-    executablePath: findChromiumExecutable(),
-    headless: true,
-  });
+  if (!browserPromise) {
+    browserPromise = loadChromium().then((chromium) =>
+      chromium.launch({
+        executablePath: findChromiumExecutable(),
+        headless: true,
+      }),
+    );
+  }
   return browserPromise;
 }
 
