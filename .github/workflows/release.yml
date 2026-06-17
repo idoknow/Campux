@@ -26,6 +26,8 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    # 软失败目标（如稀缺的 macos-13）出错不计为 job 失败，不阻塞 release 收尾。
+    continue-on-error: ${{ matrix.soft_fail == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +38,9 @@ jobs:
             runner: ubuntu-24.04-arm
           - target: darwin-x64
             runner: macos-13
+            # macos-13（Intel）runner 经常长时间排队/缺货；设为非阻塞，
+            # 它即便失败/超时也不拖垮其余平台的发布（release 用 always() 收尾）。
+            soft_fail: true
           - target: darwin-arm64
             runner: macos-14
           - target: windows-x64
