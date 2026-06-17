@@ -11,6 +11,10 @@ function resolveProjectRoot(): string {
 }
 
 function resolveSvgDir(): string {
+  // standalone 单文件形态下，svg 头像被解包到临时目录并通过 CAMPUX_SVG_DIR 指定。
+  if (process.env.CAMPUX_SVG_DIR) {
+    return process.env.CAMPUX_SVG_DIR;
+  }
   return path.join(resolveProjectRoot(), "svg");
 }
 

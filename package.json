@@ -12,6 +12,8 @@
     "dev:server": "bun --cwd apps/server dev",
     "dev:dash": "bun --cwd apps/dash dev",
     "build": "bun --cwd apps/web build && bun --cwd apps/server build",
+    "build:binary": "bun run scripts/build-release.ts",
+    "generate:embedded-assets": "bun run scripts/generate-embedded-assets.ts",
     "typecheck": "bun --cwd apps/web typecheck && bun --cwd apps/server typecheck && bun --cwd apps/dash typecheck",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",

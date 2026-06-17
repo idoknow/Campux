@@ -2,6 +2,11 @@
 
 Campux 的生产镜像由 GitHub Actions 构建并推送到 Docker Hub。每个分支会以分支名作为镜像 tag。
 
+::: tip 不想用 Docker？
+每个 Release 还提供**自包含的单可执行文件**，下载即跑，只需一个 PostgreSQL。
+见 [单文件部署](/admin/standalone-binary)。
+:::
+
 ## Docker 镜像
 
 镜像组织：

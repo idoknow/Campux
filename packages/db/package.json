@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/migrate": "./src/migrate.ts"
   },
   "scripts": {
     "prisma": "prisma"

@@ -48,3 +48,7 @@ legacy/data/
 
 # 自定义字体（雕花「字体选择」功能）默认不入库，避免数十 MB TTF 膨胀 git 历史
 /font/
+
+# 单文件发布产物 & 编译期生成的内嵌资源清单（由 scripts/build-release.ts 现生成）
+/release/
+apps/server/src/standalone/embedded-assets.generated.ts

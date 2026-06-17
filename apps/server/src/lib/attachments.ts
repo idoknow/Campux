@@ -1,10 +1,35 @@
 import { Buffer } from "node:buffer";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import sharp from "sharp";
+import type Sharp from "sharp";
 import type { CampuxConfig } from "@campux/config";
 import { createS3Client } from "@campux/integrations";
 import { sanitizeUploadExtension } from "../routes/posts";
+
+/**
+ * 惰性加载 sharp。
+ *
+ * sharp 是原生插件，在 `bun build --compile` 单文件形态下，其 `.node` 绑定通过运行时
+ * `require("@img/sharp-<platform>/sharp.node")` 解析——这个路径无法被打包追踪，所以
+ * 在顶层 `import sharp from "sharp"` 会让整个模块（乃至 server 启动）在 sharp 缺失时崩溃。
+ *
+ * 改为惰性按需加载：只有真正压缩图片时才尝试载入；载入失败由上层 try/catch 兜底返回原图，
+ * 与既有「压缩失败用原图」的降级契约一致。Docker / 源码形态下 sharp 正常安装，行为不变。
+ */
+let sharpModulePromise: Promise<typeof Sharp | null> | null = null;
+async function loadSharp(): Promise<typeof Sharp | null> {
+  if (!sharpModulePromise) {
+    sharpModulePromise = import("sharp")
+      .then((mod) => (mod.default ?? mod) as unknown as typeof Sharp)
+      .catch((error) => {
+        console.warn("sharp 原生模块加载失败，图片压缩将被跳过（返回原图）", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
+  }
+  return sharpModulePromise;
+}
 
 export type ImageCompressionConfig = {
   enabled: boolean;
@@ -42,6 +67,11 @@ export async function compressImageBuffer(
   }
 
   try {
+    const sharp = await loadSharp();
+    if (!sharp) {
+      // sharp 不可用（单文件形态下原生库缺失）——降级返回原图。
+      return buffer;
+    }
     let image = sharp(buffer, { failOn: "none" }).rotate();
 
     // Resize if needed
