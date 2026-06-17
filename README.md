@@ -81,6 +81,24 @@ docker compose up -d
 
 </details>
 
+<details>
+<summary>单文件可执行（无需 Docker，只要 PostgreSQL）</summary>
+
+不想装 Docker / Node / Bun 工具链时，可以直接下载[每个 Release](https://github.com/idoknow/Campux/releases) 附带的**自包含单可执行文件**。它内嵌了前端产物、SVG 头像、全部数据库迁移、Prisma 查询引擎与原生依赖，运行时**只需要一个可达的 PostgreSQL**。
+
+```bash
+# 选择对应平台：campux-{linux,darwin,windows}-{x64,arm64}
+chmod +x campux-linux-x64
+export DATABASE_URL="postgresql://user:password@127.0.0.1:5432/campux"
+./campux-linux-x64
+```
+
+启动时会自动执行内嵌的数据库迁移（与 `prisma migrate deploy` 互换，已迁移过的库会跳过），然后在 `:8989` 提供服务，浏览器打开即进入初始化向导。
+
+可选的图片压缩 / 说说配图渲染分别需要系统级 `sharp` 库与 Chromium，缺失时自动降级、不影响核心投稿→审核→发布链路。完整说明见 [单文件部署](https://docs.campux.top/admin/standalone-binary)。
+
+</details>
+
 ## 参与开发
 
 <details>
