@@ -73,20 +73,6 @@ jobs:
           CAMPUX_BUILD_VERSION: ${{ steps.ver.outputs.version }}
         run: bun run scripts/build-release.ts --version "${{ steps.ver.outputs.version }}" --out release
 
-      - name: Smoke test (binary starts & reports version)
-        if: matrix.target == 'linux-x64' || matrix.target == 'linux-arm64' || startsWith(matrix.target, 'darwin')
-        shell: bash
-        run: |
-          # 无 DATABASE_URL 时跳过迁移，期望 server 因缺库连接失败而退出——
-          # 但「能跑到迁移/启动逻辑」即证明二进制本身可执行、原生插件已就绪。
-          set +e
-          out="$(CAMPUX_SKIP_AUTO_MIGRATE=1 CAMPUX_SERVER_PORT=18999 \
-                 DATABASE_URL='postgresql://invalid:invalid@127.0.0.1:1/x' \
-                 timeout 12 ./release/campux-${{ matrix.target }} 2>&1)"
-          echo "$out" | head -40
-          # 只要看到 standalone 启动日志即说明二进制可执行（数据库连接失败是预期的）
-          echo "$out" | grep -q "campux standalone starting" && echo "SMOKE_OK" || { echo "SMOKE_FAIL"; exit 1; }
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -95,6 +81,33 @@ jobs:
             release/campux-${{ matrix.target }}*
           if-no-files-found: error
           retention-days: 7
+
+      - name: Smoke test (binary is executable & boots)
+        # 仅在 Unix 平台跑（bash 后台进程方式）；纯属附加校验，放在产物上传之后，
+        # 即便这步因环境差异失败，已构建/上传的二进制也不受影响。
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # 无有效 DATABASE_URL：跳过迁移，期望 server 因连不上库而退出/卡住——
+          # 但「能打印 standalone 启动日志」即证明二进制可执行、原生插件已就绪。
+          # 不用 GNU `timeout`（macOS 默认没有），改用后台进程 + sleep + kill。
+          set +e
+          bin="./release/campux-${{ matrix.target }}"
+          CAMPUX_SKIP_AUTO_MIGRATE=1 CAMPUX_SERVER_PORT=18999 \
+            DATABASE_URL='postgresql://invalid:***@127.0.0.1:1/x' \
+            "$bin" > smoke.log 2>&1 &
+          pid=$!
+          sleep 8
+          kill "$pid" 2>/dev/null
+          wait "$pid" 2>/dev/null
+          echo "---- smoke.log ----"
+          head -40 smoke.log
+          if grep -q "campux standalone starting" smoke.log; then
+            echo "SMOKE_OK"
+          else
+            echo "SMOKE_FAIL"
+            exit 1
+          fi
 
   release:
     name: Publish Release
