@@ -9,6 +9,7 @@
  */
 
 import type { FastifyBaseLogger } from "fastify";
+import { supportsAdvisoryLock } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { readTenantPublishMode } from "../lib/tenant-metadata";
 import { enqueueBatchPublishFanout } from "./publishing";
@@ -93,7 +94,10 @@ export function decideFlush(prevTotal: number, postImages: number, min: number, 
 /** 每租户的批量操作用 advisory lock 串行化，避免并发审核把同一条稿件塞进两个批次。 */
 async function lockTenantBatch<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
+    // PG 用会话级建议锁串行化；SQLite 单写者天然串行，无需（也不支持）建议锁。
+    if (supportsAdvisoryLock) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
+    }
     return fn();
   });
 }

@@ -1,13 +1,11 @@
 import { Buffer } from "node:buffer";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
-import { Upload } from "@aws-sdk/lib-storage";
-import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { FastifyInstance } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { Prisma } from "@campux/db";
-import { createS3Client } from "@campux/integrations";
+import { TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
+import { getStorageDriver } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
@@ -180,53 +178,8 @@ function isUploadTooLargeError(error: unknown) {
   return code === "FST_REQ_FILE_TOO_LARGE" || error.message.includes("size limit exceeded") || error.message.includes("File size limit exceeded");
 }
 
-async function ensureBucket(config: CampuxConfig) {
-  const s3 = createS3Client(config);
-  try {
-    await s3.send(new HeadBucketCommand({ Bucket: config.s3.bucket }));
-  } catch {
-    await s3.send(new CreateBucketCommand({ Bucket: config.s3.bucket }));
-  }
-
-  return s3;
-}
-
-async function uploadImageBytes({
-  config,
-  tenantId,
-  fileName,
-  contentType,
-  body,
-}: {
-  config: CampuxConfig;
-  tenantId: string;
-  fileName: string;
-  contentType: string;
-  body: Buffer | Transform;
-}) {
-  const extension = sanitizeUploadExtension(fileName);
-  const key = `tenants/${tenantId}/uploads/${crypto.randomUUID()}.${extension}`;
-  const s3 = await ensureBucket(config);
-
-  await new Upload({
-    client: s3,
-    params: {
-      Bucket: config.s3.bucket,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    },
-  }).done();
-
-  return {
-    key,
-    url: `/api/uploads/post-image?key=${encodeURIComponent(key)}`,
-    fileName,
-  };
-}
-
 function isTransactionSerializationFailure(value: unknown) {
-  return value instanceof Prisma.PrismaClientKnownRequestError && value.code === "P2034";
+  return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -241,19 +194,17 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       return reply.code(403).send({ message: "没有访问该图片的权限" });
     }
 
-    const s3 = await ensureBucket(config);
-    const object = await s3.send(
-      new GetObjectCommand({
-        Bucket: config.s3.bucket,
-        Key: query.key,
-      }),
-    );
+    const storage = getStorageDriver(config);
+    const object = await storage.getBytes(query.key);
+    if (!object) {
+      return reply.code(404).send({ message: "图片不存在" });
+    }
 
-    if (object.ContentType) {
-      reply.header("Content-Type", object.ContentType);
+    if (object.contentType) {
+      reply.header("Content-Type", object.contentType);
     }
     reply.header("Cache-Control", "private, max-age=3600");
-    return reply.send(object.Body);
+    return reply.send(Buffer.from(object.bytes));
   });
 
   app.post("/api/posts", async (request, reply) => {
@@ -542,7 +493,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                 },
               });
             },
-            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+            { isolationLevel: TransactionIsolationLevel.Serializable },
           );
           break;
         } catch (caught) {

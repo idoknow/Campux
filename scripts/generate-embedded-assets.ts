@@ -24,6 +24,7 @@ const outDir = resolve(repoRoot, "apps/server/src/standalone");
 const webDistDir = resolve(repoRoot, "apps/web/dist");
 const svgDir = resolve(repoRoot, "svg");
 const migrationsDir = resolve(repoRoot, "packages/db/prisma/migrations");
+const sqliteBaselinePath = resolve(repoRoot, "packages/db/prisma/sqlite-baseline.sql");
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -116,6 +117,43 @@ migrations.forEach((m, idx) => {
 });
 lines.push("");
 
+// Prisma 查询引擎发现（.node，平台相关）。
+// bun --compile 不会自动内嵌 Prisma 的原生查询引擎；它运行时按「构建机绝对路径」去找，
+// 在用户机上不存在 → 崩溃。这里把当前平台的引擎文件显式内嵌，运行时解包并用
+// PRISMA_QUERY_ENGINE_LIBRARY 指过去（见 standalone/entry.ts）。引擎与 provider 无关，
+// 同一份 .node 同时服务 postgres 与 sqlite。从 sqlite 生成的 client 目录取（postgres
+// client 同名文件字节一致）。
+const sqliteClientDir = resolve(repoRoot, "packages/db/generated/sqlite");
+let queryEnginePath: string | null = null;
+let queryEngineName: string | null = null;
+try {
+  const engineFile = readdirSync(sqliteClientDir).find(
+    (n) => n.startsWith("libquery_engine") && n.endsWith(".node"),
+  );
+  if (engineFile) {
+    queryEnginePath = resolve(sqliteClientDir, engineFile);
+    queryEngineName = engineFile;
+  }
+} catch {
+  // sqlite client 未生成——构建脚本会先生成；这里宽容处理。
+}
+if (!queryEnginePath || !queryEngineName) {
+  console.error(
+    "[generate-embedded-assets] 未找到 Prisma 查询引擎 (.node)，请先运行 `bun run db:sqlite:generate`。",
+  );
+  process.exit(1);
+}
+
+// SQLite baseline 建库脚本（单文件 sqlite 形态用）。
+lines.push(
+  `import sqliteBaselineSql from ${JSON.stringify(importSpecifier(sqliteBaselinePath))} with { type: "text" };`,
+);
+// Prisma 查询引擎（.node，平台相关；运行时解包 + PRISMA_QUERY_ENGINE_LIBRARY 指向）。
+lines.push(
+  `import queryEngineFile from ${JSON.stringify(importSpecifier(queryEnginePath))} with { type: "file" };`,
+);
+lines.push("");
+
 lines.push("/** 运行时需要写到磁盘的内嵌文件：file 为 Bun 内嵌文件路径，可用 Bun.file() 读取。 */");
 lines.push("export interface EmbeddedFileEntry {");
 lines.push("  /** 相对路径（含子目录），如 `assets/index-xxx.js`。 */");
@@ -136,10 +174,20 @@ lines.push("export const embeddedMigrations: { name: string; sql: string }[] = [
 lines.push(...migImports);
 lines.push("];");
 lines.push("");
+lines.push("/** SQLite baseline 建库脚本（单文件 sqlite 形态用，内嵌为文本）。 */");
+lines.push("export const embeddedSqliteBaselineSql: string = sqliteBaselineSql;");
+lines.push("");
+lines.push("/** 内嵌的 Prisma 查询引擎（.node）：name 为文件名，file 为 Bun 内嵌文件句柄路径。 */");
+lines.push("export const embeddedQueryEngine: { name: string; file: string } = {");
+lines.push(`  name: ${JSON.stringify(queryEngineName)},`);
+lines.push("  file: queryEngineFile,");
+lines.push("};");
+lines.push("");
 
 await Bun.write(outFile, lines.join("\n"));
 
 console.log(
   `[generate-embedded-assets] 已生成 ${relative(repoRoot, outFile)}：` +
-    `${webFiles.length} 个前端文件、${svgFiles.length} 个 SVG、${migrations.length} 个迁移。`,
+    `${webFiles.length} 个前端文件、${svgFiles.length} 个 SVG、${migrations.length} 个迁移、` +
+    `1 个 sqlite baseline、1 个 Prisma 引擎 (${queryEngineName})。`,
 );

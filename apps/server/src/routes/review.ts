@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PostStatus, Prisma } from "@campux/db";
+import { insensitiveContains } from "@campux/db";
 import { z } from "zod";
 import { requireReadyTenant } from "../lib/auth";
 import { toPostListItem, toPostTimeline } from "../lib/posts";
@@ -49,19 +50,13 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         ? {
             OR: [
               {
-                text: {
-                  contains: query.q,
-                  mode: "insensitive" as const,
-                },
+                text: insensitiveContains(query.q),
               },
               ...(displayId === null ? [] : [{ displayId }]),
               ...(qqUin === null ? [] : [{ author: { qqUin } }]),
               {
                 author: {
-                  displayName: {
-                    contains: query.q,
-                    mode: "insensitive" as const,
-                  },
+                  displayName: insensitiveContains(query.q),
                 },
               },
             ],

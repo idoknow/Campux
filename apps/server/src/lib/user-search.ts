@@ -1,4 +1,4 @@
-import { Prisma } from "@campux/db";
+import { Prisma, dbProvider, insensitiveContains } from "@campux/db";
 import { prisma } from "./prisma";
 
 export function normalizeUserSearchKeyword(input: string | null | undefined) {
@@ -11,29 +11,32 @@ export async function buildUserContainsSearch(keyword: string): Promise<Prisma.U
     return null;
   }
 
+  // qqUin 是 BigInt 列，按「数字子串」匹配需要把它转成文本再 LIKE。
+  // PG 用 `"qqUin"::text`，SQLite 用 `CAST("qqUin" AS TEXT)`——两者语法不同。
   const qqMatches = /^\d+$/.test(normalized)
-    ? await prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT "id"
-        FROM "User"
-        WHERE "qqUin"::text LIKE ${`%${normalized}%`}
-        LIMIT 500
-      `
+    ? dbProvider === "postgresql"
+      ? await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "User"
+          WHERE "qqUin"::text LIKE ${`%${normalized}%`}
+          LIMIT 500
+        `
+      : await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "User"
+          WHERE CAST("qqUin" AS TEXT) LIKE ${`%${normalized}%`}
+          LIMIT 500
+        `
     : [];
 
   return {
     OR: [
       {
-        id: {
-          contains: normalized,
-          mode: "insensitive",
-        },
+        id: insensitiveContains(normalized),
       },
       ...(qqMatches.length > 0 ? [{ id: { in: qqMatches.map((user) => user.id) } }] : []),
       {
-        displayName: {
-          contains: normalized,
-          mode: "insensitive",
-        },
+        displayName: insensitiveContains(normalized),
       },
     ],
   };

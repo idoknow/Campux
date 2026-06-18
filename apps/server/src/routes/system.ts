@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { Prisma } from "@campux/db";
+import { Prisma, createManyDedup } from "@campux/db";
 import { z } from "zod";
 import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
@@ -333,14 +333,15 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
 
       const uniqueAdminUserIds = [...new Set([...adminUserIds, context.user.id])];
       if (uniqueAdminUserIds.length > 0) {
-        await tx.tenantMembership.createMany({
-          data: uniqueAdminUserIds.map((userId) => ({
+        await createManyDedup(
+          tx.tenantMembership,
+          uniqueAdminUserIds.map((userId) => ({
             tenantId: created.id,
             userId,
-            role: "admin",
+            role: "admin" as const,
           })),
-          skipDuplicates: true,
-        });
+          (row) => `${row.tenantId}:${row.userId}`,
+        );
       }
 
       if (body.botQqUin) {

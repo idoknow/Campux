@@ -74,19 +74,23 @@ async function main() {
   if (existsSync(outFile)) rmSync(outFile);
 
   // 1) 前端构建
-  console.log("  [1/5] 构建前端 (bun --cwd apps/web build)…");
+  console.log("  [1/6] 构建前端 (bun --cwd apps/web build)…");
   await $`bun --cwd ${join(repoRoot, "apps/web")} build`.cwd(repoRoot);
 
-  // 2) Prisma client 生成（确保内嵌的引擎/类型为最新）
-  console.log("  [2/5] 生成 Prisma Client (bun run db:generate)…");
+  // 2) Prisma client 生成（postgres，确保内嵌的类型/引擎为最新）
+  console.log("  [2/6] 生成 Prisma Client (bun run db:generate)…");
   await $`bun --cwd ${join(repoRoot, "packages/db")} prisma generate`.cwd(repoRoot);
 
-  // 3) 生成内嵌资源清单（前端产物 + SVG + 迁移）
-  console.log("  [3/5] 生成内嵌资源清单…");
+  // 3) 生成 SQLite schema + client + baseline DDL（单文件默认走 sqlite）
+  console.log("  [3/6] 生成 SQLite client + baseline (db:sqlite:generate)…");
+  await $`bun ${join(repoRoot, "scripts/generate-sqlite-schema.ts")}`.cwd(repoRoot);
+
+  // 4) 生成内嵌资源清单（前端产物 + SVG + 迁移 + sqlite baseline + Prisma 引擎）
+  console.log("  [4/6] 生成内嵌资源清单…");
   await $`bun ${join(repoRoot, "scripts/generate-embedded-assets.ts")}`.cwd(repoRoot);
 
-  // 4) 编译单文件
-  console.log("  [4/5] 编译单可执行文件 (bun build --compile)…");
+  // 5) 编译单文件
+  console.log("  [5/6] 编译单可执行文件 (bun build --compile)…");
   const entry = join(repoRoot, "apps/server/src/standalone/entry.ts");
   // chromium-bidi 是 playwright 的可选 BiDi 传输，未安装；外部化避免打包解析失败。
   // 原生插件（prisma 引擎 / sharp / argon2）让 bun 自动内嵌（已验证可用）。
@@ -116,8 +120,8 @@ async function main() {
     process.exit(code);
   }
 
-  // 5) 校验和
-  console.log("  [5/5] 计算 SHA256 校验和…");
+  // 6) 校验和
+  console.log("  [6/6] 计算 SHA256 校验和…");
   const bytes = await Bun.file(outFile).arrayBuffer();
   const sha = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
   const shaFile = `${outFile}.sha256`;

@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./src/migrate": "./src/migrate.ts"
+    "./src/migrate": "./src/migrate.ts",
+    "./src/migrate-sqlite": "./src/migrate-sqlite.ts"
   },
   "scripts": {
     "prisma": "prisma"

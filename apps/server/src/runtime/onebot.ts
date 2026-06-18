@@ -1,9 +1,8 @@
 import { Buffer } from "node:buffer";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { createS3Client, setQZoneEmotionPrivate } from "@campux/integrations";
-import { Prisma } from "@campux/db";
+import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
+import { TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
 import {
   BotWorkflowError,
   findEnabledBot,
@@ -1993,7 +1992,7 @@ export class OneBotRuntime {
               },
             });
           },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          { isolationLevel: TransactionIsolationLevel.Serializable },
         );
         break;
       } catch (error) {
@@ -3168,7 +3167,7 @@ export class OneBotRuntime {
     if (!this.config || !Array.isArray(attachments)) {
       return [];
     }
-    const s3 = createS3Client(this.config);
+    const storage = getStorageDriver(this.config);
     const segments = [];
     for (const attachment of attachments) {
       const candidate = attachment as any;
@@ -3176,18 +3175,12 @@ export class OneBotRuntime {
         continue;
       }
       try {
-        const object = await s3.send(
-          new GetObjectCommand({
-            Bucket: this.config.s3.bucket,
-            Key: candidate.key,
-          }),
-        );
-        const body = object.Body;
-        if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
+        const object = await storage.getBytes(candidate.key);
+        if (!object) {
           continue;
         }
-        const bytes = await body.transformToByteArray();
-        const contentType = object.ContentType ?? inferImageContentType(candidate.fileName ?? candidate.key);
+        const bytes = object.bytes;
+        const contentType = object.contentType ?? inferImageContentType(candidate.fileName ?? candidate.key);
         segments.push({
           type: "image",
           data: {
@@ -3436,7 +3429,7 @@ function formatQZoneAutoRefreshReason(reason: string) {
 }
 
 function isTransactionSerializationFailure(value: unknown) {
-  return value instanceof Prisma.PrismaClientKnownRequestError && value.code === "P2034";
+  return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
 function normalizeImageFileName(value: unknown) {

@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { Prisma } from "@campux/db";
+import { Prisma, DbNull, createManyDedup } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { decryptJson, encryptJson } from "../lib/secret-json";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
@@ -203,10 +203,10 @@ export async function updateTenantAiSettings(
   const existing = await prisma.tenantAiSettings.findUnique({ where: { tenantId } });
   const apiKeySecret =
     input.clearApiKey
-      ? Prisma.DbNull
+      ? DbNull
       : input.apiKey && input.apiKey.trim().length > 0
         ? encryptJson({ apiKey: input.apiKey.trim() })
-        : existing?.apiKeySecret ?? Prisma.DbNull;
+        : existing?.apiKeySecret ?? DbNull;
 
   await prisma.tenantAiSettings.upsert({
     where: { tenantId },
@@ -433,16 +433,17 @@ export async function createAiBackfillBatch(queue: RuntimeQueue, tenantId: strin
     });
 
     if (posts.length > 0) {
-      await tx.aiBackfillItem.createMany({
-        data: posts.map((post) => ({
+      await createManyDedup(
+        tx.aiBackfillItem,
+        posts.map((post) => ({
           tenantId,
           batchId: created.id,
           postId: post.id,
-          status: "queued",
+          status: "queued" as const,
           nextRunAt: new Date(),
         })),
-        skipDuplicates: true,
-      });
+        (row) => `${row.batchId}:${row.postId}`,
+      );
     }
 
     await tx.aiBackfillLog.create({

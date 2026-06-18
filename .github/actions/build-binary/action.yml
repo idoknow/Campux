@@ -36,28 +36,35 @@ runs:
         if-no-files-found: error
         retention-days: 7
 
-    - name: Smoke test (binary is executable & boots)
-      # 仅在 Unix 平台跑（bash 后台进程方式）；纯属附加校验，放在产物上传之后，
-      # 即便这步因环境差异失败，已构建/上传的二进制也不受影响。
+    - name: Smoke test (binary boots on default SQLite + serves health)
+      # 仅在 Unix 平台跑（bash 后台进程方式）；放在产物上传之后，即便这步因环境差异
+      # 失败，已构建/上传的二进制也不受影响。
+      # 用「默认零依赖形态」(SQLite + 本地存储) 实跑：不配 DATABASE_URL/S3，期望二进制
+      # 自建 SQLite 库、跑内嵌 baseline、起 server 并对 /api/health 返回 200——这是对
+      # 「单文件零外部依赖」最强的端到端校验。
       if: runner.os != 'Windows'
       shell: bash
       run: |
-        # 无有效 DATABASE_URL：跳过迁移，期望 server 因连不上库而退出/卡住——
-        # 但「能打印 standalone 启动日志」即证明二进制可执行、原生插件已就绪。
-        # 不用 GNU `timeout`（macOS 默认没有），改用后台进程 + sleep + kill。
         set +e
         bin="./release/campux-${{ inputs.target }}"
-        CAMPUX_SKIP_AUTO_MIGRATE=1 CAMPUX_SERVER_PORT=18999 \
-          DATABASE_URL='postgresql://invalid:***@127.0.0.1:1/x' \
+        workdir="$(mktemp -d)"
+        CAMPUX_DATA_DIR="$workdir/data" \
+          CAMPUX_BOT_SESSION_SECRET=ci-smoke-secret \
+          CAMPUX_SERVER_PORT=18999 \
           "$bin" > smoke.log 2>&1 &
         pid=$!
-        sleep 8
+        ok=""
+        for i in $(seq 1 30); do
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18999/api/health 2>/dev/null)"
+          if [ "$code" = "200" ]; then ok="1"; break; fi
+          sleep 1
+        done
         kill "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
         echo "---- smoke.log ----"
-        head -40 smoke.log
-        if grep -q "campux standalone starting" smoke.log; then
-          echo "SMOKE_OK"
+        head -60 smoke.log
+        if [ -n "$ok" ] && [ -f "$workdir/data/campux.db" ]; then
+          echo "SMOKE_OK (health 200 + sqlite db created)"
         else
           echo "SMOKE_FAIL"
           exit 1

@@ -41,7 +41,7 @@
 - **OneBot v11 机器人接入**：墙号机器人私聊注册、重置密码、审核群命令、扫码登录、cookies 健康检查。
 - **两种部署模式**：自用单墙（隐藏多租户，开箱即用）或多租户运营平台（多个运营者自助开墙）。
 - **引导式初始化**：全新实例首次打开走「初始化向导」创建管理员，无需手动改库。
-- **自托管友好**：PostgreSQL + S3/MinIO + Docker Compose + 启动自动迁移。
+- **自托管友好**：单文件零依赖（SQLite + 本地存储）即可起跑，也支持 PostgreSQL + S3/MinIO + Docker Compose；启动自动建库 / 迁移。
 
 ## 匿名遥测
 
@@ -82,18 +82,17 @@ docker compose up -d
 </details>
 
 <details>
-<summary>单文件可执行（无需 Docker，只要 PostgreSQL）</summary>
+<summary>单文件可执行（零依赖，无需 Docker / PostgreSQL / MinIO）</summary>
 
-不想装 Docker / Node / Bun 工具链时，可以直接下载[每个 Release](https://github.com/idoknow/Campux/releases) 附带的**自包含单可执行文件**。它内嵌了前端产物、SVG 头像、全部数据库迁移、Prisma 查询引擎与原生依赖，运行时**只需要一个可达的 PostgreSQL**。
+不想装 Docker / Node / Bun，也不想单独部署 PostgreSQL 和 MinIO 时，可以直接下载[每个 Release](https://github.com/idoknow/Campux/releases) 附带的**自包含单可执行文件**。它内嵌了前端产物、SVG 头像、数据库建库脚本、Prisma 查询引擎与原生依赖。**默认零依赖**：直接运行就用内置 SQLite + 本地文件存储跑起来。
 
 ```bash
 # 选择对应平台：campux-{linux,darwin,windows}-{x64,arm64}
 chmod +x campux-linux-x64
-export DATABASE_URL="postgresql://user:password@127.0.0.1:5432/campux"
-./campux-linux-x64
+./campux-linux-x64        # 默认在 ./data 下创建 SQLite 库 + 本地存储，零外部依赖
 ```
 
-启动时会自动执行内嵌的数据库迁移（与 `prisma migrate deploy` 互换，已迁移过的库会跳过），然后在 `:8989` 提供服务，浏览器打开即进入初始化向导。
+需要更强的并发 / 独立备份时，设置 `DATABASE_URL=postgresql://...` 即切换到 PostgreSQL；再设 `CAMPUX_STORAGE_DRIVER=s3` + `S3_*` 即用对象存储。启动时自动建库 / 迁移（PG 形态与 `prisma migrate deploy` 互换，已迁移过的库会跳过），然后在 `:8989` 提供服务，浏览器打开即进入初始化向导。
 
 可选的图片压缩 / 说说配图渲染分别需要系统级 `sharp` 库与 Chromium，缺失时自动降级、不影响核心投稿→审核→发布链路。完整说明见 [单文件部署](https://docs.campux.top/admin/standalone-binary)。
 

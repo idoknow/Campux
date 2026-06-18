@@ -1,9 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
-import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import type { CampuxConfig } from "@campux/config";
-import { Prisma } from "@campux/db";
+import { Prisma, JsonNull, supportsAdvisoryLock } from "@campux/db";
 import type { PostStatus } from "@campux/db";
-import { createS3Client, publishToQZone, QZonePublishError } from "@campux/integrations";
+import { getStorageDriver, publishToQZone, QZonePublishError } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
@@ -377,7 +376,7 @@ export async function schedulePublishAttempt(options: {
         lastError: null,
         externalId: null,
         qzoneTid: null,
-        verbose: Prisma.JsonNull,
+        verbose: JsonNull,
         nextRunAt,
       },
       create: {
@@ -395,7 +394,10 @@ export async function schedulePublishAttempt(options: {
 }
 
 async function lockPublishSchedule(tx: Prisma.TransactionClient, tenantId: string, botAccountId: string) {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:publish:${tenantId}:${botAccountId}`})::bigint)`;
+  // PG 用会话级建议锁串行化每个 (tenant,bot) 的发布调度；SQLite 单写者天然串行，跳过。
+  if (supportsAdvisoryLock) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:publish:${tenantId}:${botAccountId}`})::bigint)`;
+  }
 }
 
 export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId: string, runAt = new Date()) {
@@ -494,7 +496,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     data: {
       status: "running",
       lastError: null,
-      verbose: Prisma.JsonNull,
+      verbose: JsonNull,
       nextRunAt: null,
     },
   });
@@ -704,7 +706,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     });
     const message = caught instanceof Error ? caught.message : "发布失败";
     const previousVerbose = caught instanceof QZonePublishError ? caught.verbose : null;
-    const verbose = caught instanceof QZonePublishError ? toInputJson(caught.verbose) : Prisma.JsonNull;
+    const verbose = caught instanceof QZonePublishError ? toInputJson(caught.verbose) : JsonNull;
     const needsLogin = isQZoneLoginRequiredError(message);
     if (needsLogin && attempt.publishTarget.qzoneRefreshMode === "protocol" && notifier?.refreshQZoneCookiesByProtocol && currentAttempt.attempt < maxPublishAttempts) {
       try {
@@ -1213,7 +1215,7 @@ async function loadPostImages(config: CampuxConfig, tenantId: string, attachment
   if (!Array.isArray(attachments)) {
     throw new Error("稿件图片数据格式错误：attachments 不是数组");
   }
-  const s3 = createS3Client(config);
+  const storage = getStorageDriver(config);
   const result = [];
   for (const attachment of attachments) {
     const candidate = attachment as any;
@@ -1222,34 +1224,16 @@ async function loadPostImages(config: CampuxConfig, tenantId: string, attachment
     }
     assertValidImageKey(candidate.key, tenantId);
 
-    const head = await s3.send(
-      new HeadObjectCommand({
-        Bucket: config.s3.bucket,
-        Key: candidate.key,
-      }),
-    );
-    if (head.ContentLength !== undefined && head.ContentLength > IMAGE_READ_SIZE_LIMIT) {
-      throw new Error(`图片 ${candidate.key} 超过 10MB 限制（${Math.round(head.ContentLength / 1024 / 1024)}MB）`);
+    const head = await storage.head(candidate.key);
+    if (head && head.size > IMAGE_READ_SIZE_LIMIT) {
+      throw new Error(`图片 ${candidate.key} 超过 10MB 限制（${Math.round(head.size / 1024 / 1024)}MB）`);
     }
 
-    const object = await s3.send(
-      new GetObjectCommand({
-        Bucket: config.s3.bucket,
-        Key: candidate.key,
-      }),
-    );
-    const body = object.Body;
-    if (!body || !("transformToByteArray" in body) || typeof body.transformToByteArray !== "function") {
-      throw new Error(`图片 ${candidate.key} 读取失败：对象 Body 不可读`);
+    const object = await storage.getBytes(candidate.key);
+    if (!object) {
+      throw new Error(`图片 ${candidate.key} 读取失败：对象不存在或不可读`);
     }
-
-    let bytes: Uint8Array;
-    try {
-      bytes = await body.transformToByteArray();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "未知错误";
-      throw new Error(`图片 ${candidate.key} 读取失败：${message}`);
-    }
+    const bytes = object.bytes;
 
     if (bytes.byteLength === 0) {
       throw new Error(`图片 ${candidate.key} 读取结果为空`);

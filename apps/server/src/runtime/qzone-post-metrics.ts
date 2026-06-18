@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { getQZoneEmotionComments, getQZoneEmotionMetrics, QZoneEmotionMetricsError } from "@campux/integrations";
 import type { QZoneComment } from "@campux/integrations";
-import { Prisma } from "@campux/db";
+import { Prisma, JsonNull } from "@campux/db";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
@@ -185,7 +185,7 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
         forwardCount: result.forwardCount,
         comments: commentsJson,
         lastError: null,
-        lastVerbose: Prisma.JsonNull,
+        lastVerbose: JsonNull,
         checkedAt: new Date(result.verbose.checkedAt ?? new Date().toISOString()),
       },
       update: {
@@ -198,7 +198,7 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
         forwardCount: result.forwardCount,
         comments: commentsJson,
         lastError: null,
-        lastVerbose: Prisma.JsonNull,
+        lastVerbose: JsonNull,
         checkedAt: new Date(result.verbose.checkedAt ?? new Date().toISOString()),
       },
     });
@@ -239,7 +239,7 @@ async function upsertMetricFailure(
       botAccountId: attempt.publishTarget.botAccountId,
       qzoneTid,
       lastError,
-      lastVerbose: verbose ?? Prisma.JsonNull,
+      lastVerbose: verbose ?? JsonNull,
       checkedAt: new Date(),
     },
     update: {
@@ -247,7 +247,7 @@ async function upsertMetricFailure(
       botAccountId: attempt.publishTarget.botAccountId,
       qzoneTid,
       lastError,
-      lastVerbose: verbose ?? Prisma.JsonNull,
+      lastVerbose: verbose ?? JsonNull,
       checkedAt: new Date(),
     },
   });

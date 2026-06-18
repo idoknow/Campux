@@ -7,7 +7,8 @@ Campux 通过环境变量配置。可以写在 `.env`，也可以由容器平台
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `NODE_ENV` | `production` | 运行环境，影响 cookie 安全策略和生产检查 |
-| `DATABASE_URL` | `postgresql://campux:campux@localhost:5432/campux_next` | PostgreSQL 连接串 |
+| `DATABASE_URL` | 未设置 → SQLite | 数据库连接串。`postgresql://...` 用 PostgreSQL；`file:./data/campux.db`（或留空）用内置 SQLite |
+| `CAMPUX_DB_PROVIDER` | 按 URL 推断 | 显式强制 `sqlite` 或 `postgresql`，覆盖按 `DATABASE_URL` 协议的自动判定 |
 | `CAMPUX_SERVER_HOST` | `0.0.0.0` | 后端监听地址 |
 | `CAMPUX_SERVER_PORT` | `8989` | 后端监听端口 |
 | `CAMPUX_WEB_ORIGIN` | `http://localhost:5180` | 前端访问源，影响 CORS 和 cookie |
@@ -32,7 +33,28 @@ Campux 通过环境变量配置。可以写在 `.env`，也可以由容器平台
 
 生产环境缺少 `CAMPUX_BOT_SESSION_SECRET` 会启动失败。
 
+## 数据库形态（SQLite / PostgreSQL）
+
+Campux 支持两种数据库，**同一套数据模型、同一份业务代码**，运行时按 `DATABASE_URL` 协议选择：
+
+- **SQLite（默认）**：`DATABASE_URL` 留空、或 `file:./data/campux.db`、或以 `.db`/`.sqlite` 结尾。
+  零外部依赖，适合单文件 / 单机自托管。
+- **PostgreSQL**：`DATABASE_URL=postgresql://...`。官方实例 / Docker compose 默认形态，
+  适合多实例、强并发、独立备份。
+
+可用 `CAMPUX_DB_PROVIDER=sqlite|postgresql` 显式覆盖自动判定。
+
 ## 对象存储
+
+存储后端默认**跟随数据库形态**：SQLite → 本地文件系统（`local`）；PostgreSQL → S3（`s3`）。
+可用 `CAMPUX_STORAGE_DRIVER` 单独覆盖。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CAMPUX_STORAGE_DRIVER` | 跟随 DB 形态 | `local`（本地文件系统）或 `s3`（S3/MinIO） |
+| `CAMPUX_STORAGE_LOCAL_DIR` | `./data/uploads` | `local` 驱动的存储根目录 |
+
+### 仅 `s3` 驱动需要
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -43,7 +65,8 @@ Campux 通过环境变量配置。可以写在 `.env`，也可以由容器平台
 | `S3_SECRET_ACCESS_KEY` | `campux-secret` | secret key |
 | `S3_PUBLIC_BASE_URL` | `http://localhost:9000/campux-next` | 浏览器可访问的公开前缀 |
 
-`S3_PUBLIC_BASE_URL` 必须从用户浏览器可访问，否则投稿图片和渲染图会裂。
+`s3` 驱动下 `S3_PUBLIC_BASE_URL` 必须从用户浏览器可访问，否则投稿图片和渲染图会裂。
+`local` 驱动下图片读取走应用自身的 `/api/uploads/post-image` 代理，无需公网前缀。
 
 ## 渲染
 

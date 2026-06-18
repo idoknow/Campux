@@ -19,6 +19,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "db:generate": "bun --cwd packages/db prisma generate",
+    "db:sqlite:generate": "bun run scripts/generate-sqlite-schema.ts",
     "db:migrate": "bun --cwd packages/db prisma migrate dev",
     "db:seed": "bun --cwd packages/db src/seed.ts"
   },

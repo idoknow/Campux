@@ -1,9 +1,7 @@
 import { Buffer } from "node:buffer";
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { Upload } from "@aws-sdk/lib-storage";
 import type Sharp from "sharp";
 import type { CampuxConfig } from "@campux/config";
-import { createS3Client } from "@campux/integrations";
+import { getStorageDriver } from "@campux/integrations";
 import { sanitizeUploadExtension } from "../routes/posts";
 
 /**
@@ -123,17 +121,9 @@ export async function uploadAttachmentBytes({
 }): Promise<PostAttachment> {
   const extension = sanitizeUploadExtension(fileName);
   const key = `tenants/${tenantId}/uploads/${crypto.randomUUID()}.${extension}`;
-  const s3 = createS3Client(config);
-
-  await new Upload({
-    client: s3,
-    params: {
-      Bucket: config.s3.bucket,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    },
-  }).done();
+  const storage = getStorageDriver(config);
+  await storage.ensureReady();
+  await storage.put(key, body, contentType);
 
   return {
     kind,
@@ -146,7 +136,7 @@ export async function uploadAttachmentBytes({
 }
 
 /**
- * Batch delete attachment objects from S3.
+ * Batch delete attachment objects from storage.
  * Logs warnings on per-key failures but does not throw.
  */
 export async function deleteAttachmentObjects(
@@ -157,18 +147,6 @@ export async function deleteAttachmentObjects(
     return;
   }
 
-  const s3 = createS3Client(config);
-
-  for (const key of keys) {
-    try {
-      await s3.send(
-        new DeleteObjectCommand({
-          Bucket: config.s3.bucket,
-          Key: key,
-        }),
-      );
-    } catch (error) {
-      console.warn("failed to delete attachment object", { error, key });
-    }
-  }
+  const storage = getStorageDriver(config);
+  await storage.delete(keys);
 }

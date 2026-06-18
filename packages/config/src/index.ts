@@ -15,6 +15,13 @@ const configSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().default("campux"),
   S3_SECRET_ACCESS_KEY: z.string().default("campux-secret"),
   S3_PUBLIC_BASE_URL: z.string().default("http://localhost:9000/campux-next"),
+  // 存储后端：'s3'（MinIO/S3 兼容）或 'local'（本地文件系统，零依赖单文件形态）。
+  // 留空时按数据库 provider 推断（sqlite→local，postgresql→s3），见 loadConfig。
+  CAMPUX_STORAGE_DRIVER: z.enum(["s3", "local"]).optional(),
+  // local driver 的数据根目录，对象按 key 落到此目录下。默认 ./data/uploads。
+  CAMPUX_STORAGE_LOCAL_DIR: z.string().default("./data/uploads"),
+  // 显式覆盖数据库 provider（sqlite|postgresql）；留空按 DATABASE_URL scheme 推断。
+  CAMPUX_DB_PROVIDER: z.enum(["sqlite", "postgresql"]).optional(),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().default("Campux <noreply@campux.top>"),
   // Required in production (see ensureBotSessionSecretConfigured); used to
@@ -86,9 +93,28 @@ export function loadConfig() {
   loadDotEnvFiles();
   const env = configSchema.parse(process.env);
 
+  // 数据库 provider 推断：与 @campux/db 的 resolveDbProvider 保持一致——
+  // 用「原始」DATABASE_URL（未走 zod 默认值），未设置/ file: / sqlite / .db → sqlite。
+  const rawDbUrl = (process.env.DATABASE_URL ?? "").trim().toLowerCase();
+  const dbProvider: "sqlite" | "postgresql" =
+    env.CAMPUX_DB_PROVIDER ??
+    (rawDbUrl === "" ||
+    rawDbUrl.startsWith("file:") ||
+    rawDbUrl.startsWith("sqlite:") ||
+    rawDbUrl.endsWith(".db") ||
+    rawDbUrl.endsWith(".sqlite")
+      ? "sqlite"
+      : "postgresql");
+
+  // 存储 driver 默认：显式 CAMPUX_STORAGE_DRIVER 优先；否则跟随 db provider
+  // （sqlite→local 零依赖；postgresql→s3 保持生产行为）。
+  const storageDriver: "s3" | "local" =
+    env.CAMPUX_STORAGE_DRIVER ?? (dbProvider === "sqlite" ? "local" : "s3");
+
   return {
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
+    dbProvider,
     serverHost: env.CAMPUX_SERVER_HOST,
     serverPort: env.CAMPUX_SERVER_PORT,
     webOrigin: env.CAMPUX_WEB_ORIGIN,
@@ -100,6 +126,10 @@ export function loadConfig() {
       accessKeyId: env.S3_ACCESS_KEY_ID,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
       publicBaseUrl: env.S3_PUBLIC_BASE_URL,
+    },
+    storage: {
+      driver: storageDriver,
+      localDir: env.CAMPUX_STORAGE_LOCAL_DIR,
     },
     resend: {
       apiKey: env.RESEND_API_KEY,
