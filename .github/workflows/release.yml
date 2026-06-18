@@ -124,8 +124,8 @@ jobs:
           body: |
             ## Campux ${{ github.ref_name }} — 自包含单可执行文件
 
-            每个文件都内嵌了前端产物、SVG 头像、数据库迁移、Prisma 查询引擎与原生依赖，
-            **运行时只需要一个可达的 PostgreSQL**。
+            每个文件都内嵌了前端产物、SVG 头像、数据库建库 / 迁移、Prisma 查询引擎与原生依赖。
+            **默认零外部依赖**：直接运行即用内置 SQLite + 本地文件存储起跑，无需 PostgreSQL / MinIO。
 
             | 平台 | 文件 |
             | --- | --- |
@@ -138,16 +138,20 @@ jobs:
             > macOS Intel（`darwin-x64`）由独立的 best-effort 任务构建，偶尔会因 runner 排队
             > 未能赶上本次发布；如缺失可在 Actions 重跑或用 `bun run build:binary` 自行构建。
 
-            ### 快速开始
+            ### 快速开始（零配置）
             ```bash
-            export DATABASE_URL="postgresql://user:***@host:5432/campux"
             chmod +x campux-linux-x64
             ./campux-linux-x64
             ```
-            启动时会自动执行内嵌的数据库迁移，然后在 `:8989`（可用 `CAMPUX_SERVER_PORT` 调整）提供服务。
+            启动时会在 `./data/` 下自动建好 SQLite 库与本地存储，执行内嵌迁移，然后在
+            `:8989`（可用 `CAMPUX_SERVER_PORT` 调整）提供服务。生产环境建议用 `CAMPUX_DATA_DIR`
+            固定数据目录、并设置 `CAMPUX_BOT_SESSION_SECRET`。
 
-            完整部署说明见 [docs.campux.top](https://docs.campux.top)。可选的图片压缩 / 说说配图渲染分别需要
-            系统级 `sharp` 库与 Chromium —— 见文档「单文件部署」一节。
+            想用外部 PostgreSQL + S3 / MinIO？设置 `DATABASE_URL=postgresql://...` 即自动切换，
+            再按需配 `CAMPUX_STORAGE_DRIVER=s3` 与 `S3_*`。
+
+            完整部署说明见 [docs.campux.top](https://docs.campux.top/admin/standalone-binary)。
+            可选的图片压缩 / 说说配图渲染分别需要系统级 `sharp` 库与 Chromium，缺失时自动降级。
 
             校验：`sha256sum -c SHA256SUMS`
           files: |
