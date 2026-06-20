@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export * from "./fonts";
 
+export const PRIVATE_POST_PROMPT_MAX_LENGTH = 4_000;
+
 export const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
 export type TenantStatus = z.infer<typeof tenantStatusSchema>;
 

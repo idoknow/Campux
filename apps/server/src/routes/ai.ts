@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import { z } from "zod";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
@@ -6,7 +7,7 @@ import { writeAuditLog } from "../lib/audit";
 import { analyzePostText, cancelAiBackfillBatch, createAiBackfillBatch, listAiBackfillBatches, readTenantAiSettings, refreshSchoolModelSnapshot, retryAiBackfillBatch, testTenantAiSettings, updateTenantAiSettings } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
 
-const aiSettingsSchema = z.object({
+export const aiSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   mode: z.enum(["local", "llm"]).optional(),
   provider: z.string().trim().min(1).max(80).optional(),
@@ -25,7 +26,7 @@ const aiSettingsSchema = z.object({
     privatePostAiEnabled: z.boolean().optional(),
     privatePostAggregateDelaySeconds: z.number().int().min(0).max(120).optional(),
     postTriggerKeywords: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
-    privatePostPrompt: z.string().max(4000).optional(),
+    privatePostPrompt: z.string().trim().max(PRIVATE_POST_PROMPT_MAX_LENGTH).optional(),
   }).optional(),
 });
 

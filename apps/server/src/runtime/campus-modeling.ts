@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import { PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import { Prisma, DbNull, createManyDedup } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { decryptJson, encryptJson } from "../lib/secret-json";
@@ -1258,7 +1259,7 @@ function normalizeRules(value: unknown): AiRules {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
-    privatePostPrompt: typeof candidate.privatePostPrompt === "string" ? candidate.privatePostPrompt.trim().slice(0, 4_000) : defaultAiSettings.rules.privatePostPrompt,
+    privatePostPrompt: typeof candidate.privatePostPrompt === "string" ? candidate.privatePostPrompt.trim().slice(0, PRIVATE_POST_PROMPT_MAX_LENGTH) : defaultAiSettings.rules.privatePostPrompt,
   };
 }
 

@@ -1,5 +1,6 @@
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
+import { PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import type { AuthenticatedMe, AiAnalysisItem, AiBackfillBatch, AiEntity, AiEntityDetail, AiEntityEvidence, AiOverview, AiRules, TenantAiSettings } from "@/types/app";
 import {
   ActivityIcon,
@@ -1005,11 +1006,11 @@ const SettingsPanel = memo(function SettingsPanel({
               className="min-h-28 font-mono text-xs"
               value={form.privatePostPrompt}
               disabled={!isAdmin || busy || testing || !form.privatePostAiEnabled}
-              maxLength={4000}
+              maxLength={PRIVATE_POST_PROMPT_MAX_LENGTH}
               onChange={(event) => onFormChange({ ...form, privatePostPrompt: event.target.value })}
               placeholder="留空使用默认提示词。可补充：哪些内容算投稿、哪些内容算客服咨询、匿名/提交判断规则等。"
             />
-            <span className="text-xs font-semibold text-slate-500">作为默认系统提示词的补充规则，最多 4000 字。</span>
+            <span className="text-xs font-semibold text-slate-500">作为默认系统提示词的补充规则，最多 {PRIVATE_POST_PROMPT_MAX_LENGTH} 字。</span>
           </label>
         </div>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
