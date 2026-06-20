@@ -287,29 +287,3 @@ export async function readTenantEnableAnonymousAvatarSelection(client: MetadataC
   return normalizeEnableAnonymousAvatarSelection(entry?.value);
 }
 
-// 表情包/超级表情自动审核（自动通过或自动拒绝纯表情稿件）。
-// 默认关闭：关闭时所有稿件一律走正常人工审核流程（pending_approval），绝不自动放行或误杀。
-export const enableEmojiModerationKey = "enable_emoji_moderation";
-export const enableEmojiModerationDefault = false;
-
-export function normalizeEnableEmojiModeration(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return enableEmojiModerationDefault;
-}
-
-export async function readTenantEnableEmojiModeration(client: MetadataClient, tenantId: string): Promise<boolean> {
-  const entry = await client.tenantMetadata.findUnique({
-    where: {
-      tenantId_key: {
-        tenantId,
-        key: enableEmojiModerationKey,
-      },
-    },
-    select: {
-      value: true,
-    },
-  });
-
-  return normalizeEnableEmojiModeration(entry?.value);
-}

@@ -128,7 +128,6 @@ export type TenantMetadata = {
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
   enableAnonymousAvatarSelection: boolean;
-  enableEmojiModeration: boolean;
 };
 
 export type PostAttachment = {

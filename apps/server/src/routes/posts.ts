@@ -11,10 +11,9 @@ import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/
 import { toPostListItem } from "../lib/posts";
 import { buildPublishedFeed, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
 import { prisma } from "../lib/prisma";
-import { readTenantPendingPostLimit, readTenantImageCompression, readTenantPublishMode, readTenantEnableEmojiModeration } from "../lib/tenant-metadata";
+import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
-import { evaluateEmojiModeration } from "../lib/emoji-moderation";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { formatBanNotify } from "../lib/bot-messages";
@@ -419,17 +418,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         };
       }
 
-      // 检查超级表情包自动审核（仅当本墙开启该开关时；默认关闭=一律走人工审核）
-      const emojiModerationEnabled = await readTenantEnableEmojiModeration(prisma, context.selectedTenant.id);
-      const emojiResult = emojiModerationEnabled ? evaluateEmojiModeration(text) : null;
-      const initialStatus: "pending_approval" | "approved" | "rejected" =
-        emojiResult === "approve" ? "approved" : emojiResult === "reject" ? "rejected" : "pending_approval";
-      const logComment =
-        emojiResult === "approve"
-          ? "投稿创建，表情包自动通过"
-          : emojiResult === "reject"
-            ? "投稿创建，表情包自动拒绝"
-            : "投稿创建";
+      const initialStatus: "pending_approval" = "pending_approval";
+      const logComment = "投稿创建";
 
       // Create post in transaction with retry logic
       let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
@@ -514,22 +504,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         };
       }
 
-      // 表情包自动通过：直接触发发布
-      if (emojiResult === "approve") {
-        const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
-        if (publishMode.mode === "accumulate") {
-          const { addApprovedPostToBatch } = await import("../runtime/publish-batching");
-          await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id);
-        } else {
-          const { enqueuePublishFanout } = await import("../runtime/publishing");
-          await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
-        }
-      } else {
-        // 非自动通过的稿件才需要通知审核群
-        oneBot?.notifyNewPost(post.id).catch((error) => {
-          app.log.warn({ error, postId: post.id }, "failed to notify review group");
-        });
-      }
+      oneBot?.notifyNewPost(post.id).catch((error) => {
+        app.log.warn({ error, postId: post.id }, "failed to notify review group");
+      });
       enqueueAiAnalyzePost(queue, context.selectedTenant.id, post.id);
 
       return {
