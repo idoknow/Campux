@@ -76,6 +76,7 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
+  const systemPrompt = buildPrivatePostSystemPrompt(settings.rules.privatePostPrompt);
   try {
     const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
       method: "POST",
@@ -92,16 +93,7 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
         messages: [
           {
             role: "system",
-            content: [
-              "你是校园墙 QQ 私聊投稿语义解析器。只返回 JSON，不要 Markdown。",
-              "任务：基于整句语义和上下文判断是否是投稿、提取最终投稿正文、自动分段、判断匿名/实名、判断是否已经表达提交。",
-              "返回标准格式：{\"intent\":\"post|chat|command\",\"text\":\"最终正文\",\"anonymous\":true|false|null,\"shouldSubmit\":true|false,\"sections\":[\"分段1\"],\"confidence\":0到1,\"reason\":\"简短原因\"}。",
-              "不要用关键词表或单个词命中做判断；必须理解用户真实意图，例如咨询如何匿名、注册、重置密码、闲聊、机器人命令都不是投稿。",
-              "anonymous 表示用户希望本条投稿如何发布：明确希望匿名则 true，明确希望署名/实名则 false，未表达则 null。",
-              "shouldSubmit 表示用户是否已经表达可以结束并提交当前投稿；没有明确完成意图时必须 false。",
-              "text 只能包含适合发布到校园墙的正文；去掉对机器人的请求、匿名/实名要求、提交指令、解释性废话和非正文信息。",
-              "sections 是按语义自然分段后的正文段落；如果不是投稿，text 为空、sections 为空、shouldSubmit=false。",
-            ].join("\n"),
+            content: systemPrompt,
           },
           {
             role: "user",
@@ -139,6 +131,23 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function buildPrivatePostSystemPrompt(customPrompt?: string | undefined) {
+  const basePrompt = [
+    "你是校园墙 QQ 私聊投稿语义解析器。只返回 JSON，不要 Markdown。",
+    "任务：基于整句语义和上下文判断是否是投稿、提取最终投稿正文、自动分段、判断匿名/实名、判断是否已经表达提交。",
+    "返回标准格式：{\"intent\":\"post|chat|command\",\"text\":\"最终正文\",\"anonymous\":true|false|null,\"shouldSubmit\":true|false,\"sections\":[\"分段1\"],\"confidence\":0到1,\"reason\":\"简短原因\"}。",
+    "不要用关键词表或单个词命中做判断；必须理解用户真实意图，例如咨询如何匿名、注册、重置密码、闲聊、机器人命令都不是投稿。",
+    "但如果用户发送的是可直接发布到校园墙的正文，即使是提问、吐槽、求助、评价征集或很短的校园话题（例如：学校食堂怎么样、有人了解某老师吗、想问问宿舍网络如何），也应判定为投稿。",
+    "只有当用户明显是在询问机器人/账号/投稿流程/联系方式/技术问题时，才判定为 chat。",
+    "anonymous 表示用户希望本条投稿如何发布：明确希望匿名则 true，明确希望署名/实名则 false，未表达则 null。",
+    "shouldSubmit 表示用户是否已经表达可以结束并提交当前投稿；没有明确完成意图时必须 false。",
+    "text 只能包含适合发布到校园墙的正文；去掉对机器人的请求、匿名/实名要求、提交指令、解释性废话和非正文信息。",
+    "sections 是按语义自然分段后的正文段落；如果不是投稿，text 为空、sections 为空、shouldSubmit=false。",
+  ].join("\n");
+  const trimmedCustomPrompt = customPrompt?.trim();
+  return trimmedCustomPrompt ? `${basePrompt}\n\n租户补充规则：\n${trimmedCustomPrompt}` : basePrompt;
 }
 
 export function parsePrivatePostSemanticJson(raw: string): PrivatePostSemanticResult | null {

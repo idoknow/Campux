@@ -1,5 +1,6 @@
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
+import { PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import type { AuthenticatedMe, AiAnalysisItem, AiBackfillBatch, AiEntity, AiEntityDetail, AiEntityEvidence, AiOverview, AiRules, TenantAiSettings } from "@/types/app";
 import {
   ActivityIcon,
@@ -54,6 +55,7 @@ type AiSettingsForm = {
   privatePostAiEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
   postTriggerKeywordsText: string;
+  privatePostPrompt: string;
 };
 
 type PanelTab = "overview" | "backfill" | "recent";
@@ -328,6 +330,7 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
       privatePostAiEnabled: form.privatePostAiEnabled,
       privatePostAggregateDelaySeconds: form.privatePostAggregateDelaySeconds,
       postTriggerKeywords: lines(form.postTriggerKeywordsText),
+      privatePostPrompt: form.privatePostPrompt.trim(),
     };
     return {
       enabled: form.enabled,
@@ -996,6 +999,18 @@ const SettingsPanel = memo(function SettingsPanel({
               onChange={(event) => onFormChange({ ...form, privatePostAggregateDelaySeconds: Math.max(0, Math.min(120, Number(event.target.value) || 0)) })}
             />
             <span className="text-xs font-semibold text-slate-500">用户停顿达到该时间后，将同一会话合并交给 AI 判断；设为 0 则关闭聚合。</span>
+          </label>
+          <label className="mt-3 block space-y-1 text-[11px] font-bold text-slate-600">
+            收稿提示词
+            <Textarea
+              className="min-h-28 font-mono text-xs"
+              value={form.privatePostPrompt}
+              disabled={!isAdmin || busy || testing || !form.privatePostAiEnabled}
+              maxLength={PRIVATE_POST_PROMPT_MAX_LENGTH}
+              onChange={(event) => onFormChange({ ...form, privatePostPrompt: event.target.value })}
+              placeholder="留空使用默认提示词。可补充：哪些内容算投稿、哪些内容算客服咨询、匿名/提交判断规则等。"
+            />
+            <span className="text-xs font-semibold text-slate-500">作为默认系统提示词的补充规则，最多 {PRIVATE_POST_PROMPT_MAX_LENGTH} 字。</span>
           </label>
         </div>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
@@ -1746,6 +1761,7 @@ function toForm(settings: TenantAiSettings): AiSettingsForm {
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
     privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
+    privatePostPrompt: settings.rules.privatePostPrompt ?? "",
   };
 }
 

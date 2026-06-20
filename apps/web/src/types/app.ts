@@ -442,6 +442,8 @@ export type AiRules = {
   privatePostAggregateDelaySeconds?: number;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"] */
   postTriggerKeywords?: string[];
+  /** 私聊投稿 AI 语义收稿的补充提示词 */
+  privatePostPrompt?: string;
 };
 
 export type TenantAiSettings = {
