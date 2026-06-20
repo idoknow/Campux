@@ -150,6 +150,7 @@ type PrivatePostPendingMode = {
   uploadedKeys: string[];
   updatedAt: number;
   history: PrivatePostHistoryEntry[];
+  submitAfterModeSelection?: boolean;
 };
 
 type PrivateForwardEntry = {
@@ -1415,6 +1416,7 @@ export class OneBotRuntime {
       uploadedKeys: staged.uploadedKeys,
       updatedAt: Date.now(),
       history,
+      submitAfterModeSelection: shouldSubmitPrivatePostAfterModeSelection(semantic),
     });
 
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
@@ -1779,6 +1781,11 @@ export class OneBotRuntime {
       updatedAt: Date.now(),
       history: pending.history,
     });
+
+    if (pending.submitAfterModeSelection) {
+      await this.finishPrivatePostDraft({ bot, botQqUin, userQqUin });
+      return;
+    }
 
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled));
@@ -3173,6 +3180,10 @@ export function parseCommand(input: string) {
     name,
     args: match[2]?.trim() ?? "",
   };
+}
+
+export function shouldSubmitPrivatePostAfterModeSelection(semantic: PrivatePostSemanticResult | undefined) {
+  return semantic?.intent === "post" && semantic.anonymous === null && semantic.shouldSubmit === true;
 }
 
 function parsePrivateCommand(input: string) {

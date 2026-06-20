@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseCommand } from "./onebot";
+import { parseCommand, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
   test("解析半角 # 命令", () => {
@@ -29,5 +29,43 @@ describe("parseCommand prefix handling", () => {
 
   test("命令前有非 @ 文本时不识别", () => {
     expect(parseCommand("随便说点什么 ＃通过 1")).toBeNull();
+  });
+});
+
+describe("private post semantic mode selection", () => {
+  test("AI 已确认投稿可提交但匿名未知时，选完匿名后应直接提交", () => {
+    expect(shouldSubmitPrivatePostAfterModeSelection({
+      intent: "post",
+      text: "我想问一下食堂的菜好不好吃\n有多少菜",
+      anonymous: null,
+      shouldSubmit: true,
+      sections: ["我想问一下食堂的菜好不好吃", "有多少菜"],
+      confidence: 0.88,
+      reason: "用户已表达完整投稿并致谢",
+    })).toBe(true);
+  });
+
+  test("AI 已判断匿名时不需要待选择后提交标记", () => {
+    expect(shouldSubmitPrivatePostAfterModeSelection({
+      intent: "post",
+      text: "匿名吐槽一下食堂",
+      anonymous: true,
+      shouldSubmit: true,
+      sections: ["匿名吐槽一下食堂"],
+      confidence: 0.9,
+      reason: "已指定匿名",
+    })).toBe(false);
+  });
+
+  test("AI 未判断可提交时仍进入继续添加流程", () => {
+    expect(shouldSubmitPrivatePostAfterModeSelection({
+      intent: "post",
+      text: "食堂今天怎么样",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: ["食堂今天怎么样"],
+      confidence: 0.7,
+      reason: "尚未表达提交",
+    })).toBe(false);
   });
 });
