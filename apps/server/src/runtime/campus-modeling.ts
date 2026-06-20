@@ -28,6 +28,8 @@ export type AiRules = {
   privatePostAggregateDelaySeconds?: number | undefined;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
   postTriggerKeywords?: string[] | undefined;
+  /** 私聊投稿 AI 语义收稿的补充提示词 */
+  privatePostPrompt?: string | undefined;
 };
 
 type ExtractedEntity = {
@@ -94,6 +96,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
     privatePostAiEnabled: false,
     privatePostAggregateDelaySeconds: 8,
     postTriggerKeywords: [],
+    privatePostPrompt: "",
   },
 };
 
@@ -1255,6 +1258,7 @@ function normalizeRules(value: unknown): AiRules {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
+    privatePostPrompt: typeof candidate.privatePostPrompt === "string" ? candidate.privatePostPrompt.trim().slice(0, 4_000) : defaultAiSettings.rules.privatePostPrompt,
   };
 }
 

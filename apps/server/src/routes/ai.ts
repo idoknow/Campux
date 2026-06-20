@@ -25,6 +25,7 @@ const aiSettingsSchema = z.object({
     privatePostAiEnabled: z.boolean().optional(),
     privatePostAggregateDelaySeconds: z.number().int().min(0).max(120).optional(),
     postTriggerKeywords: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
+    privatePostPrompt: z.string().max(4000).optional(),
   }).optional(),
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fallbackAnalyzePrivatePostSemantics, parsePrivatePostSemanticJson } from "./private-posting-ai";
+import { buildPrivatePostSystemPrompt, fallbackAnalyzePrivatePostSemantics, parsePrivatePostSemanticJson } from "./private-posting-ai";
 
 describe("private post AI semantic parsing", () => {
   test("parses standard JSON response", () => {
@@ -59,5 +59,18 @@ describe("private post AI semantic parsing", () => {
     const result = fallbackAnalyzePrivatePostSemantics({ messageText: "你好，请问怎么注册账号" });
     expect(result.intent).toBe("chat");
     expect(result.shouldSubmit).toBe(false);
+  });
+
+  test("appends custom private post prompt to base system prompt", () => {
+    const prompt = buildPrivatePostSystemPrompt("把食堂评价类短句视为投稿");
+    expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
+    expect(prompt).toContain("租户补充规则");
+    expect(prompt).toContain("把食堂评价类短句视为投稿");
+  });
+
+  test("does not append blank custom private post prompt", () => {
+    const prompt = buildPrivatePostSystemPrompt("  \n  ");
+    expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
+    expect(prompt).not.toContain("租户补充规则");
   });
 });
