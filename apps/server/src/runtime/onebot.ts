@@ -3183,7 +3183,7 @@ export function parseCommand(input: string) {
 }
 
 export function shouldSubmitPrivatePostAfterModeSelection(semantic: PrivatePostSemanticResult | undefined) {
-  return semantic?.intent === "post" && semantic.anonymous === null && semantic.shouldSubmit === true;
+  return semantic?.intent === "post" && semantic.anonymous === null;
 }
 
 function parsePrivateCommand(input: string) {

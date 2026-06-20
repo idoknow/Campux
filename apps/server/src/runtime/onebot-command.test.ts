@@ -33,15 +33,15 @@ describe("parseCommand prefix handling", () => {
 });
 
 describe("private post semantic mode selection", () => {
-  test("AI 已确认投稿可提交但匿名未知时，选完匿名后应直接提交", () => {
+  test("AI 已识别投稿但匿名未知时，选完匿名后应直接提交", () => {
     expect(shouldSubmitPrivatePostAfterModeSelection({
       intent: "post",
       text: "我想问一下食堂的菜好不好吃\n有多少菜",
       anonymous: null,
-      shouldSubmit: true,
+      shouldSubmit: false,
       sections: ["我想问一下食堂的菜好不好吃", "有多少菜"],
       confidence: 0.88,
-      reason: "用户已表达完整投稿并致谢",
+      reason: "用户已表达投稿但未指定匿名方式",
     })).toBe(true);
   });
 
@@ -57,9 +57,9 @@ describe("private post semantic mode selection", () => {
     })).toBe(false);
   });
 
-  test("AI 未判断可提交时仍进入继续添加流程", () => {
+  test("AI 未识别为投稿时仍进入继续添加流程", () => {
     expect(shouldSubmitPrivatePostAfterModeSelection({
-      intent: "post",
+      intent: "chat",
       text: "食堂今天怎么样",
       anonymous: null,
       shouldSubmit: false,

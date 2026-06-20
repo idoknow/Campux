@@ -52,7 +52,7 @@ export function isPrivatePostUndoText(input: string) {
 }
 
 export function parsePrivatePostModeText(input: string) {
-  const match = input.trim().match(/^(?:#|＃)(匿名|实名)(?:投稿)?\s*$/);
+  const match = input.trim().match(/^(?:(?:#|＃)\s*)?(匿名|实名)(?:投稿)?\s*$/);
   if (!match) {
     return null;
   }
