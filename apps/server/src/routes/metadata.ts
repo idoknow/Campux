@@ -40,8 +40,6 @@ import {
   normalizeEnableFontSelection,
   enableAnonymousAvatarSelectionKey,
   normalizeEnableAnonymousAvatarSelection,
-  enableEmojiModerationKey,
-  normalizeEnableEmojiModeration,
 } from "../lib/tenant-metadata";
 
 const publicMetadataKeys = [
@@ -65,7 +63,6 @@ const publicMetadataKeys = [
   enableMarkdownRenderKey,
   enableFontSelectionKey,
   enableAnonymousAvatarSelectionKey,
-  enableEmojiModerationKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -98,7 +95,6 @@ const patchMetadataSchema = z.object({
   enableMarkdownRender: z.boolean().optional(),
   enableFontSelection: z.boolean().optional(),
   enableAnonymousAvatarSelection: z.boolean().optional(),
-  enableEmojiModeration: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -138,7 +134,6 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableMarkdownRender: normalizeEnableMarkdownRender(record[enableMarkdownRenderKey]),
     enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
     enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
-    enableEmojiModeration: normalizeEnableEmojiModeration(record[enableEmojiModerationKey]),
   };
 }
 
@@ -390,9 +385,6 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.enableAnonymousAvatarSelection !== undefined) {
       updates.push({ key: enableAnonymousAvatarSelectionKey, value: body.enableAnonymousAvatarSelection });
-    }
-    if (body.enableEmojiModeration !== undefined) {
-      updates.push({ key: enableEmojiModerationKey, value: body.enableEmojiModeration });
     }
 
     await prisma.$transaction(
