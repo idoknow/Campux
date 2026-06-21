@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseCommand, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
+import { parseCommand, resolvePrivatePostModeSelectionFromSemantic, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
   test("解析半角 # 命令", () => {
@@ -67,5 +67,27 @@ describe("private post semantic mode selection", () => {
       confidence: 0.7,
       reason: "尚未表达提交",
     })).toBe(false);
+  });
+
+  test("pending 模式采纳 AI 语义识别到的匿名选择，不依赖关键词命令", () => {
+    expect(resolvePrivatePostModeSelectionFromSemantic({
+      intent: "chat",
+      text: "请问高考考的怎么样",
+      anonymous: true,
+      shouldSubmit: false,
+      sections: ["请问高考考的怎么样"],
+      confidence: 0.82,
+      reason: "用户表达希望匿名发布",
+    })).toEqual({ anonymous: true });
+
+    expect(resolvePrivatePostModeSelectionFromSemantic({
+      intent: "post",
+      text: "请问高考考的怎么样",
+      anonymous: false,
+      shouldSubmit: false,
+      sections: ["请问高考考的怎么样"],
+      confidence: 0.82,
+      reason: "用户表达希望实名发布",
+    })).toEqual({ anonymous: false });
   });
 });

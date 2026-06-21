@@ -142,6 +142,7 @@ export function buildPrivatePostSystemPrompt(customPrompt?: string | undefined) 
     "但如果用户发送的是可直接发布到校园墙的正文，即使是提问、吐槽、求助、评价征集或很短的校园话题（例如：学校食堂怎么样、有人了解某老师吗、想问问宿舍网络如何），也应判定为投稿。",
     "只有当用户明显是在询问机器人/账号/投稿流程/联系方式/技术问题时，才判定为 chat。",
     "anonymous 表示用户希望本条投稿如何发布：明确希望匿名则 true，明确希望署名/实名则 false，未表达则 null。",
+    "如果 hasCurrentDraft=true 且用户本轮只是在表达匿名/实名选择（例如：匿名、别显示名字、用实名、可以署名），也要基于语义设置 anonymous；text 保留 currentDraftText，不要把这句话追加进正文。",
     "shouldSubmit 表示用户是否已经表达可以结束并提交当前投稿；没有明确完成意图时必须 false。",
     "text 只能包含适合发布到校园墙的正文；去掉对机器人的请求、匿名/实名要求、提交指令、解释性废话和非正文信息。",
     "sections 是按语义自然分段后的正文段落；如果不是投稿，text 为空、sections 为空、shouldSubmit=false。",

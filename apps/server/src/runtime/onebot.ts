@@ -1175,12 +1175,13 @@ export class OneBotRuntime {
               logger: this.logger,
             })
           : undefined;
-        if (semantic?.intent === "post" && semantic.anonymous !== null) {
+        const semanticModeSelection = resolvePrivatePostModeSelectionFromSemantic(semantic);
+        if (semanticModeSelection !== null) {
           await this.selectPrivatePostMode({
             bot,
             botQqUin,
             userQqUin,
-            anonymous: semantic.anonymous,
+            anonymous: semanticModeSelection.anonymous,
           });
           return;
         }
@@ -3184,6 +3185,13 @@ export function parseCommand(input: string) {
 
 export function shouldSubmitPrivatePostAfterModeSelection(semantic: PrivatePostSemanticResult | undefined) {
   return semantic?.intent === "post" && semantic.anonymous === null;
+}
+
+export function resolvePrivatePostModeSelectionFromSemantic(semantic: PrivatePostSemanticResult | undefined) {
+  if (semantic?.anonymous === null || semantic?.anonymous === undefined) {
+    return null;
+  }
+  return { anonymous: semantic.anonymous };
 }
 
 function parsePrivateCommand(input: string) {

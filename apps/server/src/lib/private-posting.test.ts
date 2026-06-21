@@ -38,12 +38,10 @@ describe("private posting command parsing", () => {
   test("detects anonymous and real-name replies", () => {
     expect(parsePrivatePostModeText("#匿名")).toEqual({ anonymous: true });
     expect(parsePrivatePostModeText("＃匿名投稿")).toEqual({ anonymous: true });
-    expect(parsePrivatePostModeText("匿名")).toEqual({ anonymous: true });
-    expect(parsePrivatePostModeText("匿名投稿")).toEqual({ anonymous: true });
     expect(parsePrivatePostModeText("#实名")).toEqual({ anonymous: false });
     expect(parsePrivatePostModeText("＃实名投稿")).toEqual({ anonymous: false });
-    expect(parsePrivatePostModeText("实名")).toEqual({ anonymous: false });
-    expect(parsePrivatePostModeText("实名投稿")).toEqual({ anonymous: false });
+    expect(parsePrivatePostModeText("匿名")).toBeNull();
+    expect(parsePrivatePostModeText("实名")).toBeNull();
   });
 
   test("does not treat ordinary text as undo command", () => {
