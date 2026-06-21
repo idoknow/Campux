@@ -102,6 +102,7 @@ export default defineConfig({
         items: [
           { text: "配置项", link: "/reference/configuration" },
           { text: "OneBot 接入", link: "/reference/onebot" },
+          { text: "OAuth2 接入", link: "/reference/oauth" },
           { text: "系统架构", link: "/reference/architecture" },
           { text: "发布状态", link: "/reference/publish-states" },
         ],
