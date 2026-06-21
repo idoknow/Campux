@@ -33,6 +33,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "image=rockchin/campux:$tag" >> "$GITHUB_OUTPUT"
           echo "dash_image=rockchin/campux-dash:$tag" >> "$GITHUB_OUTPUT"
+          echo "landing_image=rockchin/campux-landing:$tag" >> "$GITHUB_OUTPUT"
           echo "build_version=$tag-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
@@ -101,6 +102,31 @@ jobs:
           tags: ${{ steps.meta.outputs.dash_image }}
           cache-from: type=gha,scope=dash
           cache-to: type=gha,mode=max,scope=dash
+          provenance: false
+          sbom: false
+
+      - name: Build and push landing image
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        id: build_landing
+        with:
+          context: .
+          file: landing/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.landing_image }}
+          cache-from: type=gha,scope=landing
+          cache-to: type=gha,mode=max,scope=landing
+
+      - name: Retry landing build on failure
+        if: steps.build_landing.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: landing/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.landing_image }}
+          cache-from: type=gha,scope=landing
+          cache-to: type=gha,mode=max,scope=landing
           provenance: false
           sbom: false
 
