@@ -127,8 +127,11 @@ const sqliteClientDir = resolve(repoRoot, "packages/db/generated/sqlite");
 let queryEnginePath: string | null = null;
 let queryEngineName: string | null = null;
 try {
+  // 平台命名差异：Linux `libquery_engine-*.so.node`、macOS `libquery_engine-*.dylib.node`、
+  // Windows `query_engine-windows.dll.node`（注意 Windows 无 `lib` 前缀）。统一按
+  // `query_engine` 子串匹配，避免 Windows 构建找不到引擎而 exit 1。
   const engineFile = readdirSync(sqliteClientDir).find(
-    (n) => n.startsWith("libquery_engine") && n.endsWith(".node"),
+    (n) => n.includes("query_engine") && n.endsWith(".node"),
   );
   if (engineFile) {
     queryEnginePath = resolve(sqliteClientDir, engineFile);
