@@ -10,8 +10,8 @@ name: Release Binaries
 #   - campux-<os>-<arch>[.exe].sha256   校验和
 #
 # 关于 darwin-x64（macOS Intel / macos-13）：该 runner 在本账号下经常长时间排队/缺货。
-# 为了不让它卡住整条发布，它被拆成一个**独立、非必需**的 job（release 不 `needs` 它）。
-# 它若赶上构建完会被一并发布；若排队/失败，其余 4 个平台照常发布。
+# GitHub 即使 release job 已完成，也会因为这个独立 job 排队而把整次 run 保持为 in_progress，
+# 所以 tag 发布默认不再启动 darwin-x64；需要 Intel macOS 产物时用 workflow_dispatch 手动勾选。
 on:
   push:
     tags:
@@ -22,6 +22,11 @@ on:
         description: "版本号（如 v1.2.3-test）；留空则用 git describe"
         required: false
         default: ""
+      include_darwin_x64:
+        description: "手动额外构建 macOS Intel / darwin-x64（runner 可能长时间排队）"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -73,10 +78,11 @@ jobs:
           target: ${{ matrix.target }}
           version: ${{ needs.resolve-version.outputs.version }}
 
-  # ── darwin-x64（Intel）：独立、非必需，runner 稀缺不阻塞发布 ──
+  # ── darwin-x64（Intel）：仅手动可选，runner 稀缺，不参与默认 tag 发布 ──
   build-darwin-x64:
-    name: Build darwin-x64 (best-effort)
+    name: Build darwin-x64 (manual best-effort)
     needs: resolve-version
+    if: github.event_name == 'workflow_dispatch' && inputs.include_darwin_x64
     runs-on: macos-13
     continue-on-error: true
     steps:
@@ -88,8 +94,7 @@ jobs:
 
   release:
     name: Publish Release
-    # 只 `needs` 必需平台；darwin-x64 不在其中，所以它排队/失败都不会拖住发布。
-    # download-artifact 会把已上传的 darwin-x64 产物（若赶上了）一并带进来。
+    # 只 `needs` 必需平台；darwin-x64 默认不会启动，避免 macos-13 排队把整次 run 卡成 in_progress。
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -131,12 +136,11 @@ jobs:
             | --- | --- |
             | Linux x64 | `campux-linux-x64` |
             | Linux arm64 | `campux-linux-arm64` |
-            | macOS x64 (Intel) | `campux-darwin-x64` |
             | macOS arm64 (Apple Silicon) | `campux-darwin-arm64` |
             | Windows x64 | `campux-windows-x64.exe` |
 
-            > macOS Intel（`darwin-x64`）由独立的 best-effort 任务构建，偶尔会因 runner 排队
-            > 未能赶上本次发布；如缺失可在 Actions 重跑或用 `bun run build:binary` 自行构建。
+            > macOS Intel（`darwin-x64`）因 `macos-13` runner 经常长时间排队，不随默认 tag 发布构建；
+            > 如确需该产物，请手动触发本 workflow 并勾选 `include_darwin_x64`。
 
             ### 快速开始（零配置）
             ```bash
