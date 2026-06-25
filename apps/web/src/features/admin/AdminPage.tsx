@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { TenantSummary } from "@campux/domain";
+import { PRIVATE_POST_PROMPT_MAX_LENGTH, type TenantSummary } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -147,6 +147,7 @@ type AiSettingsForm = {
   privatePostAiEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
   postTriggerKeywordsText: string;
+  privatePostPrompt: string;
 };
 
 type LlmTestResult = {
@@ -570,6 +571,7 @@ export function AdminPage({
       privatePostAiEnabled: aiForm.privatePostAiEnabled,
       privatePostAggregateDelaySeconds: aiForm.privatePostAggregateDelaySeconds,
       postTriggerKeywords: lines(aiForm.postTriggerKeywordsText),
+      privatePostPrompt: aiForm.privatePostPrompt.trim(),
     };
     return {
       enabled: aiForm.enabled,
@@ -2105,6 +2107,18 @@ function AdminAiSettingsPanel({
                 />
                 <span className="text-xs text-muted-foreground">用户停顿达到该时间后，将同一会话合并交给 AI 判断；设为 0 则关闭聚合。</span>
               </label>
+              <label className="mt-3 grid gap-1 text-sm font-medium">
+                收稿判断提示词
+                <Textarea
+                  className="min-h-28 font-mono text-xs"
+                  value={form.privatePostPrompt}
+                  disabled={busy || testing || !form.privatePostAiEnabled}
+                  maxLength={PRIVATE_POST_PROMPT_MAX_LENGTH}
+                  onChange={(event) => onFormChange({ ...form, privatePostPrompt: event.target.value })}
+                  placeholder="留空使用内置默认提示词。填写后将作为完整系统提示词，请要求模型只返回指定 JSON。"
+                />
+                <span className="text-xs text-muted-foreground">保存后作为完整系统提示词发送给大模型，最多 {PRIVATE_POST_PROMPT_MAX_LENGTH} 字；必须要求模型只返回指定 JSON。</span>
+              </label>
             </div>
             <label className="grid gap-1 text-sm font-medium">
               投稿触发关键词
@@ -3525,6 +3539,7 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
     privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
+    privatePostPrompt: settings.rules.privatePostPrompt ?? "",
   };
 }
 

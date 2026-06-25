@@ -52,10 +52,6 @@ type AiSettingsForm = {
   allowedCategoriesText: string;
   modelingKeywordsText: string;
   modelingNotes: string;
-  privatePostAiEnabled: boolean;
-  privatePostAggregateDelaySeconds: number;
-  postTriggerKeywordsText: string;
-  privatePostPrompt: string;
 };
 
 type PanelTab = "overview" | "backfill" | "recent";
@@ -327,10 +323,6 @@ export function AiPage({ me }: { me: AuthenticatedMe & { currentTenant: NonNulla
       allowedCategories: lines(form.allowedCategoriesText),
       modelingKeywords: lines(form.modelingKeywordsText),
       modelingNotes: form.modelingNotes.trim(),
-      privatePostAiEnabled: form.privatePostAiEnabled,
-      privatePostAggregateDelaySeconds: form.privatePostAggregateDelaySeconds,
-      postTriggerKeywords: lines(form.postTriggerKeywordsText),
-      privatePostPrompt: form.privatePostPrompt.trim(),
     };
     return {
       enabled: form.enabled,
@@ -979,50 +971,6 @@ const SettingsPanel = memo(function SettingsPanel({
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
           建模备注
           <Input value={form.modelingNotes} disabled={!isAdmin || busy || testing} onChange={(event) => onFormChange({ ...form, modelingNotes: event.target.value })} />
-        </label>
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-[11px] font-bold text-slate-700">AI 语义收稿</p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">直接交给大模型判断是否为校园墙稿件，并提取匿名、分段和提交意图。</p>
-            </div>
-            <Switch checked={form.privatePostAiEnabled} disabled={!isAdmin || busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, privatePostAiEnabled: checked })} aria-label="启用 AI 语义收稿" />
-          </div>
-          <label className="mt-3 block space-y-1 text-[11px] font-bold text-slate-600">
-            聚合等待时间（秒）
-            <Input
-              type="number"
-              min={0}
-              max={120}
-              value={form.privatePostAggregateDelaySeconds}
-              disabled={!isAdmin || busy || testing || !form.privatePostAiEnabled}
-              onChange={(event) => onFormChange({ ...form, privatePostAggregateDelaySeconds: Math.max(0, Math.min(120, Number(event.target.value) || 0)) })}
-            />
-            <span className="text-xs font-semibold text-slate-500">用户停顿达到该时间后，将同一会话合并交给 AI 判断；设为 0 则关闭聚合。</span>
-          </label>
-          <label className="mt-3 block space-y-1 text-[11px] font-bold text-slate-600">
-            收稿判断提示词
-            <Textarea
-              className="min-h-28 font-mono text-xs"
-              value={form.privatePostPrompt}
-              disabled={!isAdmin || busy || testing || !form.privatePostAiEnabled}
-              maxLength={PRIVATE_POST_PROMPT_MAX_LENGTH}
-              onChange={(event) => onFormChange({ ...form, privatePostPrompt: event.target.value })}
-              placeholder="留空使用内置默认提示词。填写后将作为完整系统提示词，例如：请判断以下内容是否为校园墙稿件；如果是请返回 post 并提取正文、匿名和提交意图；如果不是请返回 chat。"
-            />
-            <span className="text-xs font-semibold text-slate-500">保存后作为完整系统提示词发送给大模型，最多 {PRIVATE_POST_PROMPT_MAX_LENGTH} 字；必须要求模型只返回指定 JSON。</span>
-          </label>
-        </div>
-        <label className="space-y-1 text-[11px] font-bold text-slate-600">
-          投稿触发关键词
-          <Textarea
-            className="min-h-16"
-            value={form.postTriggerKeywordsText}
-            disabled={!isAdmin || busy || testing}
-            onChange={(event) => onFormChange({ ...form, postTriggerKeywordsText: event.target.value })}
-            placeholder="每行一个关键词，如 发帖、吐槽、表白"
-          />
-          <span className="text-xs font-semibold text-slate-500">发送 #关键词 可显式开始投稿，默认 #投稿 始终生效。</span>
         </label>
       </div>
 
@@ -1758,10 +1706,6 @@ function toForm(settings: TenantAiSettings): AiSettingsForm {
     allowedCategoriesText: (settings.rules.allowedCategories ?? []).join("\n"),
     modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
     modelingNotes: settings.rules.modelingNotes ?? "",
-    privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
-    privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
-    postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
-    privatePostPrompt: settings.rules.privatePostPrompt ?? "",
   };
 }
 
