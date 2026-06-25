@@ -29,7 +29,7 @@ export type AiRules = {
   privatePostAggregateDelaySeconds?: number | undefined;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
   postTriggerKeywords?: string[] | undefined;
-  /** 私聊投稿 AI 语义收稿的补充提示词 */
+  /** 私聊投稿 AI 语义收稿的完整系统提示词，留空使用内置默认提示词 */
   privatePostPrompt?: string | undefined;
 };
 

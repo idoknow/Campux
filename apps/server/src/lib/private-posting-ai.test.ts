@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildPrivatePostSystemPrompt, fallbackAnalyzePrivatePostSemantics, parsePrivatePostSemanticJson } from "./private-posting-ai";
+import { buildPrivatePostSystemPrompt, fallbackAnalyzePrivatePostSemantics, normalizePrivatePostSemanticResult, parsePrivatePostSemanticJson } from "./private-posting-ai";
 
 describe("private post AI semantic parsing", () => {
   test("parses standard JSON response", () => {
@@ -61,16 +61,58 @@ describe("private post AI semantic parsing", () => {
     expect(result.shouldSubmit).toBe(false);
   });
 
-  test("appends custom private post prompt to base system prompt", () => {
-    const prompt = buildPrivatePostSystemPrompt("把食堂评价类短句视为投稿");
-    expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
-    expect(prompt).toContain("租户补充规则");
-    expect(prompt).toContain("把食堂评价类短句视为投稿");
+  test("normalizes casual crowd-question LLM post result back to chat", () => {
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "post",
+        text: "好奇大家高考考的怎么样啊",
+        anonymous: null,
+        shouldSubmit: false,
+        sections: ["好奇大家高考考的怎么样啊"],
+        confidence: 0.86,
+        reason: "LLM 误判为评价征集",
+      },
+      { messageText: "好奇大家高考考的怎么样啊", hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("chat");
+    expect(result.text).toBe("");
+    expect(result.sections).toEqual([]);
+    expect(result.shouldSubmit).toBe(false);
+    expect(result.reason).toContain("casual_crowd_question");
   });
 
-  test("does not append blank custom private post prompt", () => {
+  test("normalization keeps explicit post requests as post", () => {
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "post",
+        text: "今天食堂阿姨特别好",
+        anonymous: true,
+        shouldSubmit: true,
+        sections: ["今天食堂阿姨特别好"],
+        confidence: 0.92,
+        reason: "明确要求匿名投稿",
+      },
+      { messageText: "帮我匿名投稿：今天食堂阿姨特别好", hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("post");
+    expect(result.text).toBe("今天食堂阿姨特别好");
+    expect(result.anonymous).toBe(true);
+    expect(result.shouldSubmit).toBe(true);
+  });
+
+  test("uses custom private post prompt as full system prompt", () => {
+    const customPrompt = "请判断以下内容是否为校园墙稿件，只返回 JSON";
+    const prompt = buildPrivatePostSystemPrompt(customPrompt);
+    expect(prompt).toBe(customPrompt);
+    expect(prompt).not.toContain("租户补充规则");
+  });
+
+  test("uses default prompt when custom private post prompt is blank", () => {
     const prompt = buildPrivatePostSystemPrompt("  \n  ");
     expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
+    expect(prompt).toContain("稿件");
     expect(prompt).not.toContain("租户补充规则");
   });
 });

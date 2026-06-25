@@ -984,7 +984,7 @@ const SettingsPanel = memo(function SettingsPanel({
           <div className="flex items-center justify-between gap-2">
             <div>
               <p className="text-[11px] font-bold text-slate-700">AI 语义收稿</p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">自动判断私聊投稿、匿名、分段和提交。</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">直接交给大模型判断是否为校园墙稿件，并提取匿名、分段和提交意图。</p>
             </div>
             <Switch checked={form.privatePostAiEnabled} disabled={!isAdmin || busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, privatePostAiEnabled: checked })} aria-label="启用 AI 语义收稿" />
           </div>
@@ -1001,16 +1001,16 @@ const SettingsPanel = memo(function SettingsPanel({
             <span className="text-xs font-semibold text-slate-500">用户停顿达到该时间后，将同一会话合并交给 AI 判断；设为 0 则关闭聚合。</span>
           </label>
           <label className="mt-3 block space-y-1 text-[11px] font-bold text-slate-600">
-            收稿提示词
+            收稿判断提示词
             <Textarea
               className="min-h-28 font-mono text-xs"
               value={form.privatePostPrompt}
               disabled={!isAdmin || busy || testing || !form.privatePostAiEnabled}
               maxLength={PRIVATE_POST_PROMPT_MAX_LENGTH}
               onChange={(event) => onFormChange({ ...form, privatePostPrompt: event.target.value })}
-              placeholder="留空使用默认提示词。可补充：哪些内容算投稿、哪些内容算客服咨询、匿名/提交判断规则等。"
+              placeholder="留空使用内置默认提示词。填写后将作为完整系统提示词，例如：请判断以下内容是否为校园墙稿件；如果是请返回 post 并提取正文、匿名和提交意图；如果不是请返回 chat。"
             />
-            <span className="text-xs font-semibold text-slate-500">作为默认系统提示词的补充规则，最多 {PRIVATE_POST_PROMPT_MAX_LENGTH} 字。</span>
+            <span className="text-xs font-semibold text-slate-500">保存后作为完整系统提示词发送给大模型，最多 {PRIVATE_POST_PROMPT_MAX_LENGTH} 字；必须要求模型只返回指定 JSON。</span>
           </label>
         </div>
         <label className="space-y-1 text-[11px] font-bold text-slate-600">
