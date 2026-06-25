@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseBanCommandArgs, parseCommand, parseUnbanCommandArgs, resolvePrivatePostModeSelectionFromSemantic, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
+import { parseBanCommandArgs, parseCommand, parseReviewGroupCommand, parseUnbanCommandArgs, resolvePrivatePostModeSelectionFromSemantic, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
   test("解析半角 # 命令", () => {
@@ -53,9 +53,14 @@ describe("review group ban command parsing", () => {
     expect(parseUnbanCommandArgs("123456789 其他内容")).toBeNull();
   });
 
-  test("裸 ban/unban 命令可被识别", () => {
-    expect(parseCommand("ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
-    expect(parseCommand("unban 123456789")).toEqual({ name: "unban", args: "123456789" });
+  test("裸 ban/unban 不在通用解析中识别", () => {
+    expect(parseCommand("ban 123456789 刷屏广告")).toBeNull();
+    expect(parseCommand("unban 123456789")).toBeNull();
+  });
+
+  test("审核群解析支持裸 ban/unban 命令", () => {
+    expect(parseReviewGroupCommand("ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
+    expect(parseReviewGroupCommand("unban 123456789")).toEqual({ name: "unban", args: "123456789" });
   });
 });
 

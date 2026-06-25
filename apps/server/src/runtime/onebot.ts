@@ -2029,7 +2029,7 @@ export class OneBotRuntime {
       return;
     }
 
-    let command = parseCommand(extractPlainText(event));
+    let command = parseReviewGroupCommand(extractPlainText(event));
 
     // 如果没有以 # 或 / 明确给出命令，但消息是 @ 机器人的短命令（比如 过/拒），支持基于 mention 的快捷命令。
     if (!command && isMentioningBot(event, botQqUin)) {
@@ -3225,13 +3225,6 @@ function escapeRegex(value: string) {
 
 export function parseCommand(input: string) {
   const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
-  const bareCommand = normalized.match(/^(ban|unban)\b(?:\s+(.*))?$/i);
-  if (bareCommand?.[1]) {
-    return {
-      name: bareCommand[1].toLowerCase(),
-      args: bareCommand[2]?.trim() ?? "",
-    };
-  }
 
   // 同时支持半角 # / 与全角 ＃ 作为命令前缀（全角 # 在中文输入法下很常见，否则会出现指令无法识别）
   const commandStart = normalized.search(/[#＃/]/);
@@ -3251,6 +3244,23 @@ export function parseCommand(input: string) {
   return {
     name,
     args: match[2]?.trim() ?? "",
+  };
+}
+
+export function parseReviewGroupCommand(input: string) {
+  const command = parseCommand(input);
+  if (command) {
+    return command;
+  }
+
+  const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  const bareCommand = normalized.match(/^(ban|unban)\b(?:\s+(.*))?$/i);
+  if (!bareCommand?.[1]) {
+    return null;
+  }
+  return {
+    name: bareCommand[1].toLowerCase(),
+    args: bareCommand[2]?.trim() ?? "",
   };
 }
 
