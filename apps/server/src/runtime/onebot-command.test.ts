@@ -62,6 +62,10 @@ describe("review group ban command parsing", () => {
     expect(parseReviewGroupCommand("ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
     expect(parseReviewGroupCommand("unban 123456789")).toEqual({ name: "unban", args: "123456789" });
   });
+
+  test("审核群裸命令复用 CQ at 规范化", () => {
+    expect(parseReviewGroupCommand("[CQ:at,qq=10000] ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
+  });
 });
 
 describe("private post semantic mode selection", () => {

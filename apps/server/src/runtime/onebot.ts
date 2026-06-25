@@ -204,6 +204,8 @@ type OneBotMessageEvent = {
   // but we treat them as part of `message` / `raw_message` as fallback.
 };
 
+const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
+
 const reviewHelp = [
   "审核命令：",
   "#通过 <稿件id>",
@@ -2256,7 +2258,7 @@ export class OneBotRuntime {
         const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
         const parsed = parseBanCommandArgs(command.args);
         if (!parsed) {
-          await this.sendGroupMessage(botQqUin, groupId, "请提供要封禁的 QQ 号和理由，例如：#封禁 123456789 刷屏广告");
+          await this.sendGroupMessage(botQqUin, groupId, "请提供要封禁的 QQ 号和理由，例如：#封禁 123456789 刷屏广告 或 ban 123456789 刷屏广告");
           return;
         }
         const targetUser = await prisma.user.findUnique({
@@ -2282,7 +2284,7 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, "不能封禁管理员");
           return;
         }
-        const endsAt = new Date("9999-12-31T23:59:59.999Z");
+        const endsAt = new Date(PERMANENT_BAN_ENDS_AT);
         await prisma.banRecord.create({
           data: {
             tenantId: bot.tenantId,
@@ -3223,8 +3225,12 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function normalizeCommandInput(input: string) {
+  return input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+}
+
 export function parseCommand(input: string) {
-  const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  const normalized = normalizeCommandInput(input);
 
   // 同时支持半角 # / 与全角 ＃ 作为命令前缀（全角 # 在中文输入法下很常见，否则会出现指令无法识别）
   const commandStart = normalized.search(/[#＃/]/);
@@ -3253,7 +3259,7 @@ export function parseReviewGroupCommand(input: string) {
     return command;
   }
 
-  const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  const normalized = normalizeCommandInput(input);
   const bareCommand = normalized.match(/^(ban|unban)\b(?:\s+(.*))?$/i);
   if (!bareCommand?.[1]) {
     return null;
