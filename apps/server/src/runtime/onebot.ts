@@ -204,6 +204,8 @@ type OneBotMessageEvent = {
   // but we treat them as part of `message` / `raw_message` as fallback.
 };
 
+const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
+
 const reviewHelp = [
   "审核命令：",
   "#通过 <稿件id>",
@@ -212,7 +214,8 @@ const reviewHelp = [
   "#回复 <内容> （引用转发私信后使用）",
   "#发布 <内容> （可附带图片，文字+图片一起发布到空间）",
   "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
-  "#解封 <QQ号>",
+  "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
+  "#解封 <QQ号> 或 unban <QQ号>",
   "#好友数",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
@@ -2028,7 +2031,7 @@ export class OneBotRuntime {
       return;
     }
 
-    let command = parseCommand(extractPlainText(event));
+    let command = parseReviewGroupCommand(extractPlainText(event));
 
     // 如果没有以 # 或 / 明确给出命令，但消息是 @ 机器人的短命令（比如 过/拒），支持基于 mention 的快捷命令。
     if (!command && isMentioningBot(event, botQqUin)) {
@@ -2251,13 +2254,75 @@ export class OneBotRuntime {
         return;
       }
 
-      if (command.name === "解封") {
+      if (["封禁", "ban"].includes(command.name)) {
         const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
-        const qqUin = command.args.trim();
-        if (!qqUin || !/^\d+$/.test(qqUin)) {
+        const parsed = parseBanCommandArgs(command.args);
+        if (!parsed) {
+          await this.sendGroupMessage(botQqUin, groupId, "请提供要封禁的 QQ 号和理由，例如：#封禁 123456789 刷屏广告 或 ban 123456789 刷屏广告");
+          return;
+        }
+        const targetUser = await prisma.user.findUnique({
+          where: { qqUin: BigInt(parsed.qqUin) },
+        });
+        if (!targetUser) {
+          await this.sendGroupMessage(botQqUin, groupId, `未找到 QQ ${parsed.qqUin} 对应的账号，请先让该账号通过 Bot 注册或由运维创建`);
+          return;
+        }
+        const membership = await prisma.tenantMembership.findUnique({
+          where: {
+            tenantId_userId: {
+              tenantId: bot.tenantId,
+              userId: targetUser.id,
+            },
+          },
+        });
+        if (!membership) {
+          await this.sendGroupMessage(botQqUin, groupId, "该用户不属于当前校园墙");
+          return;
+        }
+        if (membership.role === "admin") {
+          await this.sendGroupMessage(botQqUin, groupId, "不能封禁管理员");
+          return;
+        }
+        const endsAt = new Date(PERMANENT_BAN_ENDS_AT);
+        await prisma.banRecord.create({
+          data: {
+            tenantId: bot.tenantId,
+            userId: targetUser.id,
+            operatorId: operator.id,
+            comment: parsed.reason,
+            endsAt,
+          },
+        });
+        await writeAuditLog({
+          tenantId: bot.tenantId,
+          actorId: operator.id,
+          action: "ban.create",
+          targetType: "user",
+          targetId: targetUser.id,
+          detail: {
+            comment: parsed.reason,
+            endsAt: endsAt.toISOString(),
+            source: "review_group",
+          },
+        });
+        await this.sendGroupMessage(botQqUin, groupId, `已封禁 QQ ${parsed.qqUin}，理由：${parsed.reason}`);
+        const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId } });
+        const tenantName = tenant?.name ?? "校园墙";
+        await this.sendPrivateMessageViaTenantBots(bot.tenantId, parsed.qqUin, formatBanNotify(tenantName, parsed.reason, endsAt)).catch((error) => {
+          this.logger.warn({ error, qqUin: parsed.qqUin }, "failed to send ban notification");
+        });
+        return;
+      }
+
+      if (["解封", "unban"].includes(command.name)) {
+        const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+        const parsed = parseUnbanCommandArgs(command.args);
+        if (!parsed) {
           await this.sendGroupMessage(botQqUin, groupId, "请提供要解封的 QQ 号，例如：#解封 123456789");
           return;
         }
+        const qqUin = parsed.qqUin;
         const targetUser = await prisma.user.findUnique({
           where: { qqUin: BigInt(qqUin) },
         });
@@ -3160,8 +3225,13 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function normalizeCommandInput(input: string) {
+  return input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+}
+
 export function parseCommand(input: string) {
-  const normalized = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  const normalized = normalizeCommandInput(input);
+
   // 同时支持半角 # / 与全角 ＃ 作为命令前缀（全角 # 在中文输入法下很常见，否则会出现指令无法识别）
   const commandStart = normalized.search(/[#＃/]/);
   if (commandStart < 0) {
@@ -3180,6 +3250,23 @@ export function parseCommand(input: string) {
   return {
     name,
     args: match[2]?.trim() ?? "",
+  };
+}
+
+export function parseReviewGroupCommand(input: string) {
+  const command = parseCommand(input);
+  if (command) {
+    return command;
+  }
+
+  const normalized = normalizeCommandInput(input);
+  const bareCommand = normalized.match(/^(ban|unban)\b(?:\s+(.*))?$/i);
+  if (!bareCommand?.[1]) {
+    return null;
+  }
+  return {
+    name: bareCommand[1].toLowerCase(),
+    args: bareCommand[2]?.trim() ?? "",
   };
 }
 
@@ -3233,6 +3320,27 @@ function parseRejectArgs(args: string) {
   return {
     comment: comment.trim(),
     displayId,
+  };
+}
+
+export function parseBanCommandArgs(args: string) {
+  const match = args.trim().match(/^(\d+)\s+(.+\S)$/);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  return {
+    qqUin: match[1],
+    reason: match[2].trim(),
+  };
+}
+
+export function parseUnbanCommandArgs(args: string) {
+  const match = args.trim().match(/^(\d+)$/);
+  if (!match?.[1]) {
+    return null;
+  }
+  return {
+    qqUin: match[1],
   };
 }
 

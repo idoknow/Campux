@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseCommand, resolvePrivatePostModeSelectionFromSemantic, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
+import { parseBanCommandArgs, parseCommand, parseReviewGroupCommand, parseUnbanCommandArgs, resolvePrivatePostModeSelectionFromSemantic, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
   test("解析半角 # 命令", () => {
@@ -29,6 +29,42 @@ describe("parseCommand prefix handling", () => {
 
   test("命令前有非 @ 文本时不识别", () => {
     expect(parseCommand("随便说点什么 ＃通过 1")).toBeNull();
+  });
+});
+
+describe("review group ban command parsing", () => {
+  test("解析封禁参数中的 QQ 与理由", () => {
+    expect(parseBanCommandArgs("123456789 刷屏广告")).toEqual({ qqUin: "123456789", reason: "刷屏广告" });
+  });
+
+  test("封禁理由可以包含空格", () => {
+    expect(parseBanCommandArgs("123456789 多次 发布 广告")).toEqual({ qqUin: "123456789", reason: "多次 发布 广告" });
+  });
+
+  test("封禁参数缺少理由时返回 null", () => {
+    expect(parseBanCommandArgs("123456789")).toBeNull();
+  });
+
+  test("解析解封参数中的 QQ", () => {
+    expect(parseUnbanCommandArgs("123456789")).toEqual({ qqUin: "123456789" });
+  });
+
+  test("解封参数包含额外内容时返回 null", () => {
+    expect(parseUnbanCommandArgs("123456789 其他内容")).toBeNull();
+  });
+
+  test("裸 ban/unban 不在通用解析中识别", () => {
+    expect(parseCommand("ban 123456789 刷屏广告")).toBeNull();
+    expect(parseCommand("unban 123456789")).toBeNull();
+  });
+
+  test("审核群解析支持裸 ban/unban 命令", () => {
+    expect(parseReviewGroupCommand("ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
+    expect(parseReviewGroupCommand("unban 123456789")).toEqual({ name: "unban", args: "123456789" });
+  });
+
+  test("审核群裸命令复用 CQ at 规范化", () => {
+    expect(parseReviewGroupCommand("[CQ:at,qq=10000] ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
   });
 });
 
