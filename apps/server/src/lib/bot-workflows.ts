@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { hashPassword, type TenantRole } from "@campux/db";
+import { hashPassword, isPrismaKnownRequestError, type TenantRole } from "@campux/db";
 import { hasTenantRole } from "./auth";
 import { writeAuditLog } from "./audit";
 import { prisma } from "./prisma";
@@ -257,6 +257,96 @@ export async function reviewPostViaBot({
     bot,
     post: reviewed,
     operator: serializeUser(operator),
+  };
+}
+
+export async function approveAllPendingPostsViaBot({
+  queue,
+  botQqUin,
+  groupId,
+  operatorQqUin,
+}: {
+  queue: RuntimeQueue;
+  botQqUin: string;
+  groupId?: string | null | undefined;
+  operatorQqUin: string;
+}) {
+  const bot = await findEnabledBot(botQqUin);
+  assertReviewGroup(bot, groupId);
+  const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+  const pending = await prisma.post.findMany({
+    where: {
+      tenantId: bot.tenantId,
+      status: "pending_approval",
+    },
+    select: { id: true, displayId: true, status: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (pending.length === 0) {
+    await markBotSeen(bot.id);
+    return {
+      bot,
+      operator: serializeUser(operator),
+      approved: 0,
+      approvedPostIds: [],
+    };
+  }
+
+  const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
+  const approvedPostIds: string[] = [];
+
+  for (const post of pending) {
+    try {
+      await prisma.post.update({
+        where: { id: post.id, status: "pending_approval" },
+        data: {
+          status: "approved",
+          logs: {
+            create: {
+              tenantId: bot.tenantId,
+              actorId: operator.id,
+              oldStatus: "pending_approval",
+              newStatus: "approved",
+              comment: "审核群命令全部通过",
+            },
+          },
+        },
+      });
+    } catch (error) {
+      if (isPrismaKnownRequestError(error) && error.code === "P2025") {
+        continue;
+      }
+      throw error;
+    }
+
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: operator.id,
+      action: "bot.review.approve",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+        groupId: groupId ?? null,
+        bulk: true,
+      },
+    });
+
+    if (publishMode.mode === "accumulate") {
+      await addApprovedPostToBatch(queue, bot.tenantId, post.id, operator.id);
+    } else {
+      await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+    }
+    approvedPostIds.push(post.id);
+  }
+
+  await markBotSeen(bot.id);
+  return {
+    bot,
+    operator: serializeUser(operator),
+    approved: approvedPostIds.length,
+    approvedPostIds,
   };
 }
 

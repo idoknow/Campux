@@ -5,6 +5,7 @@ import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
 import { TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
 import {
   BotWorkflowError,
+  approveAllPendingPostsViaBot,
   findEnabledBot,
   qzoneCookieDomain,
   publishTextDirectViaBot,
@@ -209,6 +210,7 @@ const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
 const reviewHelp = [
   "审核命令：",
   "#通过 <稿件id>",
+  "#全部通过",
   "#拒绝 <理由> <稿件id>",
   "#重发 <稿件id>",
   "#回复 <内容> （引用转发私信后使用）",
@@ -2060,6 +2062,18 @@ export class OneBotRuntime {
 
     try {
       const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+
+      if (command.name === "全部通过") {
+        const result = await approveAllPendingPostsViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, result.approved === 0 ? "当前没有待审核稿件" : `已全部通过 ${result.approved} 条待审核稿件`);
+        await Promise.all(result.approvedPostIds.map((postId) => this.notifyReviewResult(postId, "approved").catch(() => undefined)));
+        return;
+      }
 
       if (command.name === "通过") {
         let displayId = parseDisplayId(command.args);
