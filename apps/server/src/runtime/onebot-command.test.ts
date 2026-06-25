@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseBanCommandArgs, parseCommand, parseReviewGroupCommand, parseUnbanCommandArgs, resolvePrivatePostModeSelectionFromSemantic, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
+import { parseBanCommandArgs, parseCommand, parseReviewGroupCommand, parseUnbanCommandArgs, resolvePrivatePostModeSelectionFromSemantic, shouldNotifyReviewGroupAfterPrivatePostCreate, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
   test("解析半角 # 命令", () => {
@@ -130,5 +130,13 @@ describe("private post semantic mode selection", () => {
       confidence: 0.82,
       reason: "用户表达希望实名发布",
     })).toEqual({ anonymous: false });
+  });
+
+  test("私聊投稿创建成功后应通知审核群", () => {
+    expect(shouldNotifyReviewGroupAfterPrivatePostCreate({ status: "pending_approval" })).toBe(true);
+  });
+
+  test("非待审核私聊投稿不触发新稿审核通知", () => {
+    expect(shouldNotifyReviewGroupAfterPrivatePostCreate({ status: "approved" })).toBe(false);
   });
 });

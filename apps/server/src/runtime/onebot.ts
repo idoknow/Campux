@@ -1573,10 +1573,6 @@ export class OneBotRuntime {
     this.privatePostDrafts.delete(draftKey);
     const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
-
-    this.notifyNewPost(post.id).catch((error) => {
-      this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
-    });
   }
 
   private async ensurePrivatePostingAllowed(tenantId: string, userQqUin: string) {
@@ -2016,6 +2012,12 @@ export class OneBotRuntime {
         attachmentCount: draft.attachments.length,
       },
     });
+
+    if (shouldNotifyReviewGroupAfterPrivatePostCreate(post)) {
+      await this.notifyNewPost(post.id).catch((error) => {
+        this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
+      });
+    }
 
     return { post };
   }
@@ -3282,6 +3284,10 @@ export function parseReviewGroupCommand(input: string) {
     name: bareCommand[1].toLowerCase(),
     args: bareCommand[2]?.trim() ?? "",
   };
+}
+
+export function shouldNotifyReviewGroupAfterPrivatePostCreate(post: { status: string }) {
+  return post.status === "pending_approval";
 }
 
 export function shouldSubmitPrivatePostAfterModeSelection(semantic: PrivatePostSemanticResult | undefined) {
