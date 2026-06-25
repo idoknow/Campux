@@ -247,8 +247,8 @@ function isCasualCrowdQuestion(text: string) {
   return !hasPostCue && hasQuestionCue && (hasCrowdCue || hasCasualCue);
 }
 
-function appendReason(reason: string, marker: string) {
-  const trimmed = reason.trim();
+function appendReason(reason: unknown, marker: string) {
+  const trimmed = typeof reason === "string" ? reason.trim() : "";
   return trimmed ? `${trimmed};${marker}`.slice(0, 120) : marker;
 }
 

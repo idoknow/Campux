@@ -82,6 +82,23 @@ describe("private post AI semantic parsing", () => {
     expect(result.reason).toContain("casual_crowd_question");
   });
 
+  test("normalization tolerates malformed missing reason", () => {
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "post",
+        text: "好奇大家高考考的怎么样啊",
+        anonymous: null,
+        shouldSubmit: false,
+        sections: ["好奇大家高考考的怎么样啊"],
+        confidence: 0.86,
+      } as never,
+      { messageText: "好奇大家高考考的怎么样啊", hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("chat");
+    expect(result.reason).toBe("casual_crowd_question");
+  });
+
   test("normalization keeps explicit post requests as post", () => {
     const result = normalizePrivatePostSemanticResult(
       {
