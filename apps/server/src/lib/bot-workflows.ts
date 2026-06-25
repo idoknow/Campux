@@ -260,6 +260,90 @@ export async function reviewPostViaBot({
   };
 }
 
+export async function approveAllPendingPostsViaBot({
+  queue,
+  botQqUin,
+  groupId,
+  operatorQqUin,
+}: {
+  queue: RuntimeQueue;
+  botQqUin: string;
+  groupId?: string | null | undefined;
+  operatorQqUin: string;
+}) {
+  const bot = await findEnabledBot(botQqUin);
+  assertReviewGroup(bot, groupId);
+  const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+  const pending = await prisma.post.findMany({
+    where: {
+      tenantId: bot.tenantId,
+      status: "pending_approval",
+    },
+    select: { id: true, displayId: true, status: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (pending.length === 0) {
+    await markBotSeen(bot.id);
+    return {
+      bot,
+      operator: serializeUser(operator),
+      approved: 0,
+    };
+  }
+
+  const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
+  let approved = 0;
+
+  for (const post of pending) {
+    const result = await prisma.post.updateMany({
+      where: { id: post.id, status: "pending_approval" },
+      data: { status: "approved" },
+    });
+    if (result.count === 0) {
+      continue;
+    }
+
+    await prisma.postLog.create({
+      data: {
+        postId: post.id,
+        tenantId: bot.tenantId,
+        actorId: operator.id,
+        oldStatus: "pending_approval",
+        newStatus: "approved",
+        comment: "审核群命令全部通过",
+      },
+    });
+
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: operator.id,
+      action: "bot.review.approve",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+        groupId: groupId ?? null,
+        bulk: true,
+      },
+    });
+
+    if (publishMode.mode === "accumulate") {
+      await addApprovedPostToBatch(queue, bot.tenantId, post.id, operator.id);
+    } else {
+      await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+    }
+    approved += 1;
+  }
+
+  await markBotSeen(bot.id);
+  return {
+    bot,
+    operator: serializeUser(operator),
+    approved,
+  };
+}
+
 export async function refreshQZoneCookiesViaBot({
   botQqUin,
   operatorQqUin,

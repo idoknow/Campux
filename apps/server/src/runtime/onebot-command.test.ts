@@ -53,6 +53,11 @@ describe("review group ban command parsing", () => {
     expect(parseUnbanCommandArgs("123456789 其他内容")).toBeNull();
   });
 
+  test("解析全部通过命令", () => {
+    expect(parseReviewGroupCommand("#全部通过")).toEqual({ name: "全部通过", args: "" });
+    expect(parseReviewGroupCommand("＃全部通过")).toEqual({ name: "全部通过", args: "" });
+  });
+
   test("裸 ban/unban 不在通用解析中识别", () => {
     expect(parseCommand("ban 123456789 刷屏广告")).toBeNull();
     expect(parseCommand("unban 123456789")).toBeNull();
