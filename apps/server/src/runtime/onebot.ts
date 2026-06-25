@@ -2071,6 +2071,7 @@ export class OneBotRuntime {
           operatorQqUin,
         });
         await this.sendGroupMessage(botQqUin, groupId, result.approved === 0 ? "当前没有待审核稿件" : `已全部通过 ${result.approved} 条待审核稿件`);
+        await Promise.all(result.approvedPostIds.map((postId) => this.notifyReviewResult(postId, "approved").catch(() => undefined)));
         return;
       }
 

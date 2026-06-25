@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { hashPassword, type TenantRole } from "@campux/db";
+import { hashPassword, isPrismaKnownRequestError, type TenantRole } from "@campux/db";
 import { hasTenantRole } from "./auth";
 import { writeAuditLog } from "./audit";
 import { prisma } from "./prisma";
@@ -289,31 +289,36 @@ export async function approveAllPendingPostsViaBot({
       bot,
       operator: serializeUser(operator),
       approved: 0,
+      approvedPostIds: [],
     };
   }
 
   const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
-  let approved = 0;
+  const approvedPostIds: string[] = [];
 
   for (const post of pending) {
-    const result = await prisma.post.updateMany({
-      where: { id: post.id, status: "pending_approval" },
-      data: { status: "approved" },
-    });
-    if (result.count === 0) {
-      continue;
+    try {
+      await prisma.post.update({
+        where: { id: post.id, status: "pending_approval" },
+        data: {
+          status: "approved",
+          logs: {
+            create: {
+              tenantId: bot.tenantId,
+              actorId: operator.id,
+              oldStatus: "pending_approval",
+              newStatus: "approved",
+              comment: "审核群命令全部通过",
+            },
+          },
+        },
+      });
+    } catch (error) {
+      if (isPrismaKnownRequestError(error) && error.code === "P2025") {
+        continue;
+      }
+      throw error;
     }
-
-    await prisma.postLog.create({
-      data: {
-        postId: post.id,
-        tenantId: bot.tenantId,
-        actorId: operator.id,
-        oldStatus: "pending_approval",
-        newStatus: "approved",
-        comment: "审核群命令全部通过",
-      },
-    });
 
     await writeAuditLog({
       tenantId: bot.tenantId,
@@ -333,14 +338,15 @@ export async function approveAllPendingPostsViaBot({
     } else {
       await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
     }
-    approved += 1;
+    approvedPostIds.push(post.id);
   }
 
   await markBotSeen(bot.id);
   return {
     bot,
     operator: serializeUser(operator),
-    approved,
+    approved: approvedPostIds.length,
+    approvedPostIds,
   };
 }
 
