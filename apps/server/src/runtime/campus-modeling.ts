@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
+import { DEFAULT_PRIVATE_POST_PROMPT, PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import { Prisma, DbNull, createManyDedup } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { decryptJson, encryptJson } from "../lib/secret-json";
@@ -97,7 +97,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
     privatePostAiEnabled: false,
     privatePostAggregateDelaySeconds: 8,
     postTriggerKeywords: [],
-    privatePostPrompt: "",
+    privatePostPrompt: DEFAULT_PRIVATE_POST_PROMPT,
   },
 };
 
@@ -196,7 +196,7 @@ export async function readTenantAiSettings(tenantId: string): Promise<TenantAiSe
     apiKeyConfigured: Boolean(settings.apiKeySecret),
     temperature: clampNumber(settings.temperature, 0, 1, defaultAiSettings.temperature),
     timeoutSeconds: Math.max(5, Math.min(120, settings.timeoutSeconds)),
-    rules: normalizeRules(settings.rules),
+    rules: normalizeAiRules(settings.rules),
   };
 }
 
@@ -223,7 +223,7 @@ export async function updateTenantAiSettings(
       apiKeySecret,
       ...(input.temperature === undefined ? {} : { temperature: clampNumber(input.temperature, 0, 1, defaultAiSettings.temperature) }),
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: Math.max(5, Math.min(120, input.timeoutSeconds)) }),
-      ...(input.rules === undefined ? {} : { rules: normalizeRules(input.rules) as Prisma.InputJsonValue }),
+      ...(input.rules === undefined ? {} : { rules: normalizeAiRules(input.rules) as Prisma.InputJsonValue }),
     },
     create: {
       tenantId,
@@ -235,7 +235,7 @@ export async function updateTenantAiSettings(
       apiKeySecret,
       temperature: clampNumber(input.temperature ?? defaultAiSettings.temperature, 0, 1, defaultAiSettings.temperature),
       timeoutSeconds: Math.max(5, Math.min(120, input.timeoutSeconds ?? defaultAiSettings.timeoutSeconds)),
-      rules: normalizeRules(input.rules ?? defaultAiSettings.rules) as Prisma.InputJsonValue,
+      rules: normalizeAiRules(input.rules ?? defaultAiSettings.rules) as Prisma.InputJsonValue,
     },
   });
 
@@ -1245,7 +1245,7 @@ function normalizeEntity(value: unknown): ExtractedEntity | null {
   };
 }
 
-function normalizeRules(value: unknown): AiRules {
+export function normalizeAiRules(value: unknown): AiRules {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return defaultAiSettings.rules;
   }
@@ -1259,12 +1259,20 @@ function normalizeRules(value: unknown): AiRules {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
-    privatePostPrompt: typeof candidate.privatePostPrompt === "string" ? candidate.privatePostPrompt.trim().slice(0, PRIVATE_POST_PROMPT_MAX_LENGTH) : defaultAiSettings.rules.privatePostPrompt,
+    privatePostPrompt: normalizePrivatePostPrompt(candidate.privatePostPrompt),
   };
 }
 
 function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function normalizePrivatePostPrompt(value: unknown) {
+  if (typeof value !== "string") {
+    return defaultAiSettings.rules.privatePostPrompt;
+  }
+  const trimmed = value.trim().slice(0, PRIVATE_POST_PROMPT_MAX_LENGTH);
+  return trimmed || defaultAiSettings.rules.privatePostPrompt;
 }
 
 function normalizeNumber(value: unknown, min: number, max: number, fallback: number) {

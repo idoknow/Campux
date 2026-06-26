@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
 import { buildPrivatePostSystemPrompt, fallbackAnalyzePrivatePostSemantics, normalizePrivatePostSemanticResult, parsePrivatePostSemanticJson } from "./private-posting-ai";
 
 describe("private post AI semantic parsing", () => {
@@ -128,6 +129,7 @@ describe("private post AI semantic parsing", () => {
 
   test("uses default prompt when custom private post prompt is blank", () => {
     const prompt = buildPrivatePostSystemPrompt("  \n  ");
+    expect(prompt).toBe(DEFAULT_PRIVATE_POST_PROMPT);
     expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
     expect(prompt).toContain("稿件");
     expect(prompt).not.toContain("租户补充规则");
