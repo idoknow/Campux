@@ -5,11 +5,7 @@ export type RuntimeJobName =
   | "notifyPostCancelled"
   | "notifyReviewResult"
   | "publishPost"
-  | "refreshQZonePostMetric"
-  | "aiAnalyzePost"
-  | "refreshSchoolModel"
-  | "aiBackfillBatch"
-  | "aiBackfillItem";
+  | "refreshQZonePostMetric";
 
 export type RuntimeJob = {
   id: string;

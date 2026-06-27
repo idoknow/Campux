@@ -15,7 +15,6 @@ import fastifyStatic from "@fastify/static";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
 import { OneBotRuntime } from "./runtime/onebot";
-import { recoverAiBackfillJobs, registerCampusModelingWorker } from "./runtime/campus-modeling";
 import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publishing";
 import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from "./runtime/qzone-post-metrics";
 import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapshots";
@@ -67,7 +66,6 @@ const queue = createRuntimeQueue({
 const oneBot = new OneBotRuntime(queue, app.log, config);
 registerPublishingWorker(queue, app.log, config, oneBot);
 registerQZonePostMetricWorker(queue, app.log);
-registerCampusModelingWorker(queue, app.log);
 
 await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
@@ -75,7 +73,7 @@ registerSetupRoutes(app);
 registerAuthRoutes(app, config);
 registerTenantRoutes(app);
 registerMetadataRoutes(app, config);
-registerAiRoutes(app, queue);
+registerAiRoutes(app);
 registerOAuthRoutes(app);
 registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
@@ -117,7 +115,6 @@ app.addHook("onClose", async () => {
 
 await queue.start();
 await recoverPublishAttempts(queue, app.log);
-await recoverAiBackfillJobs(queue, app.log);
 const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
 const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: app.log, config });
 const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });

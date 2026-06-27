@@ -33,7 +33,6 @@ type SelectTenantResponse = {
 const tabPaths: Record<MainTab, string> = {
   post: "/post",
   posts: "/posts",
-  ai: "/ai",
   stats: "/stats",
   services: "/services",
   admin: "/admin",
@@ -56,7 +55,6 @@ const adminTabPaths: Record<AdminTab, string> = {
 const mainTabTitles: Record<MainTab, string> = {
   post: "投稿",
   posts: "稿件",
-  ai: "AI",
   stats: "统计",
   services: "服务",
   admin: "管理",
@@ -114,13 +112,11 @@ export function App() {
   const documentTenantName = route.kind === "tenant" ? selectedTenant?.name : undefined;
   const activeLogoUrl = (me?.authenticated ? selectedTenant?.logoUrl : hostTenant?.logoUrl)?.trim() || "/logo.svg";
   const availableNavItems = useMemo(() => {
-    const aiEnabled = selectedTenant?.aiEnabled ?? true;
-    const visibleNavItems = navItems.filter((item) => item.value !== "ai" || aiEnabled);
     if (!currentRole) {
-      return visibleNavItems.filter((item) => item.value !== "admin");
+      return navItems.filter((item) => item.value !== "admin");
     }
-    return visibleNavItems.filter((item) => canAccess(currentRole, item.minRole));
-  }, [currentRole, selectedTenant?.aiEnabled]);
+    return navItems.filter((item) => canAccess(currentRole, item.minRole));
+  }, [currentRole]);
 
   async function refreshMe() {
     const data = await api<MeResponse>("/api/me");
