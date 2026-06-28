@@ -228,6 +228,8 @@ export function formatRegisterExtended(stylishEnabled = false): string {
 
 const privatePostBodyStartDefault =
   "好的，以下是正文内容，直接发送文字或图片即可添加。发送 #撤回 可撤回上一条，发送 #结束 提交投稿。（发送 #取消 取消本次投稿）";
+const privatePostBodyStartAiDefault =
+  "好的，以下是正文内容，直接发送文字或图片即可添加。写完后直接说“可以提交/发出去”，也可以说“撤回上一条”或“取消本次投稿”。";
 
 const privatePostBodyStartStylish = [
   "📝 好的，以下是正文内容~ 直接发文字或图片就行，发完记得 #结束 提交！",
@@ -235,8 +237,18 @@ const privatePostBodyStartStylish = [
   "✨ 开始编辑正文吧~ 直接发送文字或图片添加内容。发 #撤回 撤回上一条，发 #结束 提交投稿。",
   privatePostBodyStartDefault,
 ];
+const privatePostBodyStartAiStylish = [
+  "📝 好的，以下是正文内容~ 直接发文字或图片就行，写完告诉我可以提交就好。",
+  "✏️ 好嘞，继续发正文和图片吧。想修改可以说撤回上一条，想放弃可以说取消。",
+  "✨ 开始编辑正文吧~ 发完直接说可以发出去，我会按语义帮你提交。",
+  privatePostBodyStartAiDefault,
+];
 
-export function formatPrivatePostBodyStart(stylishEnabled = false): string {
+export function formatPrivatePostBodyStart(stylishEnabled = false, aiIntakeEnabled = false): string {
+  if (aiIntakeEnabled) {
+    if (!stylishEnabled) return privatePostBodyStartAiDefault;
+    return pick(privatePostBodyStartAiStylish);
+  }
   if (!stylishEnabled) return privatePostBodyStartDefault;
   return pick(privatePostBodyStartStylish);
 }
@@ -549,14 +561,25 @@ export function formatQZoneAutoRefreshReason(reason: string): string {
 
 const privatePostModeDefault =
   "现在回复 #匿名 或 #实名 选择投稿方式。（取消本次投稿请发送 #取消）";
+const privatePostModeAiDefault =
+  "请告诉我这次投稿是否匿名，可以直接回复“匿名/实名/是/否”等自然语言。也可以说“取消本次投稿”。";
 
 const privatePostModeStylish = [
   "✨ 好嘞！回复 #匿名 悄悄说，或者 #实名 光明正大发~（发 #取消 就不投了）",
   "📝 选择投稿方式吧~ #匿名 还是 #实名？（要取消就发 #取消）",
   privatePostModeDefault,
 ];
+const privatePostModeAiStylish = [
+  "✨ 好嘞！这次要匿名还是实名？直接说“匿名/实名/是/否”都可以~",
+  "📝 选择投稿方式吧~ 可以自然回复匿名、实名、是或否；想取消也直接说就行。",
+  privatePostModeAiDefault,
+];
 
-export function formatPrivatePostModePrompt(stylishEnabled = false): string {
+export function formatPrivatePostModePrompt(stylishEnabled = false, aiIntakeEnabled = false): string {
+  if (aiIntakeEnabled) {
+    if (!stylishEnabled) return privatePostModeAiDefault;
+    return pick(privatePostModeAiStylish);
+  }
   if (!stylishEnabled) return privatePostModeDefault;
   return pick(privatePostModeStylish);
 }
@@ -565,14 +588,25 @@ export function formatPrivatePostModePrompt(stylishEnabled = false): string {
 
 const privatePostDraftDefault =
   "继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）";
+const privatePostDraftAiDefault =
+  "继续发送添加稿件正文及图片；写完后直接说“可以提交/发出去”，也可以说“撤回上一条”或“取消本次投稿”。";
 
 const privatePostDraftStylish = [
   "📎 继续发正文或图片吧~ 发 #撤回 删掉上一条，写完了发 #结束 提交！（发 #取消 就取消）",
   "继续发送添加稿件正文及图片，发 #撤回 删除上一条，发 #结束 完成投稿。（取消请发 #取消）",
   privatePostDraftDefault,
 ];
+const privatePostDraftAiStylish = [
+  "📎 继续发正文或图片吧~ 写完说可以提交；想改就说撤回上一条，想放弃就说取消。",
+  "继续发送添加稿件正文及图片，完成后自然告诉我发出去即可。",
+  privatePostDraftAiDefault,
+];
 
-export function formatPrivatePostDraftPrompt(stylishEnabled = false): string {
+export function formatPrivatePostDraftPrompt(stylishEnabled = false, aiIntakeEnabled = false): string {
+  if (aiIntakeEnabled) {
+    if (!stylishEnabled) return privatePostDraftAiDefault;
+    return pick(privatePostDraftAiStylish);
+  }
   if (!stylishEnabled) return privatePostDraftDefault;
   return pick(privatePostDraftStylish);
 }
@@ -590,6 +624,27 @@ const privatePostContinueStylish = [
 export function formatPrivatePostContinuePrompt(stylishEnabled = false): string {
   if (!stylishEnabled) return privatePostContinueDefault;
   return pick(privatePostContinueStylish);
+}
+
+// ── 对话投稿最终确认 ──────────────────────────────────
+
+function formatPrivatePostPreview(text: string, attachmentCount: number) {
+  const trimmed = text.trim();
+  const parts = ["请确认投稿内容："];
+  if (trimmed) {
+    parts.push("", trimmed);
+  }
+  if (attachmentCount > 0) {
+    parts.push("", `图片：${attachmentCount} 张`);
+  }
+  return parts.join("\n");
+}
+
+export function formatPrivatePostConfirmPrompt(text: string, attachmentCount: number, aiIntakeEnabled = false): string {
+  const actionHint = aiIntakeEnabled
+    ? "确认无误请直接回复“确认提交/可以发布”，需要取消请回复“取消”。"
+    : "确认无误请发送 #确认，取消提交请发送 #取消。";
+  return [formatPrivatePostPreview(text, attachmentCount), "", actionHint].join("\n");
 }
 
 // ── 对话投稿取消提示 ──────────────────────────────────

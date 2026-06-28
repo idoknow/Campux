@@ -13,6 +13,7 @@ export type PrivatePostSemanticInput = {
 
 export type PrivatePostSemanticResult = {
   intent: "post" | "chat" | "command";
+  action: "none" | "submit" | "cancel" | "undo";
   text: string;
   anonymous: boolean | null;
   shouldSubmit: boolean;
@@ -24,6 +25,7 @@ export type PrivatePostSemanticResult = {
 
 const defaultSemanticResult: PrivatePostSemanticResult = {
   intent: "chat",
+  action: "none",
   text: "",
   anonymous: null,
   shouldSubmit: false,
@@ -175,6 +177,7 @@ export function parsePrivatePostSemanticJson(raw: string): PrivatePostSemanticRe
   }
 
   const intent = parsed.intent === "post" || parsed.intent === "chat" || parsed.intent === "command" ? parsed.intent : "chat";
+  const action = parsed.action === "submit" || parsed.action === "cancel" || parsed.action === "undo" ? parsed.action : "none";
   const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
   const sections = Array.isArray(parsed.sections)
     ? parsed.sections.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 20)
@@ -187,6 +190,7 @@ export function parsePrivatePostSemanticJson(raw: string): PrivatePostSemanticRe
 
   return {
     intent,
+    action,
     text: normalizedText,
     anonymous,
     shouldSubmit,

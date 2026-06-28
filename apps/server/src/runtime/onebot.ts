@@ -22,7 +22,7 @@ import { decryptJson } from "../lib/secret-json";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
@@ -70,6 +70,7 @@ import {
   formatPrivatePostContinuePrompt,
   formatPrivatePostBodyStart,
   formatPrivatePostAppendAck,
+  formatPrivatePostConfirmPrompt,
   formatPrivatePostCancelled,
   formatPrivateHelp,
   formatPrivateReplySent,
@@ -142,6 +143,7 @@ type PrivatePostDraft = {
   uploadedKeys: string[];
   updatedAt: number;
   history: PrivatePostHistoryEntry[];
+  aiIntakeEnabled: boolean;
 };
 
 type PrivatePostPendingMode = {
@@ -151,8 +153,11 @@ type PrivatePostPendingMode = {
   uploadedKeys: string[];
   updatedAt: number;
   history: PrivatePostHistoryEntry[];
+  aiIntakeEnabled: boolean;
   submitAfterModeSelection?: boolean;
 };
+
+type PrivatePostPendingConfirm = PrivatePostDraft;
 
 type PrivateForwardEntry = {
   time: number;
@@ -238,6 +243,7 @@ export class OneBotRuntime {
   private readonly privateForwardBuffers = new Map<string, PrivateForwardBuffer>();
   private readonly privatePostAggregateBuffers = new Map<string, PrivatePostAggregateBuffer>();
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
+  private readonly privatePostPendingConfirms = new Map<string, PrivatePostPendingConfirm>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
   private readonly pendingFriendRequestFlags = new Set<string>();
   private readonly privateForwardMsgIdMap = new Map<string, { userQqUin: string; userNickname: string; botQqUin: string }>();
@@ -1130,7 +1136,10 @@ export class OneBotRuntime {
       const privatePostAggregateDelaySeconds = Math.max(0, Math.min(120, Math.trunc(aiSettings.rules.privatePostAggregateDelaySeconds ?? 8)));
       const extraKeywords = aiSettings.rules.postTriggerKeywords;
 
-      const startBody = parsePrivatePostStartText(plainText, extraKeywords);
+      const startBody = parsePrivatePostStartText(plainText, {
+        extraKeywords,
+        aiIntakeEnabled: privatePostAiEnabled,
+      });
       if (startBody !== null) {
         this.clearPrivatePostAggregateBuffer(this.getPrivatePostDraftKey(botQqUin, userQqUin));
         await this.startPrivatePostDraft({
@@ -1139,11 +1148,28 @@ export class OneBotRuntime {
           userQqUin,
           event,
           body: startBody,
+          aiIntakeEnabled: privatePostAiEnabled,
         });
         return;
       }
 
-      if (isPrivatePostCancelText(plainText)) {
+      const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+      const existingPendingMode = this.privatePostPendingModes.get(draftKey);
+      const existingPendingConfirm = this.privatePostPendingConfirms.get(draftKey);
+      const existingDraft = this.privatePostDrafts.get(draftKey);
+      const semanticForExistingFlow = privatePostAiEnabled && (existingPendingMode || existingPendingConfirm || existingDraft)
+        ? await analyzePrivatePostSemantics({
+            tenantId: bot.tenantId,
+            messageText: plainText,
+            currentDraftText: existingPendingMode?.text ?? existingPendingConfirm?.text ?? existingDraft?.text ?? "",
+            hasCurrentDraft: true,
+            imageCount: (existingPendingMode?.attachments.length ?? existingPendingConfirm?.attachments.length ?? existingDraft?.attachments.length ?? 0) + extractOneBotImageSegments(event.message).length,
+            logger: this.logger,
+          })
+        : undefined;
+
+      const semanticAction = resolvePrivatePostSemanticAction(semanticForExistingFlow);
+      if (semanticAction === "cancel") {
         await this.cancelPrivatePostDraft({
           bot,
           botQqUin,
@@ -1152,8 +1178,66 @@ export class OneBotRuntime {
         return;
       }
 
-      const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
-      if (isPrivatePostUndoText(plainText)) {
+      if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostCancelText(plainText)) {
+        await this.cancelPrivatePostDraft({
+          bot,
+          botQqUin,
+          userQqUin,
+        });
+        return;
+      }
+
+      const pendingConfirm = existingPendingConfirm;
+      if (pendingConfirm) {
+        if (semanticAction === "undo") {
+          await this.undoPrivatePostDraftEntry({
+            bot,
+            botQqUin,
+            userQqUin,
+          });
+          return;
+        }
+        if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText)) {
+          await this.undoPrivatePostDraftEntry({
+            bot,
+            botQqUin,
+            userQqUin,
+          });
+          return;
+        }
+
+        const semanticConfirm = privatePostAiEnabled ? shouldConfirmPrivatePostSubmissionFromSemantic(semanticForExistingFlow) : null;
+        const keywordConfirm = shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
+        const confirmation = semanticConfirm ?? keywordConfirm;
+        if (confirmation?.confirmed === true) {
+          await this.submitPrivatePostPendingConfirm({
+            bot,
+            botQqUin,
+            userQqUin,
+          });
+          return;
+        }
+        if (confirmation?.confirmed === false) {
+          await this.cancelPrivatePostDraft({
+            bot,
+            botQqUin,
+            userQqUin,
+          });
+          return;
+        }
+
+        const shouldAppendContent = privatePostAiEnabled && shouldAppendPrivatePostContentForSemantic(semanticForExistingFlow);
+        const appended = shouldAppendContent
+          ? await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: pendingConfirm, semantic: semanticForExistingFlow })
+          : false;
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, pendingConfirm.aiIntakeEnabled));
+        if (!appended) {
+          return;
+        }
+        return;
+      }
+
+      if (semanticAction === "undo") {
         await this.undoPrivatePostDraftEntry({
           bot,
           botQqUin,
@@ -1162,24 +1246,19 @@ export class OneBotRuntime {
         return;
       }
 
-      const pendingMode = this.privatePostPendingModes.get(draftKey);
+      if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText)) {
+        await this.undoPrivatePostDraftEntry({
+          bot,
+          botQqUin,
+          userQqUin,
+        });
+        return;
+      }
+
+      const pendingMode = existingPendingMode;
       if (pendingMode) {
         const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-        if (isPrivatePostFinishText(plainText)) {
-          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
-          return;
-        }
-
-        const semantic = privatePostAiEnabled
-          ? await analyzePrivatePostSemantics({
-              tenantId: bot.tenantId,
-              messageText: plainText,
-              currentDraftText: pendingMode.text,
-              hasCurrentDraft: true,
-              imageCount: pendingMode.attachments.length + extractOneBotImageSegments(event.message).length,
-              logger: this.logger,
-            })
-          : undefined;
+        const semantic = semanticForExistingFlow;
         const semanticModeSelection = resolvePrivatePostModeSelectionFromSemantic(semantic);
         if (semanticModeSelection !== null) {
           await this.selectPrivatePostMode({
@@ -1191,23 +1270,38 @@ export class OneBotRuntime {
           return;
         }
 
-        const selection = parsePrivatePostModeText(plainText);
-        if (selection) {
-          await this.selectPrivatePostMode({
-            bot,
-            botQqUin,
-            userQqUin,
-            anonymous: selection.anonymous,
-          });
+        if (semanticAction === "submit") {
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pendingMode.aiIntakeEnabled === true));
+          return;
+        }
+        if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostFinishText(plainText)) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pendingMode.aiIntakeEnabled === true));
           return;
         }
 
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
+        if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled)) {
+          const selection = parsePrivatePostModeText(plainText);
+          if (selection) {
+            await this.selectPrivatePostMode({
+              bot,
+              botQqUin,
+              userQqUin,
+              anonymous: selection.anonymous,
+            });
+            return;
+          }
+        }
+
+        const shouldAppendContent = privatePostAiEnabled && shouldAppendPrivatePostContentForSemantic(semantic);
+        if (shouldAppendContent) {
+          await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: pendingMode, semantic });
+        }
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pendingMode.aiIntakeEnabled === true));
         return;
       }
 
-      if (isPrivatePostFinishText(plainText)) {
-        await this.finishPrivatePostDraft({
+      if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostFinishText(plainText)) {
+        await this.requestPrivatePostSubmitConfirmation({
           bot,
           botQqUin,
           userQqUin,
@@ -1215,31 +1309,26 @@ export class OneBotRuntime {
         return;
       }
 
-      const draft = this.privatePostDrafts.get(draftKey);
+      const draft = existingDraft;
       if (draft) {
-        const semantic = privatePostAiEnabled
-          ? await analyzePrivatePostSemantics({
-              tenantId: bot.tenantId,
-              messageText: plainText,
-              currentDraftText: draft.text,
-              hasCurrentDraft: true,
-              imageCount: draft.attachments.length + extractOneBotImageSegments(event.message).length,
-              logger: this.logger,
-            })
-          : undefined;
+        const semantic = semanticForExistingFlow;
 
         if (semantic?.intent === "post" && semantic.anonymous !== null) {
           draft.anonymous = semantic.anonymous;
         }
 
-        const shouldSubmitBySemantic = semantic?.intent === "post" && semantic.shouldSubmit;
-        if (shouldSubmitBySemantic && semantic.text) {
-          draft.text = semantic.text;
+        const shouldSubmitBySemantic = semanticAction === "submit" || (semantic?.intent === "post" && semantic.shouldSubmit);
+        const semanticText = semantic?.text;
+        if (shouldSubmitBySemantic && semanticText && shouldApplyPrivatePostSemanticText(semantic)) {
+          draft.text = semanticText;
         }
 
-        const appended = await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft, semantic });
+        const shouldAppendContent = shouldAppendPrivatePostContentForSemantic(semantic);
+        const appended = shouldAppendContent
+          ? await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft, semantic })
+          : false;
         if (shouldSubmitBySemantic) {
-          await this.finishPrivatePostDraft({
+          await this.requestPrivatePostSubmitConfirmation({
             bot,
             botQqUin,
             userQqUin,
@@ -1285,6 +1374,7 @@ export class OneBotRuntime {
               event,
               body: semantic.text || plainText,
               semantic,
+              aiIntakeEnabled: true,
             });
             return;
           }
@@ -1368,6 +1458,7 @@ export class OneBotRuntime {
     event,
     body,
     semantic,
+    aiIntakeEnabled = false,
   }: {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
     botQqUin: string;
@@ -1375,6 +1466,7 @@ export class OneBotRuntime {
     event: OneBotMessageEvent;
     body: string;
     semantic?: PrivatePostSemanticResult | undefined;
+    aiIntakeEnabled?: boolean;
   }) {
     await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
 
@@ -1405,13 +1497,14 @@ export class OneBotRuntime {
         uploadedKeys: staged.uploadedKeys,
         updatedAt: Date.now(),
         history,
+        aiIntakeEnabled,
       });
       if (semantic.shouldSubmit) {
-        await this.finishPrivatePostDraft({ bot, botQqUin, userQqUin });
+        await this.requestPrivatePostSubmitConfirmation({ bot, botQqUin, userQqUin });
         return;
       }
       const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled, aiIntakeEnabled));
       return;
     }
 
@@ -1422,11 +1515,12 @@ export class OneBotRuntime {
       uploadedKeys: staged.uploadedKeys,
       updatedAt: Date.now(),
       history,
+      aiIntakeEnabled,
       submitAfterModeSelection: shouldSubmitPrivatePostAfterModeSelection(semantic),
     });
 
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-    const summary = this.formatPrivatePostPendingSummary(text, attachments.length, privateStylishEnabled);
+    const summary = this.formatPrivatePostPendingSummary(text, attachments.length, privateStylishEnabled, aiIntakeEnabled);
     await this.sendPrivateMessage(botQqUin, userQqUin, summary);
   }
 
@@ -1442,7 +1536,7 @@ export class OneBotRuntime {
     botQqUin: string;
     userQqUin: string;
     event: OneBotMessageEvent;
-    target: PrivatePostDraft | PrivatePostPendingMode;
+    target: PrivatePostDraft | PrivatePostPendingMode | PrivatePostPendingConfirm;
     semantic?: PrivatePostSemanticResult | undefined;
   }) {
     await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
@@ -1519,6 +1613,14 @@ export class OneBotRuntime {
       return;
     }
 
+    const pendingConfirm = this.privatePostPendingConfirms.get(draftKey);
+    if (pendingConfirm) {
+      await this.clearPrivatePostPendingConfirm(draftKey);
+      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
+      return;
+    }
+
     const draft = this.privatePostDrafts.get(draftKey);
     if (!draft) {
       await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿。");
@@ -1530,7 +1632,7 @@ export class OneBotRuntime {
     await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
   }
 
-  private async finishPrivatePostDraft({
+  private async requestPrivatePostSubmitConfirmation({
     bot,
     botQqUin,
     userQqUin,
@@ -1549,16 +1651,43 @@ export class OneBotRuntime {
     }
 
     const text = draft.text.trim();
-    if (!text) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "请先发送稿件正文或图片，再发送 #结束。");
+    if (!text && draft.attachments.length === 0) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, draft.aiIntakeEnabled ? "请先发送稿件正文或图片，再确认提交。" : "请先发送稿件正文或图片，再发送 #结束。");
       return;
     }
     if (text.length > 1_000) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，请控制在 1000 字以内，再发送 #结束。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, draft.aiIntakeEnabled ? "正文太长了，请控制在 1000 字以内，再确认提交。" : "正文太长了，请控制在 1000 字以内，再发送 #结束。");
       return;
     }
 
-    const result = await this.createPostFromPrivateDraft(bot, userQqUin, draft).catch(async (error) => {
+    this.privatePostDrafts.delete(draftKey);
+    this.privatePostPendingConfirms.set(draftKey, {
+      ...draft,
+      text,
+      updatedAt: Date.now(),
+    });
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(text, draft.attachments.length, draft.aiIntakeEnabled));
+  }
+
+  private async submitPrivatePostPendingConfirm({
+    bot,
+    botQqUin,
+    userQqUin,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+  }) {
+    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+
+    const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    const pending = this.privatePostPendingConfirms.get(draftKey);
+    if (!pending) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有等待确认的投稿。");
+      return;
+    }
+
+    const result = await this.createPostFromPrivateDraft(bot, userQqUin, pending).catch(async (error) => {
       if (error instanceof BotWorkflowError) {
         await this.sendPrivateMessage(botQqUin, userQqUin, error.message).catch(() => undefined);
         return null;
@@ -1570,7 +1699,7 @@ export class OneBotRuntime {
     }
 
     const { post } = result;
-    this.privatePostDrafts.delete(draftKey);
+    this.privatePostPendingConfirms.delete(draftKey);
     const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
   }
@@ -1619,6 +1748,19 @@ export class OneBotRuntime {
     if (this.config && existing.uploadedKeys.length > 0) {
       await deleteAttachmentObjects(this.config, existing.uploadedKeys).catch((error) => {
         this.logger.warn({ error, draftKey }, "failed to cleanup pending private post attachments");
+      });
+    }
+  }
+
+  private async clearPrivatePostPendingConfirm(draftKey: string) {
+    const existing = this.privatePostPendingConfirms.get(draftKey);
+    if (!existing) {
+      return;
+    }
+    this.privatePostPendingConfirms.delete(draftKey);
+    if (this.config && existing.uploadedKeys.length > 0) {
+      await deleteAttachmentObjects(this.config, existing.uploadedKeys).catch((error) => {
+        this.logger.warn({ error, draftKey }, "failed to cleanup pending private post confirm attachments");
       });
     }
   }
@@ -1740,17 +1882,17 @@ export class OneBotRuntime {
     throw new BotWorkflowError("无法读取图片附件，请重新发送图片", 400);
   }
 
-  private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean, stylishEnabled = false) {
+  private formatPrivatePostDraftSummary(text: string, attachmentCount: number, anonymous: boolean, stylishEnabled = false, aiIntakeEnabled = false) {
     void text;
     void attachmentCount;
     void anonymous;
-    return formatPrivatePostDraftPrompt(stylishEnabled);
+    return formatPrivatePostDraftPrompt(stylishEnabled, aiIntakeEnabled);
   }
 
-  private formatPrivatePostPendingSummary(text: string, attachmentCount: number, stylishEnabled = false) {
+  private formatPrivatePostPendingSummary(text: string, attachmentCount: number, stylishEnabled = false, aiIntakeEnabled = false) {
     void text;
     void attachmentCount;
-    return formatPrivatePostModePrompt(stylishEnabled);
+    return formatPrivatePostModePrompt(stylishEnabled, aiIntakeEnabled);
   }
 
   private async selectPrivatePostMode({
@@ -1782,15 +1924,16 @@ export class OneBotRuntime {
       uploadedKeys: pending.uploadedKeys,
       updatedAt: Date.now(),
       history: pending.history,
+      aiIntakeEnabled: pending.aiIntakeEnabled,
     });
 
     if (pending.submitAfterModeSelection) {
-      await this.finishPrivatePostDraft({ bot, botQqUin, userQqUin });
+      await this.requestPrivatePostSubmitConfirmation({ bot, botQqUin, userQqUin });
       return;
     }
 
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled, pending.aiIntakeEnabled === true));
   }
 
   private async undoPrivatePostDraftEntry({
@@ -1811,10 +1954,18 @@ export class OneBotRuntime {
       const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
       const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
       if (!undone) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled));
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pending.aiIntakeEnabled === true));
         return;
       }
-      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, privateStylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, privateStylishEnabled, pending.aiIntakeEnabled === true));
+      return;
+    }
+
+    const pendingConfirm = this.privatePostPendingConfirms.get(draftKey);
+    if (pendingConfirm) {
+      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      await this.popPrivatePostHistoryEntry(draftKey, pendingConfirm, stylishEnabled);
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, pendingConfirm.aiIntakeEnabled));
       return;
     }
 
@@ -1828,10 +1979,10 @@ export class OneBotRuntime {
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
     const undone = await this.popPrivatePostHistoryEntry(draftKey, draft, stylishEnabled);
     if (!undone) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(privateStylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(privateStylishEnabled, draft.aiIntakeEnabled === true));
       return;
     }
-    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled, draft.aiIntakeEnabled === true));
   }
 
   private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode, stylishEnabled = false) {
@@ -2548,7 +2699,7 @@ export class OneBotRuntime {
       return;
     }
     this.clearPrivatePostAggregateBuffer(key);
-    if (this.privatePostDrafts.has(key) || this.privatePostPendingModes.has(key)) {
+    if (this.privatePostDrafts.has(key) || this.privatePostPendingModes.has(key) || this.privatePostPendingConfirms.has(key)) {
       return;
     }
 
@@ -2569,6 +2720,7 @@ export class OneBotRuntime {
         event: mergePrivatePostAggregateEvents(buffer.events, messageText),
         body: messageText,
         semantic,
+        aiIntakeEnabled: true,
       });
       return;
     }
@@ -3294,8 +3446,41 @@ export function shouldSubmitPrivatePostAfterModeSelection(semantic: PrivatePostS
   return semantic?.intent === "post" && semantic.anonymous === null;
 }
 
+export function shouldRunPrivatePostKeywordCommand(aiIntakeEnabled: boolean) {
+  return !aiIntakeEnabled;
+}
+
+export function resolvePrivatePostSemanticAction(semantic: PrivatePostSemanticResult | undefined) {
+  if (!semantic || semantic.confidence < 0.4 || semantic.action === "none") {
+    return null;
+  }
+  return semantic.action;
+}
+
+export function shouldAppendPrivatePostContentForSemantic(semantic: PrivatePostSemanticResult | undefined) {
+  if (!semantic) {
+    return true;
+  }
+  return semantic.action === "none" || semantic.intent === "post";
+}
+
+export function shouldApplyPrivatePostSemanticText(semantic: PrivatePostSemanticResult | undefined) {
+  return semantic?.intent === "post" && Boolean(semantic.text);
+}
+
+export function shouldConfirmPrivatePostSubmissionFromSemantic(semantic: PrivatePostSemanticResult | undefined) {
+  const action = resolvePrivatePostSemanticAction(semantic);
+  if (action === "submit") {
+    return { confirmed: true };
+  }
+  if (action === "cancel") {
+    return { confirmed: false };
+  }
+  return null;
+}
+
 export function resolvePrivatePostModeSelectionFromSemantic(semantic: PrivatePostSemanticResult | undefined) {
-  if (semantic?.anonymous === null || semantic?.anonymous === undefined) {
+  if (!semantic || semantic.confidence < 0.4 || semantic.anonymous === null || semantic.anonymous === undefined) {
     return null;
   }
   return { anonymous: semantic.anonymous };

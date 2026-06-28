@@ -15,8 +15,19 @@ function matchKeyword(input: string, keyword: string): string | null {
   return input.slice(prefix.length).trimStart();
 }
 
-export function parsePrivatePostStartText(input: string, extraKeywords?: string[] | undefined) {
+export type PrivatePostStartParseOptions = {
+  extraKeywords?: string[] | undefined;
+  aiIntakeEnabled?: boolean | undefined;
+};
+
+export function parsePrivatePostStartText(input: string, options?: PrivatePostStartParseOptions | string[] | undefined) {
   const trimmed = input.trim();
+  const extraKeywords = Array.isArray(options) ? options : options?.extraKeywords;
+  const aiIntakeEnabled = Array.isArray(options) ? false : options?.aiIntakeEnabled === true;
+
+  if (aiIntakeEnabled) {
+    return null;
+  }
 
   // 默认支持 #投稿（也可不带 # 前缀走下面兜底）
   const defaultMatch = matchKeyword(trimmed, "投稿");
@@ -60,6 +71,17 @@ export function parsePrivatePostModeText(input: string) {
   return {
     anonymous: match[1] === "匿名",
   };
+}
+
+export function parsePrivatePostConfirmText(input: string) {
+  const trimmed = input.trim();
+  if (/^(?:#|＃)确认\s*$/.test(trimmed)) {
+    return { confirmed: true };
+  }
+  if (/^(?:#|＃)(?:取消|取消提交|取消本次投稿)\s*$/.test(trimmed)) {
+    return { confirmed: false };
+  }
+  return null;
 }
 
 export function extractOneBotImageSegments(message: unknown) {

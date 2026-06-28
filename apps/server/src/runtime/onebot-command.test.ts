@@ -1,6 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseBanCommandArgs, parseCommand, parseReviewGroupCommand, parseUnbanCommandArgs, resolvePrivatePostModeSelectionFromSemantic, shouldNotifyReviewGroupAfterPrivatePostCreate, shouldSubmitPrivatePostAfterModeSelection } from "./onebot";
+import { parsePrivatePostConfirmText } from "../lib/private-posting";
+import {
+  shouldAppendPrivatePostContentForSemantic,
+  shouldApplyPrivatePostSemanticText,
+  shouldConfirmPrivatePostSubmissionFromSemantic,
+  shouldNotifyReviewGroupAfterPrivatePostCreate,
+  shouldRunPrivatePostKeywordCommand,
+  shouldSubmitPrivatePostAfterModeSelection,
+  parseBanCommandArgs,
+  parseCommand,
+  parseReviewGroupCommand,
+  parseUnbanCommandArgs,
+  resolvePrivatePostModeSelectionFromSemantic,
+  resolvePrivatePostSemanticAction,
+} from "./onebot";
 
 describe("parseCommand prefix handling", () => {
   test("解析半角 # 命令", () => {
@@ -74,9 +88,195 @@ describe("review group ban command parsing", () => {
 });
 
 describe("private post semantic mode selection", () => {
+  test("非 AI 确认提交阶段只接受 #确认 或 #取消", () => {
+    expect(parsePrivatePostConfirmText("#确认")).toEqual({ confirmed: true });
+    expect(parsePrivatePostConfirmText("＃确认")).toEqual({ confirmed: true });
+    expect(parsePrivatePostConfirmText("#取消")).toEqual({ confirmed: false });
+    expect(parsePrivatePostConfirmText("确认")).toBeNull();
+    expect(parsePrivatePostConfirmText("可以提交")).toBeNull();
+  });
+
+  test("AI 确认提交阶段使用语义确认或取消", () => {
+    expect(shouldConfirmPrivatePostSubmissionFromSemantic({
+      intent: "command",
+      action: "submit",
+      text: "原稿",
+      anonymous: null,
+      shouldSubmit: true,
+      sections: ["原稿"],
+      confidence: 0.86,
+      reason: "用户确认提交",
+    })).toEqual({ confirmed: true });
+
+    expect(shouldConfirmPrivatePostSubmissionFromSemantic({
+      intent: "command",
+      action: "cancel",
+      text: "原稿",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: ["原稿"],
+      confidence: 0.86,
+      reason: "用户取消提交",
+    })).toEqual({ confirmed: false });
+  });
+
+  test("AI 草稿阶段普通内容应追加正文，不因语义非 post 被丢弃", () => {
+    expect(shouldAppendPrivatePostContentForSemantic({
+      intent: "chat",
+      action: "none",
+      text: "补充一句",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: ["补充一句"],
+      confidence: 0.7,
+      reason: "用户继续补充内容",
+    })).toBe(true);
+
+    expect(shouldAppendPrivatePostContentForSemantic({
+      intent: "command",
+      action: "undo",
+      text: "",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: [],
+      confidence: 0.86,
+      reason: "用户要求撤回",
+    })).toBe(false);
+  });
+
+  test("AI 收稿开启时禁用投稿关键词指令分支", () => {
+    expect(shouldRunPrivatePostKeywordCommand(true)).toBe(false);
+    expect(shouldRunPrivatePostKeywordCommand(false)).toBe(true);
+  });
+
+  test("AI 收稿通过语义 action 触发投稿草稿动作", () => {
+    expect(resolvePrivatePostSemanticAction({
+      intent: "command",
+      action: "cancel",
+      text: "",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: [],
+      confidence: 0.86,
+      reason: "用户想取消本次投稿",
+    })).toBe("cancel");
+    expect(resolvePrivatePostSemanticAction({
+      intent: "command",
+      action: "undo",
+      text: "",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: [],
+      confidence: 0.82,
+      reason: "用户想撤回上一条内容",
+    })).toBe("undo");
+    expect(resolvePrivatePostSemanticAction({
+      intent: "post",
+      action: "submit",
+      text: "最终正文",
+      anonymous: true,
+      shouldSubmit: true,
+      sections: ["最终正文"],
+      confidence: 0.9,
+      reason: "用户表达完成并提交",
+    })).toBe("submit");
+  });
+
+  test("AI 语义提交动作不把提交话术追加或覆盖正文", () => {
+    const commandSubmit = {
+      intent: "command" as const,
+      action: "submit" as const,
+      text: "可以提交",
+      anonymous: null,
+      shouldSubmit: true,
+      sections: ["原稿"],
+      confidence: 0.86,
+      reason: "用户只是要求提交",
+    };
+    expect(shouldAppendPrivatePostContentForSemantic(commandSubmit)).toBe(false);
+    expect(shouldApplyPrivatePostSemanticText(commandSubmit)).toBe(false);
+
+    const postSubmit = {
+      intent: "post" as const,
+      action: "submit" as const,
+      text: "原稿\n补充一句正文",
+      anonymous: null,
+      shouldSubmit: true,
+      sections: ["原稿", "补充一句正文"],
+      confidence: 0.86,
+      reason: "用户补充正文后要求提交",
+    };
+    expect(shouldAppendPrivatePostContentForSemantic(postSubmit)).toBe(true);
+    expect(shouldApplyPrivatePostSemanticText(postSubmit)).toBe(true);
+  });
+
+  test("AI 收稿忽略低置信度或无动作语义结果", () => {
+    expect(resolvePrivatePostSemanticAction({
+      intent: "command",
+      action: "cancel",
+      text: "",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: [],
+      confidence: 0.39,
+      reason: "低置信度",
+    })).toBeNull();
+    expect(resolvePrivatePostSemanticAction({
+      intent: "chat",
+      action: "none",
+      text: "",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: [],
+      confidence: 0.9,
+      reason: "闲聊",
+    })).toBeNull();
+  });
+
+  test("pending 模式采纳 AI 对是/否语义选择，不依赖关键词命令", () => {
+    expect(resolvePrivatePostModeSelectionFromSemantic({
+      intent: "command",
+      action: "none",
+      text: "原稿",
+      anonymous: true,
+      shouldSubmit: false,
+      sections: ["原稿"],
+      confidence: 0.8,
+      reason: "用户回答是，表示同意匿名",
+    })).toEqual({ anonymous: true });
+
+    expect(resolvePrivatePostModeSelectionFromSemantic({
+      intent: "command",
+      action: "none",
+      text: "原稿",
+      anonymous: false,
+      shouldSubmit: false,
+      sections: ["原稿"],
+      confidence: 0.8,
+      reason: "用户回答否，表示不匿名",
+    })).toEqual({ anonymous: false });
+  });
+
+  test("pending 模式优先采纳匿名选择，即使同时表达提交", () => {
+    const semantic = {
+      intent: "command" as const,
+      action: "submit" as const,
+      text: "原稿",
+      anonymous: true,
+      shouldSubmit: true,
+      sections: ["原稿"],
+      confidence: 0.88,
+      reason: "用户表示匿名并提交",
+    };
+
+    expect(resolvePrivatePostModeSelectionFromSemantic(semantic)).toEqual({ anonymous: true });
+    expect(resolvePrivatePostSemanticAction(semantic)).toBe("submit");
+  });
+
   test("AI 已识别投稿但匿名未知时，选完匿名后应直接提交", () => {
     expect(shouldSubmitPrivatePostAfterModeSelection({
       intent: "post",
+      action: "none",
       text: "我想问一下食堂的菜好不好吃\n有多少菜",
       anonymous: null,
       shouldSubmit: false,
@@ -89,6 +289,7 @@ describe("private post semantic mode selection", () => {
   test("AI 已判断匿名时不需要待选择后提交标记", () => {
     expect(shouldSubmitPrivatePostAfterModeSelection({
       intent: "post",
+      action: "none",
       text: "匿名吐槽一下食堂",
       anonymous: true,
       shouldSubmit: true,
@@ -101,6 +302,7 @@ describe("private post semantic mode selection", () => {
   test("AI 未识别为投稿时仍进入继续添加流程", () => {
     expect(shouldSubmitPrivatePostAfterModeSelection({
       intent: "chat",
+      action: "none",
       text: "食堂今天怎么样",
       anonymous: null,
       shouldSubmit: false,
@@ -113,6 +315,7 @@ describe("private post semantic mode selection", () => {
   test("pending 模式采纳 AI 语义识别到的匿名选择，不依赖关键词命令", () => {
     expect(resolvePrivatePostModeSelectionFromSemantic({
       intent: "chat",
+      action: "none",
       text: "请问高考考的怎么样",
       anonymous: true,
       shouldSubmit: false,
@@ -123,6 +326,7 @@ describe("private post semantic mode selection", () => {
 
     expect(resolvePrivatePostModeSelectionFromSemantic({
       intent: "post",
+      action: "none",
       text: "请问高考考的怎么样",
       anonymous: false,
       shouldSubmit: false,

@@ -7,6 +7,7 @@ describe("private post AI semantic parsing", () => {
     expect(
       parsePrivatePostSemanticJson(JSON.stringify({
         intent: "post",
+        action: "submit",
         text: "第一段\n第二段",
         anonymous: true,
         shouldSubmit: true,
@@ -16,6 +17,7 @@ describe("private post AI semantic parsing", () => {
       })),
     ).toEqual({
       intent: "post",
+      action: "submit",
       text: "第一段\n第二段",
       anonymous: true,
       shouldSubmit: true,
@@ -24,6 +26,7 @@ describe("private post AI semantic parsing", () => {
       reason: "用户明确匿名提交",
       rawOutput: {
         intent: "post",
+        action: "submit",
         text: "第一段\n第二段",
         anonymous: true,
         shouldSubmit: true,
@@ -66,6 +69,7 @@ describe("private post AI semantic parsing", () => {
     const result = normalizePrivatePostSemanticResult(
       {
         intent: "post",
+        action: "none",
         text: "好奇大家高考考的怎么样啊",
         anonymous: null,
         shouldSubmit: false,
@@ -87,6 +91,7 @@ describe("private post AI semantic parsing", () => {
     const result = normalizePrivatePostSemanticResult(
       {
         intent: "post",
+        action: "none",
         text: "好奇大家高考考的怎么样啊",
         anonymous: null,
         shouldSubmit: false,
@@ -104,6 +109,7 @@ describe("private post AI semantic parsing", () => {
     const result = normalizePrivatePostSemanticResult(
       {
         intent: "post",
+        action: "submit",
         text: "今天食堂阿姨特别好",
         anonymous: true,
         shouldSubmit: true,
@@ -131,6 +137,11 @@ describe("private post AI semantic parsing", () => {
     const prompt = buildPrivatePostSystemPrompt("  \n  ");
     expect(prompt).toBe(DEFAULT_PRIVATE_POST_PROMPT);
     expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
+    expect(prompt).toContain("action");
+    expect(prompt).toContain("none|submit|cancel|undo");
+    expect(prompt).toContain("不要用关键词表或单个词命中做判断");
+    expect(prompt).toContain("是");
+    expect(prompt).toContain("否");
     expect(prompt).toContain("稿件");
     expect(prompt).not.toContain("租户补充规则");
   });
