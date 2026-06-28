@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
-import { normalizeAiRules } from "./campus-modeling";
+import { normalizeAiRules } from "./ai-settings";
 
 describe("AI settings normalization", () => {
   test("uses built-in private post prompt when rules are missing", () => {

@@ -28,7 +28,7 @@ import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiOverview, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,11 +139,6 @@ type AiSettingsForm = {
   clearApiKey: boolean;
   temperature: number;
   timeoutSeconds: number;
-  tone: string;
-  strictPrivacy: boolean;
-  allowedCategoriesText: string;
-  modelingKeywordsText: string;
-  modelingNotes: string;
   privatePostAiEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
   postTriggerKeywordsText: string;
@@ -299,7 +294,7 @@ export function AdminPage({
   onSaved: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TenantSettingsForm>(() => toForm(selectedTenant, metadata));
-  const [aiOverview, setAiOverview] = useState<AiOverview | null>(null);
+  const [aiSettings, setAiSettings] = useState<TenantAiSettings | null>(null);
   const [aiForm, setAiForm] = useState<AiSettingsForm | null>(null);
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<LlmTestResult | null>(null);
@@ -427,7 +422,7 @@ export function AdminPage({
   async function refreshAdminData() {
     setAdminLoading(true);
     try {
-      const [memberData, botData, targetData, attemptData, banData, oauthSettingsData, oauthClientData, aiOverviewData] = await Promise.all([
+      const [memberData, botData, targetData, attemptData, banData, oauthSettingsData, oauthClientData, aiSettingsData] = await Promise.all([
         fetchMembers(memberPage),
         api<{ bots: AdminBotAccount[]; events: AdminBotEvent[] }>("/api/admin/bots"),
         api<{ targets: PublishTargetItem[] }>("/api/admin/publish-targets"),
@@ -435,7 +430,7 @@ export function AdminPage({
         fetchBanRecords(banPage),
         api<OAuthClientSettingsResponse>("/api/admin/oauth/settings"),
         api<{ clients: OAuthClientItem[] }>("/api/admin/oauth/clients"),
-        api<AiOverview>("/api/ai/overview"),
+        api<{ settings: TenantAiSettings }>("/api/admin/ai/settings"),
       ]);
       setMembers(memberData.members);
       setMemberPagination(memberData.pagination);
@@ -447,8 +442,8 @@ export function AdminPage({
       setBanPagination(banData.pagination);
       setOAuthSettings(oauthSettingsData.settings);
       setOAuthClients(oauthClientData.clients);
-      setAiOverview(aiOverviewData);
-      setAiForm(aiSettingsToForm(aiOverviewData.settings));
+      setAiSettings(aiSettingsData.settings);
+      setAiForm(aiSettingsToForm(aiSettingsData.settings));
     } finally {
       setAdminLoading(false);
     }
@@ -563,11 +558,6 @@ export function AdminPage({
   function buildAiSettingsPayload() {
     if (!aiForm) return null;
     const rules: AiRules = {
-      tone: aiForm.tone.trim(),
-      strictPrivacy: aiForm.strictPrivacy,
-      allowedCategories: lines(aiForm.allowedCategoriesText),
-      modelingKeywords: lines(aiForm.modelingKeywordsText),
-      modelingNotes: aiForm.modelingNotes.trim(),
       privatePostAiEnabled: aiForm.privatePostAiEnabled,
       privatePostAggregateDelaySeconds: aiForm.privatePostAggregateDelaySeconds,
       postTriggerKeywords: lines(aiForm.postTriggerKeywordsText),
@@ -597,10 +587,10 @@ export function AdminPage({
         body: JSON.stringify(payload),
       });
       setAiForm(aiSettingsToForm(response.settings));
-      setAiOverview((current) => current ? { ...current, settings: response.settings } : current);
+      setAiSettings(response.settings);
       await onSaved();
       setAiTestResult(null);
-      toast.success("AI 实验功能设置已保存。");
+      toast.success("LLM 设置已保存。");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "保存 AI 设置失败");
     } finally {
@@ -1103,7 +1093,7 @@ export function AdminPage({
             <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <div className="flex flex-col gap-4">
                 <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} onUploaded={onSaved} />
-                {aiOverview && aiForm ? (
+                {aiSettings && aiForm ? (
                   <div className="product-surface overflow-hidden">
                     <button
                       type="button"
@@ -1112,8 +1102,8 @@ export function AdminPage({
                       className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
                     >
                       <div>
-                        <p className="text-base font-semibold text-slate-950">AI 实验功能</p>
-                        <p className="mt-1 text-sm text-slate-600">校园建模、文本分析规则和 LLM 配置。</p>
+                        <p className="text-base font-semibold text-slate-950">LLM 设置</p>
+                        <p className="mt-1 text-sm text-slate-600">配置发布短总结和私聊智能收稿使用的大模型。</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
@@ -1123,7 +1113,7 @@ export function AdminPage({
                     {aiSectionOpen ? (
                       <div className="border-t border-slate-200 p-3">
                         <AdminAiSettingsPanel
-                          overview={aiOverview}
+                          settings={aiSettings}
                           form={aiForm}
                           busy={busy}
                           testing={aiTesting}
@@ -1138,7 +1128,7 @@ export function AdminPage({
                 ) : (
                   <Card className="rounded-md border-slate-200 bg-white shadow-none">
                     <CardContent className="p-4">
-                      <LoadingBlock title="正在加载 AI 实验功能设置" />
+                      <LoadingBlock title="正在加载 LLM 设置" />
                     </CardContent>
                   </Card>
                 )}
@@ -1891,7 +1881,7 @@ function MetadataPanel({
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <div>
               <p className="text-sm font-medium text-slate-900">说说文字 AI 总结</p>
-              <p className="text-xs text-slate-500">开启后，发布说说时在 @原作者 之后追加一句不超过 16 字的 AI 总结（仅说说文字，不影响渲染图）。批量发送时每条子稿件各自生成。需先在「AI」中配置并启用 LLM，否则不会生成。</p>
+              <p className="text-xs text-slate-500">开启后，发布说说时在 @原作者 之后追加一句不超过 16 字的 AI 总结（仅说说文字，不影响渲染图）。批量发送时每条子稿件各自生成。需先在下方 LLM 设置中配置并启用，否则不会生成。</p>
             </div>
             <Switch
               checked={form.publishLlmSummaryEnabled}
@@ -1988,7 +1978,7 @@ function MetadataPanel({
 }
 
 function AdminAiSettingsPanel({
-  overview,
+  settings,
   form,
   busy,
   testing,
@@ -1997,7 +1987,7 @@ function AdminAiSettingsPanel({
   onSave,
   onTest,
 }: {
-  overview: AiOverview;
+  settings: TenantAiSettings;
   form: AiSettingsForm;
   busy: boolean;
   testing: boolean;
@@ -2011,17 +2001,17 @@ function AdminAiSettingsPanel({
       <CardContent className="p-4">
         <PanelTitle
           icon={SparklesIcon}
-          title="AI 实验功能"
-          description="开启校园建模、配置 LLM 能力和文本分析规则"
+          title="LLM 能力"
+          description="发布短总结和私聊智能收稿共用这组大模型配置"
           color="product-accent-violet"
-          action={<Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">实验性</Badge>}
+          action={<Badge className="rounded-full bg-blue-50 text-blue-700 ring-1 ring-blue-200 shadow-none">可选</Badge>}
         />
 
         <form className="mt-4 grid gap-4" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
           <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
             <div>
-              <p className="text-sm font-semibold text-slate-950">启用 AI 建模</p>
-              <p className="mt-1 text-xs text-slate-500">{form.mode === "llm" ? "启用后使用 LLM 分析，失败时本地规则回退。" : "启用后使用本地文本规则分析。"}</p>
+              <p className="text-sm font-semibold text-slate-950">启用 LLM 能力</p>
+              <p className="mt-1 text-xs text-slate-500">关闭后，发布短总结和私聊智能收稿都会跳过大模型调用。</p>
             </div>
             <Switch checked={form.enabled} disabled={busy || testing} onCheckedChange={(enabled) => onFormChange({ ...form, enabled })} />
           </div>
@@ -2055,7 +2045,7 @@ function AdminAiSettingsPanel({
                 type="password"
                 name="apiKey"
                 value={form.apiKey}
-                placeholder={overview.settings.apiKeyConfigured ? "保持不变" : "未配置"}
+                placeholder={settings.apiKeyConfigured ? "保持不变" : "未配置"}
                 disabled={busy || testing}
                 onChange={(event) => onFormChange({ ...form, apiKey: event.target.value, clearApiKey: false })}
               />
@@ -2070,24 +2060,8 @@ function AdminAiSettingsPanel({
             </label>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-sm font-medium">
-              墙号语气
-              <Input value={form.tone} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, tone: event.target.value })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              建模备注
-              <Input value={form.modelingNotes} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, modelingNotes: event.target.value })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              允许分类
-              <Textarea className="min-h-24" value={form.allowedCategoriesText} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, allowedCategoriesText: event.target.value })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              建模关键词
-              <Textarea className="min-h-24" value={form.modelingKeywordsText} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, modelingKeywordsText: event.target.value })} />
-            </label>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+          <div className="grid gap-3">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-slate-900">AI 语义收稿</p>
@@ -2141,7 +2115,7 @@ function AdminAiSettingsPanel({
           ) : null}
 
           <div className="flex flex-wrap justify-end gap-2">
-            {overview.settings.apiKeyConfigured ? (
+            {settings.apiKeyConfigured ? (
               <Button type="button" variant="outline" disabled={busy || testing} onClick={() => onFormChange({ ...form, apiKey: "", clearApiKey: true })}>
                 <KeyRoundIcon data-icon="inline-start" />
                 清除密钥
@@ -2153,7 +2127,7 @@ function AdminAiSettingsPanel({
             </Button>
             <Button type="submit" disabled={busy || testing}>
               <SaveIcon data-icon="inline-start" />
-              保存 AI 设置
+              保存 LLM 设置
             </Button>
           </div>
         </form>
@@ -3531,11 +3505,6 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     clearApiKey: false,
     temperature: settings.temperature,
     timeoutSeconds: settings.timeoutSeconds,
-    tone: settings.rules.tone ?? "",
-    strictPrivacy: Boolean(settings.rules.strictPrivacy),
-    allowedCategoriesText: (settings.rules.allowedCategories ?? []).join("\n"),
-    modelingKeywordsText: (settings.rules.modelingKeywords ?? []).join("\n"),
-    modelingNotes: settings.rules.modelingNotes ?? "",
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
     privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),

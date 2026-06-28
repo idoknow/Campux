@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS "AiBackfillLog";
+DROP TABLE IF EXISTS "AiBackfillItem";
+DROP TABLE IF EXISTS "AiBackfillBatch";
+DROP TABLE IF EXISTS "PostAiAnalysis";
+DROP TABLE IF EXISTS "SchoolModelSnapshot";
+DROP TABLE IF EXISTS "SchoolEntity";

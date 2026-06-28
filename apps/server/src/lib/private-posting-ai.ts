@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
-import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "../runtime/campus-modeling";
+import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "../runtime/ai-settings";
 
 export type PrivatePostSemanticInput = {
   tenantId: string;

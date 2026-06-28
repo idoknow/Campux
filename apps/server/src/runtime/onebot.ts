@@ -26,7 +26,7 @@ import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancel
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
-import { readTenantAiSettings } from "./campus-modeling";
+import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";

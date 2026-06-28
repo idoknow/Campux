@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { BarChart3Icon, ClipboardListIcon, HomeIcon, ShieldCheckIcon, SparklesIcon, WrenchIcon } from "lucide-react";
+import { BarChart3Icon, ClipboardListIcon, HomeIcon, ShieldCheckIcon, WrenchIcon } from "lucide-react";
 import type { MainTab, TenantMetadata, TenantRole } from "@/types/app";
 
 export type NavItem = {
@@ -51,7 +51,6 @@ export const navItems = [
   { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },
   { value: "posts", label: "稿件", emoji: "🌏", icon: ClipboardListIcon, minRole: "submitter" },
   { value: "services", label: "服务", emoji: "🛠", icon: WrenchIcon, minRole: "submitter" },
-  { value: "ai", label: "AI 图谱", emoji: "AI", icon: SparklesIcon, minRole: "reviewer", badge: "实验" },
   { value: "admin", label: "管理", emoji: "🔐", icon: ShieldCheckIcon, minRole: "admin" },
   { value: "stats", label: "统计", emoji: "📊", icon: BarChart3Icon, minRole: "reviewer" },
 ] satisfies NavItem[];

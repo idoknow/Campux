@@ -17,7 +17,6 @@ import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, ty
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { formatBanNotify } from "../lib/bot-messages";
-import { enqueueAiAnalyzePost } from "../runtime/campus-modeling";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 
@@ -181,7 +180,7 @@ function isTransactionSerializationFailure(value: unknown) {
   return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
-export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
+export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
@@ -507,7 +506,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       oneBot?.notifyNewPost(post.id).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to notify review group");
       });
-      enqueueAiAnalyzePost(queue, context.selectedTenant.id, post.id);
 
       return {
         post: toPostListItem(post),

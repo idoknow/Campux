@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./campus-modeling";
+import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 
 // 说说文字里追加的极短总结硬上限：不超过 16 个字。
 export const publishSummaryMaxChars = 16;
