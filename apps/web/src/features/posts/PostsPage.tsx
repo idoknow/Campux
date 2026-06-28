@@ -27,7 +27,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
-import type { Pagination, PostItem, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
+import type { AssignedPostTag, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -269,6 +269,8 @@ export function PostsPage({
   const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
+  const [publishedTags, setPublishedTags] = useState<PostTag[]>([]);
+  const [publishedTagFilter, setPublishedTagFilter] = useState("all");
   const [publishedPagination, setPublishedPagination] = useState<Pagination>(() => defaultPagination());
   const [publishedLoading, setPublishedLoading] = useState(false);
   const [publishedPage, setPublishedPage] = useState(1);
@@ -349,10 +351,10 @@ export function PostsPage({
     if (activeTab !== "published") {
       return;
     }
-    void refreshPublishedFeed(publishedPage).catch((caught) => {
+    void Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取已发布稿件");
     });
-  }, [activeTab, publishedPage, tenantId]);
+  }, [activeTab, publishedPage, publishedTagFilter, tenantId]);
 
   async function refreshAll() {
     await onRefresh();
@@ -404,6 +406,9 @@ export function PostsPage({
       page: String(page),
       limit: String(publishedPagination.limit),
     });
+    if (publishedTagFilter !== "all") {
+      params.set("tag", publishedTagFilter);
+    }
     setPublishedLoading(true);
     try {
       const data = await api<{ items: PublishedFeedItem[]; pagination: Pagination }>(`/api/posts/published?${params}`);
@@ -412,6 +417,20 @@ export function PostsPage({
     } finally {
       setPublishedLoading(false);
     }
+  }
+
+  async function refreshPublishedTags() {
+    const data = await api<{ tags: PostTag[] }>("/api/post-tags");
+    setPublishedTags(data.tags);
+    if (publishedTagFilter !== "all" && !data.tags.some((tag) => tag.id === publishedTagFilter)) {
+      setPublishedTagFilter("all");
+      setPublishedPage(1);
+    }
+  }
+
+  function changePublishedTagFilter(value: string) {
+    setPublishedTagFilter(value);
+    setPublishedPage(1);
   }
 
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
@@ -772,10 +791,11 @@ export function PostsPage({
           )}
         </TabsContent>
         <TabsContent value="published" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+          <PublishedTagFilter tags={publishedTags} value={publishedTagFilter} onChange={changePublishedTagFilter} />
           {publishedLoading ? (
             <LoadingBlock title="正在加载已发布稿件..." />
           ) : publishedItems.length === 0 ? (
-            <EmptyCard title="还没有已发布的稿件" />
+            <EmptyCard title={publishedTagFilter === "all" ? "还没有已发布的稿件" : "这个标签下还没有已发布稿件"} />
           ) : (
             <>
               <div className="space-y-3">
@@ -1491,6 +1511,8 @@ function ReviewCard({
           <span>QQ {authorQq}</span>
         </div>
 
+        <PostTagsInline tags={post.tags} />
+
         <PostTextBlock text={post.text} createdAt={post.createdAt} updatedAt={post.updatedAt} compact {...(cardTextColor ? { textColor: cardTextColor } : {})} />
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
@@ -1649,6 +1671,8 @@ function PostCard({
           }
         />
 
+        <PostTagsInline tags={post.tags} />
+
         <PostTextBlock text={post.text} createdAt={post.createdAt} compact {...(cardTextColor ? { textColor: cardTextColor } : {})} />
 
         {images.length > 0 ? <ImageGallery images={images} compact onImageClick={onImagePreview} /> : null}
@@ -1779,6 +1803,58 @@ function FollowButton({ following, busy, onClick }: { following: boolean; busy: 
   );
 }
 
+function PostTagsInline({ tags }: { tags?: AssignedPostTag[] | undefined }) {
+  if (!tags || tags.length === 0) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {tags.map((tag) => (
+        <span
+          key={tag.id}
+          className="inline-flex min-h-6 items-center rounded-full border border-slate-200 px-2 text-[11px] font-bold text-slate-700"
+          style={{ backgroundColor: tag.color || "#f8fafc" }}
+          title={tag.description ?? tag.name}
+        >
+          {tag.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PublishedTagFilter({ tags, value, onChange }: { tags: PostTag[]; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+      <button
+        type="button"
+        className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-bold transition-colors ${
+          value === "all" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+        }`}
+        onClick={() => onChange("all")}
+      >
+        <HashIcon className="size-3.5" />
+        全部
+      </button>
+      {tags.map((tag) => (
+        <button
+          key={tag.id}
+          type="button"
+          className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-bold transition-colors ${
+            value === tag.id ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+          onClick={() => onChange(tag.id)}
+          title={tag.description ?? tag.name}
+        >
+          <span className="size-2 rounded-full" style={{ backgroundColor: tag.color || "#cbd5e1" }} />
+          {tag.name}
+          {typeof tag.postCount === "number" ? <span className="text-[10px] opacity-70">{tag.postCount}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PublishedFeedAuthorLine({ post, canViewIdentity }: { post: PublishedFeedItem["posts"][number]; canViewIdentity: boolean }) {
   // 后端已脱敏：普通用户看匿名稿件时 author 为 null。
   if (post.author === null) {
@@ -1818,6 +1894,7 @@ function PublishedFeedPostBlock({
         <span className="inline-flex items-center rounded bg-sky-50 px-1.5 py-0.5 text-xs font-bold text-sky-700">稿件 {post.displayId}</span>
       </div>
       <PublishedFeedAuthorLine post={post} canViewIdentity={canViewIdentity} />
+      <PostTagsInline tags={post.tags} />
       <PostTextBlock text={post.text} createdAt={post.createdAt} {...(cardTextColor ? { textColor: cardTextColor } : {})} />
       {images.length > 0 ? (
         <ImageGallery images={images} compact onImageClick={(imgs, index) => onImagePreview(imgs, index, `稿件 ${post.displayId} 上传图片`)} />

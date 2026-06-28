@@ -1,4 +1,5 @@
 import { toQZonePostStats, type PostQZoneMetric } from "./posts";
+import type { SerializedAssignedPostTag } from "./post-tags";
 
 /**
  * 「已发布」聚合 feed 的整形逻辑（纯函数，无 DB 访问，便于单测）。
@@ -30,6 +31,7 @@ export type RawFeedPost = {
   textColor: string | null;
   font: string | null;
   createdAt: Date;
+  tags?: SerializedAssignedPostTag[];
 };
 
 export type PublishedFeedAuthor = {
@@ -48,6 +50,7 @@ export type PublishedFeedPost = {
   textColor: string | null;
   font: string | null;
   createdAt: string;
+  tags: SerializedAssignedPostTag[];
 };
 
 export type PublishedFeedItem = {
@@ -89,6 +92,7 @@ function toFeedPost(post: RawFeedPost, viewerIsReviewer: boolean): PublishedFeed
     textColor: post.textColor,
     font: post.font,
     createdAt: post.createdAt.toISOString(),
+    tags: post.tags ?? [],
   };
 }
 
@@ -138,5 +142,17 @@ export function buildPublishedFeed(input: {
 
   return [...singleItems, ...batchItems].sort(
     (left, right) => new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime(),
+  );
+}
+
+export function filterPublishedFeedByTag(items: PublishedFeedItem[], tag: string | null | undefined): PublishedFeedItem[] {
+  const normalized = tag?.trim();
+  if (!normalized || normalized === "all") {
+    return items;
+  }
+  return items.filter((item) =>
+    item.posts.some((post) =>
+      post.tags.some((postTag) => postTag.id === normalized || postTag.name === normalized),
+    ),
   );
 }

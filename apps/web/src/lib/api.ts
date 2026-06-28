@@ -44,6 +44,8 @@ export function createPostWithAttachments(
   textColor?: string,
   font?: string,
   anonymousAvatar?: string,
+  tagIds?: string[],
+  tagNames?: string[],
 ): Promise<CreatePostResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -96,6 +98,12 @@ export function createPostWithAttachments(
     }
     if (font) {
       formData.append("font", font);
+    }
+    if (tagIds && tagIds.length > 0) {
+      formData.append("tagIds", JSON.stringify(tagIds));
+    }
+    if (tagNames && tagNames.length > 0) {
+      formData.append("tagNames", JSON.stringify(tagNames));
     }
     for (const file of files) {
       formData.append("images", file, file.name);

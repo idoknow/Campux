@@ -145,6 +145,7 @@ export type RenderPostCardInput = {
   bgColor?: string | null;
   textColor?: string | null;
   font?: string | null;
+  tags?: Array<{ name: string; color?: string | null }> | null;
 };
 
 let browserPromise: Promise<Browser> | null = null;
@@ -289,6 +290,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   const bgColor = resolveBgColor(input.bgColor);
   const textColor = resolveTextColor(input.textColor);
   const font = input.font && input.font !== "default" ? input.font : null;
+  const tagsHtml = renderTagsHtml(input.tags);
 
   return `<!DOCTYPE html>
 <html>
@@ -489,6 +491,22 @@ async function renderPostHtml(input: RenderPostCardInput) {
       letter-spacing: 0.05rem;
     }
 
+    .post-tag {
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      max-width: 14rem;
+      padding: 0.2rem 0.8rem;
+      border-radius: 999px;
+      background: #F1F5F9;
+      color: #334155;
+      font-size: 1.7rem;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     #bg-fixed-br {
       position: fixed;
       top: -120px;
@@ -517,6 +535,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <div id="footer">
     <span style="display: flex; align-items: center; gap: 1.2rem;">
       ${postIdTag ? `<span id="post-id-tag">${escapeHtml(postIdTag)}</span>` : ""}
+      ${tagsHtml}
       <span>${escapeHtml(footer)}</span>
     </span>
     <span>${escapeHtml(displayHost)}</span>
@@ -541,6 +560,25 @@ function normalizeDisplayHost(value: string | null | undefined) {
     return "https://campux.top";
   }
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function renderTagsHtml(tags: RenderPostCardInput["tags"]) {
+  const normalized = (tags ?? [])
+    .map((tag) => ({
+      name: tag.name.trim(),
+      color: tag.color?.trim() ?? "",
+    }))
+    .filter((tag) => tag.name)
+    .slice(0, 3);
+  if (normalized.length === 0) {
+    return "";
+  }
+  return normalized
+    .map((tag) => {
+      const background = /^#[0-9a-fA-F]{6}$/.test(tag.color) ? tag.color : "#F1F5F9";
+      return `<span class="post-tag" style="background:${background};">${escapeHtml(tag.name)}</span>`;
+    })
+    .join("");
 }
 
 async function qqAvatarDataUrl(qq: string | undefined) {

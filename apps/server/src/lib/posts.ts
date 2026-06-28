@@ -7,6 +7,22 @@ type PostQZoneComment = {
   replies?: Array<{ uin: string; name: string; content: string; images: string[]; createdAt: string | null }>;
 };
 
+type PostTagAssignmentInput = {
+  source: string;
+  confidence: number | null;
+  tag: {
+    id: string;
+    name: string;
+    description: string | null;
+    color: string;
+    status: string;
+    source: string;
+    lastUsedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+};
+
 export type PostQZoneMetric = {
   visitorCount: number | null;
   likeCount: number | null;
@@ -68,6 +84,7 @@ export function toPostListItem(post: {
       items: Array<{ post: { displayId: number } }>;
     };
   } | null;
+  tagAssignments?: PostTagAssignmentInput[];
 }) {
   const recallLog = post.logs
     ?.filter((log) => log.oldStatus === "published" && log.newStatus === "pending_recall")
@@ -95,7 +112,27 @@ export function toPostListItem(post: {
     submissionChannel: inferSubmissionChannel(post.logs),
     qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? []),
     batch: toBatchSummary(post.batchItem, post.displayId),
+    tags: toPostTags(post.tagAssignments),
   };
+}
+
+function toPostTags(assignments: PostTagAssignmentInput[] | undefined) {
+  return (assignments ?? [])
+    .filter((assignment) => assignment.tag.status === "active")
+    .map((assignment) => ({
+      id: assignment.tag.id,
+      name: assignment.tag.name,
+      description: assignment.tag.description,
+      color: assignment.tag.color,
+      status: assignment.tag.status,
+      source: assignment.tag.source,
+      lastUsedAt: assignment.tag.lastUsedAt?.toISOString() ?? null,
+      createdAt: assignment.tag.createdAt.toISOString(),
+      updatedAt: assignment.tag.updatedAt.toISOString(),
+      assignmentSource: assignment.source,
+      confidence: assignment.confidence,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
 }
 
 /**

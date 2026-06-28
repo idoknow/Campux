@@ -31,6 +31,7 @@ import { registerMetadataRoutes } from "./routes/metadata";
 import { registerOAuthRoutes } from "./routes/oauth";
 import { registerOneBotRoutes } from "./routes/onebot";
 import { registerPostRoutes } from "./routes/posts";
+import { registerPostTagRoutes } from "./routes/post-tags";
 import { registerReviewRoutes } from "./routes/review";
 import { registerSetupRoutes } from "./routes/setup";
 import { registerStatsRoutes } from "./routes/stats";
@@ -40,6 +41,7 @@ import { registerTenantRoutes } from "./routes/tenants";
 import { runDatabaseMigrations } from "./lib/migrations";
 import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
 import { registerTenantLifecycleScheduler } from "./runtime/tenant-lifecycle";
+import { registerPostTagMaintenanceScheduler } from "./runtime/post-tagging";
 import { ensureBotSessionSecretConfigured } from "./lib/secret-json";
 
 const config = loadConfig();
@@ -78,6 +80,7 @@ registerOAuthRoutes(app);
 registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
 registerPostRoutes(app, config, queue, oneBot);
+registerPostTagRoutes(app);
 registerReviewRoutes(app, queue, oneBot);
 registerSvgRoutes(app);
 registerStatsRoutes(app);
@@ -120,6 +123,7 @@ const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: 
 const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });
 const stopBotFriendSnapshotScheduler = registerBotFriendSnapshotScheduler({ caller: oneBot, logger: app.log });
 const stopFollowedPostCommentScheduler = registerFollowedPostCommentScheduler({ caller: oneBot, logger: app.log });
+const stopPostTagMaintenanceScheduler = registerPostTagMaintenanceScheduler({ logger: app.log });
 const stopTelemetryReporter = registerTelemetryReporter({ logger: app.log, config });
 registerBatchFlushSweeper(queue, app.log);
 
@@ -129,6 +133,7 @@ app.addHook("onClose", async () => {
   stopQZonePostMetricScheduler();
   stopBotFriendSnapshotScheduler();
   stopFollowedPostCommentScheduler();
+  stopPostTagMaintenanceScheduler();
   stopTelemetryReporter();
   stopBatchFlushSweeper();
 });
