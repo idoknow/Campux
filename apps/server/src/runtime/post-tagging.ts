@@ -58,6 +58,14 @@ const defaultTagMaintenanceLookbackDays = 14;
 const tagMaintenanceArchiveInactiveDays = 14;
 const maxTagMaintenanceLookbackDays = 90;
 const tagAgentRecentPosts = 80;
+/**
+ * The maintenance agent feeds up to `tagAgentRecentPosts` posts to the LLM and asks
+ * for a multi-action JSON plan — with a reasoning model this realistically takes
+ * 60-90s. It must NOT be bounded by the tenant's `timeoutSeconds` (which is tuned
+ * for the fast single-post auto-tag path, often 30s) or the call aborts mid-flight
+ * and the agent silently returns "no changes". Give it its own generous ceiling.
+ */
+const tagMaintenanceTimeoutMs = 180_000;
 /** Rock's rule ①: a new tag is only created once a theme recurs across at least this many posts. */
 const minClusterSize = 3;
 
@@ -294,7 +302,7 @@ export async function maintainTenantPostTags(options: {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
+  const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
   try {
     const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
       method: "POST",
