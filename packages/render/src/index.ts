@@ -495,6 +495,8 @@ async function renderPostHtml(input: RenderPostCardInput) {
       right: -170px;
       width: 500px;
       height: 500px;
+      border-radius: 50%;
+      object-fit: cover;
       opacity: 0.25;
     }
   </style>
