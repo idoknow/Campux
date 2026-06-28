@@ -16,7 +16,8 @@ export const DEFAULT_PRIVATE_POST_PROMPT = [
   "shouldSubmit 表示用户是否已经表达可以结束并提交当前投稿；action=submit 时 shouldSubmit=true。没有明确完成意图时必须 false。",
   "text 只能包含适合发布到校园墙的正文；去掉对机器人的请求、匿名/实名要求、提交/取消/撤回意图、解释性废话和非正文信息。",
   "sections 是按语义自然分段后的正文段落；如果不是稿件且没有当前草稿，text 为空、sections 为空、shouldSubmit=false、action=none。",
-  "单纯好奇、闲聊、询问大家情况、聊天式问题、对机器人或墙号流程的咨询，即使提到学校/高考/食堂/老师，也不要判定为稿件，除非语境明确是在让墙号发布。",
+  "单句好奇、闲聊、询问大家情况、对机器人或墙号流程的咨询，应判定为 chat。",
+  "但用户连续发送多条可发布内容、或同时表达匿名/实名/提交/谢谢收尾等投稿上下文时，应判定为 post；即使内容是询问学校规模、食堂饭菜、老师教学等问题，也可以作为校园墙投稿正文。",
 ].join("\n");
 
 export const tenantStatusSchema = z.enum(["active", "paused", "archived"]);

@@ -228,14 +228,19 @@ function splitPostSections(text: string) {
 }
 
 function isCasualCrowdQuestion(text: string) {
-  const normalized = text.replace(/\s+/g, "").trim();
+  const trimmed = text.trim();
+  const lines = trimmed.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 1) {
+    return false;
+  }
+  const normalized = trimmed.replace(/\s+/g, "").trim();
   if (!normalized || normalized.length > 40) {
     return false;
   }
   const hasCrowdCue = /大家|你们|有人|有没有人|同学们|朋友们/.test(normalized);
   const hasQuestionCue = /吗|嘛|么|啥|什么|怎么样|咋样|如何|多少|几|\?|？/.test(normalized);
   const hasCasualCue = /好奇|想问|问问|问一下|有人知道|有无|有没有/.test(normalized);
-  const hasPostCue = /投稿|发墙|上墙|帮我发|帮忙发|匿名|求扩|墙墙|墙墙帮/.test(normalized);
+  const hasPostCue = /投稿|发墙|上墙|帮我发|帮忙发|匿名|实名|求扩|墙墙|墙墙帮|提交|发出去|发布|谢谢/.test(normalized);
   return !hasPostCue && hasQuestionCue && (hasCrowdCue || hasCasualCue);
 }
 

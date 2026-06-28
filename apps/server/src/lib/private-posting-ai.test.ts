@@ -126,6 +126,35 @@ describe("private post AI semantic parsing", () => {
     expect(result.shouldSubmit).toBe(true);
   });
 
+  test("normalization keeps aggregated anonymous multi-question intake as post", () => {
+    const messageText = [
+      "我想问一下",
+      "学校有多大?",
+      "食堂饭菜好吃吗",
+      "老师教的好吗?",
+      "匿名",
+      "谢谢",
+    ].join("\n");
+
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "post",
+        action: "submit",
+        text: "我想问一下\n学校有多大?\n食堂饭菜好吃吗\n老师教的好吗?",
+        anonymous: true,
+        shouldSubmit: true,
+        sections: ["我想问一下", "学校有多大?", "食堂饭菜好吃吗", "老师教的好吗?"],
+        confidence: 0.9,
+        reason: "用户连续发送多条投稿内容并指定匿名",
+      },
+      { messageText, hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("post");
+    expect(result.anonymous).toBe(true);
+    expect(result.shouldSubmit).toBe(true);
+  });
+
   test("uses custom private post prompt as full system prompt", () => {
     const customPrompt = "请判断以下内容是否为校园墙稿件，只返回 JSON";
     const prompt = buildPrivatePostSystemPrompt(customPrompt);
@@ -142,7 +171,9 @@ describe("private post AI semantic parsing", () => {
     expect(prompt).toContain("不要用关键词表或单个词命中做判断");
     expect(prompt).toContain("是");
     expect(prompt).toContain("否");
-    expect(prompt).toContain("稿件");
+    expect(prompt).toContain("连续发送多条可发布内容");
+    expect(prompt).toContain("询问学校规模、食堂饭菜、老师教学");
+    expect(prompt).not.toContain("即使提到学校/高考/食堂/老师，也不要判定为稿件");
     expect(prompt).not.toContain("租户补充规则");
   });
 });
