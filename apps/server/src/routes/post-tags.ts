@@ -8,6 +8,10 @@ const listTagsQuerySchema = z.object({
   includeArchived: z.coerce.boolean().default(false),
 });
 
+const maintainTagsBodySchema = z.object({
+  lookbackDays: z.coerce.number().int().min(7).max(90).default(14),
+}).default({});
+
 export function registerPostTagRoutes(app: FastifyInstance) {
   app.get("/api/post-tags", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
@@ -20,8 +24,10 @@ export function registerPostTagRoutes(app: FastifyInstance) {
 
   app.post("/api/post-tags/maintain", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "admin");
+    const body = maintainTagsBodySchema.parse(request.body ?? {});
     const result = await maintainTenantPostTags({
       tenantId: context.selectedTenant.id,
+      lookbackDays: body.lookbackDays,
       logger: request.log,
     });
     return {

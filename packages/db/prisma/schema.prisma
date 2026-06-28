@@ -271,7 +271,7 @@ model PostTag {
   description String?
   color       String              @default("#e2e8f0")
   status      String              @default("active")
-  source      String              @default("manual")
+  source      String              @default("llm")
   lastUsedAt  DateTime?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
@@ -287,7 +287,7 @@ model PostTagAssignment {
   tenantId   String
   postId     String
   tagId      String
-  source     String   @default("manual")
+  source     String   @default("llm")
   confidence Float?
   createdAt  DateTime @default(now())
   post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)

@@ -12,21 +12,34 @@ type ExistingTag = {
 
 export type PostTagSuggestion = {
   selected: string[];
+  confidence: number;
+};
+
+type PostTagMaintenanceActions = {
   create: Array<{
     name: string;
     description: string | null;
-    color: string | null;
+    color: string;
+    postIds: string[];
+    confidence: number;
   }>;
-  confidence: number;
 };
 
 export type PostTagMaintenanceResult = {
   created: string[];
   archived: string[];
   deleted: string[];
+  assigned: Array<{
+    tag: string;
+    postIds: string[];
+  }>;
 };
 
 const tagPromptMaxTextChars = 800;
+const defaultTagMaintenanceLookbackDays = 14;
+const tagMaintenanceArchiveInactiveDays = 14;
+const maxTagMaintenanceLookbackDays = 90;
+const tagMaintenanceMaxPosts = 120;
 
 export async function autoTagPost(options: {
   tenantId: string;
@@ -75,19 +88,7 @@ export async function autoTagPost(options: {
     return;
   }
 
-  const selectedNames = normalizeSuggestedNames(suggestion.selected);
-  const createItems = suggestion.create
-    .map((item) => {
-      const name = normalizeTagName(item.name);
-      return {
-        name,
-        description: item.description?.trim().slice(0, 80) || null,
-        color: normalizeHexColor(item.color) ?? tagColorForName(name),
-      };
-    })
-    .filter((item) => item.name)
-    .slice(0, Math.max(0, maxTagsPerPost - selectedNames.length));
-
+  const selectedNames = normalizeSuggestedNames(suggestion.selected).slice(0, maxTagsPerPost);
   const tagsByName = new Map(existingTags.map((tag) => [tag.name, tag]));
   const tagsToAssign: Array<{ tagId: string; source: "llm"; confidence: number }> = [];
 
@@ -96,35 +97,6 @@ export async function autoTagPost(options: {
     if (tag) {
       tagsToAssign.push({ tagId: tag.id, source: "llm", confidence: suggestion.confidence });
     }
-  }
-
-  for (const item of createItems) {
-    if (tagsByName.has(item.name)) {
-      const existing = tagsByName.get(item.name)!;
-      tagsToAssign.push({ tagId: existing.id, source: "llm", confidence: suggestion.confidence });
-      continue;
-    }
-    const tag = await prisma.postTag.upsert({
-      where: {
-        tenantId_name: {
-          tenantId: options.tenantId,
-          name: item.name,
-        },
-      },
-      update: {
-        status: "active",
-        ...(item.description ? { description: item.description } : {}),
-      },
-      create: {
-        tenantId: options.tenantId,
-        name: item.name,
-        description: item.description,
-        color: item.color,
-        source: "llm",
-      },
-    });
-    tagsByName.set(tag.name, tag);
-    tagsToAssign.push({ tagId: tag.id, source: "llm", confidence: suggestion.confidence });
   }
 
   const alreadyAssigned = new Set(post.tagAssignments.map((assignment) => assignment.tagId));
@@ -182,10 +154,10 @@ export async function generatePostTagSuggestion(options: {
               "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
               `目标：为一条校园墙稿件选择最多 ${maxTagsPerPost} 个主题标签。`,
               "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
-              "如果正文明显属于一个近期事件、办事主题或高频咨询方向，可以在 create 中新增 1-2 个短中文标签。",
+              "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
               "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
-              "不要为了单条闲聊创建过细标签；不确定时少打标。",
-              "返回格式：{\"selected\":[\"已有标签名\"],\"create\":[{\"name\":\"新标签\",\"description\":\"一句话说明\",\"color\":\"#dbeafe\"}],\"confidence\":0到1}",
+              "不确定时少打标。",
+              "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
             ].join("\n"),
           },
           {
@@ -226,48 +198,30 @@ export function parsePostTagSuggestionJson(raw: string): PostTagSuggestion | nul
     return null;
   }
   const selected = normalizeSuggestedNames(parsed.selected);
-  const create = Array.isArray(parsed.create)
-    ? parsed.create.flatMap((item) => {
-        if (!item || typeof item !== "object") {
-          return [];
-        }
-        const record = item as Record<string, unknown>;
-        const name = normalizeTagName(record.name);
-        if (!name) {
-          return [];
-        }
-        return [{
-          name,
-          description: typeof record.description === "string" ? record.description.trim().slice(0, 80) || null : null,
-          color: normalizeHexColor(record.color),
-        }];
-      })
-    : [];
   const confidence = clampNumber(typeof parsed.confidence === "number" ? parsed.confidence : Number(parsed.confidence), 0, 1, 0.5);
   return {
     selected: selected.slice(0, maxTagsPerPost),
-    create: create.slice(0, maxTagsPerPost),
     confidence,
   };
 }
 
 export async function maintainTenantPostTags(options: {
   tenantId: string;
+  lookbackDays?: number | undefined;
   logger: FastifyBaseLogger;
 }): Promise<PostTagMaintenanceResult> {
+  const emptyResult = (): PostTagMaintenanceResult => ({ created: [], archived: [], deleted: [], assigned: [] });
   const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag maintenance: failed to read AI settings");
     return null;
   });
-  if (!settings || !settings.enabled || !settings.rules.postTagMaintenanceEnabled || settings.mode !== "llm" || !settings.apiKeyConfigured) {
-    return { created: [], archived: [], deleted: [] };
+  if (!settings || !settings.enabled || !settings.rules.postTagMaintenanceEnabled || settings.mode !== "llm") {
+    return emptyResult();
   }
 
-  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
-  if (!apiKey) {
-    return { created: [], archived: [], deleted: [] };
-  }
-
+  const lookbackDays = clampInteger(options.lookbackDays, 7, maxTagMaintenanceLookbackDays, defaultTagMaintenanceLookbackDays);
+  const maintenanceSince = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const archiveSince = new Date(Date.now() - tagMaintenanceArchiveInactiveDays * 24 * 60 * 60 * 1000);
   const [tags, posts] = await Promise.all([
     prisma.postTag.findMany({
       where: { tenantId: options.tenantId },
@@ -278,9 +232,10 @@ export async function maintainTenantPostTags(options: {
     prisma.post.findMany({
       where: {
         tenantId: options.tenantId,
-        createdAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
+        createdAt: { gte: maintenanceSince },
       },
       select: {
+        id: true,
         displayId: true,
         text: true,
         createdAt: true,
@@ -291,12 +246,19 @@ export async function maintainTenantPostTags(options: {
         },
       },
       orderBy: { createdAt: "desc" },
-      take: 80,
+      take: tagMaintenanceMaxPosts,
     }),
   ]);
 
   if (posts.length === 0 && tags.length === 0) {
-    return { created: [], archived: [], deleted: [] };
+    return emptyResult();
+  }
+
+  let applied = emptyResult();
+  const apiKey = settings.apiKeyConfigured ? await resolveTenantAiApiKey(options.tenantId, {}) : null;
+  if (!apiKey || posts.length < 4) {
+    const archived = await archiveInactivePostTags(options.tenantId, archiveSince);
+    return { ...applied, archived };
   }
 
   const controller = new AbortController();
@@ -319,12 +281,13 @@ export async function maintainTenantPostTags(options: {
             role: "system",
             content: [
               "你是校园墙标签维护助手。只返回 JSON。",
-              "根据最近 14 天稿件和现有标签，维护一个简洁、可筛选的标签库。",
-              "create：近期事件或高频主题缺少标签时新增，最多 5 个。",
-              "archive：明显过期、近期不用但历史仍有价值的标签，最多 10 个。",
-              "delete：没有任何使用记录且冗余/质量差的标签，最多 10 个。不要删除有使用记录的标签。",
+              `你只负责从最近 ${lookbackDays} 天稿件里发现阶段性重复主题，输出可创建或复用的标签簇。`,
+              "只有同类稿件超过 3 条，也就是 postIds 至少 4 个时，才允许返回一个 create 项。",
+              "每个 create.postIds 必须只使用输入 recentPosts 里的 id，并覆盖这几条相似稿件。",
+              "如果主题已被现有 active 标签覆盖，可以返回相同 name 用于回填这几条稿件；不要制造近义重复标签。",
+              "不要归档或删除标签；系统会自动归档过去两周无命中的 active 标签。",
               "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。",
-              "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关咨询\",\"color\":\"#dbeafe\"}],\"archive\":[\"旧标签\"],\"delete\":[\"空标签\"]}",
+              "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关咨询\",\"color\":\"#dbeafe\",\"postIds\":[\"稿件id1\",\"稿件id2\",\"稿件id3\",\"稿件id4\"],\"confidence\":0到1}]}",
             ].join("\n"),
           },
           {
@@ -339,11 +302,13 @@ export async function maintainTenantPostTags(options: {
                 lastUsedAt: tag.lastUsedAt?.toISOString() ?? null,
               })),
               recentPosts: posts.map((post) => ({
+                id: post.id,
                 displayId: post.displayId,
                 createdAt: post.createdAt.toISOString(),
                 text: post.text.slice(0, tagPromptMaxTextChars),
                 tags: post.tagAssignments.map((assignment) => assignment.tag.name),
               })),
+              lookbackDays,
             }),
           },
         ],
@@ -354,23 +319,26 @@ export async function maintainTenantPostTags(options: {
       | null;
     if (!response.ok) {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
-      return { created: [], archived: [], deleted: [] };
+      return { ...applied, archived: await archiveInactivePostTags(options.tenantId, archiveSince) };
     }
     const actions = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
-    if (!actions) {
-      return { created: [], archived: [], deleted: [] };
+    if (actions) {
+      applied = await applyTagMaintenanceActions(options.tenantId, actions, posts.map((post) => post.id));
     }
-    return applyTagMaintenanceActions(options.tenantId, actions);
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
     options.logger.warn({ error, tenantId: options.tenantId, aborted }, "post tag maintenance: LLM call errored");
-    return { created: [], archived: [], deleted: [] };
   } finally {
     clearTimeout(timeout);
   }
+  const archived = await archiveInactivePostTags(options.tenantId, archiveSince);
+  return {
+    ...applied,
+    archived: uniqueStrings([...applied.archived, ...archived]),
+  };
 }
 
-export function parsePostTagMaintenanceJson(raw: string) {
+export function parsePostTagMaintenanceJson(raw: string): PostTagMaintenanceActions | null {
   const parsed = parseJsonObject(raw);
   if (!parsed) {
     return null;
@@ -385,29 +353,54 @@ export function parsePostTagMaintenanceJson(raw: string) {
         if (!name) {
           return [];
         }
+        const postIds = normalizeStringList(record.postIds);
+        if (postIds.length < 4) {
+          return [];
+        }
         return [{
           name,
           description: typeof record.description === "string" ? record.description.trim().slice(0, 80) || null : null,
           color: normalizeHexColor(record.color) ?? tagColorForName(name),
+          postIds,
+          confidence: clampNumber(typeof record.confidence === "number" ? record.confidence : Number(record.confidence), 0, 1, 0.8),
         }];
       }).slice(0, 5)
     : [];
   return {
     create,
-    archive: normalizeSuggestedNames(parsed.archive).slice(0, 10),
-    delete: normalizeSuggestedNames(parsed.delete).slice(0, 10),
   };
 }
 
 async function applyTagMaintenanceActions(
   tenantId: string,
-  actions: NonNullable<ReturnType<typeof parsePostTagMaintenanceJson>>,
+  actions: PostTagMaintenanceActions,
+  recentPostIds: string[],
 ): Promise<PostTagMaintenanceResult> {
   const created: string[] = [];
-  const archived: string[] = [];
-  const deleted: string[] = [];
+  const assigned: PostTagMaintenanceResult["assigned"] = [];
+  const knownRecentPostIds = new Set(recentPostIds);
+  const handledTagNames = new Set<string>();
 
   for (const item of actions.create) {
+    if (handledTagNames.has(item.name)) {
+      continue;
+    }
+    handledTagNames.add(item.name);
+    const postIds = uniqueStrings(item.postIds).filter((postId) => knownRecentPostIds.has(postId)).slice(0, 30);
+    if (postIds.length < 4) {
+      continue;
+    }
+    const existing = await prisma.postTag.findUnique({
+      where: {
+        tenantId_name: {
+          tenantId,
+          name: item.name,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
     const tag = await prisma.postTag.upsert({
       where: {
         tenantId_name: {
@@ -417,6 +410,8 @@ async function applyTagMaintenanceActions(
       },
       update: {
         status: "active",
+        source: "llm",
+        color: item.color,
         ...(item.description ? { description: item.description } : {}),
       },
       create: {
@@ -427,51 +422,68 @@ async function applyTagMaintenanceActions(
         source: "llm",
       },
     });
-    created.push(tag.name);
+    if (!existing) {
+      created.push(tag.name);
+    }
+    for (const postId of postIds) {
+      await assignPostTags(prisma, {
+        tenantId,
+        postId,
+        tags: [{
+          tagId: tag.id,
+          source: "llm",
+          confidence: item.confidence,
+        }],
+      });
+    }
+    assigned.push({ tag: tag.name, postIds });
   }
 
-  if (actions.archive.length > 0) {
-    const result = await prisma.postTag.updateMany({
+  return { created: uniqueStrings(created), archived: [], deleted: [], assigned };
+}
+
+async function archiveInactivePostTags(tenantId: string, recentSince: Date): Promise<string[]> {
+  const [activeTags, recentAssignments] = await Promise.all([
+    prisma.postTag.findMany({
       where: {
         tenantId,
-        name: { in: actions.archive },
         status: "active",
       },
-      data: {
-        status: "archived",
+      select: {
+        id: true,
+        name: true,
       },
-    });
-    if (result.count > 0) {
-      archived.push(...actions.archive);
-    }
-  }
-
-  if (actions.delete.length > 0) {
-    const candidates = await prisma.postTag.findMany({
+    }),
+    prisma.postTagAssignment.findMany({
       where: {
         tenantId,
-        name: { in: actions.delete },
-      },
-      include: {
-        _count: {
-          select: {
-            assignments: true,
-          },
+        post: {
+          tenantId,
+          createdAt: { gte: recentSince },
         },
       },
-    });
-    const deletable = candidates.filter((tag) => tag._count.assignments === 0);
-    if (deletable.length > 0) {
-      await prisma.postTag.deleteMany({
-        where: {
-          id: { in: deletable.map((tag) => tag.id) },
-        },
-      });
-      deleted.push(...deletable.map((tag) => tag.name));
-    }
+      select: {
+        tagId: true,
+      },
+    }),
+  ]);
+  const recentTagIds = new Set(recentAssignments.map((assignment) => assignment.tagId));
+  const inactiveTags = activeTags.filter((tag) => !recentTagIds.has(tag.id));
+  if (inactiveTags.length === 0) {
+    return [];
   }
-
-  return { created: uniqueStrings(created), archived: uniqueStrings(archived), deleted: uniqueStrings(deleted) };
+  const inactiveIds = inactiveTags.map((tag) => tag.id);
+  const result = await prisma.postTag.updateMany({
+    where: {
+      tenantId,
+      id: { in: inactiveIds },
+      status: "active",
+    },
+    data: {
+      status: "archived",
+    },
+  });
+  return result.count > 0 ? inactiveTags.map((tag) => tag.name) : [];
 }
 
 export function registerPostTagMaintenanceScheduler(options: { logger: FastifyBaseLogger }) {
@@ -518,6 +530,23 @@ function normalizeSuggestedNames(value: unknown): string[] {
   return uniqueStrings(value.map(normalizeTagName).filter(Boolean));
 }
 
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return uniqueStrings(value
+    .flatMap((item) => {
+      if (typeof item === "string") {
+        return [item.trim()];
+      }
+      if (typeof item === "number") {
+        return [String(item)];
+      }
+      return [];
+    })
+    .filter(Boolean));
+}
+
 function normalizeHexColor(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -559,4 +588,11 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
     return fallback;
   }
   return Math.max(min, Math.min(max, value));
+}
+
+function clampInteger(value: number | undefined, min: number, max: number, fallback: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.trunc(value)));
 }

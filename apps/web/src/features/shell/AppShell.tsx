@@ -1,4 +1,4 @@
-import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostTag, PostsTab, TenantMetadata } from "@/types/app";
+import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
@@ -23,9 +23,6 @@ export function AppShell({
   postBgColor,
   postTextColor,
   postFont,
-  postTags,
-  selectedPostTagIds,
-  selectedPostTagNames,
   postsTab,
   postsPagination,
   anonymous,
@@ -38,8 +35,6 @@ export function AppShell({
   onBgColorChange,
   onTextColorChange,
   onFontChange,
-  onSelectedPostTagIdsChange,
-  onSelectedPostTagNamesChange,
   onFilesSelected,
   onLogout,
   onOpenOps,
@@ -68,9 +63,6 @@ export function AppShell({
   postBgColor: string;
   postTextColor: string;
   postFont: string;
-  postTags: PostTag[];
-  selectedPostTagIds: string[];
-  selectedPostTagNames: string[];
   postsTab: PostsTab;
   postsPagination: Pagination;
   anonymous: boolean;
@@ -83,8 +75,6 @@ export function AppShell({
   onBgColorChange: (value: string) => void;
   onTextColorChange: (value: string) => void;
   onFontChange: (value: string) => void;
-  onSelectedPostTagIdsChange: (value: string[]) => void;
-  onSelectedPostTagNamesChange: (value: string[]) => void;
   onFilesSelected: (files: ArrayLike<File> | null) => void;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
@@ -127,9 +117,6 @@ export function AppShell({
                 postBgColor={postBgColor}
                 postTextColor={postTextColor}
                 postFont={postFont}
-                postTags={postTags}
-                selectedPostTagIds={selectedPostTagIds}
-                selectedPostTagNames={selectedPostTagNames}
                 anonymous={anonymous}
                 anonymousAvatar={anonymousAvatar}
                 selectedTenant={me.currentTenant}
@@ -139,8 +126,6 @@ export function AppShell({
                 onBgColorChange={onBgColorChange}
                 onTextColorChange={onTextColorChange}
                 onFontChange={onFontChange}
-                onSelectedPostTagIdsChange={onSelectedPostTagIdsChange}
-                onSelectedPostTagNamesChange={onSelectedPostTagNamesChange}
                 onFilesSelected={onFilesSelected}
                 onPostTextChange={onPostTextChange}
                 onSubmit={onSubmitPost}
