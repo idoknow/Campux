@@ -10,7 +10,7 @@ import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
 import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
-import { assignPostTags, normalizeTagIds, normalizeTagNames, resolveManualPostTags, serializeAssignedPostTags } from "../lib/post-tags";
+import { serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
@@ -186,15 +186,6 @@ function isTransactionSerializationFailure(value: unknown) {
   return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
-function parseJsonArrayField(value: unknown): unknown[] {
-  try {
-    const parsed = JSON.parse(String(value ?? "[]"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
@@ -248,8 +239,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     let bgColor: string | null = null;
     let textColor: string | null = null;
     let font: string | null = null;
-    let manualTagIds: string[] = [];
-    let manualTagNames: string[] = [];
     const staged: PostAttachment[] = [];
     const remoteGifUrls: string[] = [];
 
@@ -269,10 +258,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
             textColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "font") {
             font = String(part.value ?? "") || null;
-          } else if (part.fieldname === "tagIds") {
-            manualTagIds = normalizeTagIds(parseJsonArrayField(part.value));
-          } else if (part.fieldname === "tagNames") {
-            manualTagNames = normalizeTagNames(parseJsonArrayField(part.value));
           } else if (part.fieldname === "remoteGifUrls") {
             // Accept JSON array of GIF URLs from 失控图床 API conversion
             try {
@@ -478,10 +463,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
                 },
               });
               const displayId = tenant.nextPostDisplayId - 1;
-              const manualTags = await resolveManualPostTags(tx, context.selectedTenant.id, {
-                tagIds: manualTagIds,
-                tagNames: manualTagNames,
-              });
 
               const created = await tx.post.create({
                 data: {
@@ -506,16 +487,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
                   },
                 },
               });
-              if (manualTags.length > 0) {
-                await assignPostTags(tx, {
-                  tenantId: context.selectedTenant.id,
-                  postId: created.id,
-                  tags: manualTags.map((tag) => ({
-                    tagId: tag.id,
-                    source: "manual",
-                  })),
-                });
-              }
               return tx.post.findUniqueOrThrow({
                 where: { id: created.id },
                 include: {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeTagIds, normalizeTagName, normalizeTagNames } from "./post-tags";
+import { normalizeTagName, tagColorForName } from "./post-tags";
 
 describe("post tag normalization", () => {
   test("normalizes tag names", () => {
@@ -7,8 +7,8 @@ describe("post tag normalization", () => {
     expect(normalizeTagName("")).toBe("");
   });
 
-  test("deduplicates names and ids", () => {
-    expect(normalizeTagNames(["高考志愿", "#高考志愿", "失物"])).toEqual(["高考志愿", "失物"]);
-    expect(normalizeTagIds(["a", "a", "b", 3])).toEqual(["a", "b"]);
+  test("picks a stable palette color for names", () => {
+    expect(tagColorForName("高考志愿")).toMatch(/^#[0-9a-f]{6}$/);
+    expect(tagColorForName("高考志愿")).toBe(tagColorForName("高考志愿"));
   });
 });

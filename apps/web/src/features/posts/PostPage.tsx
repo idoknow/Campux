@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS } from "@campux/domain";
-import { ChevronDownIcon, HashIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, PlusIcon, SendIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
-import type { PendingAttachment, PostTag, TenantMetadata } from "@/types/app";
+import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { LoadingBlock } from "@/components/app/utility";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,10 +33,6 @@ const TEXT_COLOR_OPTIONS = [
   { value: "dark_orange", label: "深橙", hex: "#CC5500" },
 ] as const;
 
-function normalizeDraftTagName(value: string): string {
-  return value.trim().replace(/^#+/, "").replace(/\s+/g, " ").trim().slice(0, 16);
-}
-
 export function PostPage({
   busy,
   loading,
@@ -46,9 +41,6 @@ export function PostPage({
   postBgColor,
   postTextColor,
   postFont,
-  postTags,
-  selectedPostTagIds,
-  selectedPostTagNames,
   anonymous,
   anonymousAvatar,
   pendingAttachments,
@@ -58,8 +50,6 @@ export function PostPage({
   onBgColorChange,
   onTextColorChange,
   onFontChange,
-  onSelectedPostTagIdsChange,
-  onSelectedPostTagNamesChange,
   onFilesSelected,
   onRemoveAttachment,
   onSubmit,
@@ -71,9 +61,6 @@ export function PostPage({
   postBgColor: string;
   postTextColor: string;
   postFont: string;
-  postTags: PostTag[];
-  selectedPostTagIds: string[];
-  selectedPostTagNames: string[];
   anonymous: boolean;
   anonymousAvatar: string;
   selectedTenant: TenantSummary;
@@ -84,8 +71,6 @@ export function PostPage({
   onBgColorChange: (value: string) => void;
   onTextColorChange: (value: string) => void;
   onFontChange: (value: string) => void;
-  onSelectedPostTagIdsChange: (value: string[]) => void;
-  onSelectedPostTagNamesChange: (value: string[]) => void;
   onFilesSelected: (files: ArrayLike<File> | null) => void;
   onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
@@ -96,13 +81,11 @@ export function PostPage({
   const [fontPreviewUrl, setFontPreviewUrl] = useState<string | null>(null);
   const [fontPreviewLoading, setFontPreviewLoading] = useState(false);
   const [svgAvatars, setSvgAvatars] = useState<string[]>([]);
-  const [draftTagName, setDraftTagName] = useState("");
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
   const hasNonDefaultFont = postFont && postFont !== "default";
-  const selectedTagCount = selectedPostTagIds.length + selectedPostTagNames.length;
 
   useEffect(() => {
     if (metadata.enableAnonymousAvatarSelection) {
@@ -138,35 +121,6 @@ export function PostPage({
     }
     onRemoveAttachment(attachmentToRemove.id);
     setAttachmentToRemove(null);
-  }
-
-  function toggleTag(tagId: string) {
-    if (selectedPostTagIds.includes(tagId)) {
-      onSelectedPostTagIdsChange(selectedPostTagIds.filter((id) => id !== tagId));
-      return;
-    }
-    if (selectedTagCount >= 5) {
-      return;
-    }
-    onSelectedPostTagIdsChange([...selectedPostTagIds, tagId]);
-  }
-
-  function addDraftTag() {
-    const name = normalizeDraftTagName(draftTagName);
-    if (!name || selectedTagCount >= 5) {
-      return;
-    }
-    const duplicateExisting = postTags.some((tag) => tag.name === name && selectedPostTagIds.includes(tag.id));
-    if (duplicateExisting || selectedPostTagNames.includes(name)) {
-      setDraftTagName("");
-      return;
-    }
-    onSelectedPostTagNamesChange([...selectedPostTagNames, name]);
-    setDraftTagName("");
-  }
-
-  function removeDraftTag(name: string) {
-    onSelectedPostTagNamesChange(selectedPostTagNames.filter((tagName) => tagName !== name));
   }
 
   async function handleSubmit() {
@@ -241,82 +195,6 @@ export function PostPage({
           onChange={(event) => onPostTextChange(event.target.value)}
           onPaste={pasteImages}
         />
-
-        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-              <HashIcon className="size-4 text-slate-500" />
-              标签
-            </div>
-            <Badge variant="secondary" className="rounded-md shadow-none">
-              {selectedTagCount}/5
-            </Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {postTags.length > 0 ? postTags.map((tag) => {
-              const selected = selectedPostTagIds.includes(tag.id);
-              const disabled = !selected && selectedTagCount >= 5;
-              return (
-                <button
-                  key={tag.id}
-                  type="button"
-                  disabled={disabled || busy}
-                  className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-xs font-semibold transition-colors ${
-                    selected
-                      ? "border-slate-700 bg-slate-800 text-white"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-white/80 disabled:opacity-45"
-                  }`}
-                  onClick={() => toggleTag(tag.id)}
-                  title={tag.description ?? tag.name}
-                >
-                  {tag.name}
-                </button>
-              );
-            }) : (
-              <span className="inline-flex min-h-7 items-center rounded-full border border-dashed border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-400">
-                暂无可选标签
-              </span>
-            )}
-            {selectedPostTagNames.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className="inline-flex min-h-7 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700"
-                onClick={() => removeDraftTag(name)}
-                title="移除标签"
-              >
-                {name}
-                <XIcon className="size-3" />
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 flex gap-2">
-            <Input
-              value={draftTagName}
-              disabled={busy || selectedTagCount >= 5}
-              className="h-8 rounded-md bg-white text-sm"
-              maxLength={16}
-              placeholder="新增标签"
-              onChange={(event) => setDraftTagName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  addDraftTag();
-                }
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-8 shrink-0 px-2 text-xs font-bold"
-              disabled={busy || selectedTagCount >= 5 || !normalizeDraftTagName(draftTagName)}
-              onClick={addDraftTag}
-            >
-              <PlusIcon data-icon="inline-start" />
-              添加
-            </Button>
-          </div>
-        </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
           {sortedAttachments.map((item) => (

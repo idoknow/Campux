@@ -14,6 +14,7 @@ import {
   HashIcon,
   HeartIcon,
   ImageIcon,
+  LoaderIcon,
   MessageCircleIcon,
   ChevronDownIcon,
   RotateCcwIcon,
@@ -191,6 +192,23 @@ const reviewStatusOptions = [
   { value: "all", label: "全部" },
 ] as const;
 
+const publishedTagMaintenanceOptions = [
+  { value: "14", label: "近 14 天" },
+  { value: "30", label: "近 30 天" },
+  { value: "60", label: "近 60 天" },
+  { value: "90", label: "近 90 天" },
+] as const;
+
+type PostTagMaintenanceResult = {
+  created: string[];
+  archived: string[];
+  deleted: string[];
+  assigned: Array<{
+    tag: string;
+    postIds: string[];
+  }>;
+};
+
 type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"];
 type ReviewListPreferences = {
   status: ReviewStatusFilter;
@@ -274,6 +292,8 @@ export function PostsPage({
   const [publishedPagination, setPublishedPagination] = useState<Pagination>(() => defaultPagination());
   const [publishedLoading, setPublishedLoading] = useState(false);
   const [publishedPage, setPublishedPage] = useState(1);
+  const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
+  const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
@@ -362,7 +382,7 @@ export function PostsPage({
       await Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]);
     }
     if (activeTab === "published") {
-      await refreshPublishedFeed(publishedPage);
+      await Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]);
     }
   }
 
@@ -401,13 +421,13 @@ export function PostsPage({
     }
   }
 
-  async function refreshPublishedFeed(page = publishedPage) {
+  async function refreshPublishedFeed(page = publishedPage, tagFilter = publishedTagFilter) {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(publishedPagination.limit),
     });
-    if (publishedTagFilter !== "all") {
-      params.set("tag", publishedTagFilter);
+    if (tagFilter !== "all") {
+      params.set("tag", tagFilter);
     }
     setPublishedLoading(true);
     try {
@@ -422,15 +442,43 @@ export function PostsPage({
   async function refreshPublishedTags() {
     const data = await api<{ tags: PostTag[] }>("/api/post-tags");
     setPublishedTags(data.tags);
+    let nextFilter = publishedTagFilter;
     if (publishedTagFilter !== "all" && !data.tags.some((tag) => tag.id === publishedTagFilter)) {
-      setPublishedTagFilter("all");
+      nextFilter = "all";
+      setPublishedTagFilter(nextFilter);
       setPublishedPage(1);
     }
+    return nextFilter;
   }
 
   function changePublishedTagFilter(value: string) {
     setPublishedTagFilter(value);
     setPublishedPage(1);
+  }
+
+  async function runPublishedTagMaintenance() {
+    const lookbackDays = Number(tagMaintenanceDays);
+    setTagMaintenanceBusy(true);
+    try {
+      const data = await api<{ ok: true; result: PostTagMaintenanceResult }>("/api/post-tags/maintain", {
+        method: "POST",
+        body: JSON.stringify({ lookbackDays }),
+      });
+      const assignedPostIds = new Set(data.result.assigned.flatMap((item) => item.postIds));
+      const summaryParts = [
+        data.result.created.length > 0 ? `新增 ${data.result.created.length} 个标签` : "",
+        assignedPostIds.size > 0 ? `回填 ${assignedPostIds.size} 条稿件` : "",
+        data.result.archived.length > 0 ? `归档 ${data.result.archived.length} 个标签` : "",
+      ].filter(Boolean);
+      toast.success(summaryParts.length > 0 ? `整理完成：${summaryParts.join("，")}。` : `已整理近 ${lookbackDays} 天稿件，暂无标签变化。`);
+      const nextFilter = await refreshPublishedTags();
+      setPublishedPage(1);
+      await refreshPublishedFeed(1, nextFilter);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "标签整理失败");
+    } finally {
+      setTagMaintenanceBusy(false);
+    }
   }
 
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
@@ -791,7 +839,17 @@ export function PostsPage({
           )}
         </TabsContent>
         <TabsContent value="published" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-          <PublishedTagFilter tags={publishedTags} value={publishedTagFilter} onChange={changePublishedTagFilter} />
+          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <PublishedTagFilter tags={publishedTags} value={publishedTagFilter} onChange={changePublishedTagFilter} />
+            {isAdmin ? (
+              <PublishedTagMaintenanceToolbar
+                value={tagMaintenanceDays}
+                busy={tagMaintenanceBusy}
+                onChange={setTagMaintenanceDays}
+                onRun={() => void runPublishedTagMaintenance()}
+              />
+            ) : null}
+          </div>
           {publishedLoading ? (
             <LoadingBlock title="正在加载已发布稿件..." />
           ) : publishedItems.length === 0 ? (
@@ -1823,9 +1881,49 @@ function PostTagsInline({ tags }: { tags?: AssignedPostTag[] | undefined }) {
   );
 }
 
+function PublishedTagMaintenanceToolbar({
+  value,
+  busy,
+  onChange,
+  onRun,
+}: {
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onRun: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-8 w-[108px] rounded-md bg-white text-xs font-bold">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {publishedTagMaintenanceOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 shrink-0 px-2.5 text-xs font-bold text-slate-700"
+        disabled={busy}
+        onClick={onRun}
+      >
+        {busy ? <LoaderIcon data-icon="inline-start" className="animate-spin" /> : <SparklesIcon data-icon="inline-start" />}
+        整理标签
+      </Button>
+    </div>
+  );
+}
+
 function PublishedTagFilter({ tags, value, onChange }: { tags: PostTag[]; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+    <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
       <button
         type="button"
         className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-bold transition-colors ${

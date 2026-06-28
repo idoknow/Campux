@@ -47,37 +47,6 @@ export function normalizeTagName(value: unknown): string {
     .slice(0, maxTagNameLength);
 }
 
-export function normalizeTagNames(values: unknown): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-  const names: string[] = [];
-  for (const value of values) {
-    const name = normalizeTagName(value);
-    if (name && !names.includes(name)) {
-      names.push(name);
-    }
-  }
-  return names.slice(0, maxTagsPerPost);
-}
-
-export function normalizeTagIds(values: unknown): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-  const ids: string[] = [];
-  for (const value of values) {
-    if (typeof value !== "string") {
-      continue;
-    }
-    const trimmed = value.trim();
-    if (trimmed && !ids.includes(trimmed)) {
-      ids.push(trimmed);
-    }
-  }
-  return ids.slice(0, maxTagsPerPost);
-}
-
 export function tagColorForName(name: string): string {
   let hash = 0;
   for (const char of name) {
@@ -139,68 +108,12 @@ export function serializeAssignedPostTags(
     .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
 }
 
-export async function resolveManualPostTags(
-  client: TagClient,
-  tenantId: string,
-  input: {
-    tagIds?: string[] | undefined;
-    tagNames?: string[] | undefined;
-  },
-) {
-  const tagIds = normalizeTagIds(input.tagIds ?? []);
-  const tagNames = normalizeTagNames(input.tagNames ?? []);
-  if (tagIds.length === 0 && tagNames.length === 0) {
-    return [];
-  }
-
-  const existingById = tagIds.length > 0
-    ? await client.postTag.findMany({
-        where: {
-          tenantId,
-          status: "active",
-          id: { in: tagIds },
-        },
-      })
-    : [];
-
-  const tags = [...existingById];
-  for (const name of tagNames) {
-    const alreadySelected = tags.some((tag) => tag.name === name);
-    if (alreadySelected) {
-      continue;
-    }
-    const tag = await client.postTag.upsert({
-      where: {
-        tenantId_name: {
-          tenantId,
-          name,
-        },
-      },
-      update: {
-        status: "active",
-      },
-      create: {
-        tenantId,
-        name,
-        color: tagColorForName(name),
-        source: "manual",
-      },
-    });
-    tags.push(tag);
-    if (tags.length >= maxTagsPerPost) {
-      break;
-    }
-  }
-
-  return tags.slice(0, maxTagsPerPost);
-}
-
 export async function assignPostTags(
   client: TagClient,
   input: {
     tenantId: string;
     postId: string;
-    tags: Array<{ tagId: string; source: "manual" | "llm"; confidence?: number | null | undefined }>;
+    tags: Array<{ tagId: string; source: "llm"; confidence?: number | null | undefined }>;
   },
 ) {
   const seen = new Set<string>();
@@ -224,12 +137,10 @@ export async function assignPostTags(
         source: tag.source,
         confidence: tag.confidence ?? null,
       },
-      update: tag.source === "manual"
-        ? {
-            source: "manual",
-            confidence: tag.confidence ?? null,
-          }
-        : {},
+      update: {
+        source: tag.source,
+        confidence: tag.confidence ?? null,
+      },
     });
     await client.postTag.update({
       where: { id: tag.tagId },
