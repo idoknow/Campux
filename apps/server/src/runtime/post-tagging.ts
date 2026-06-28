@@ -15,7 +15,13 @@ export type PostTagSuggestion = {
   confidence: number;
 };
 
-type PostTagMaintenanceActions = {
+/**
+ * The full lifecycle plan an autonomous tag agent may propose in a single pass.
+ * Every field is advisory: the server re-validates each action against the hard
+ * rules (cluster size, known post ids, max tags per post) before applying it.
+ */
+type PostTagAgentPlan = {
+  /** New tags to mint for a recurring recent theme. */
   create: Array<{
     name: string;
     description: string | null;
@@ -23,10 +29,21 @@ type PostTagMaintenanceActions = {
     postIds: string[];
     confidence: number;
   }>;
+  /** Near-duplicate tags to fold into one canonical tag. */
+  merge: Array<{
+    from: string[];
+    into: string;
+  }>;
+  /** Back-fill / re-tag: map a post onto the (existing or just-created) taxonomy. */
+  assign: Array<{
+    postId: string;
+    tags: string[];
+  }>;
 };
 
 export type PostTagMaintenanceResult = {
   created: string[];
+  merged: Array<{ from: string[]; into: string }>;
   archived: string[];
   deleted: string[];
   assigned: Array<{
@@ -36,10 +53,14 @@ export type PostTagMaintenanceResult = {
 };
 
 const tagPromptMaxTextChars = 800;
+const tagAgentPostTextChars = 240;
 const defaultTagMaintenanceLookbackDays = 14;
 const tagMaintenanceArchiveInactiveDays = 14;
 const maxTagMaintenanceLookbackDays = 90;
-const tagMaintenanceMaxPosts = 120;
+const tagAgentRecentPosts = 60;
+const tagAgentBackfillPosts = 40;
+/** Rock's rule ①: a new tag is only created once a theme recurs across at least this many posts. */
+const minClusterSize = 3;
 
 export async function autoTagPost(options: {
   tenantId: string;
@@ -205,12 +226,22 @@ export function parsePostTagSuggestionJson(raw: string): PostTagSuggestion | nul
   };
 }
 
+/**
+ * The autonomous tag-lifecycle agent. A single pass that, given the whole tag
+ * library plus recent and historically-untagged posts, lets the LLM propose the
+ * full set of lifecycle actions (create / merge / assign), then applies them
+ * under hard server-side rules, and finally archives tags that went quiet.
+ *
+ * It is driven both by the periodic scheduler (no human trigger needed) and by
+ * the admin "整理标签" button — both call here. There is no confirmation step:
+ * the agent owns the tag lifecycle end to end.
+ */
 export async function maintainTenantPostTags(options: {
   tenantId: string;
   lookbackDays?: number | undefined;
   logger: FastifyBaseLogger;
 }): Promise<PostTagMaintenanceResult> {
-  const emptyResult = (): PostTagMaintenanceResult => ({ created: [], archived: [], deleted: [], assigned: [] });
+  const emptyResult = (): PostTagMaintenanceResult => ({ created: [], merged: [], archived: [], deleted: [], assigned: [] });
   const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag maintenance: failed to read AI settings");
     return null;
@@ -220,35 +251,62 @@ export async function maintainTenantPostTags(options: {
   }
 
   const lookbackDays = clampInteger(options.lookbackDays, 7, maxTagMaintenanceLookbackDays, defaultTagMaintenanceLookbackDays);
-  const maintenanceSince = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const clusterSince = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
   const archiveSince = new Date(Date.now() - tagMaintenanceArchiveInactiveDays * 24 * 60 * 60 * 1000);
-  const [tags, posts] = await Promise.all([
+
+  const [tags, recentPosts, backfillPosts] = await Promise.all([
     prisma.postTag.findMany({
       where: { tenantId: options.tenantId },
       include: { _count: { select: { assignments: true } } },
       orderBy: [{ status: "asc" }, { lastUsedAt: "desc" }, { updatedAt: "desc" }],
       take: 100,
     }),
+    // Recent window — the substrate for spotting recurring themes (create clusters).
     prisma.post.findMany({
       where: {
         tenantId: options.tenantId,
-        createdAt: { gte: maintenanceSince },
+        text: { not: "" },
+        createdAt: { gte: clusterSince },
       },
       select: {
         id: true,
         displayId: true,
         text: true,
         createdAt: true,
-        tagAssignments: {
-          select: {
-            tag: { select: { name: true } },
-          },
-        },
+        tagAssignments: { select: { tag: { select: { name: true } } } },
       },
       orderBy: { createdAt: "desc" },
-      take: tagMaintenanceMaxPosts,
+      take: tagAgentRecentPosts,
+    }),
+    // Historical untagged sweep — oldest first so successive cycles cover the
+    // entire corpus, not just the last two weeks. This is the back-fill the
+    // old maintenance pass never did.
+    prisma.post.findMany({
+      where: {
+        tenantId: options.tenantId,
+        text: { not: "" },
+        tagAssignments: { none: {} },
+      },
+      select: {
+        id: true,
+        displayId: true,
+        text: true,
+        createdAt: true,
+        tagAssignments: { select: { tag: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: "asc" },
+      take: tagAgentBackfillPosts,
     }),
   ]);
+
+  // Merge the two post pools, de-duplicating by id (a recent post can also be untagged).
+  const postsById = new Map<string, (typeof recentPosts)[number]>();
+  for (const post of [...recentPosts, ...backfillPosts]) {
+    if (!postsById.has(post.id)) {
+      postsById.set(post.id, post);
+    }
+  }
+  const posts = Array.from(postsById.values());
 
   if (posts.length === 0 && tags.length === 0) {
     return emptyResult();
@@ -256,13 +314,13 @@ export async function maintainTenantPostTags(options: {
 
   let applied = emptyResult();
   const apiKey = settings.apiKeyConfigured ? await resolveTenantAiApiKey(options.tenantId, {}) : null;
-  if (!apiKey || posts.length < 4) {
+  if (!apiKey || posts.length < minClusterSize) {
     const archived = await archiveInactivePostTags(options.tenantId, archiveSince);
     return { ...applied, archived };
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 30) * 1_000);
+  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
   try {
     const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
       method: "POST",
@@ -274,20 +332,20 @@ export async function maintainTenantPostTags(options: {
       body: JSON.stringify({
         model: settings.model,
         temperature: 0,
-        max_tokens: 900,
+        max_tokens: 2000,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
             content: [
-              "你是校园墙标签维护助手。只返回 JSON。",
-              `你只负责从最近 ${lookbackDays} 天稿件里发现阶段性重复主题，输出可创建或复用的标签簇。`,
-              "只有同类稿件超过 3 条，也就是 postIds 至少 4 个时，才允许返回一个 create 项。",
-              "每个 create.postIds 必须只使用输入 recentPosts 里的 id，并覆盖这几条相似稿件。",
-              "如果主题已被现有 active 标签覆盖，可以返回相同 name 用于回填这几条稿件；不要制造近义重复标签。",
-              "不要归档或删除标签；系统会自动归档过去两周无命中的 active 标签。",
-              "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。",
-              "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关咨询\",\"color\":\"#dbeafe\",\"postIds\":[\"稿件id1\",\"稿件id2\",\"稿件id3\",\"稿件id4\"],\"confidence\":0到1}]}",
+              "你是校园墙标签库的自治维护 agent。只返回 JSON，不要 Markdown。",
+              "你负责维护整套标签体系，可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给稿件回填标签）。",
+              `create：只有当最近 ${lookbackDays} 天里同一主题反复出现、相似稿件达到 ${minClusterSize} 条及以上（postIds 至少 ${minClusterSize} 个）时，才新建一个标签。postIds 必须来自输入 posts 的 id。`,
+              "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。",
+              "assign：把 posts 里的稿件映射到合适的标签上（已有标签或本次 create 的标签都行），用于回填历史稿件。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
+              "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。不确定时宁可少操作。",
+              "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
+              "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",
             ].join("\n"),
           },
           {
@@ -301,14 +359,15 @@ export async function maintainTenantPostTags(options: {
                 postCount: tag._count.assignments,
                 lastUsedAt: tag.lastUsedAt?.toISOString() ?? null,
               })),
-              recentPosts: posts.map((post) => ({
+              posts: posts.map((post) => ({
                 id: post.id,
                 displayId: post.displayId,
                 createdAt: post.createdAt.toISOString(),
-                text: post.text.slice(0, tagPromptMaxTextChars),
+                text: post.text.slice(0, tagAgentPostTextChars),
                 tags: post.tagAssignments.map((assignment) => assignment.tag.name),
               })),
               lookbackDays,
+              minClusterSize,
             }),
           },
         ],
@@ -321,9 +380,9 @@ export async function maintainTenantPostTags(options: {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
       return { ...applied, archived: await archiveInactivePostTags(options.tenantId, archiveSince) };
     }
-    const actions = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
-    if (actions) {
-      applied = await applyTagMaintenanceActions(options.tenantId, actions, posts.map((post) => post.id));
+    const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
+    if (plan) {
+      applied = await applyTagAgentPlan(options.tenantId, plan, posts.map((post) => post.id), options.logger);
     }
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
@@ -338,7 +397,7 @@ export async function maintainTenantPostTags(options: {
   };
 }
 
-export function parsePostTagMaintenanceJson(raw: string): PostTagMaintenanceActions | null {
+export function parsePostTagMaintenanceJson(raw: string): PostTagAgentPlan | null {
   const parsed = parseJsonObject(raw);
   if (!parsed) {
     return null;
@@ -354,7 +413,7 @@ export function parsePostTagMaintenanceJson(raw: string): PostTagMaintenanceActi
           return [];
         }
         const postIds = normalizeStringList(record.postIds);
-        if (postIds.length < 4) {
+        if (postIds.length < minClusterSize) {
           return [];
         }
         return [{
@@ -364,82 +423,217 @@ export function parsePostTagMaintenanceJson(raw: string): PostTagMaintenanceActi
           postIds,
           confidence: clampNumber(typeof record.confidence === "number" ? record.confidence : Number(record.confidence), 0, 1, 0.8),
         }];
-      }).slice(0, 5)
+      }).slice(0, 8)
     : [];
-  return {
-    create,
-  };
+
+  const merge = Array.isArray(parsed.merge)
+    ? parsed.merge.flatMap((item) => {
+        if (!item || typeof item !== "object") {
+          return [];
+        }
+        const record = item as Record<string, unknown>;
+        const into = normalizeTagName(record.into);
+        if (!into) {
+          return [];
+        }
+        const from = normalizeSuggestedNames(record.from).filter((name) => name !== into);
+        if (from.length === 0) {
+          return [];
+        }
+        return [{ from, into }];
+      }).slice(0, 8)
+    : [];
+
+  const assign = Array.isArray(parsed.assign)
+    ? parsed.assign.flatMap((item) => {
+        if (!item || typeof item !== "object") {
+          return [];
+        }
+        const record = item as Record<string, unknown>;
+        const postId = typeof record.postId === "string" ? record.postId.trim() : "";
+        if (!postId) {
+          return [];
+        }
+        const tags = normalizeSuggestedNames(record.tags).slice(0, maxTagsPerPost);
+        if (tags.length === 0) {
+          return [];
+        }
+        return [{ postId, tags }];
+      }).slice(0, 200)
+    : [];
+
+  return { create, merge, assign };
 }
 
-async function applyTagMaintenanceActions(
+export async function applyTagAgentPlan(
   tenantId: string,
-  actions: PostTagMaintenanceActions,
-  recentPostIds: string[],
+  plan: PostTagAgentPlan,
+  knownPostIds: string[],
+  logger: FastifyBaseLogger,
 ): Promise<PostTagMaintenanceResult> {
   const created: string[] = [];
-  const assigned: PostTagMaintenanceResult["assigned"] = [];
-  const knownRecentPostIds = new Set(recentPostIds);
-  const handledTagNames = new Set<string>();
+  const merged: Array<{ from: string[]; into: string }> = [];
+  const assignedByTag = new Map<string, Set<string>>();
+  const knownIds = new Set(knownPostIds);
+  const handledCreateNames = new Set<string>();
 
-  for (const item of actions.create) {
-    if (handledTagNames.has(item.name)) {
+  const recordAssignment = (tagName: string, postId: string) => {
+    const set = assignedByTag.get(tagName) ?? new Set<string>();
+    set.add(postId);
+    assignedByTag.set(tagName, set);
+  };
+
+  // 1) CREATE — only for clusters that clear the hard ≥minClusterSize rule.
+  for (const item of plan.create) {
+    if (handledCreateNames.has(item.name)) {
       continue;
     }
-    handledTagNames.add(item.name);
-    const postIds = uniqueStrings(item.postIds).filter((postId) => knownRecentPostIds.has(postId)).slice(0, 30);
-    if (postIds.length < 4) {
+    handledCreateNames.add(item.name);
+    const postIds = uniqueStrings(item.postIds).filter((postId) => knownIds.has(postId)).slice(0, 50);
+    if (postIds.length < minClusterSize) {
       continue;
     }
-    const existing = await prisma.postTag.findUnique({
-      where: {
-        tenantId_name: {
-          tenantId,
-          name: item.name,
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
-    const tag = await prisma.postTag.upsert({
-      where: {
-        tenantId_name: {
-          tenantId,
-          name: item.name,
-        },
-      },
-      update: {
-        status: "active",
-        source: "llm",
-        color: item.color,
-        ...(item.description ? { description: item.description } : {}),
-      },
-      create: {
-        tenantId,
-        name: item.name,
-        description: item.description,
-        color: item.color,
-        source: "llm",
-      },
-    });
-    if (!existing) {
-      created.push(tag.name);
-    }
-    for (const postId of postIds) {
-      await assignPostTags(prisma, {
-        tenantId,
-        postId,
-        tags: [{
-          tagId: tag.id,
-          source: "llm",
-          confidence: item.confidence,
-        }],
+    try {
+      const existing = await prisma.postTag.findUnique({
+        where: { tenantId_name: { tenantId, name: item.name } },
+        select: { id: true },
       });
+      const tag = await prisma.postTag.upsert({
+        where: { tenantId_name: { tenantId, name: item.name } },
+        update: {
+          status: "active",
+          source: "llm",
+          color: item.color,
+          ...(item.description ? { description: item.description } : {}),
+        },
+        create: {
+          tenantId,
+          name: item.name,
+          description: item.description,
+          color: item.color,
+          source: "llm",
+        },
+      });
+      if (!existing) {
+        created.push(tag.name);
+      }
+      for (const postId of postIds) {
+        await assignPostTags(prisma, {
+          tenantId,
+          postId,
+          tags: [{ tagId: tag.id, source: "llm", confidence: item.confidence }],
+        });
+        recordAssignment(tag.name, postId);
+      }
+    } catch (error) {
+      logger.warn({ error, tenantId, tag: item.name }, "post tag agent: create failed");
     }
-    assigned.push({ tag: tag.name, postIds });
   }
 
-  return { created: uniqueStrings(created), archived: [], deleted: [], assigned };
+  // 2) MERGE — fold near-duplicate tags into one canonical tag. Assignments are
+  // migrated to the canonical tag (upsert de-dupes), then the source tag's own
+  // assignments are removed and the tag is archived (reversible, no post loses a tag).
+  for (const item of plan.merge) {
+    try {
+      const canonical = await prisma.postTag.upsert({
+        where: { tenantId_name: { tenantId, name: item.into } },
+        update: { status: "active" },
+        create: {
+          tenantId,
+          name: item.into,
+          description: null,
+          color: tagColorForName(item.into),
+          source: "llm",
+        },
+      });
+      const mergedFrom: string[] = [];
+      for (const fromName of item.from) {
+        if (fromName === canonical.name) {
+          continue;
+        }
+        const fromTag = await prisma.postTag.findUnique({
+          where: { tenantId_name: { tenantId, name: fromName } },
+          select: { id: true, name: true },
+        });
+        if (!fromTag || fromTag.id === canonical.id) {
+          continue;
+        }
+        const assignments = await prisma.postTagAssignment.findMany({
+          where: { tenantId, tagId: fromTag.id },
+          select: { postId: true, confidence: true },
+        });
+        for (const assignment of assignments) {
+          await assignPostTags(prisma, {
+            tenantId,
+            postId: assignment.postId,
+            tags: [{ tagId: canonical.id, source: "llm", confidence: assignment.confidence ?? null }],
+          });
+          recordAssignment(canonical.name, assignment.postId);
+        }
+        // Drop the source tag's now-redundant assignments and retire it.
+        await prisma.postTagAssignment.deleteMany({ where: { tenantId, tagId: fromTag.id } });
+        await prisma.postTag.update({ where: { id: fromTag.id }, data: { status: "archived" } });
+        mergedFrom.push(fromTag.name);
+      }
+      if (mergedFrom.length > 0) {
+        merged.push({ from: mergedFrom, into: canonical.name });
+      }
+    } catch (error) {
+      logger.warn({ error, tenantId, into: item.into }, "post tag agent: merge failed");
+    }
+  }
+
+  // 3) ASSIGN — back-fill posts onto the (now-current) active taxonomy.
+  if (plan.assign.length > 0) {
+    const activeTags = await prisma.postTag.findMany({
+      where: { tenantId, status: "active" },
+      select: { id: true, name: true },
+    });
+    const tagIdByName = new Map(activeTags.map((tag) => [tag.name, tag.id]));
+    for (const item of plan.assign) {
+      if (!knownIds.has(item.postId)) {
+        continue;
+      }
+      const existingAssignments = await prisma.postTagAssignment.findMany({
+        where: { tenantId, postId: item.postId },
+        select: { tagId: true },
+      });
+      const alreadyAssigned = new Set(existingAssignments.map((assignment) => assignment.tagId));
+      const remainingSlots = Math.max(0, maxTagsPerPost - alreadyAssigned.size);
+      if (remainingSlots === 0) {
+        continue;
+      }
+      const tagIds: Array<{ tagId: string; name: string }> = [];
+      for (const tagName of item.tags) {
+        const tagId = tagIdByName.get(tagName);
+        if (tagId && !alreadyAssigned.has(tagId) && !tagIds.some((entry) => entry.tagId === tagId)) {
+          tagIds.push({ tagId, name: tagName });
+        }
+      }
+      const toAssign = tagIds.slice(0, remainingSlots);
+      if (toAssign.length === 0) {
+        continue;
+      }
+      try {
+        await assignPostTags(prisma, {
+          tenantId,
+          postId: item.postId,
+          tags: toAssign.map((entry) => ({ tagId: entry.tagId, source: "llm" as const, confidence: null })),
+        });
+        for (const entry of toAssign) {
+          recordAssignment(entry.name, item.postId);
+        }
+      } catch (error) {
+        logger.warn({ error, tenantId, postId: item.postId }, "post tag agent: assign failed");
+      }
+    }
+  }
+
+  const assigned = Array.from(assignedByTag.entries())
+    .map(([tag, postIds]) => ({ tag, postIds: Array.from(postIds) }))
+    .filter((entry) => entry.postIds.length > 0);
+
+  return { created: uniqueStrings(created), merged, archived: [], deleted: [], assigned };
 }
 
 async function archiveInactivePostTags(tenantId: string, recentSince: Date): Promise<string[]> {

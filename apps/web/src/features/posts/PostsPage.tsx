@@ -201,6 +201,7 @@ const publishedTagMaintenanceOptions = [
 
 type PostTagMaintenanceResult = {
   created: string[];
+  merged: Array<{ from: string[]; into: string }>;
   archived: string[];
   deleted: string[];
   assigned: Array<{
@@ -467,6 +468,7 @@ export function PostsPage({
       const assignedPostIds = new Set(data.result.assigned.flatMap((item) => item.postIds));
       const summaryParts = [
         data.result.created.length > 0 ? `新增 ${data.result.created.length} 个标签` : "",
+        data.result.merged.length > 0 ? `合并 ${data.result.merged.reduce((sum, item) => sum + item.from.length, 0)} 个标签` : "",
         assignedPostIds.size > 0 ? `回填 ${assignedPostIds.size} 条稿件` : "",
         data.result.archived.length > 0 ? `归档 ${data.result.archived.length} 个标签` : "",
       ].filter(Boolean);
