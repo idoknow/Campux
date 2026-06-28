@@ -216,6 +216,7 @@ export type PostItem = {
     otherDisplayIds: number[];
     collecting: boolean;
   } | null;
+  tags: AssignedPostTag[];
 };
 
 export type PostTimelineEntry = {
@@ -253,6 +254,7 @@ export type PublishedFeedPost = {
   textColor: string | null;
   font: string | null;
   createdAt: string;
+  tags: AssignedPostTag[];
 };
 
 export type PublishedFeedItem = {
@@ -433,12 +435,34 @@ export type AdminBotAccount = {
 export type AiRules = {
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;
+  /** 是否启用投稿后的 LLM 自动打标 */
+  postTaggingEnabled?: boolean;
+  /** 是否启用 LLM 定期维护标签库 */
+  postTagMaintenanceEnabled?: boolean;
   /** 私聊 AI 聚合收稿等待秒数，0 表示不聚合 */
   privatePostAggregateDelaySeconds?: number;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"] */
   postTriggerKeywords?: string[];
   /** 私聊投稿 AI 语义收稿的完整系统提示词，留空使用内置默认提示词 */
   privatePostPrompt?: string;
+};
+
+export type PostTag = {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  status: string;
+  source: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  postCount?: number;
+};
+
+export type AssignedPostTag = PostTag & {
+  assignmentSource: string;
+  confidence: number | null;
 };
 
 export type TenantAiSettings = {

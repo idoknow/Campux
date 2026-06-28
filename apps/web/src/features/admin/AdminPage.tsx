@@ -140,6 +140,8 @@ type AiSettingsForm = {
   temperature: number;
   timeoutSeconds: number;
   privatePostAiEnabled: boolean;
+  postTaggingEnabled: boolean;
+  postTagMaintenanceEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
   postTriggerKeywordsText: string;
   privatePostPrompt: string;
@@ -559,6 +561,8 @@ export function AdminPage({
     if (!aiForm) return null;
     const rules: AiRules = {
       privatePostAiEnabled: aiForm.privatePostAiEnabled,
+      postTaggingEnabled: aiForm.postTaggingEnabled,
+      postTagMaintenanceEnabled: aiForm.postTagMaintenanceEnabled,
       privatePostAggregateDelaySeconds: aiForm.privatePostAggregateDelaySeconds,
       postTriggerKeywords: lines(aiForm.postTriggerKeywordsText),
       privatePostPrompt: aiForm.privatePostPrompt.trim(),
@@ -2064,6 +2068,25 @@ function AdminAiSettingsPanel({
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
+                  <p className="text-sm font-medium text-slate-900">AI 标签</p>
+                  <p className="text-xs text-slate-500">用于投稿后自动打标，并定期按近期稿件维护标签库。</p>
+                </div>
+                <div className="grid gap-2">
+                  <label className="flex items-center justify-end gap-2 text-xs font-semibold text-slate-600">
+                    自动打标
+                    <Switch checked={form.postTaggingEnabled} disabled={busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, postTaggingEnabled: checked })} aria-label="启用 AI 自动打标" />
+                  </label>
+                  <label className="flex items-center justify-end gap-2 text-xs font-semibold text-slate-600">
+                    自动维护
+                    <Switch checked={form.postTagMaintenanceEnabled} disabled={busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, postTagMaintenanceEnabled: checked })} aria-label="启用 AI 标签维护" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
                   <p className="text-sm font-medium text-slate-900">AI 语义收稿</p>
                   <p className="text-xs text-slate-500">开启后，私聊可由 AI 自动判断投稿内容、匿名意图、分段和是否提交；关闭时仅保留 #投稿 等显式命令。</p>
                 </div>
@@ -3506,6 +3529,8 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     temperature: settings.temperature,
     timeoutSeconds: settings.timeoutSeconds,
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
+    postTaggingEnabled: settings.rules.postTaggingEnabled ?? true,
+    postTagMaintenanceEnabled: settings.rules.postTagMaintenanceEnabled ?? true,
     privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
     privatePostPrompt: settings.rules.privatePostPrompt ?? "",

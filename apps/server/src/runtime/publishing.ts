@@ -5,6 +5,7 @@ import type { PostStatus } from "@campux/db";
 import { getStorageDriver, publishToQZone, QZonePublishError } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { qzoneCookieDomain } from "../lib/bot-workflows";
+import { serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
@@ -532,6 +533,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         include: {
           tenant: true,
           author: true,
+          tagAssignments: {
+            include: { tag: true },
+            orderBy: { createdAt: "asc" },
+          },
         },
       },
       batch: {
@@ -543,6 +548,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
                 include: {
                   tenant: true,
                   author: true,
+                  tagAssignments: {
+                    include: { tag: true },
+                    orderBy: { createdAt: "asc" },
+                  },
                 },
               },
             },
@@ -636,6 +645,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         bgColor: (target as { bgColor?: string | null }).bgColor ?? null,
         textColor: (target as { textColor?: string | null }).textColor ?? null,
         font: (target as { font?: string | null }).font ?? null,
+        tags: serializeAssignedPostTags((target as { tagAssignments?: Parameters<typeof serializeAssignedPostTags>[0] }).tagAssignments).map((tag) => ({
+          name: tag.name,
+          color: tag.color,
+        })),
       });
       captionParts.push(
         renderPublishCaption(attempt.publishTarget.botAccount.publishTextTemplate, {

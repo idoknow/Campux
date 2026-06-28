@@ -18,6 +18,10 @@ export type TenantAiSettingsPayload = {
 export type AiRules = {
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean | undefined;
+  /** 是否启用投稿后的 LLM 自动打标 */
+  postTaggingEnabled?: boolean | undefined;
+  /** 是否启用 LLM 定期维护标签库 */
+  postTagMaintenanceEnabled?: boolean | undefined;
   /** 私聊 AI 聚合收稿等待秒数，0 表示不聚合 */
   privatePostAggregateDelaySeconds?: number | undefined;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
@@ -60,6 +64,8 @@ const defaultAiSettings: TenantAiSettingsPayload = {
   timeoutSeconds: 30,
   rules: {
     privatePostAiEnabled: false,
+    postTaggingEnabled: true,
+    postTagMaintenanceEnabled: true,
     privatePostAggregateDelaySeconds: 8,
     postTriggerKeywords: [],
     privatePostPrompt: DEFAULT_PRIVATE_POST_PROMPT,
@@ -261,6 +267,8 @@ export function normalizeAiRules(value: unknown): AiRules {
   const candidate = value as Record<string, unknown>;
   return {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
+    postTaggingEnabled: typeof candidate.postTaggingEnabled === "boolean" ? candidate.postTaggingEnabled : defaultAiSettings.rules.postTaggingEnabled,
+    postTagMaintenanceEnabled: typeof candidate.postTagMaintenanceEnabled === "boolean" ? candidate.postTagMaintenanceEnabled : defaultAiSettings.rules.postTagMaintenanceEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
     privatePostPrompt: normalizePrivatePostPrompt(candidate.privatePostPrompt),

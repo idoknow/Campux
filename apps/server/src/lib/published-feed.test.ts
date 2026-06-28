@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildPublishedFeed, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "./published-feed";
+import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "./published-feed";
 import type { PostQZoneMetric } from "./posts";
 
 function makePost(overrides: Partial<RawFeedPost> & { id: string; displayId: number }): RawFeedPost {
@@ -10,6 +10,7 @@ function makePost(overrides: Partial<RawFeedPost> & { id: string; displayId: num
     bgColor: null,
     textColor: null,
     font: null,
+    tags: [],
     author: { displayName: `用户${overrides.displayId}`, qqUin: BigInt(10000 + overrides.displayId) },
     createdAt: new Date("2026-06-08T00:00:00Z"),
     ...overrides,
@@ -144,5 +145,46 @@ describe("buildPublishedFeed", () => {
     expect(items[0]!.qzoneStats?.likeCount).toBe(5);
     expect(items[0]!.qzoneStats?.commentCount).toBe(5);
     expect(items[0]!.qzoneStats?.targets).toHaveLength(2);
+  });
+
+  test("按标签过滤 single 和 batch feed", () => {
+    const tag = {
+      id: "tag-gaokao",
+      name: "高考志愿",
+      description: null,
+      color: "#dbeafe",
+      status: "active",
+      source: "llm",
+      lastUsedAt: null,
+      createdAt: "2026-06-08T00:00:00.000Z",
+      updatedAt: "2026-06-08T00:00:00.000Z",
+      assignmentSource: "llm",
+      confidence: 0.9,
+    };
+    const items = buildPublishedFeed({
+      singles: [
+        {
+          post: makePost({ id: "p1", displayId: 1, tags: [tag] }),
+          publishedAt: new Date("2026-06-08T04:00:00Z"),
+          metrics: [],
+        },
+        {
+          post: makePost({ id: "p2", displayId: 2 }),
+          publishedAt: new Date("2026-06-08T03:00:00Z"),
+          metrics: [],
+        },
+      ],
+      batches: [
+        {
+          batchId: "b1",
+          publishedAt: new Date("2026-06-08T02:00:00Z"),
+          posts: [makePost({ id: "p3", displayId: 3 }), makePost({ id: "p4", displayId: 4, tags: [tag] })],
+          metrics: [],
+        },
+      ],
+      viewerIsReviewer: false,
+    });
+    expect(filterPublishedFeedByTag(items, "tag-gaokao").map((item) => item.key)).toEqual(["p1", "b1"]);
+    expect(filterPublishedFeedByTag(items, "高考志愿").map((item) => item.key)).toEqual(["p1", "b1"]);
   });
 });

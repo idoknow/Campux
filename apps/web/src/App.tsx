@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { api, createPostWithAttachments, CreatePostError } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
-import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata } from "@/types/app";
+import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostTag, PostsTab, TenantMetadata } from "@/types/app";
 import { usePendingAttachments } from "@/hooks/useUploadImages";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
 import { LoginScreen } from "@/features/auth/LoginScreen";
@@ -96,6 +96,9 @@ export function App() {
   const [postBgColor, setPostBgColor] = useState<string>("");
   const [postTextColor, setPostTextColor] = useState<string>("");
   const [postFont, setPostFont] = useState<string>("");
+  const [postTags, setPostTags] = useState<PostTag[]>([]);
+  const [selectedPostTagIds, setSelectedPostTagIds] = useState<string[]>([]);
+  const [selectedPostTagNames, setSelectedPostTagNames] = useState<string[]>([]);
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -215,12 +218,14 @@ export function App() {
   async function loadTenantData(page = postsPage) {
     setTenantDataLoading(true);
     try {
-      const [metadataData, postsData] = await Promise.all([
+      const [metadataData, postsData, tagData] = await Promise.all([
         api<TenantMetadata>("/api/tenant/metadata"),
         api<{ posts: PostItem[]; pagination: Pagination }>(`/api/posts/mine?page=${page}&limit=${postsPagination.limit}`),
+        api<{ tags: PostTag[] }>("/api/post-tags").catch(() => ({ tags: [] })),
       ]);
       setMetadata(metadataData);
       setPosts(postsData.posts);
+      setPostTags(tagData.tags);
       setPostsPagination(postsData.pagination);
       setPostsPage(postsData.pagination.page);
     } finally {
@@ -405,6 +410,9 @@ export function App() {
     await api<{ ok: true }>("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     setMe({ authenticated: false });
     setPostText("");
+    setSelectedPostTagIds([]);
+    setSelectedPostTagNames([]);
+    setPostTags([]);
     clearAttachments();
     setPosts([]);
     navigate({ kind: "login" }, "replace");
@@ -423,6 +431,9 @@ export function App() {
     setPostText("");
     setAnonymous(false);
     setAnonymousAvatar("");
+    setSelectedPostTagIds([]);
+    setSelectedPostTagNames([]);
+    setPostTags([]);
     setMe((current) => current?.authenticated ? {
       ...current,
       currentTenant: data.currentTenant,
@@ -475,6 +486,8 @@ export function App() {
         postTextColor || undefined,
         postFont || undefined,
         anonymousAvatar || undefined,
+        selectedPostTagIds,
+        selectedPostTagNames,
       );
       clearAttachments();
       setPostText("");
@@ -483,9 +496,15 @@ export function App() {
       setPostBgColor("");
       setPostTextColor("");
       setPostFont("");
+      setSelectedPostTagIds([]);
+      setSelectedPostTagNames([]);
       toast.success("投稿已提交，等待审核。");
-      const data = await api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10");
+      const [data, tagData] = await Promise.all([
+        api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10"),
+        api<{ tags: PostTag[] }>("/api/post-tags").catch(() => ({ tags: [] })),
+      ]);
       setPosts(data.posts);
+      setPostTags(tagData.tags);
       setPostsPagination(data.pagination);
       setPostsPage(1);
       setActiveTab("posts");
@@ -627,6 +646,9 @@ export function App() {
       postBgColor={postBgColor}
       postTextColor={postTextColor}
       postFont={postFont}
+      postTags={postTags}
+      selectedPostTagIds={selectedPostTagIds}
+      selectedPostTagNames={selectedPostTagNames}
       postsTab={route.kind === "tenant" && route.tab === "posts" ? (route.subTab as PostsTab | undefined) ?? defaultPostsTab : defaultPostsTab}
       postsPagination={postsPagination}
       anonymous={anonymous}
@@ -639,6 +661,8 @@ export function App() {
       onBgColorChange={setPostBgColor}
       onTextColorChange={setPostTextColor}
       onFontChange={setPostFont}
+      onSelectedPostTagIdsChange={setSelectedPostTagIds}
+      onSelectedPostTagNamesChange={setSelectedPostTagNames}
       onFilesSelected={handleUploadFiles}
       onLogout={logout}
       onOpenOps={showOpsUi && canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}

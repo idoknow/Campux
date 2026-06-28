@@ -74,6 +74,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
               createdAt: "asc",
             },
           },
+          tagAssignments: {
+            include: {
+              tag: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           qzonePostMetrics: {
             include: {
               publishAttempt: {

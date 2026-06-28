@@ -17,6 +17,8 @@ export const aiSettingsSchema = z.object({
   timeoutSeconds: z.number().int().min(5).max(120).optional(),
   rules: z.object({
     privatePostAiEnabled: z.boolean().optional(),
+    postTaggingEnabled: z.boolean().optional(),
+    postTagMaintenanceEnabled: z.boolean().optional(),
     privatePostAggregateDelaySeconds: z.number().int().min(0).max(120).optional(),
     postTriggerKeywords: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
     privatePostPrompt: z.string().trim().max(PRIVATE_POST_PROMPT_MAX_LENGTH).optional(),

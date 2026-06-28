@@ -76,6 +76,7 @@ model Tenant {
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens OAuthAccessToken[]
   posts          Post[]
+  postTags       PostTag[]
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
   auditLogs      AuditLog[]
@@ -257,11 +258,46 @@ model Post {
   publishAttempts PublishAttempt[]
   qzonePostMetrics QZonePostMetric[]
   follows         PostFollow[]
+  tagAssignments  PostTagAssignment[]
   batchItem       PublishBatchItem?
 
   @@unique([tenantId, displayId])
   @@unique([tenantId, legacyDisplayId])
   @@index([tenantId, status, createdAt])
+}
+
+model PostTag {
+  id          String              @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  color       String              @default("#e2e8f0")
+  status      String              @default("active")
+  source      String              @default("manual")
+  lastUsedAt  DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignments PostTagAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, status, updatedAt])
+}
+
+model PostTagAssignment {
+  id         String   @id @default(uuid())
+  tenantId   String
+  postId     String
+  tagId      String
+  source     String   @default("manual")
+  confidence Float?
+  createdAt  DateTime @default(now())
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag        PostTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, tagId])
+  @@index([tenantId, tagId])
+  @@index([tenantId, postId])
 }
 
 model PostFollow {

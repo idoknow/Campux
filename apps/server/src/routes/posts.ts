@@ -9,7 +9,8 @@ import { getStorageDriver } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
 import { toPostListItem } from "../lib/posts";
-import { buildPublishedFeed, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
+import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
+import { assignPostTags, normalizeTagIds, normalizeTagNames, resolveManualPostTags, serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import { writeAuditLog } from "../lib/audit";
@@ -19,6 +20,7 @@ import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { formatBanNotify } from "../lib/bot-messages";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
+import { autoTagPost } from "../runtime/post-tagging";
 
 const fileQuerySchema = z.object({
   key: z.string().min(1),
@@ -31,6 +33,10 @@ const postParamsSchema = z.object({
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
+const publishedListQuerySchema = listQuerySchema.extend({
+  tag: z.string().trim().max(80).optional(),
 });
 
 const recallRequestSchema = z.object({
@@ -180,6 +186,15 @@ function isTransactionSerializationFailure(value: unknown) {
   return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
+function parseJsonArrayField(value: unknown): unknown[] {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
@@ -233,6 +248,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     let bgColor: string | null = null;
     let textColor: string | null = null;
     let font: string | null = null;
+    let manualTagIds: string[] = [];
+    let manualTagNames: string[] = [];
     const staged: PostAttachment[] = [];
     const remoteGifUrls: string[] = [];
 
@@ -252,6 +269,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
             textColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "font") {
             font = String(part.value ?? "") || null;
+          } else if (part.fieldname === "tagIds") {
+            manualTagIds = normalizeTagIds(parseJsonArrayField(part.value));
+          } else if (part.fieldname === "tagNames") {
+            manualTagNames = normalizeTagNames(parseJsonArrayField(part.value));
           } else if (part.fieldname === "remoteGifUrls") {
             // Accept JSON array of GIF URLs from 失控图床 API conversion
             try {
@@ -457,8 +478,12 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
                 },
               });
               const displayId = tenant.nextPostDisplayId - 1;
+              const manualTags = await resolveManualPostTags(tx, context.selectedTenant.id, {
+                tagIds: manualTagIds,
+                tagNames: manualTagNames,
+              });
 
-              return tx.post.create({
+              const created = await tx.post.create({
                 data: {
                   tenantId: context.selectedTenant.id,
                   authorId: context.user.id,
@@ -478,6 +503,25 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
                       newStatus: initialStatus,
                       comment: logComment,
                     },
+                  },
+                },
+              });
+              if (manualTags.length > 0) {
+                await assignPostTags(tx, {
+                  tenantId: context.selectedTenant.id,
+                  postId: created.id,
+                  tags: manualTags.map((tag) => ({
+                    tagId: tag.id,
+                    source: "manual",
+                  })),
+                });
+              }
+              return tx.post.findUniqueOrThrow({
+                where: { id: created.id },
+                include: {
+                  tagAssignments: {
+                    include: { tag: true },
+                    orderBy: { createdAt: "asc" },
                   },
                 },
               });
@@ -505,6 +549,13 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
 
       oneBot?.notifyNewPost(post.id).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to notify review group");
+      });
+      autoTagPost({
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        logger: request.log,
+      }).catch((error) => {
+        app.log.warn({ error, postId: post.id }, "failed to auto-tag post");
       });
 
       return {
@@ -603,6 +654,14 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
             },
             take: 1,
           },
+          tagAssignments: {
+            include: {
+              tag: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           qzonePostMetrics: {
             include: {
               publishAttempt: {
@@ -663,7 +722,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
   // 面向本墙任意登录成员公开。
   app.get("/api/posts/published", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
-    const query = listQuerySchema.parse(request.query);
+    const query = publishedListQuerySchema.parse(request.query);
     const tenantId = context.selectedTenant.id;
     const viewerIsReviewer = hasTenantRole(context.selectedMembership.role, "reviewer");
 
@@ -699,6 +758,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         },
         include: {
           author: authorSelect,
+          tagAssignments: {
+            include: { tag: true },
+            orderBy: { createdAt: "asc" },
+          },
           qzonePostMetrics: metricInclude,
         },
         orderBy: { updatedAt: "desc" },
@@ -709,7 +772,17 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         include: {
           items: {
             orderBy: { position: "asc" },
-            include: { post: { include: { author: authorSelect } } },
+            include: {
+              post: {
+                include: {
+                  author: authorSelect,
+                  tagAssignments: {
+                    include: { tag: true },
+                    orderBy: { createdAt: "asc" },
+                  },
+                },
+              },
+            },
           },
           attempts: {
             include: { qzonePostMetrics: metricInclude },
@@ -730,6 +803,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       font: string | null;
       createdAt: Date;
       author: { displayName: string | null; qqUin: bigint } | null;
+      tagAssignments?: Parameters<typeof serializeAssignedPostTags>[0];
     }): RawFeedPost => ({
       id: post.id,
       displayId: post.displayId,
@@ -741,6 +815,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       font: post.font,
       author: post.author ? { displayName: post.author.displayName ?? "", qqUin: post.author.qqUin } : null,
       createdAt: post.createdAt,
+      tags: serializeAssignedPostTags(post.tagAssignments),
     });
 
     const singles: SingleFeedInput[] = singlePosts.map((post) => ({
@@ -759,7 +834,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       };
     });
 
-    const allItems = buildPublishedFeed({ singles, batches: batchInputs, viewerIsReviewer });
+    const allItems = filterPublishedFeedByTag(
+      buildPublishedFeed({ singles, batches: batchInputs, viewerIsReviewer }),
+      query.tag,
+    );
     const total = allItems.length;
     const start = (query.page - 1) * query.limit;
     const items = allItems.slice(start, start + query.limit);
@@ -781,6 +859,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       include: {
         author: true,
         tenant: true,
+        tagAssignments: {
+          include: { tag: true },
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
 
@@ -819,6 +901,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       bgColor: post.bgColor ?? null,
       textColor: post.textColor ?? null,
       font: post.font ?? null,
+      tags: serializeAssignedPostTags(post.tagAssignments).map((tag) => ({ name: tag.name, color: tag.color })),
     });
 
     reply.header("Cache-Control", "private, max-age=60");
