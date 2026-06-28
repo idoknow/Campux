@@ -59,11 +59,17 @@ jobs:
           node-version: 22
 
       - name: Install commitlint
-        run: npm install --no-save @commitlint/cli @commitlint/config-conventional
+        run: |
+          npm install \
+            --prefix "$RUNNER_TEMP/commitlint" \
+            @commitlint/cli \
+            @commitlint/config-conventional
 
       - name: Lint commits in this PR
+        env:
+          NODE_PATH: ${{ runner.temp }}/commitlint/node_modules
         run: |
-          npx commitlint \
+          "$RUNNER_TEMP/commitlint/node_modules/.bin/commitlint" \
             --config commitlint.config.cjs \
             --from "${{ github.event.pull_request.base.sha }}" \
             --to "${{ github.event.pull_request.head.sha }}" \
