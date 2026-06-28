@@ -57,8 +57,7 @@ const tagAgentPostTextChars = 240;
 const defaultTagMaintenanceLookbackDays = 14;
 const tagMaintenanceArchiveInactiveDays = 14;
 const maxTagMaintenanceLookbackDays = 90;
-const tagAgentRecentPosts = 60;
-const tagAgentBackfillPosts = 40;
+const tagAgentRecentPosts = 80;
 /** Rock's rule ①: a new tag is only created once a theme recurs across at least this many posts. */
 const minClusterSize = 3;
 
@@ -254,14 +253,17 @@ export async function maintainTenantPostTags(options: {
   const clusterSince = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
   const archiveSince = new Date(Date.now() - tagMaintenanceArchiveInactiveDays * 24 * 60 * 60 * 1000);
 
-  const [tags, recentPosts, backfillPosts] = await Promise.all([
+  const [tags, posts] = await Promise.all([
     prisma.postTag.findMany({
       where: { tenantId: options.tenantId },
       include: { _count: { select: { assignments: true } } },
       orderBy: [{ status: "asc" }, { lastUsedAt: "desc" }, { updatedAt: "desc" }],
       take: 100,
     }),
-    // Recent window — the substrate for spotting recurring themes (create clusters).
+    // Recent window only — tags are a recent-activity feature, no historical
+    // back-fill. The agent reasons over the last `lookbackDays` of posts to spot
+    // recurring themes (create), tidy the taxonomy (merge), and tag any recent
+    // post that slipped through per-post auto-tagging (assign).
     prisma.post.findMany({
       where: {
         tenantId: options.tenantId,
@@ -278,35 +280,7 @@ export async function maintainTenantPostTags(options: {
       orderBy: { createdAt: "desc" },
       take: tagAgentRecentPosts,
     }),
-    // Historical untagged sweep — oldest first so successive cycles cover the
-    // entire corpus, not just the last two weeks. This is the back-fill the
-    // old maintenance pass never did.
-    prisma.post.findMany({
-      where: {
-        tenantId: options.tenantId,
-        text: { not: "" },
-        tagAssignments: { none: {} },
-      },
-      select: {
-        id: true,
-        displayId: true,
-        text: true,
-        createdAt: true,
-        tagAssignments: { select: { tag: { select: { name: true } } } },
-      },
-      orderBy: { createdAt: "asc" },
-      take: tagAgentBackfillPosts,
-    }),
   ]);
-
-  // Merge the two post pools, de-duplicating by id (a recent post can also be untagged).
-  const postsById = new Map<string, (typeof recentPosts)[number]>();
-  for (const post of [...recentPosts, ...backfillPosts]) {
-    if (!postsById.has(post.id)) {
-      postsById.set(post.id, post);
-    }
-  }
-  const posts = Array.from(postsById.values());
 
   if (posts.length === 0 && tags.length === 0) {
     return emptyResult();
@@ -339,10 +313,10 @@ export async function maintainTenantPostTags(options: {
             role: "system",
             content: [
               "你是校园墙标签库的自治维护 agent。只返回 JSON，不要 Markdown。",
-              "你负责维护整套标签体系，可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给稿件回填标签）。",
+              `你只维护最近 ${lookbackDays} 天的稿件标签（这是一个近期活动特性，不回填历史稿件）。可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给近期稿件补打标签）。`,
               `create：只有当最近 ${lookbackDays} 天里同一主题反复出现、相似稿件达到 ${minClusterSize} 条及以上（postIds 至少 ${minClusterSize} 个）时，才新建一个标签。postIds 必须来自输入 posts 的 id。`,
               "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。",
-              "assign：把 posts 里的稿件映射到合适的标签上（已有标签或本次 create 的标签都行），用于回填历史稿件。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
+              "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
               "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。不确定时宁可少操作。",
               "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
               "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",

@@ -123,7 +123,7 @@ maybeDescribe("applyTagAgentPlan e2e", () => {
     expect(canonPostIds).toContain(postIds[1]!);
   });
 
-  test("assign: backfills untagged posts with existing taxonomy", async () => {
+  test("assign: tags recent posts with existing taxonomy", async () => {
     // postIds[2] has no assignment yet after create test removed it from knowledge
     const plan = {
       create: [],
