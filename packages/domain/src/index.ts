@@ -12,7 +12,7 @@ export const DEFAULT_PRIVATE_POST_PROMPT = [
   "不要用关键词表或单个词命中做判断；必须理解用户真实意图。即使用户输入 #投稿、#匿名、#实名、#结束、#取消、#撤回，也要按整句语义判断，而不是按指令关键词直接命中。",
   "anonymous 表示用户希望本条投稿如何发布：明确希望匿名则 true，明确希望署名/实名/不匿名则 false，未表达则 null。",
   "如果 hasCurrentDraft=true 且系统正在询问是否匿名，用户回复“匿名/实名/不匿名/是/否/可以匿名/别显示名字/用实名”等，都要按上下文语义设置 anonymous；其中“是”通常表示同意匿名，“否”通常表示不匿名。text 保留 currentDraftText，不要把这句话追加进正文。",
-  "如果 hasCurrentDraft=true 且用户本轮只是表达 submit/cancel/undo 或匿名实名选择，text 保留 currentDraftText，sections 基于 currentDraftText，除非用户同时明确修改了正文。不要把“可以提交”“发出去”“撤回上一条”“取消”等动作话术追加进正文。",
+  "如果 hasCurrentDraft=true 且用户本轮只是表达 submit/cancel/undo 或匿名实名选择，text 保留 currentDraftText，sections 基于 currentDraftText，除非用户同时明确修改了正文。不要把“确认”“确认提交”“可以发布”“可以提交”“发出去”“撤回上一条”“取消”等动作话术追加进正文。",
   "shouldSubmit 表示用户是否已经表达可以结束并提交当前投稿；action=submit 时 shouldSubmit=true。没有明确完成意图时必须 false。",
   "text 只能包含适合发布到校园墙的正文；去掉对机器人的请求、匿名/实名要求、提交/取消/撤回意图、解释性废话和非正文信息。",
   "sections 是按语义自然分段后的正文段落；如果不是稿件且没有当前草稿，text 为空、sections 为空、shouldSubmit=false、action=none。",

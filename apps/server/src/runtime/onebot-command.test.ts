@@ -13,6 +13,7 @@ import {
   parseReviewGroupCommand,
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
+  resolvePrivatePostConfirmControlText,
   resolvePrivatePostSemanticAction,
 } from "./onebot";
 
@@ -118,6 +119,17 @@ describe("private post semantic mode selection", () => {
       confidence: 0.86,
       reason: "用户取消提交",
     })).toEqual({ confirmed: false });
+  });
+
+  test("AI 确认提交阶段本地识别确认取消撤回控制语句", () => {
+    expect(resolvePrivatePostConfirmControlText("确认")).toEqual({ type: "confirm" });
+    expect(resolvePrivatePostConfirmControlText("确认提交")).toEqual({ type: "confirm" });
+    expect(resolvePrivatePostConfirmControlText("可以发布")).toEqual({ type: "confirm" });
+    expect(resolvePrivatePostConfirmControlText("取消")).toEqual({ type: "cancel" });
+    expect(resolvePrivatePostConfirmControlText("#取消")).toEqual({ type: "cancel" });
+    expect(resolvePrivatePostConfirmControlText("撤回")).toEqual({ type: "undo" });
+    expect(resolvePrivatePostConfirmControlText("#撤回")).toEqual({ type: "undo" });
+    expect(resolvePrivatePostConfirmControlText("我还想补一句正文")).toBeNull();
   });
 
   test("AI 草稿阶段普通内容应追加正文，不因语义非 post 被丢弃", () => {

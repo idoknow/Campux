@@ -1206,9 +1206,23 @@ export class OneBotRuntime {
           return;
         }
 
+        const localConfirmControl = privatePostAiEnabled ? resolvePrivatePostConfirmControlText(plainText) : null;
+        if (localConfirmControl?.type === "undo") {
+          await this.undoPrivatePostDraftEntry({
+            bot,
+            botQqUin,
+            userQqUin,
+          });
+          return;
+        }
+
         const semanticConfirm = privatePostAiEnabled ? shouldConfirmPrivatePostSubmissionFromSemantic(semanticForExistingFlow) : null;
         const keywordConfirm = shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
-        const confirmation = semanticConfirm ?? keywordConfirm;
+        const confirmation = semanticConfirm ?? keywordConfirm ?? (localConfirmControl?.type === "confirm"
+          ? { confirmed: true }
+          : localConfirmControl?.type === "cancel"
+            ? { confirmed: false }
+            : null);
         if (confirmation?.confirmed === true) {
           await this.submitPrivatePostPendingConfirm({
             bot,
@@ -3475,6 +3489,23 @@ export function shouldConfirmPrivatePostSubmissionFromSemantic(semantic: Private
   }
   if (action === "cancel") {
     return { confirmed: false };
+  }
+  return null;
+}
+
+export function resolvePrivatePostConfirmControlText(input: string): { type: "confirm" | "cancel" | "undo" } | null {
+  const normalized = input.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (/^(?:#|＃)?(?:确认|确认提交|提交|可以提交|可以发布|发布|发出去|确认发布|没问题|无误)\s*$/.test(normalized)) {
+    return { type: "confirm" };
+  }
+  if (/^(?:#|＃)?(?:取消|取消提交|取消本次投稿|不提交|算了|不投了|放弃)\s*$/.test(normalized)) {
+    return { type: "cancel" };
+  }
+  if (/^(?:#|＃)?(?:撤回|撤回上一条|撤回上一步|删掉上一条|删除上一条)\s*$/.test(normalized)) {
+    return { type: "undo" };
   }
   return null;
 }
