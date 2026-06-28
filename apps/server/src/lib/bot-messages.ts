@@ -229,7 +229,7 @@ export function formatRegisterExtended(stylishEnabled = false): string {
 const privatePostBodyStartDefault =
   "好的，以下是正文内容，直接发送文字或图片即可添加。发送 #撤回 可撤回上一条，发送 #结束 提交投稿。（发送 #取消 取消本次投稿）";
 const privatePostBodyStartAiDefault =
-  "好的，以下是正文内容，直接发送文字或图片即可添加。写完后直接说“可以提交/发出去”，也可以说“撤回上一条”或“取消本次投稿”。";
+  "好的，已进入投稿编辑。可以继续发送文字或图片补充内容；写完后直接说“可以提交/发出去”，也可以说“撤回上一条”或“取消本次投稿”。";
 
 const privatePostBodyStartStylish = [
   "📝 好的，以下是正文内容~ 直接发文字或图片就行，发完记得 #结束 提交！",
@@ -238,9 +238,9 @@ const privatePostBodyStartStylish = [
   privatePostBodyStartDefault,
 ];
 const privatePostBodyStartAiStylish = [
-  "📝 好的，以下是正文内容~ 直接发文字或图片就行，写完告诉我可以提交就好。",
+  "📝 好的，已进入投稿编辑~ 继续发文字或图片补充内容，写完告诉我可以提交就好。",
   "✏️ 好嘞，继续发正文和图片吧。想修改可以说撤回上一条，想放弃可以说取消。",
-  "✨ 开始编辑正文吧~ 发完直接说可以发出去，我会按语义帮你提交。",
+  "✨ 开始编辑投稿吧~ 发完直接说可以发出去，我会按语义帮你提交。",
   privatePostBodyStartAiDefault,
 ];
 
