@@ -314,6 +314,14 @@ async function renderPostHtml(input: RenderPostCardInput) {
       margin-bottom: 0;
     }
 
+    #post-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      margin-bottom: 0.8rem;
+      max-width: 65rem;
+    }
+
     #content {
       font-family: inherit;
       font-size: 3.3rem;
@@ -527,6 +535,7 @@ async function renderPostHtml(input: RenderPostCardInput) {
     <div style="display: flex; align-items: flex-start;">
       <img id="avatar" src="${avatar}" style="flex-shrink: 0; width: 18%; height: 18%; border-radius: 50%; box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);" />
       <div style="margin-left: 32px; margin-top: 32px; flex: 1; min-width: 0;">
+        ${tagsHtml ? `<div id="post-tags">${tagsHtml}</div>` : ""}
         <span id="nickname" style="color: ${textColor};">${escapeHtml(author)}</span>
         <div id="content" style="color: ${textColor};">${renderMarkdown(input.text)}</div>
       </div>
@@ -535,7 +544,6 @@ async function renderPostHtml(input: RenderPostCardInput) {
   <div id="footer">
     <span style="display: flex; align-items: center; gap: 1.2rem;">
       ${postIdTag ? `<span id="post-id-tag">${escapeHtml(postIdTag)}</span>` : ""}
-      ${tagsHtml}
       <span>${escapeHtml(footer)}</span>
     </span>
     <span>${escapeHtml(displayHost)}</span>
