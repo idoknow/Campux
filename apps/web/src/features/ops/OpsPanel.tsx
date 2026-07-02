@@ -191,11 +191,17 @@ export function OpsPanel({
   const [hostDraft, setHostDraft] = useState("");
   const [managementHostDraft, setManagementHostDraft] = useState("");
   const [tenantDomainSuffix, setTenantDomainSuffix] = useState<string | null>(null);
+  const [showArchivedTenants, setShowArchivedTenants] = useState(false);
   const [tenantForm, setTenantForm] = useState(() => createTenantFormState());
 
+  const visibleTenants = useMemo(
+    () => showArchivedTenants ? tenants : tenants.filter((tenant) => tenant.status !== "archived"),
+    [showArchivedTenants, tenants],
+  );
+
   const selectedTenant = useMemo(
-    () => tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0],
-    [selectedTenantId, tenants],
+    () => visibleTenants.find((tenant) => tenant.id === selectedTenantId) ?? visibleTenants[0],
+    [selectedTenantId, visibleTenants],
   );
 
   const availableRoleFilters = useMemo(
@@ -241,7 +247,8 @@ export function OpsPanel({
       setTenants(data.tenants);
       setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
       setQueue(queueData);
-      const nextTenant = data.tenants.find((tenant) => tenant.id === nextSelectedId) ?? data.tenants.find((tenant) => tenant.id === selectedTenantId) ?? data.tenants[0];
+      const candidateTenants = showArchivedTenants ? data.tenants : data.tenants.filter((tenant) => tenant.status !== "archived");
+      const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
       setSelectedTenantId(nextTenant?.id ?? "");
       return data.tenants;
     } finally {
@@ -342,14 +349,14 @@ export function OpsPanel({
   }, [userPage, userKeyword, userTenantFilterId, selectedUserRoleFilters]);
 
   useEffect(() => {
-    if (!userTenantFilterId || tenants.length === 0 || tenants.some((tenant) => tenant.id === userTenantFilterId)) {
+    if (!userTenantFilterId || visibleTenants.some((tenant) => tenant.id === userTenantFilterId)) {
       return;
     }
     setUserTenantFilterId("");
     setSelectedUserRoleFilters([]);
     writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: "", roleFilters: [] });
     setUserPage(1);
-  }, [mode, tenants, userKeyword, userTenantFilterId]);
+  }, [mode, userKeyword, userTenantFilterId, visibleTenants]);
 
   useEffect(() => {
     void refreshAudit(auditPage).catch((caught) => {
@@ -556,7 +563,7 @@ export function OpsPanel({
   }
 
   function openMembershipDialog(user: SystemUser) {
-    const preferredTenant = selectedTenant ?? tenants.find((tenant) => tenant.status === "active") ?? tenants[0];
+    const preferredTenant = selectedTenant ?? visibleTenants.find((tenant) => tenant.status === "active") ?? visibleTenants[0];
     setMembershipDialogUser(user);
     setMembershipForm({ tenantId: preferredTenant?.id ?? "", role: "submitter" });
   }
@@ -673,7 +680,7 @@ export function OpsPanel({
         <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
       </div>
 
-      <OnboardingGuide mode={mode} hasTenants={tenants.length > 0} selectedTenant={selectedTenant} tenantDomainSuffix={tenantDomainSuffix} />
+      <OnboardingGuide mode={mode} hasTenants={visibleTenants.length > 0} selectedTenant={selectedTenant} tenantDomainSuffix={tenantDomainSuffix} />
 
       {isSystemMode ? (
         <>
@@ -697,7 +704,7 @@ export function OpsPanel({
           </Card>
           <OperationsAdminAccessPanel
             users={operationsAdmins}
-            tenants={tenants}
+            tenants={visibleTenants}
             loading={loadingOperationsAdmins}
             busyKey={accessBusyKey}
             grantTenantByUserId={grantTenantByUserId}
@@ -716,7 +723,14 @@ export function OpsPanel({
                 <Building2Icon className="size-4" />
                 {isSystemMode ? "租户生命周期" : "我的校园墙"}
               </div>
-              {loadingOverview ? <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
+              <div className="flex items-center gap-2">
+                {summary.archived > 0 ? (
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setShowArchivedTenants((current) => !current)}>
+                    {showArchivedTenants ? "隐藏归档" : `显示归档 ${summary.archived}`}
+                  </Button>
+                ) : null}
+                {loadingOverview ? <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
+              </div>
             </div>
             <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -772,7 +786,7 @@ export function OpsPanel({
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              {tenants.map((tenant) => (
+              {visibleTenants.map((tenant) => (
                 <button
                   key={tenant.id}
                   className={`rounded-md border px-3 py-2 text-left transition ${selectedTenant?.id === tenant.id ? "border-slate-300 bg-slate-100" : "border-slate-100 bg-white hover:bg-slate-50"}`}
@@ -798,6 +812,11 @@ export function OpsPanel({
                   </span>
                 </button>
               ))}
+              {visibleTenants.length === 0 ? (
+                <p className="rounded-md border border-slate-100 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                  {summary.archived > 0 ? "当前没有未归档的校园墙。" : "暂无校园墙。"}
+                </p>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -994,7 +1013,7 @@ export function OpsPanel({
                 availableRoleFilters={availableRoleFilters}
                 mode={mode}
                 selectedTenantFilterId={userTenantFilterId}
-                tenants={tenants}
+                tenants={visibleTenants}
                 onKeywordChange={(keyword) => {
                   setUserKeywordDraft(keyword);
                   setUserKeyword(keyword);
@@ -1050,7 +1069,7 @@ export function OpsPanel({
                   <SelectValue placeholder="选择校园墙" />
                 </SelectTrigger>
                 <SelectContent>
-                  {tenants.map((tenant) => (
+                  {visibleTenants.map((tenant) => (
                     <SelectItem key={tenant.id} value={tenant.id}>
                       {tenant.name} · {statusLabels[tenant.status]}
                     </SelectItem>
@@ -1235,6 +1254,8 @@ function OperationsAdminAccessPanel({
   onGrant: (user: SystemUser) => void;
   onRevoke: (user: SystemUser, membershipId: string, tenantName: string) => void;
 }) {
+  const visibleTenantIds = useMemo(() => new Set(tenants.map((tenant) => tenant.id)), [tenants]);
+
   return (
     <Card className="mt-4 rounded-md">
       <CardContent className="p-4">
@@ -1250,7 +1271,7 @@ function OperationsAdminAccessPanel({
         </p>
         <div className="mt-4 grid gap-3">
           {users.map((user) => {
-            const adminMemberships = user.memberships.filter((membership) => membership.role === "admin");
+            const adminMemberships = user.memberships.filter((membership) => membership.role === "admin" && visibleTenantIds.has(membership.tenant.id));
             const assignedTenantIds = new Set(adminMemberships.map((membership) => membership.tenant.id));
             const availableTenants = tenants.filter((tenant) => !assignedTenantIds.has(tenant.id));
             const grantTenantId = grantTenantByUserId[user.id] ?? "";
@@ -1359,6 +1380,8 @@ function GlobalUsersTable({
   onPageChange: (page: number) => void;
   onToggleRoleFilter: (role: SystemUserRoleFilter) => void;
 }) {
+  const visibleTenantIds = useMemo(() => new Set(tenants.map((tenant) => tenant.id)), [tenants]);
+
   if (loading && users.length === 0) {
     return <InlineLoading title={mode === "system" ? "正在加载全局用户..." : "正在加载墙内用户..."} />;
   }
@@ -1447,48 +1470,51 @@ function GlobalUsersTable({
         </div>
       </div>
       <div className="overflow-hidden rounded-md border border-slate-200">
-        {users.map((user) => (
-          <div key={user.id} className="grid gap-3 border-b border-slate-100 bg-white p-3 last:border-b-0 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(150px,0.6fr)]">
-            <div className="flex min-w-0 items-center gap-3">
-              <img className="size-10 rounded-full border border-slate-200 bg-slate-50" src={`https://q1.qlogo.cn/g?b=qq&nk=${user.qqUin}&s=100`} alt="" loading="lazy" />
+        {users.map((user) => {
+          const visibleMemberships = user.memberships.filter((membership) => visibleTenantIds.has(membership.tenant.id));
+          return (
+            <div key={user.id} className="grid gap-3 border-b border-slate-100 bg-white p-3 last:border-b-0 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(150px,0.6fr)]">
+              <div className="flex min-w-0 items-center gap-3">
+                <img className="size-10 rounded-full border border-slate-200 bg-slate-50" src={`https://q1.qlogo.cn/g?b=qq&nk=${user.qqUin}&s=100`} alt="" loading="lazy" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-950">{user.displayName ?? "未设置昵称"}</p>
+                  <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {user.qqUin}</p>
+                  {user.email ? <p className="mt-0.5 truncate text-xs font-bold text-slate-500">{user.email}</p> : null}
+                </div>
+              </div>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-950">{user.displayName ?? "未设置昵称"}</p>
-                <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {user.qqUin}</p>
-                {user.email ? <p className="mt-0.5 truncate text-xs font-bold text-slate-500">{user.email}</p> : null}
+                <div className="flex flex-wrap gap-1.5">
+                  {user.systemRole === "operations_admin" ? <Badge variant="secondary">运营管理员</Badge> : null}
+                  {user.systemRole === "system_operator" ? <Badge variant="secondary">系统运维</Badge> : null}
+                  {user.isTestAccount ? <Badge variant="outline">测试账号</Badge> : null}
+                  {visibleMemberships.length === 0 ? <Badge variant="outline">未加入租户</Badge> : null}
+                  {visibleMemberships.slice(0, 4).map((membership) => (
+                    <span key={membership.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700">
+                      {membership.tenant.name} · {roleLabels[membership.role]}
+                      <button
+                        type="button"
+                        className="ml-0.5 inline-flex size-4 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        onClick={() => onRevokeMembership(user, membership)}
+                        aria-label={`删除 ${membership.tenant.name} 的${roleLabels[membership.role]}身份`}
+                      >
+                        <Trash2Icon className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {visibleMemberships.length > 4 ? <Badge variant="outline">+{visibleMemberships.length - 4}</Badge> : null}
+                </div>
+              </div>
+              <div className="text-xs text-slate-500">
+                <p>创建：{formatDateTime(user.createdAt)}</p>
+                <p className="mt-1">加入：{visibleMemberships.length} 个校园墙</p>
+                <Button variant="outline" size="sm" className="mt-2 h-7 px-2 text-xs" disabled={tenants.length === 0} onClick={() => onOpenAssignMembership(user)}>
+                  <ShieldPlusIcon data-icon="inline-start" />
+                  添加身份
+                </Button>
               </div>
             </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap gap-1.5">
-                {user.systemRole === "operations_admin" ? <Badge variant="secondary">运营管理员</Badge> : null}
-                {user.systemRole === "system_operator" ? <Badge variant="secondary">系统运维</Badge> : null}
-                {user.isTestAccount ? <Badge variant="outline">测试账号</Badge> : null}
-                {user.memberships.length === 0 ? <Badge variant="outline">未加入租户</Badge> : null}
-                {user.memberships.slice(0, 4).map((membership) => (
-                  <span key={membership.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700">
-                    {membership.tenant.name} · {roleLabels[membership.role]}
-                    <button
-                      type="button"
-                      className="ml-0.5 inline-flex size-4 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                      onClick={() => onRevokeMembership(user, membership)}
-                      aria-label={`删除 ${membership.tenant.name} 的${roleLabels[membership.role]}身份`}
-                    >
-                      <Trash2Icon className="size-3" />
-                    </button>
-                  </span>
-                ))}
-                {user.memberships.length > 4 ? <Badge variant="outline">+{user.memberships.length - 4}</Badge> : null}
-              </div>
-            </div>
-            <div className="text-xs text-slate-500">
-              <p>创建：{formatDateTime(user.createdAt)}</p>
-              <p className="mt-1">加入：{user.memberships.length} 个校园墙</p>
-              <Button variant="outline" size="sm" className="mt-2 h-7 px-2 text-xs" disabled={tenants.length === 0} onClick={() => onOpenAssignMembership(user)}>
-                <ShieldPlusIcon data-icon="inline-start" />
-                添加身份
-              </Button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {users.length === 0 ? <p className="px-3 py-8 text-center text-sm font-bold text-slate-500">没有用户。</p> : null}
       <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />

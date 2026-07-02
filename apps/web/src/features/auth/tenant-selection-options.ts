@@ -10,13 +10,15 @@ export type TenantSelectionOption = {
 };
 
 export function getTenantSelectionOptions(me: AuthenticatedMe): TenantSelectionOption[] {
-  const realOptions = me.memberships.map((membership) => toMembershipOption(membership));
+  const visibleMemberships = me.memberships.filter((membership) => membership.tenant.status !== "archived");
+  const realOptions = visibleMemberships.map((membership) => toMembershipOption(membership));
   if (me.user.systemRole !== "system_operator") {
     return realOptions;
   }
 
-  const realTenantIds = new Set(me.memberships.map((membership) => membership.tenant.id));
+  const realTenantIds = new Set(visibleMemberships.map((membership) => membership.tenant.id));
   const syntheticOptions = (me.systemAccessibleTenants ?? [])
+    .filter((tenant) => tenant.status !== "archived")
     .filter((tenant) => !realTenantIds.has(tenant.id))
     .map((tenant) => ({
       key: `system:${tenant.id}`,

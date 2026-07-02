@@ -165,10 +165,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
           memberships: user.memberships,
         })
       : null;
+    const visibleMemberships = user.memberships.filter((membership) => membership.tenant.status !== "archived");
     const onlyMembership = singleModeTenantId
       ? user.memberships.find((membership) => membership.tenantId === singleModeTenantId)
         ?? (singleModeMembership ? user.memberships[0] : undefined)
-      : user.systemRole === "system_operator" ? undefined : user.memberships.length === 1 ? user.memberships[0] : undefined;
+      : user.systemRole === "system_operator" ? undefined : visibleMemberships.length === 1 ? visibleMemberships[0] : undefined;
     const selectedTenantId = singleModeTenantId && singleModeMembership ? singleModeTenantId : onlyMembership?.tenantId ?? null;
     const token = await createSession(user.id, selectedTenantId);
     setSessionCookie(reply, token);
@@ -204,7 +205,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       currentTenant: onlyMembership ? toTenantSummary(onlyMembership.tenant) : null,
       currentMembership: onlyMembership ? { id: onlyMembership.id, role: onlyMembership.role } : null,
       activeBan: onlyMembership ? toActiveBan(await findActiveBan(onlyMembership.tenantId, user.id)) : null,
-      needsTenantSelection: !selectedTenantId && (user.memberships.length > 1 || systemAccessibleTenants.length > 0),
+      needsTenantSelection: !selectedTenantId && (visibleMemberships.length > 1 || systemAccessibleTenants.length > 0),
       hostLocked: false,
     };
   });
@@ -411,7 +412,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const systemAccessibleTenants = await listSystemAccessibleTenants(context.user.systemRole);
-    const needsTenantSelection = !context.selectedTenant && (context.memberships.length > 1 || systemAccessibleTenants.length > 0);
+    const visibleMemberships = context.memberships.filter((membership) => membership.tenant.status !== "archived");
+    const needsTenantSelection = !context.selectedTenant && (visibleMemberships.length > 1 || systemAccessibleTenants.length > 0);
 
     return {
       authenticated: true,
@@ -546,6 +548,11 @@ async function listSystemAccessibleTenants(systemRole: string | null) {
   }
 
   const tenants = await prisma.tenant.findMany({
+    where: {
+      status: {
+        not: "archived",
+      },
+    },
     include: {
       metadata: {
         where: {

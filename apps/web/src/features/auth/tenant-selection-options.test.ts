@@ -144,4 +144,38 @@ describe("getTenantSelectionOptions", () => {
       },
     ]);
   });
+
+  it("hides archived tenant memberships by default", () => {
+    const alpha = tenant({ id: "tenant-alpha", name: "Alpha 墙" });
+    const archived = tenant({ id: "tenant-archived", name: "Archived 墙", status: "archived" });
+    const options = getTenantSelectionOptions(
+      me({
+        memberships: [membership("membership-alpha", alpha, "admin"), membership("membership-archived", archived, "admin")],
+      }),
+    );
+
+    expect(options.map((option) => option.tenantId)).toEqual(["tenant-alpha"]);
+  });
+
+  it("hides archived synthetic system tenant access by default", () => {
+    const alpha = tenant({ id: "tenant-alpha", name: "Alpha 墙" });
+    const archived = tenant({ id: "tenant-archived", name: "Archived 墙", status: "archived" });
+    const options = getTenantSelectionOptions(
+      me({
+        user: {
+          id: "operator-1",
+          qqUin: "10001",
+          email: null,
+          displayName: "系统运维",
+          systemRole: "system_operator",
+          passwordChangeRequired: false,
+          autoFollowOwnPosts: true,
+        },
+        memberships: [],
+        systemAccessibleTenants: [alpha, archived],
+      }),
+    );
+
+    expect(options.map((option) => option.tenantId)).toEqual(["tenant-alpha"]);
+  });
 });
