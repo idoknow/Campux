@@ -360,6 +360,32 @@ export function OpsPanel({
     setHostDraft(selectedTenant?.host ?? "");
   }, [selectedTenant?.id, selectedTenant?.host]);
 
+  // Subdomain-aware host editing. When an auto-domain suffix is configured and
+  // the current draft is a host under that suffix (or empty), operators edit
+  // just the subdomain prefix and the platform keeps the Cloudflare CNAME in
+  // sync. A "custom domain" escape hatch still allows a fully custom host.
+  const normalizedDomainSuffix = tenantDomainSuffix?.trim().replace(/^\*\./, "").replace(/^\./, "").toLowerCase() ?? null;
+  const hostDraftTrimmed = hostDraft.trim().toLowerCase();
+  const hostDraftIsUnderSuffix = Boolean(
+    normalizedDomainSuffix && hostDraftTrimmed.length > 0 && hostDraftTrimmed.endsWith(`.${normalizedDomainSuffix}`),
+  );
+  const subdomainPrefix = hostDraftIsUnderSuffix && normalizedDomainSuffix
+    ? hostDraftTrimmed.slice(0, hostDraftTrimmed.length - normalizedDomainSuffix.length - 1)
+    : "";
+  // Use the prefix editor when a suffix is configured and the draft is empty or
+  // already a subdomain of it; a fully custom host falls back to raw editing.
+  const useSubdomainEditor = Boolean(normalizedDomainSuffix) && (hostDraftTrimmed.length === 0 || hostDraftIsUnderSuffix);
+  const subdomainPrefixInvalid = subdomainPrefix.length > 0 && !tenantSlugPattern.test(subdomainPrefix);
+
+  function setSubdomainPrefix(prefix: string) {
+    const cleaned = prefix.trim().toLowerCase();
+    if (!normalizedDomainSuffix || cleaned.length === 0) {
+      setHostDraft("");
+      return;
+    }
+    setHostDraft(`${cleaned}.${normalizedDomainSuffix}`);
+  }
+
   async function updateStatus(status: TenantStatus) {
     if (!selectedTenant || selectedTenant.status === status) {
       return;
@@ -821,12 +847,60 @@ export function OpsPanel({
                 <p className="mt-1 text-sm text-slate-500">
                   设置后，从这个域名进入的用户会被固定到当前校园墙，不再展示租户选择。
                 </p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <Input placeholder="wall.example.com 或 localhost:5180" value={hostDraft} onChange={(event) => setHostDraft(event.target.value)} />
-                  <Button className="shrink-0 font-medium" disabled={savingHost} onClick={() => void saveHost()}>
-                    保存 host
-                  </Button>
-                </div>
+                {useSubdomainEditor ? (
+                  <>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <div className="flex flex-1 items-stretch">
+                        <Input
+                          className="rounded-r-none"
+                          placeholder="子域名前缀，例如 gzhu-wall"
+                          value={subdomainPrefix}
+                          aria-invalid={subdomainPrefixInvalid}
+                          onChange={(event) => setSubdomainPrefix(event.target.value)}
+                        />
+                        <span className="inline-flex select-none items-center rounded-r-md border border-l-0 border-slate-200 bg-slate-100 px-3 font-mono text-sm text-slate-600">
+                          .{normalizedDomainSuffix}
+                        </span>
+                      </div>
+                      <Button className="shrink-0 font-medium" disabled={savingHost || subdomainPrefixInvalid} onClick={() => void saveHost()}>
+                        保存子域名
+                      </Button>
+                    </div>
+                    <div className="mt-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-900">
+                      {subdomainPrefix ? (
+                        <p>访问域名：<span className="font-mono">{subdomainPrefix}.{normalizedDomainSuffix}</span>，保存后平台会自动同步 Cloudflare 解析。</p>
+                      ) : (
+                        <p>留空表示不绑定专属子域名。</p>
+                      )}
+                      {subdomainPrefixInvalid ? (
+                        <p className="mt-1 text-red-700">子域名前缀只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p>
+                      ) : null}
+                      <p className="mt-1 text-blue-700">
+                        需要完全自定义的域名？
+                        <button type="button" className="ml-1 underline" onClick={() => setHostDraft(selectedTenant?.host && !hostDraftIsUnderSuffix ? selectedTenant.host : `custom.example.com`)}>
+                          改用自定义域名
+                        </button>
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Input placeholder="wall.example.com 或 localhost:5180" value={hostDraft} onChange={(event) => setHostDraft(event.target.value)} />
+                      <Button className="shrink-0 font-medium" disabled={savingHost} onClick={() => void saveHost()}>
+                        保存 host
+                      </Button>
+                    </div>
+                    {normalizedDomainSuffix ? (
+                      <p className="mt-2 text-xs font-semibold text-slate-500">
+                        想用平台子域名？
+                        <button type="button" className="ml-1 underline" onClick={() => setHostDraft("")}>
+                          改用 .{normalizedDomainSuffix} 子域名
+                        </button>
+                      </p>
+                    ) : null}
+                  </>
+                )}
                 </div>
               </details>
 

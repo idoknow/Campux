@@ -8,8 +8,10 @@ import { prisma } from "../lib/prisma";
 import { normalizeTenantHost } from "../lib/tenant-host";
 import {
   buildTenantDomainHost,
+  hostIsUnderTenantSuffix,
   normalizeDomainSuffix,
   provisionTenantDomain,
+  reprovisionTenantDomain,
   resolveDnsTargetHost,
   tenantDomainAutomationEnabled,
   TenantDomainProvisioningError,
@@ -462,6 +464,44 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (conflict) return conflict;
     }
 
+    // When the host is changing and either the old or new host is managed by
+    // the auto-domain automation, sync Cloudflare BEFORE writing the DB so a
+    // failed DNS change leaves the tenant's stored host untouched (no drift
+    // between DB and DNS).
+    const hostChanging = body.host !== undefined;
+    let cloudflareDnsRecordId: string | null = null;
+    if (hostChanging && tenantDomainAutomationEnabled(config)) {
+      const current = await prisma.tenant.findUnique({
+        where: { id: params.tenantId },
+        select: { host: true },
+      });
+      const previousHost = current?.host ?? null;
+      const touchesAutomation =
+        hostIsUnderTenantSuffix(config, previousHost) || hostIsUnderTenantSuffix(config, normalizedHost);
+      if (touchesAutomation && previousHost !== (normalizedHost ?? null)) {
+        try {
+          const targetHost = resolveDnsTargetHost(
+            config.tenantDomains.targetHost ?? (await getManagementHost()) ?? config.webOrigin,
+          );
+          if (!targetHost) {
+            return reply.code(500).send({ message: "自动域名已启用，但没有可用的 DNS CNAME 目标" });
+          }
+          cloudflareDnsRecordId = await reprovisionTenantDomain({
+            config,
+            previousHost,
+            nextHost: normalizedHost ?? null,
+            targetHost,
+          });
+        } catch (caught) {
+          request.log.error({ err: caught, tenantId: params.tenantId, host: normalizedHost }, "failed to reprovision tenant domain");
+          if (caught instanceof TenantDomainProvisioningError) {
+            return reply.code(502).send({ message: caught.message });
+          }
+          throw caught;
+        }
+      }
+    }
+
     const updateData: {
       status?: z.infer<typeof tenantStatusSchema>;
       host?: string | null;
@@ -486,6 +526,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       detail: {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.host !== undefined ? { host: normalizedHost } : {}),
+        ...(cloudflareDnsRecordId ? { cloudflareDnsRecordId } : {}),
       },
     });
 
