@@ -191,14 +191,24 @@ jobs:
           echo "Stack name: $(printf '%s' "$stack_info" | jq -r '.Name // "unknown"')" >&2
           echo "Stack type: $(printf '%s' "$stack_info" | jq -r '.Type // "unknown"')" >&2
 
+          # Preserve the stack's existing environment variables (e.g. the
+          # Cloudflare API token for tenant-subdomain automation, which is set
+          # in the Portainer stack env and must NOT be wiped on every deploy).
+          # We merge CAMPUX_IMAGE_TAG on top of whatever is already stored.
+          existing_env="$(printf '%s' "$stack_info" | jq -c '.Env // []')"
+
           # 构造 redeploy payload
           redeploy_payload="$(
             jq -n \
               --arg repositoryUsername "$PORTAINER_REPOSITORY_USERNAME" \
               --arg repositoryPassword "$PORTAINER_REPOSITORY_PASSWORD" \
               --arg imageTag "${CAMPUX_IMAGE_TAG}" \
+              --argjson existingEnv "$existing_env" \
               '{
-                env: [{"name": "CAMPUX_IMAGE_TAG", "value": $imageTag}],
+                env: (
+                  ($existingEnv | map(select(.name != "CAMPUX_IMAGE_TAG")))
+                  + [{"name": "CAMPUX_IMAGE_TAG", "value": $imageTag}]
+                ),
                 prune: false,
                 pullImage: true,
                 repositoryAuthentication: true,
