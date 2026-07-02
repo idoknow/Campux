@@ -243,6 +243,7 @@ export function OpsPanel({
       setQueue(queueData);
       const nextTenant = data.tenants.find((tenant) => tenant.id === nextSelectedId) ?? data.tenants.find((tenant) => tenant.id === selectedTenantId) ?? data.tenants[0];
       setSelectedTenantId(nextTenant?.id ?? "");
+      return data.tenants;
     } finally {
       setLoadingOverview(false);
     }
@@ -429,8 +430,9 @@ export function OpsPanel({
       return;
     }
 
-    setCreatingTenant(true);
     const slug = tenantFormSlug;
+    let created: SystemTenant | undefined;
+    setCreatingTenant(true);
     try {
       const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants", {
         method: "POST",
@@ -442,16 +444,41 @@ export function OpsPanel({
         }),
       });
       setTenants(data.tenants);
-      const created = data.tenants.find((tenant) => tenant.slug === slug);
+      created = data.tenants.find((tenant) => tenant.slug === slug);
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
       setTenantForm(createTenantFormState(new Set(data.tenants.map((tenant) => tenant.slug))));
-      toast.success("新校园墙已创建，进入后按引导完成接入。");
-      await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
-      await onTenantCreated?.();
+      const [refreshedTenants] = await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
+      created ??= refreshedTenants.find((tenant) => tenant.slug === slug);
+      if (created) {
+        setSelectedTenantId(created.id);
+      }
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建校园墙失败");
     } finally {
       setCreatingTenant(false);
+    }
+
+    if (!created) {
+      await onTenantCreated?.();
+      toast.success("新校园墙已创建。");
+      return;
+    }
+
+    if (!onEnterTenant) {
+      await onTenantCreated?.();
+      toast.success("新校园墙已创建，进入后按引导完成接入。");
+      return;
+    }
+
+    setEnteringTenantId(created.id);
+    try {
+      toast.success("新校园墙已创建，正在打开接入引导。");
+      await onEnterTenant(created.id);
+      await onTenantCreated?.();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "校园墙已创建，但打开接入引导失败");
+    } finally {
+      setEnteringTenantId("");
     }
   }
 
@@ -737,8 +764,8 @@ export function OpsPanel({
                   <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
                   <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
                 </div>
-                <p className="text-xs font-semibold text-slate-500">创建后进入校园墙，会有引导一步步带你接入墙号机器人；官方部署会自动分配专属域名。</p>
-                <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0 || tenantFormSlug.length === 0 || tenantFormInvalid} onClick={() => void createTenant()}>
+                <p className="text-xs font-semibold text-slate-500">创建后会自动打开接入引导，一步步带你完成墙号机器人和发布配置；官方部署会自动分配专属域名。</p>
+                <Button className="font-medium" disabled={creatingTenant || enteringTenantId.length > 0 || tenantForm.name.trim().length === 0 || tenantFormSlug.length === 0 || tenantFormInvalid} onClick={() => void createTenant()}>
                   <PlusIcon data-icon="inline-start" />
                   创建
                 </Button>
@@ -1109,7 +1136,7 @@ function OnboardingGuide({
     },
     {
       title: isSystemMode ? "分配运营资源" : "进入开通引导",
-      detail: isSystemMode ? "在运营管理员资源里给账号授权可管理的校园墙；系统运维仍保留全局能力。" : "点击校园墙的「作为管理员进入」，会有引导带你一步步完成接入。",
+      detail: isSystemMode ? "在运营管理员资源里给账号授权可管理的校园墙；系统运维仍保留全局能力。" : "创建校园墙后会自动打开引导；之后也可以点「作为管理员进入」继续未完成的接入流程。",
       done: isSystemMode ? true : botReady,
     },
     {
@@ -1136,7 +1163,7 @@ function OnboardingGuide({
             <p className="text-sm font-bold text-slate-950">{isSystemMode ? "平台交付流程" : "自助开墙流程"}</p>
             <p className="mt-1 text-sm leading-6 text-slate-500">首次交付或自助开墙时展开查看流程。</p>
             {!isSystemMode && hasTenants ? (
-              <p className="mt-1 text-xs font-bold text-blue-700">创建完成后，点击校园墙的“作为管理员进入”，按页面引导一步步完成接入。</p>
+              <p className="mt-1 text-xs font-bold text-blue-700">创建完成后会自动打开接入引导；之后也可以点击校园墙的“作为管理员进入”继续未完成的流程。</p>
             ) : null}
           </div>
           {selectedTenant ? <Badge variant="secondary">{selectedTenant.name}</Badge> : <Badge variant="outline">帮助</Badge>}
