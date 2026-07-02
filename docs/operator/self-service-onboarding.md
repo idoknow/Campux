@@ -162,6 +162,7 @@ Campux 支持两种登录方式：
 
 - `CAMPUX_WEB_ORIGIN` 指向对外访问域名。
 - 运维面板里的管理端 host 已设置为 `app.campux.top`。
+- 如需自动分配专属子域名，已配置 `CAMPUX_TENANT_DOMAIN_SUFFIX` 和 `CAMPUX_CLOUDFLARE_API_TOKEN`。
 - Resend 邮件配置可用，注册验证码能发送。
 - 反向代理支持 WebSocket upgrade。
 - `CAMPUX_BOT_SESSION_SECRET` 已在生产环境设置。

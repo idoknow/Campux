@@ -44,6 +44,18 @@ const configSchema = z.object({
   // Optional, voluntary instance label shown on the central dashboard. Leave
   // unset to stay fully anonymous.
   CAMPUX_TELEMETRY_INSTANCE_NAME: z.string().max(64).optional(),
+  // Optional official-service automation: when configured, newly-created walls
+  // get a slug-based subdomain and a Cloudflare CNAME record automatically.
+  CAMPUX_TENANT_DOMAIN_SUFFIX: z.string().optional(),
+  CAMPUX_TENANT_DOMAIN_TARGET: z.string().optional(),
+  CAMPUX_TENANT_DOMAIN_PROXIED: z.string().optional(),
+  CAMPUX_TENANT_DOMAIN_TTL: z.coerce.number().int().positive().max(86400).refine((ttl) => ttl === 1 || ttl >= 60).default(1),
+  CAMPUX_CLOUDFLARE_API_TOKEN: z.string().optional(),
+  CAMPUX_CLOUDFLARE_API_KEY: z.string().optional(),
+  CLOUDFLARE_API_TOKEN: z.string().optional(),
+  CLOUDFLARE_API_KEY: z.string().optional(),
+  CAMPUX_CLOUDFLARE_ZONE_ID: z.string().optional(),
+  CLOUDFLARE_ZONE_ID: z.string().optional(),
 });
 
 const DEFAULT_TELEMETRY_ENDPOINT = "https://dash.campux.top";
@@ -53,6 +65,17 @@ function flagEnabled(value: string | undefined): boolean {
 }
 
 export type CampuxConfig = ReturnType<typeof loadConfig>;
+
+function nonEmpty(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
 
 function loadDotEnvFiles() {
   const candidates = [
@@ -143,6 +166,19 @@ export function loadConfig() {
       // reporting outside production (see resolveTelemetryTarget).
       endpointExplicit: env.CAMPUX_TELEMETRY_ENDPOINT !== undefined,
       instanceName: env.CAMPUX_TELEMETRY_INSTANCE_NAME,
+    },
+    tenantDomains: {
+      suffix: nonEmpty(env.CAMPUX_TENANT_DOMAIN_SUFFIX),
+      targetHost: nonEmpty(env.CAMPUX_TENANT_DOMAIN_TARGET),
+      proxied: parseBoolean(env.CAMPUX_TENANT_DOMAIN_PROXIED, true),
+      ttl: env.CAMPUX_TENANT_DOMAIN_TTL,
+      cloudflare: {
+        apiToken: nonEmpty(env.CAMPUX_CLOUDFLARE_API_TOKEN)
+          ?? nonEmpty(env.CLOUDFLARE_API_TOKEN)
+          ?? nonEmpty(env.CAMPUX_CLOUDFLARE_API_KEY)
+          ?? nonEmpty(env.CLOUDFLARE_API_KEY),
+        zoneId: nonEmpty(env.CAMPUX_CLOUDFLARE_ZONE_ID) ?? nonEmpty(env.CLOUDFLARE_ZONE_ID),
+      },
     },
   };
 }

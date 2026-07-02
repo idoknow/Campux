@@ -17,6 +17,12 @@ services:
       CAMPUX_SERVER_PORT: 8989
       CAMPUX_WEB_ORIGIN: ${CAMPUX_WEB_ORIGIN:-http://localhost:8989}
       CAMPUX_WEB_DIST_DIR: /app/apps/web/dist
+      CAMPUX_TENANT_DOMAIN_SUFFIX: ${CAMPUX_TENANT_DOMAIN_SUFFIX:-}
+      CAMPUX_TENANT_DOMAIN_TARGET: ${CAMPUX_TENANT_DOMAIN_TARGET:-}
+      CAMPUX_TENANT_DOMAIN_PROXIED: ${CAMPUX_TENANT_DOMAIN_PROXIED:-true}
+      CAMPUX_TENANT_DOMAIN_TTL: ${CAMPUX_TENANT_DOMAIN_TTL:-1}
+      CAMPUX_CLOUDFLARE_API_TOKEN: ${CAMPUX_CLOUDFLARE_API_TOKEN:-}
+      CAMPUX_CLOUDFLARE_ZONE_ID: ${CAMPUX_CLOUDFLARE_ZONE_ID:-}
       # REQUIRED: encrypts stored bot session cookies. Generate with
       # `openssl rand -hex 32` and put it in a .env next to this compose file.
       # The `:?` guard makes `docker compose up` fail loudly if it is unset

@@ -25,6 +25,19 @@ Campux 通过环境变量配置。可以写在 `.env`，也可以由容器平台
 
 初始化会创建第一个系统运维账号，并把当前访问域名自动设为管理端 host。该流程只能执行一次（实例已有系统运维后接口拒绝重放）。详见[部署与快速开始](/getting-started)。
 
+## 自助开墙域名
+
+多租户官方服务可以在运营者创建校园墙时自动分配 `${slug}.${CAMPUX_TENANT_DOMAIN_SUFFIX}`，并通过 Cloudflare DNS API 创建 CNAME 记录。未配置时保持旧行为：创建校园墙但不自动绑定专属域名，仍可由系统运维在运维面板手动填写 host。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CAMPUX_TENANT_DOMAIN_SUFFIX` | 空 | 自动分配的域名后缀，例如 `campux.top` |
+| `CAMPUX_CLOUDFLARE_API_TOKEN` | 空 | Cloudflare API Token，至少需要目标 Zone 的 `Zone Read` 和 `DNS Write` |
+| `CAMPUX_TENANT_DOMAIN_TARGET` | 空 | CNAME 指向的官方入口 host；为空时依次使用管理端 host、`CAMPUX_WEB_ORIGIN` 的 host |
+| `CAMPUX_CLOUDFLARE_ZONE_ID` | 空 | 可选；为空时按后缀调用 Cloudflare Zones API 查询 |
+| `CAMPUX_TENANT_DOMAIN_PROXIED` | `true` | 创建 DNS 记录时是否开启 Cloudflare proxy |
+| `CAMPUX_TENANT_DOMAIN_TTL` | `1` | DNS TTL，`1` 表示 Cloudflare 自动 TTL；其他值建议不低于 `60` |
+
 ## 安全
 
 | 变量 | 必填 | 说明 |
@@ -96,6 +109,9 @@ CAMPUX_SERVER_PORT=8989
 CAMPUX_WEB_ORIGIN=https://campux.example.com
 CAMPUX_WEB_DIST_DIR=/app/apps/web/dist
 CAMPUX_BOT_SESSION_SECRET=replace-with-a-long-random-secret
+CAMPUX_TENANT_DOMAIN_SUFFIX=campux.example.com
+CAMPUX_TENANT_DOMAIN_TARGET=app.campux.example.com
+CAMPUX_CLOUDFLARE_API_TOKEN=replace-with-cloudflare-api-token
 S3_ENDPOINT=http://minio:9000
 S3_REGION=auto
 S3_BUCKET=campux-next

@@ -617,12 +617,12 @@ export function OpsPanel({
               <div className="grid gap-2">
                 <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
                 <Input placeholder="网址标识（可选，留空自动生成）" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
-                <Input placeholder="专属域名（可选）" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
+                <Input placeholder="专属域名（可选，留空由平台自动分配）" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
                 <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
                   <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
                   <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
                 </div>
-                <p className="text-xs font-semibold text-slate-500">创建后进入校园墙，会有引导一步步带你接入墙号机器人。</p>
+                <p className="text-xs font-semibold text-slate-500">创建后进入校园墙，会有引导一步步带你接入墙号机器人；官方部署会自动分配专属域名。</p>
                 <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0} onClick={() => void createTenant()}>
                   <PlusIcon data-icon="inline-start" />
                   创建
@@ -946,8 +946,8 @@ function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelM
       done: publishReady,
     },
     {
-      title: "可选：绑定专属域名",
-      detail: "绑定后用户从该域名进入会固定到当前校园墙，渲染图右下角也会显示这个域名。",
+      title: "专属域名",
+      detail: "官方部署会在开墙时自动分配子域名；也可以由系统运维在这里手动维护。",
       done: hostReady,
     },
   ];

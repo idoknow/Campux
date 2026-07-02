@@ -84,7 +84,7 @@ registerPostTagRoutes(app);
 registerReviewRoutes(app, queue, oneBot);
 registerSvgRoutes(app);
 registerStatsRoutes(app);
-registerSystemRoutes(app, queue);
+registerSystemRoutes(app, queue, config);
 
 // Campux walls/console are private operating tools, not public content — keep
 // every host (app/admin/<wall>.campux.top) out of search engines. Served before

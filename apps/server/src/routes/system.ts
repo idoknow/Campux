@@ -1,10 +1,18 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { CampuxConfig } from "@campux/config";
 import { Prisma, createManyDedup } from "@campux/db";
 import { z } from "zod";
 import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { normalizeTenantHost } from "../lib/tenant-host";
+import {
+  buildTenantDomainHost,
+  provisionTenantDomain,
+  resolveDnsTargetHost,
+  tenantDomainAutomationEnabled,
+  TenantDomainProvisioningError,
+} from "../lib/tenant-domain";
 import { buildUserContainsSearch } from "../lib/user-search";
 import type { RuntimeQueue } from "../runtime/queue";
 
@@ -213,7 +221,7 @@ async function listSystemTenants(context: PlatformContext) {
   return tenants.map(toSystemTenant);
 }
 
-export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) {
+export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, config: CampuxConfig) {
   app.get("/api/system/settings", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
     if (!isSystemOperator(context)) {
@@ -278,10 +286,32 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
   app.post("/api/system/tenants", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
     const body = tenantCreateSchema.parse(request.body);
-    const normalizedHost = body.host === undefined ? null : normalizeTenantHost(body.host);
+    const manualHost = body.host === undefined ? null : normalizeTenantHost(body.host);
+    let normalizedHost = manualHost;
+    if (!normalizedHost && tenantDomainAutomationEnabled(config)) {
+      try {
+        normalizedHost = buildTenantDomainHost(body.slug, config.tenantDomains.suffix);
+      } catch (caught) {
+        if (caught instanceof TenantDomainProvisioningError) {
+          return reply.code(500).send({ message: caught.message });
+        }
+        throw caught;
+      }
+    }
     if (normalizedHost) {
       const conflict = await assertHostNotReserved(normalizedHost, reply);
       if (conflict) return conflict;
+    }
+    const existingSlug = await prisma.tenant.findUnique({
+      where: {
+        slug: body.slug,
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (existingSlug) {
+      return reply.code(409).send({ message: "这个网址标识已经被其他校园墙使用" });
     }
     if (body.botQqUin) {
       const existingBot = await prisma.botAccount.findUnique({
@@ -294,6 +324,28 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       });
       if (existingBot) {
         return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
+      }
+    }
+
+    let cloudflareDnsRecordId: string | null = null;
+    if (!manualHost && normalizedHost && tenantDomainAutomationEnabled(config)) {
+      try {
+        const targetHost = resolveDnsTargetHost(config.tenantDomains.targetHost ?? await getManagementHost() ?? config.webOrigin);
+        if (!targetHost) {
+          return reply.code(500).send({ message: "自动域名已启用，但没有可用的 DNS CNAME 目标" });
+        }
+        const record = await provisionTenantDomain({
+          config,
+          host: normalizedHost,
+          targetHost,
+        });
+        cloudflareDnsRecordId = record?.id ?? null;
+      } catch (caught) {
+        request.log.error({ err: caught, host: normalizedHost }, "failed to provision tenant domain");
+        if (caught instanceof TenantDomainProvisioningError) {
+          return reply.code(502).send({ message: caught.message });
+        }
+        throw caught;
       }
     }
 
@@ -375,6 +427,8 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue) 
       targetId: tenant.id,
       detail: {
         slug: tenant.slug,
+        host: tenant.host,
+        cloudflareDnsRecordId,
       },
     });
 
