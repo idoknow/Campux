@@ -23,16 +23,19 @@ export const MANAGEMENT_HOST_KEY = "management_host";
 const DEFAULT_DEPLOY_MODE: DeployMode = "multi";
 
 // Derive a URL-safe, schema-valid tenant slug from a human wall name. The slug
-// must match /^[a-z0-9][a-z0-9-]*[a-z0-9]$/ (>=2 chars). Non-ASCII names (e.g.
-// Chinese) collapse to empty, so we fall back to a generated "wall-NNNN".
+// must match /^[a-z0-9][a-z0-9-]*[a-z0-9]$/ and stay within the 4-16 character
+// subdomain label range. Non-ASCII names (e.g. Chinese) collapse to empty, so
+// we fall back to a generated "wall-NNNN".
 export function slugFromWallName(name: string, suffix: number): string {
+  const suffixText = String(Math.abs(Math.trunc(suffix))).slice(-4).padStart(4, "0");
+  const maxBaseLength = Math.max(0, 16 - suffixText.length - 1);
   const base = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
+    .slice(0, maxBaseLength)
     .replace(/-+$/g, "");
-  return base.length >= 2 ? `${base}-${suffix}` : `wall-${suffix}`;
+  return base.length >= 2 ? `${base}-${suffixText}` : `wall-${suffixText}`;
 }
 
 // Normalize/validate a deploy-mode string coming from persisted settings.

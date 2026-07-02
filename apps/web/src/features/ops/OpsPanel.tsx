@@ -12,6 +12,7 @@ import {
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
+  RefreshCwIcon,
   SearchIcon,
   ShieldPlusIcon,
   Trash2Icon,
@@ -121,10 +122,30 @@ function writeOpsUserListPreferences(mode: OpsPanelMode, preferences: OpsUserLis
   writeListPreferences(opsUserPreferencesKey(mode), normalizeOpsUserPreferences(mode, preferences));
 }
 
-// Operators shouldn't have to invent a URL slug. When left blank we generate a
-// valid one (matches the backend ^[a-z0-9][a-z0-9-]*[a-z0-9]$ rule).
-function generateWallSlug() {
-  return `wall-${Math.random().toString(36).slice(2, 8)}`;
+const tenantSlugMinLength = 4;
+const tenantSlugMaxLength = 16;
+const tenantSlugPattern = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
+
+// Operators shouldn't have to invent a URL slug. We generate a valid 4-16 char
+// candidate (matches the backend ^[a-z0-9][a-z0-9-]*[a-z0-9]$ rule).
+function generateWallSlug(existingSlugs: ReadonlySet<string> = new Set()) {
+  for (let index = 0; index < 20; index += 1) {
+    const candidate = `wall-${Math.random().toString(36).slice(2, 8)}`;
+    if (!existingSlugs.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `wall-${Date.now().toString(36)}`;
+}
+
+function createTenantFormState(existingSlugs?: ReadonlySet<string>) {
+  return {
+    name: "",
+    slug: generateWallSlug(existingSlugs),
+    host: "",
+    themeColor: "#111827",
+    botQqUin: "",
+  };
 }
 
 export function OpsPanel({
@@ -169,13 +190,8 @@ export function OpsPanel({
   const [savingManagementHost, setSavingManagementHost] = useState(false);
   const [hostDraft, setHostDraft] = useState("");
   const [managementHostDraft, setManagementHostDraft] = useState("");
-  const [tenantForm, setTenantForm] = useState({
-    name: "",
-    slug: "",
-    host: "",
-    themeColor: "#111827",
-    botQqUin: "",
-  });
+  const [tenantDomainSuffix, setTenantDomainSuffix] = useState<string | null>(null);
+  const [tenantForm, setTenantForm] = useState(() => createTenantFormState());
 
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0],
@@ -197,14 +213,33 @@ export function OpsPanel({
     [tenants],
   );
 
+  const existingTenantSlugs = useMemo(() => new Set(tenants.map((tenant) => tenant.slug)), [tenants]);
+  const existingTenantHosts = useMemo(() => new Set(tenants.map((tenant) => tenant.host).filter((host): host is string => Boolean(host))), [tenants]);
+
+  const tenantFormSlug = tenantForm.slug.trim();
+  const tenantFormHost = tenantForm.host.trim();
+  const expectedTenantHost = tenantFormHost || (tenantDomainSuffix && tenantFormSlug ? `${tenantFormSlug}.${tenantDomainSuffix}` : "");
+  const slugLengthInvalid = tenantFormSlug.length > 0 && (tenantFormSlug.length < tenantSlugMinLength || tenantFormSlug.length > tenantSlugMaxLength);
+  const slugFormatInvalid = tenantFormSlug.length > 0 && !tenantSlugPattern.test(tenantFormSlug);
+  const slugAlreadyUsed = tenantFormSlug.length > 0 && existingTenantSlugs.has(tenantFormSlug);
+  const expectedHostAlreadyUsed = expectedTenantHost.length > 0 && existingTenantHosts.has(expectedTenantHost);
+  const tenantFormInvalid = slugLengthInvalid || slugFormatInvalid || slugAlreadyUsed || expectedHostAlreadyUsed;
+  const tenantSlugHint = tenantFormHost
+    ? "访问标识用于 URL 和内部标识，创建后不可修改。"
+    : tenantDomainSuffix
+      ? "访问标识会作为专属子域名前缀，创建后不可修改。"
+      : "访问标识用于 URL 和内部标识，创建后不可修改。";
+  const expectedTenantHostLabel = tenantFormHost ? "专属访问域名" : "预计访问域名";
+
   async function refreshOverview(nextSelectedId?: string) {
     setLoadingOverview(true);
     try {
       const [data, queueData] = await Promise.all([
-        api<{ tenants: SystemTenant[] }>("/api/system/tenants"),
+        api<{ tenants: SystemTenant[]; tenantDomainSuffix?: string | null }>("/api/system/tenants"),
         api<SystemQueueSnapshot>("/api/system/queue"),
       ]);
       setTenants(data.tenants);
+      setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
       setQueue(queueData);
       const nextTenant = data.tenants.find((tenant) => tenant.id === nextSelectedId) ?? data.tenants.find((tenant) => tenant.id === selectedTenantId) ?? data.tenants[0];
       setSelectedTenantId(nextTenant?.id ?? "");
@@ -347,8 +382,29 @@ export function OpsPanel({
   }
 
   async function createTenant() {
+    if (!tenantFormSlug) {
+      toast.error("请填写访问标识");
+      return;
+    }
+    if (slugLengthInvalid) {
+      toast.error("访问标识需要 4 到 16 个字符");
+      return;
+    }
+    if (slugFormatInvalid) {
+      toast.error("访问标识只能使用小写字母、数字和连字符，且不能以连字符开头或结尾");
+      return;
+    }
+    if (slugAlreadyUsed) {
+      toast.error("这个访问标识已经被其他校园墙使用");
+      return;
+    }
+    if (expectedHostAlreadyUsed) {
+      toast.error("这个访问域名已经绑定到其他校园墙");
+      return;
+    }
+
     setCreatingTenant(true);
-    const slug = tenantForm.slug.trim() || generateWallSlug();
+    const slug = tenantFormSlug;
     try {
       const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants", {
         method: "POST",
@@ -362,7 +418,7 @@ export function OpsPanel({
       setTenants(data.tenants);
       const created = data.tenants.find((tenant) => tenant.slug === slug);
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
-      setTenantForm({ name: "", slug: "", host: "", themeColor: "#111827", botQqUin: "" });
+      setTenantForm(createTenantFormState(new Set(data.tenants.map((tenant) => tenant.slug))));
       toast.success("新校园墙已创建，进入后按引导完成接入。");
       await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
       await onTenantCreated?.();
@@ -564,7 +620,7 @@ export function OpsPanel({
         <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
       </div>
 
-      <OnboardingGuide mode={mode} hasTenants={tenants.length > 0} selectedTenant={selectedTenant} />
+      <OnboardingGuide mode={mode} hasTenants={tenants.length > 0} selectedTenant={selectedTenant} tenantDomainSuffix={tenantDomainSuffix} />
 
       {isSystemMode ? (
         <>
@@ -616,14 +672,47 @@ export function OpsPanel({
               </div>
               <div className="grid gap-2">
                 <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
-                <Input placeholder="网址标识（可选，留空自动生成）" value={tenantForm.slug} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
+                <div className="grid gap-1">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="网址标识，例如 gzhu-wall"
+                      value={tenantForm.slug}
+                      maxLength={tenantSlugMaxLength}
+                      aria-invalid={slugLengthInvalid || slugFormatInvalid || slugAlreadyUsed}
+                      onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      title="重新生成网址标识"
+                      className="shrink-0"
+                      onClick={() => setTenantForm({ ...tenantForm, slug: generateWallSlug(existingTenantSlugs) })}
+                    >
+                      <RefreshCwIcon className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-900">
+                    <p>{tenantSlugHint}</p>
+                    {expectedTenantHost ? (
+                      <p className="mt-1 break-all">{expectedTenantHostLabel}：<span className="font-mono">{expectedTenantHost}</span></p>
+                    ) : (
+                      <p className="mt-1">配置自动域名后，这里会显示完整的预计访问域名。</p>
+                    )}
+                    <p className="mt-1 text-blue-700">规则：4-16 个字符，只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p>
+                    {slugLengthInvalid ? <p className="mt-1 text-red-700">访问标识需要 4 到 16 个字符。</p> : null}
+                    {slugFormatInvalid ? <p className="mt-1 text-red-700">访问标识只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p> : null}
+                    {slugAlreadyUsed ? <p className="mt-1 text-red-700">这个访问标识已经被其他校园墙使用，请换一个。</p> : null}
+                    {expectedHostAlreadyUsed ? <p className="mt-1 text-red-700">这个访问域名已经绑定到其他校园墙，请换一个。</p> : null}
+                  </div>
+                </div>
                 <Input placeholder="专属域名（可选，留空由平台自动分配）" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
                 <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
                   <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
                   <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
                 </div>
                 <p className="text-xs font-semibold text-slate-500">创建后进入校园墙，会有引导一步步带你接入墙号机器人；官方部署会自动分配专属域名。</p>
-                <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0} onClick={() => void createTenant()}>
+                <Button className="font-medium" disabled={creatingTenant || tenantForm.name.trim().length === 0 || tenantFormSlug.length === 0 || tenantFormInvalid} onClick={() => void createTenant()}>
                   <PlusIcon data-icon="inline-start" />
                   创建
                 </Button>
@@ -919,7 +1008,17 @@ export function OpsPanel({
   );
 }
 
-function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelMode; hasTenants: boolean; selectedTenant: SystemTenant | undefined }) {
+function OnboardingGuide({
+  mode,
+  hasTenants,
+  selectedTenant,
+  tenantDomainSuffix,
+}: {
+  mode: OpsPanelMode;
+  hasTenants: boolean;
+  selectedTenant: SystemTenant | undefined;
+  tenantDomainSuffix: string | null;
+}) {
   const isSystemMode = mode === "system";
   const botReady = Boolean(selectedTenant?.ready);
   const publishReady = Boolean(selectedTenant?.bots.some((bot) => bot.publishTargets.length > 0));
@@ -927,7 +1026,11 @@ function OnboardingGuide({ mode, hasTenants, selectedTenant }: { mode: OpsPanelM
   const steps = [
     {
       title: isSystemMode ? "开放管理端注册" : "创建校园墙",
-      detail: isSystemMode ? "设置管理端 host，例如 app.campux.top，让墙号运营者可以用邮箱注册运营管理员账号。" : "填写校园墙名称即可，创建后你会自动成为该墙管理员。",
+      detail: isSystemMode
+        ? "设置管理端 host，例如 app.campux.top，让墙号运营者可以用邮箱注册运营管理员账号。"
+        : tenantDomainSuffix
+          ? `确认校园墙名称和访问标识。访问标识会成为 ${tenantDomainSuffix} 下的子域名前缀，创建后不可修改。`
+          : "确认校园墙名称和访问标识。访问标识会用于 URL 和内部标识，创建后不可修改。",
       done: isSystemMode ? true : hasTenants,
     },
     {

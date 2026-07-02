@@ -59,8 +59,8 @@ app.campux.top
 | 字段 | 建议 |
 | --- | --- |
 | 校园墙名称 | 面向运营者和用户展示的名称 |
-| slug | URL 和内部标识，例如 `gzhu-wall` |
-| 专属 host | 可选，例如 `wall.example.com` |
+| slug | 访问标识，例如 `gzhu-wall`。要求 4-16 个字符，只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。官方服务会用它生成专属子域名，例如 `gzhu-wall.campux.top`；创建后不可修改 |
+| 专属 host | 可选，例如 `wall.example.com`。留空时官方服务自动使用 slug 子域名 |
 | 主题色 | 用于页面和渲染图的品牌色 |
 | Bot QQ | 可选，填写后会同时创建一个 Bot 和发布目标 |
 

@@ -8,6 +8,7 @@ import { prisma } from "../lib/prisma";
 import { normalizeTenantHost } from "../lib/tenant-host";
 import {
   buildTenantDomainHost,
+  normalizeDomainSuffix,
   provisionTenantDomain,
   resolveDnsTargetHost,
   tenantDomainAutomationEnabled,
@@ -37,7 +38,7 @@ const userMembershipCreateSchema = z.object({
 
 const tenantCreateSchema = z.object({
   name: z.string().min(1).max(80),
-  slug: z.string().min(2).max(64).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
+  slug: z.string().min(4).max(16).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
   host: z.string().max(255).nullable().optional(),
   themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#42a5f5"),
   banner: z.string().max(200).default(""),
@@ -221,6 +222,17 @@ async function listSystemTenants(context: PlatformContext) {
   return tenants.map(toSystemTenant);
 }
 
+function tenantDomainSuffixForResponse(config: CampuxConfig) {
+  if (!tenantDomainAutomationEnabled(config)) {
+    return null;
+  }
+  try {
+    return normalizeDomainSuffix(config.tenantDomains.suffix);
+  } catch {
+    return null;
+  }
+}
+
 export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, config: CampuxConfig) {
   app.get("/api/system/settings", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
@@ -280,6 +292,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     return {
       tenants: await listSystemTenants(context),
+      tenantDomainSuffix: tenantDomainSuffixForResponse(config),
     };
   });
 
@@ -434,6 +447,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     return {
       tenants: await listSystemTenants(context),
+      tenantDomainSuffix: tenantDomainSuffixForResponse(config),
     };
   });
 
@@ -477,6 +491,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     return {
       tenants: await listSystemTenants(context),
+      tenantDomainSuffix: tenantDomainSuffixForResponse(config),
     };
   });
 

@@ -67,7 +67,7 @@ const publicMetadataKeys = [
 
 const patchMetadataSchema = z.object({
   tenantName: z.string().min(1).max(80).optional(),
-  slug: z.string().min(2).max(64).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/).optional(),
+  slug: z.string().min(4).max(16).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/).optional(),
   themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   brand: z.string().min(1).optional(),
   banner: z.string().optional(),
@@ -304,14 +304,16 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     const context = await requireTenantRole(request, reply, "admin");
     const body = patchMetadataSchema.parse(request.body);
 
-    if (body.tenantName !== undefined || body.slug !== undefined || body.themeColor !== undefined) {
+    if (body.slug !== undefined && body.slug !== context.selectedTenant.slug) {
+      return reply.code(400).send({ message: "访问标识创建后不可修改" });
+    }
+
+    if (body.tenantName !== undefined || body.themeColor !== undefined) {
       const tenantUpdate: {
         name?: string;
-        slug?: string;
         themeColor?: string;
       } = {};
       if (body.tenantName !== undefined) tenantUpdate.name = body.tenantName;
-      if (body.slug !== undefined) tenantUpdate.slug = body.slug;
       if (body.themeColor !== undefined) tenantUpdate.themeColor = body.themeColor;
 
       await prisma.tenant.update({

@@ -508,7 +508,6 @@ export function AdminPage({
         method: "PATCH",
         body: JSON.stringify({
           tenantName: form.tenantName,
-          slug: form.slug,
           themeColor: form.themeColor,
           brand: form.brand,
           banner: form.banner,
@@ -1693,7 +1692,8 @@ function MetadataPanel({
           </label>
           <label className="grid gap-1 text-sm font-medium">
             访问标识
-            <Input value={form.slug} onChange={(event) => onFormChange({ ...form, slug: event.target.value })} />
+            <Input value={form.slug} readOnly className="bg-slate-50 text-slate-500" />
+            <span className="text-xs font-semibold leading-5 text-slate-500">创建校园墙时确定，用于专属访问域名和内部标识，创建后不可修改。</span>
           </label>
           <label className="grid gap-1 text-sm font-medium">
             主题色
