@@ -473,7 +473,7 @@ export function App() {
         remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
         postBgColor || undefined,
         postTextColor || undefined,
-        postFont || undefined,
+        postFont && postFont !== "default" ? postFont : undefined,
         anonymousAvatar || undefined,
       );
       clearAttachments();

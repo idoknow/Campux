@@ -94,7 +94,7 @@ export function createPostWithAttachments(
     if (textColor) {
       formData.append("textColor", textColor);
     }
-    if (font) {
+    if (font && font !== "default") {
       formData.append("font", font);
     }
     for (const file of files) {

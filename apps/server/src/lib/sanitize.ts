@@ -221,6 +221,7 @@ export function validateTextColor(value: string | null | undefined): boolean {
 
 export function validateFont(value: string | null | undefined): boolean {
   if (!value) return true;
+  if (value === "default") return true;
   return ALLOWED_FONTS.has(value);
 }
 
