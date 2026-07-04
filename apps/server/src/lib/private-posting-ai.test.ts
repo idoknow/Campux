@@ -168,6 +168,7 @@ describe("private post AI semantic parsing", () => {
     expect(prompt).toContain("校园墙 QQ 私聊投稿语义解析器");
     expect(prompt).toContain("action");
     expect(prompt).toContain("none|submit|cancel|undo");
+    expect(prompt).toContain("发布吧");
     expect(prompt).toContain("不要用关键词表或单个词命中做判断");
     expect(prompt).toContain("是");
     expect(prompt).toContain("否");

@@ -229,7 +229,7 @@ export function formatRegisterExtended(stylishEnabled = false): string {
 const privatePostBodyStartDefault =
   "好的，以下是正文内容，直接发送文字或图片即可添加。发送 #撤回 可撤回上一条，发送 #结束 提交投稿。（发送 #取消 取消本次投稿）";
 const privatePostBodyStartAiDefault =
-  "好的，已进入投稿编辑。可以继续发送文字或图片补充内容；写完后直接说“可以提交/发出去”，也可以说“撤回上一条”或“取消本次投稿”。";
+  "好的，已进入投稿编辑。可以继续发送文字或图片补充内容；写完后直接说清楚想继续补充、发布、撤回或取消，我会按语义理解你的意思。";
 
 const privatePostBodyStartStylish = [
   "📝 好的，以下是正文内容~ 直接发文字或图片就行，发完记得 #结束 提交！",
@@ -238,9 +238,9 @@ const privatePostBodyStartStylish = [
   privatePostBodyStartDefault,
 ];
 const privatePostBodyStartAiStylish = [
-  "📝 好的，已进入投稿编辑~ 继续发文字或图片补充内容，写完告诉我可以提交就好。",
-  "✏️ 好嘞，继续发正文和图片吧。想修改可以说撤回上一条，想放弃可以说取消。",
-  "✨ 开始编辑投稿吧~ 发完直接说可以发出去，我会按语义帮你提交。",
+  "📝 好的，已进入投稿编辑~ 继续发文字或图片补充内容，写完直接说明你想发布就好。",
+  "✏️ 好嘞，继续发正文和图片吧。想修改、撤回、发布或放弃都直接说明意思。",
+  "✨ 开始编辑投稿吧~ 发完自然告诉我你的想法，我会按语义处理。",
   privatePostBodyStartAiDefault,
 ];
 
@@ -589,7 +589,7 @@ export function formatPrivatePostModePrompt(stylishEnabled = false, aiIntakeEnab
 const privatePostDraftDefault =
   "继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）";
 const privatePostDraftAiDefault =
-  "继续发送添加稿件正文及图片；写完后直接说“可以提交/发出去”，也可以说“撤回上一条”或“取消本次投稿”。";
+  "继续发送添加稿件正文及图片；完成后直接说清楚想继续补充、发布、撤回或取消，我会按语义理解你的意思。";
 
 const privatePostDraftStylish = [
   "📎 继续发正文或图片吧~ 发 #撤回 删掉上一条，写完了发 #结束 提交！（发 #取消 就取消）",
@@ -597,8 +597,8 @@ const privatePostDraftStylish = [
   privatePostDraftDefault,
 ];
 const privatePostDraftAiStylish = [
-  "📎 继续发正文或图片吧~ 写完说可以提交；想改就说撤回上一条，想放弃就说取消。",
-  "继续发送添加稿件正文及图片，完成后自然告诉我发出去即可。",
+  "📎 继续发正文或图片吧~ 写完直接说明你想发布、撤回或取消，我会按语义处理。",
+  "继续发送添加稿件正文及图片，完成后自然告诉我下一步想怎么做即可。",
   privatePostDraftAiDefault,
 ];
 
@@ -642,7 +642,7 @@ function formatPrivatePostPreview(text: string, attachmentCount: number) {
 
 export function formatPrivatePostConfirmPrompt(text: string, attachmentCount: number, aiIntakeEnabled = false): string {
   const actionHint = aiIntakeEnabled
-    ? "确认无误请直接回复“确认提交/可以发布”，需要取消请回复“取消”。"
+    ? "如果内容无误，就用自然语言告诉我可以发布；如果要取消，也直接说明你的意思。"
     : "确认无误请发送 #确认，取消提交请发送 #取消。";
   return [formatPrivatePostPreview(text, attachmentCount), "", actionHint].join("\n");
 }

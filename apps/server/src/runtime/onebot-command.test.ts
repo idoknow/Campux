@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { parsePrivatePostConfirmText } from "../lib/private-posting";
 import {
+  isPrivatePostAiIntakeActive,
   shouldAppendPrivatePostContentForSemantic,
   shouldApplyPrivatePostSemanticText,
   shouldConfirmPrivatePostSubmissionFromSemantic,
@@ -13,7 +14,6 @@ import {
   parseReviewGroupCommand,
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
-  resolvePrivatePostConfirmControlText,
   resolvePrivatePostSemanticAction,
 } from "./onebot";
 
@@ -101,35 +101,24 @@ describe("private post semantic mode selection", () => {
     expect(shouldConfirmPrivatePostSubmissionFromSemantic({
       intent: "command",
       action: "submit",
-      text: "原稿",
+      text: "正文",
       anonymous: null,
       shouldSubmit: true,
-      sections: ["原稿"],
-      confidence: 0.86,
-      reason: "用户确认提交",
+      sections: ["正文"],
+      confidence: 0.9,
+      reason: "用户用‘发布吧’表达确认提交",
     })).toEqual({ confirmed: true });
 
     expect(shouldConfirmPrivatePostSubmissionFromSemantic({
       intent: "command",
       action: "cancel",
-      text: "原稿",
+      text: "正文",
       anonymous: null,
       shouldSubmit: false,
-      sections: ["原稿"],
-      confidence: 0.86,
-      reason: "用户取消提交",
+      sections: ["正文"],
+      confidence: 0.85,
+      reason: "用户取消投稿",
     })).toEqual({ confirmed: false });
-  });
-
-  test("AI 确认提交阶段本地识别确认取消撤回控制语句", () => {
-    expect(resolvePrivatePostConfirmControlText("确认")).toEqual({ type: "confirm" });
-    expect(resolvePrivatePostConfirmControlText("确认提交")).toEqual({ type: "confirm" });
-    expect(resolvePrivatePostConfirmControlText("可以发布")).toEqual({ type: "confirm" });
-    expect(resolvePrivatePostConfirmControlText("取消")).toEqual({ type: "cancel" });
-    expect(resolvePrivatePostConfirmControlText("#取消")).toEqual({ type: "cancel" });
-    expect(resolvePrivatePostConfirmControlText("撤回")).toEqual({ type: "undo" });
-    expect(resolvePrivatePostConfirmControlText("#撤回")).toEqual({ type: "undo" });
-    expect(resolvePrivatePostConfirmControlText("我还想补一句正文")).toBeNull();
   });
 
   test("AI 草稿阶段普通内容应追加正文，不因语义非 post 被丢弃", () => {
@@ -153,6 +142,19 @@ describe("private post semantic mode selection", () => {
       sections: [],
       confidence: 0.86,
       reason: "用户要求撤回",
+    })).toBe(false);
+  });
+
+  test("AI 收稿不把低可用性下的命令式语义追加为正文", () => {
+    expect(shouldAppendPrivatePostContentForSemantic({
+      intent: "command",
+      action: "none",
+      text: "#取消",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: ["#取消"],
+      confidence: 0.4,
+      reason: "command_like_without_llm",
     })).toBe(false);
   });
 
@@ -322,6 +324,12 @@ describe("private post semantic mode selection", () => {
       confidence: 0.7,
       reason: "尚未表达提交",
     })).toBe(false);
+  });
+
+  test("AI 收稿仅在配置启用且 LLM 可用时激活", () => {
+    expect(isPrivatePostAiIntakeActive(true, true)).toBe(true);
+    expect(isPrivatePostAiIntakeActive(true, false)).toBe(false);
+    expect(isPrivatePostAiIntakeActive(false, true)).toBe(false);
   });
 
   test("pending 模式采纳 AI 语义识别到的匿名选择，不依赖关键词命令", () => {

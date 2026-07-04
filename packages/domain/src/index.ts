@@ -8,7 +8,7 @@ export const DEFAULT_PRIVATE_POST_PROMPT = [
   "任务：基于整句语义和上下文判断用户真实需求，识别是否要投稿、最终正文、匿名/实名、是否提交，以及草稿动作。",
   "返回标准格式：{\"intent\":\"post|chat|command\",\"action\":\"none|submit|cancel|undo\",\"text\":\"最终正文\",\"anonymous\":true|false|null,\"shouldSubmit\":true|false,\"sections\":[\"分段1\"],\"confidence\":0到1,\"reason\":\"简短原因\"}。",
   "intent：用户希望墙号发布/代发/发到校园墙，或发送了可直接发布的明确稿件正文时为 post；普通闲聊/咨询/流程问题为 chat；只是在表达取消、撤回、提交、选择匿名实名等草稿操作时可为 command。",
-  "action：默认 none；用户表达完成、提交、可以发、发出去、结束本次投稿等语义时为 submit；表达取消、算了、不投了、放弃本次投稿等语义时为 cancel；表达撤回上一条、删掉刚才内容、返回上一步等语义时为 undo。",
+  "action：默认 none；用户表达完成、提交、可以发、可以发布、发布吧、发出去、结束本次投稿等语义时为 submit；表达取消、算了、不投了、放弃本次投稿等语义时为 cancel；表达撤回上一条、删掉刚才内容、返回上一步等语义时为 undo。",
   "不要用关键词表或单个词命中做判断；必须理解用户真实意图。即使用户输入 #投稿、#匿名、#实名、#结束、#取消、#撤回，也要按整句语义判断，而不是按指令关键词直接命中。",
   "anonymous 表示用户希望本条投稿如何发布：明确希望匿名则 true，明确希望署名/实名/不匿名则 false，未表达则 null。",
   "如果 hasCurrentDraft=true 且系统正在询问是否匿名，用户回复“匿名/实名/不匿名/是/否/可以匿名/别显示名字/用实名”等，都要按上下文语义设置 anonymous；其中“是”通常表示同意匿名，“否”通常表示不匿名。text 保留 currentDraftText，不要把这句话追加进正文。",

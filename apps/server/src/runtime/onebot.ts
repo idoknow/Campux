@@ -1132,7 +1132,8 @@ export class OneBotRuntime {
 
       // 读取租户 AI 规则：额外投稿关键词与私聊语义收稿开关。
       const aiSettings = await readTenantAiSettings(bot.tenantId);
-      const privatePostAiEnabled = aiSettings.rules.privatePostAiEnabled === true;
+      const privatePostAiConfigured = aiSettings.rules.privatePostAiEnabled === true;
+      const privatePostAiEnabled = isPrivatePostAiIntakeActive(privatePostAiConfigured, aiSettings.mode === "llm" && aiSettings.apiKeyConfigured);
       const privatePostAggregateDelaySeconds = Math.max(0, Math.min(120, Math.trunc(aiSettings.rules.privatePostAggregateDelaySeconds ?? 8)));
       const extraKeywords = aiSettings.rules.postTriggerKeywords;
 
@@ -1206,23 +1207,9 @@ export class OneBotRuntime {
           return;
         }
 
-        const localConfirmControl = privatePostAiEnabled ? resolvePrivatePostConfirmControlText(plainText) : null;
-        if (localConfirmControl?.type === "undo") {
-          await this.undoPrivatePostDraftEntry({
-            bot,
-            botQqUin,
-            userQqUin,
-          });
-          return;
-        }
-
         const semanticConfirm = privatePostAiEnabled ? shouldConfirmPrivatePostSubmissionFromSemantic(semanticForExistingFlow) : null;
         const keywordConfirm = shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
-        const confirmation = semanticConfirm ?? keywordConfirm ?? (localConfirmControl?.type === "confirm"
-          ? { confirmed: true }
-          : localConfirmControl?.type === "cancel"
-            ? { confirmed: false }
-            : null);
+        const confirmation = semanticConfirm ?? keywordConfirm;
         if (confirmation?.confirmed === true) {
           await this.submitPrivatePostPendingConfirm({
             bot,
@@ -3460,6 +3447,10 @@ export function shouldSubmitPrivatePostAfterModeSelection(semantic: PrivatePostS
   return semantic?.intent === "post" && semantic.anonymous === null;
 }
 
+export function isPrivatePostAiIntakeActive(configured: boolean, llmAvailable: boolean) {
+  return configured && llmAvailable;
+}
+
 export function shouldRunPrivatePostKeywordCommand(aiIntakeEnabled: boolean) {
   return !aiIntakeEnabled;
 }
@@ -3475,6 +3466,9 @@ export function shouldAppendPrivatePostContentForSemantic(semantic: PrivatePostS
   if (!semantic) {
     return true;
   }
+  if (semantic.intent === "command") {
+    return false;
+  }
   return semantic.action === "none" || semantic.intent === "post";
 }
 
@@ -3489,23 +3483,6 @@ export function shouldConfirmPrivatePostSubmissionFromSemantic(semantic: Private
   }
   if (action === "cancel") {
     return { confirmed: false };
-  }
-  return null;
-}
-
-export function resolvePrivatePostConfirmControlText(input: string): { type: "confirm" | "cancel" | "undo" } | null {
-  const normalized = input.trim();
-  if (!normalized) {
-    return null;
-  }
-  if (/^(?:#|＃)?(?:确认|确认提交|提交|可以提交|可以发布|发布|发出去|确认发布|没问题|无误)\s*$/.test(normalized)) {
-    return { type: "confirm" };
-  }
-  if (/^(?:#|＃)?(?:取消|取消提交|取消本次投稿|不提交|算了|不投了|放弃)\s*$/.test(normalized)) {
-    return { type: "cancel" };
-  }
-  if (/^(?:#|＃)?(?:撤回|撤回上一条|撤回上一步|删掉上一条|删除上一条)\s*$/.test(normalized)) {
-    return { type: "undo" };
   }
   return null;
 }
