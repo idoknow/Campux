@@ -1,3 +1,4 @@
+import { isDefaultFont } from "@campux/domain";
 import type { PostItem } from "../types/app";
 
 export async function api<T>(path: string, options: RequestInit = {}) {
@@ -33,6 +34,10 @@ export class CreatePostError extends Error {
 export type CreatePostResponse = {
   post: PostItem;
 };
+
+export function normalizePostFont(font: string | null | undefined): string | undefined {
+  return font && !isDefaultFont(font) ? font : undefined;
+}
 
 export function createPostWithAttachments(
   text: string,
@@ -94,8 +99,9 @@ export function createPostWithAttachments(
     if (textColor) {
       formData.append("textColor", textColor);
     }
-    if (font && font !== "default") {
-      formData.append("font", font);
+    const normalizedFont = normalizePostFont(font);
+    if (normalizedFont) {
+      formData.append("font", normalizedFont);
     }
     for (const file of files) {
       formData.append("images", file, file.name);

@@ -14,7 +14,7 @@ export type PostFont = z.infer<typeof postFontSchema>;
 export const postFontDefault = "default";
 
 export const FONT_OPTIONS: Array<{ value: PostFont; label: string; fileName: string }> = [
-  { value: "default", label: "默认字体", fileName: "" },
+  { value: postFontDefault, label: "默认字体", fileName: "" },
   { value: "beinidekeaitianyunle", label: "贝尼的可爱云乐体", fileName: "beinidekeaitianyunle.ttf" },
   { value: "dunhuangfeitiankai", label: "敦煌飞天楷", fileName: "dunhuangfeitiankai.ttf" },
   { value: "mengxiangchaoyanningti", label: "梦想超妍宁体", fileName: "mengxiangchaoyanningti.ttf" },
@@ -24,9 +24,9 @@ export const FONT_OPTIONS: Array<{ value: PostFont; label: string; fileName: str
 ];
 
 export const FONT_FILE_MAP: Record<string, string> = Object.fromEntries(
-  FONT_OPTIONS.filter((f) => f.value !== "default").map((f) => [f.value, f.fileName]),
+  FONT_OPTIONS.filter((f) => f.value !== postFontDefault).map((f) => [f.value, f.fileName]),
 );
 
 export function isDefaultFont(font: string | null | undefined): boolean {
-  return !font || font === "default";
+  return !font || font === postFontDefault;
 }
