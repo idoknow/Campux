@@ -261,7 +261,7 @@ export class OneBotRuntime {
     private readonly logger: FastifyBaseLogger,
     private readonly config?: CampuxConfig,
   ) {
-    this.reviewQueueReminderTimer = process.env.NODE_ENV === "test"
+    this.reviewQueueReminderTimer = process.env.NODE_ENV === "test" || this.config?.nodeEnv === "production"
       ? null
       : setInterval(() => {
           this.runReviewQueueReminderScan().catch((error) => {
