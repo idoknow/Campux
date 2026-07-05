@@ -112,6 +112,7 @@ if (existsSync(webDistDir)) {
 }
 
 app.addHook("onClose", async () => {
+  oneBot.close();
   await queue.stop();
   await prisma.$disconnect();
 });

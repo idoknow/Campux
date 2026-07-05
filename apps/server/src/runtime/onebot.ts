@@ -64,6 +64,7 @@ import {
   formatQrLoginTimeout,
   formatReviewApprovedGroup,
   formatReviewRejectedGroup,
+  formatReviewQueueMessages,
   formatRequeue,
   formatPrivatePostModePrompt,
   formatPrivatePostDraftPrompt,
@@ -87,6 +88,7 @@ import {
   formatUnbanNotify,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
+import { collectOverdueReviewReminders, listPendingReviewQueue, reviewQueueReminderIntervalMs } from "./review-queue";
 
 type OneBotConnection = {
   socket: WebSocketLike;
@@ -216,6 +218,7 @@ const reviewHelp = [
   "审核命令：",
   "#通过 <稿件id>",
   "#全部通过",
+  "#审核队列",
   "#拒绝 <理由> <稿件id>",
   "#重发 <稿件id>",
   "#回复 <内容> （引用转发私信后使用）",
@@ -250,12 +253,28 @@ export class OneBotRuntime {
   private static readonly MAX_FORWARD_MSG_ID_MAP_SIZE = 500;
   private readonly qzoneProtocolAutoRefreshFailures = new Map<string, QZoneProtocolAutoRefreshFailure>();
   private readonly qzoneProtocolAutoRefreshInFlight = new Map<string, Promise<{ cookieNames: string[]; session: { id: string } }>>();
+  private readonly reviewQueueReminderTimer: Timer | null;
+  private reviewQueueReminderRunning = false;
 
   constructor(
     private readonly queue: RuntimeQueue,
     private readonly logger: FastifyBaseLogger,
     private readonly config?: CampuxConfig,
-  ) {}
+  ) {
+    this.reviewQueueReminderTimer = process.env.NODE_ENV === "test"
+      ? null
+      : setInterval(() => {
+          this.runReviewQueueReminderScan().catch((error) => {
+            this.logger.warn({ error }, "review queue reminder scan failed");
+          });
+        }, reviewQueueReminderIntervalMs);
+  }
+
+  close() {
+    if (this.reviewQueueReminderTimer) {
+      clearInterval(this.reviewQueueReminderTimer);
+    }
+  }
 
   async handleConnection(socket: WebSocketLike, request: { headers: Record<string, string | string[] | undefined>; url?: string }) {
     const auth = await this.authenticateConnection(request);
@@ -844,6 +863,34 @@ export class OneBotRuntime {
     await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
       this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, logMessage);
     });
+  }
+
+  private async runReviewQueueReminderScan() {
+    if (this.reviewQueueReminderRunning) {
+      return;
+    }
+    this.reviewQueueReminderRunning = true;
+    const sentAt = new Date();
+    try {
+      const reminders = await collectOverdueReviewReminders(prisma, sentAt);
+      for (const reminder of reminders) {
+        if (!reminder.bot.reviewGroupId) {
+          continue;
+        }
+        try {
+          for (const message of reminder.messageChunks) {
+            await this.sendGroupMessage(reminder.bot.qqUin.toString(), reminder.bot.reviewGroupId, message);
+          }
+        } catch (error) {
+          this.logger.warn(
+            { error, tenantId: reminder.bot.tenantId, botQqUin: reminder.bot.qqUin.toString(), groupId: reminder.bot.reviewGroupId },
+            "failed to send review queue reminder",
+          );
+        }
+      }
+    } finally {
+      this.reviewQueueReminderRunning = false;
+    }
   }
 
   async callAction(botQqUin: string, action: string, params: Record<string, unknown>, timeoutMs = 8_000) {
@@ -2226,6 +2273,15 @@ export class OneBotRuntime {
         });
         await this.sendGroupMessage(botQqUin, groupId, result.approved === 0 ? "当前没有待审核稿件" : `已全部通过 ${result.approved} 条待审核稿件`);
         await Promise.all(result.approvedPostIds.map((postId) => this.notifyReviewResult(postId, "approved").catch(() => undefined)));
+        return;
+      }
+
+      if (["审核队列", "待审核", "队列"].includes(command.name)) {
+        await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+        const queueSnapshot = await listPendingReviewQueue(prisma, bot.tenantId);
+        for (const message of formatReviewQueueMessages(queueSnapshot.items, new Date(), queueSnapshot.hiddenCount)) {
+          await this.sendGroupMessage(botQqUin, groupId, message);
+        }
         return;
       }
 

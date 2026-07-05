@@ -805,7 +805,7 @@ export function AdminPage({
 
   async function updateBotConfig(
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) {
     setBusy(true);
     try {
@@ -2465,7 +2465,7 @@ function BotsPanel({
   onDelete: (id: string) => void;
   onUpdateConfig: (
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) => void;
   onRefresh: () => void;
 }) {
@@ -2684,7 +2684,7 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
@@ -2692,6 +2692,8 @@ function BotConfigEditor({
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
   const [reviewGroupMessageReply, setReviewGroupMessageReply] = useState(bot.reviewGroupMessageReply);
   const [reviewNotificationEnabled, setReviewNotificationEnabled] = useState(bot.reviewNotificationEnabled);
+  const [reviewQueueAutoReminderEnabled, setReviewQueueAutoReminderEnabled] = useState(bot.reviewQueueAutoReminderEnabled);
+  const [reviewQueueReminderThresholdHours, setReviewQueueReminderThresholdHours] = useState(String(bot.reviewQueueReminderThresholdHours));
   const [autoFriendRequestApprovalEnabled, setAutoFriendRequestApprovalEnabled] = useState(bot.autoFriendRequestApprovalEnabled);
   const [enabled, setEnabled] = useState(bot.enabled);
 
@@ -2702,21 +2704,26 @@ function BotConfigEditor({
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
     setReviewGroupMessageReply(bot.reviewGroupMessageReply);
     setReviewNotificationEnabled(bot.reviewNotificationEnabled);
+    setReviewQueueAutoReminderEnabled(bot.reviewQueueAutoReminderEnabled);
+    setReviewQueueReminderThresholdHours(String(bot.reviewQueueReminderThresholdHours));
     setAutoFriendRequestApprovalEnabled(bot.autoFriendRequestApprovalEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
   const trimmedUserMessageReply = userMessageReply.trim();
   const trimmedReviewGroupMessageReply = reviewGroupMessageReply.trim();
   const normalizedCooldownSeconds = Math.max(0, Number(userMessageReplyCooldownSeconds || 0));
+  const normalizedReviewQueueReminderThresholdHours = Math.min(168, Math.max(1, Number(reviewQueueReminderThresholdHours || 6)));
   const changed = trimmedDisplayName !== bot.displayName
     || trimmedReviewGroupId !== (bot.reviewGroupId ?? "")
     || trimmedUserMessageReply !== bot.userMessageReply
     || normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds
     || trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply
     || reviewNotificationEnabled !== bot.reviewNotificationEnabled
+    || reviewQueueAutoReminderEnabled !== bot.reviewQueueAutoReminderEnabled
+    || normalizedReviewQueueReminderThresholdHours !== bot.reviewQueueReminderThresholdHours
     || autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled
     || enabled !== bot.enabled;
   const canSave = !busy && Boolean(trimmedDisplayName) && Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply) && changed;
@@ -2729,6 +2736,8 @@ function BotConfigEditor({
       userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
       reviewGroupMessageReply: trimmedReviewGroupMessageReply,
       reviewNotificationEnabled,
+      reviewQueueAutoReminderEnabled,
+      reviewQueueReminderThresholdHours: normalizedReviewQueueReminderThresholdHours,
       autoFriendRequestApprovalEnabled,
       enabled,
     });
@@ -2774,6 +2783,24 @@ function BotConfigEditor({
                 <span className="block text-xs font-normal leading-5 text-slate-500">新稿件、撤回等通知由这个墙号发送。</span>
               </span>
               <Switch checked={reviewNotificationEnabled} onCheckedChange={setReviewNotificationEnabled} aria-label="发送稿件审核通知" />
+            </label>
+            <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <span>
+                超时自动催审
+                <span className="block text-xs font-normal leading-5 text-slate-500">待审核稿件超过阈值后在审核群 @全体成员。</span>
+              </span>
+              <Switch checked={reviewQueueAutoReminderEnabled} onCheckedChange={setReviewQueueAutoReminderEnabled} aria-label="超时自动催审" />
+            </label>
+            <label className="grid gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+              催审阈值（小时）
+              <Input
+                className="bg-white"
+                inputMode="numeric"
+                disabled={!reviewQueueAutoReminderEnabled}
+                value={reviewQueueReminderThresholdHours}
+                onChange={(event) => setReviewQueueReminderThresholdHours(event.target.value.replace(/\D/g, ""))}
+              />
+              <span className="text-[11px] font-normal text-slate-400">支持 1-168 小时；关闭自动催审后不会推送。</span>
             </label>
           </div>
           <div className="flex justify-end">
@@ -3109,6 +3136,8 @@ function PublishPanel({
                       enabled: target.botAccount.enabled,
                       reviewGroupId: null,
                       reviewNotificationEnabled: false,
+                      reviewQueueAutoReminderEnabled: false,
+                      reviewQueueReminderThresholdHours: 6,
                       autoFriendRequestApprovalEnabled: false,
                       connectionToken: target.botAccount.connectionToken,
                       publishTextTemplate: target.botAccount.publishTextTemplate,

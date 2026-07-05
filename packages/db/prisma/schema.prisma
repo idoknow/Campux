@@ -248,6 +248,7 @@ model Post {
   publishSummary  String?
   recallIgnored   Boolean          @default(false)
   recallIgnoredAt DateTime?
+  reviewQueueReminderSentAt DateTime?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -262,6 +263,7 @@ model Post {
   @@unique([tenantId, displayId])
   @@unique([tenantId, legacyDisplayId])
   @@index([tenantId, status, createdAt])
+  @@index([tenantId, status, reviewQueueReminderSentAt])
 }
 
 model PostTag {
@@ -337,6 +339,8 @@ model BotAccount {
   enabled        Boolean         @default(true)
   reviewGroupId  String?
   reviewNotificationEnabled Boolean @default(false)
+  reviewQueueAutoReminderEnabled Boolean @default(false)
+  reviewQueueReminderThresholdHours Int @default(6)
   autoFriendRequestApprovalEnabled Boolean @default(false)
   connectionToken String          @default(uuid())
   publishTextTemplate Json        @default("{\"includePostId\":true,\"includeAuthorMention\":false,\"includeLinks\":false,\"customText\":\"\"}")

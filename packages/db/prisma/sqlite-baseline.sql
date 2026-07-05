@@ -158,6 +158,7 @@ CREATE TABLE "Post" (
     "publishSummary" TEXT,
     "recallIgnored" BOOLEAN NOT NULL DEFAULT false,
     "recallIgnoredAt" DATETIME,
+    "reviewQueueReminderSentAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Post_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -228,6 +229,8 @@ CREATE TABLE "BotAccount" (
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "reviewGroupId" TEXT,
     "reviewNotificationEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "reviewQueueAutoReminderEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "reviewQueueReminderThresholdHours" INTEGER NOT NULL DEFAULT 6,
     "autoFriendRequestApprovalEnabled" BOOLEAN NOT NULL DEFAULT false,
     "connectionToken" TEXT NOT NULL,
     "publishTextTemplate" JSONB NOT NULL DEFAULT '{"includePostId":true,"includeAuthorMention":false,"includeLinks":false,"customText":""}',
@@ -494,6 +497,9 @@ CREATE INDEX "OAuthAccessToken_userId_createdAt_idx" ON "OAuthAccessToken"("user
 
 -- CreateIndex
 CREATE INDEX "Post_tenantId_status_createdAt_idx" ON "Post"("tenantId", "status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "Post_tenantId_status_reviewQueueReminderSentAt_idx" ON "Post"("tenantId", "status", "reviewQueueReminderSentAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Post_tenantId_displayId_key" ON "Post"("tenantId", "displayId");

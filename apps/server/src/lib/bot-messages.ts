@@ -864,3 +864,107 @@ export function formatBanNotify(tenantName: string, reason: string, endsAt: Date
 export function formatUnbanNotify(tenantName: string): string {
   return `你的账号在「${tenantName}」中已被解封，现在可以正常使用。`;
 }
+
+// ── 审核队列 ──────────────────────────────────────────
+
+export type ReviewQueueItem = {
+  displayId: number;
+  authorName: string;
+  authorQqUin: string;
+  anonymous: boolean;
+  text: string;
+  imageCount: number;
+  createdAt: Date;
+};
+
+const reviewQueuePreviewLimit = 40;
+export const reviewQueueDefaultDisplayLimit = 100;
+export const reviewQueueMessageMaxChars = 2500;
+
+function formatReviewQueueDuration(createdAt: Date, now: Date) {
+  const minutes = Math.max(0, Math.floor((now.getTime() - createdAt.getTime()) / 60_000));
+  if (minutes < 60) {
+    return `${Math.max(1, minutes)}分`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}小时${remainingMinutes}分` : `${hours}小时`;
+}
+
+function formatReviewQueuePreview(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "（无文字）";
+  }
+  return normalized.length > reviewQueuePreviewLimit
+    ? `${normalized.slice(0, reviewQueuePreviewLimit)}...`
+    : normalized;
+}
+
+function formatReviewQueueLine(item: ReviewQueueItem, index: number, now: Date) {
+  const authorName = item.authorName || "未命名";
+  const imageLabel = item.imageCount > 0 ? `图 ${item.imageCount}` : "无图";
+  const anonymousLabel = item.anonymous ? "匿名" : "实名";
+  return `${index + 1}. #${item.displayId} 等待 ${formatReviewQueueDuration(item.createdAt, now)}｜${authorName}(${item.authorQqUin})｜${anonymousLabel}｜${imageLabel}｜${formatReviewQueuePreview(item.text)}`;
+}
+
+export function formatReviewQueue(items: ReviewQueueItem[], now = new Date(), hiddenCount = 0): string[] {
+  if (items.length === 0 && hiddenCount <= 0) {
+    return ["当前没有待审核稿件"];
+  }
+  const total = items.length + Math.max(0, hiddenCount);
+  const lines = [`当前待审核队列：${total} 条`];
+  lines.push(...items.map((item, index) => formatReviewQueueLine(item, index, now)));
+  if (hiddenCount > 0) {
+    lines.push(`还有 ${hiddenCount} 条未展示，请到后台审核页查看完整队列。`);
+  }
+  lines.push("", "操作：#通过 <稿件id> / #拒绝 <理由> <稿件id>");
+  return lines;
+}
+
+export function formatReviewQueueMessages(items: ReviewQueueItem[], now = new Date(), hiddenCount = 0, maxChars = reviewQueueMessageMaxChars): string[] {
+  return chunkReviewQueueLines(formatReviewQueue(items, now, hiddenCount), maxChars);
+}
+
+export function formatReviewQueueReminder(items: ReviewQueueItem[], thresholdHours: number, now = new Date(), hiddenCount = 0): string[] {
+  if (items.length === 0 && hiddenCount <= 0) {
+    return ["审核队列提醒：当前没有超时待审核稿件。"];
+  }
+  const total = items.length + Math.max(0, hiddenCount);
+  const lines = [
+    `审核队列提醒：有 ${total} 条稿件已等待超过 ${thresholdHours} 小时，请尽快处理。`,
+    ...items.map((item, index) => formatReviewQueueLine(item, index, now)),
+  ];
+  if (hiddenCount > 0) {
+    lines.push(`还有 ${hiddenCount} 条未展示，请到后台审核页查看完整队列。`);
+  }
+  lines.push("", "操作：#审核队列 查看全部待审核稿件。");
+  return lines;
+}
+
+export function formatReviewQueueReminderMessages(items: ReviewQueueItem[], thresholdHours: number, now = new Date(), hiddenCount = 0, maxChars = reviewQueueMessageMaxChars): string[] {
+  return chunkReviewQueueLines(formatReviewQueueReminder(items, thresholdHours, now, hiddenCount), maxChars);
+}
+
+function chunkReviewQueueLines(lines: string[], maxChars: number): string[] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentLength = 0;
+  for (const line of lines) {
+    const nextLength = currentLength + line.length + (current.length > 0 ? 1 : 0);
+    if (current.length > 0 && nextLength > maxChars) {
+      chunks.push(current);
+      current = [];
+      currentLength = 0;
+    }
+    current.push(line);
+    currentLength += line.length + (current.length > 1 ? 1 : 0);
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  if (chunks.length <= 1) {
+    return [lines.join("\n")];
+  }
+  return chunks.map((chunk, index) => [`（${index + 1}/${chunks.length}）`, ...chunk].join("\n"));
+}
