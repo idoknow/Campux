@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
-import { api, createPostWithAttachments, CreatePostError, normalizePostFont } from "@/lib/api";
+import { api, createPostWithAttachments, CreatePostError } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
 import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata } from "@/types/app";
@@ -473,7 +473,7 @@ export function App() {
         remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
         postBgColor || undefined,
         postTextColor || undefined,
-        normalizePostFont(postFont),
+        postFont || undefined,
         anonymousAvatar || undefined,
       );
       clearAttachments();
