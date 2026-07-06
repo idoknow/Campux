@@ -15,6 +15,7 @@ import {
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
   resolvePrivatePostSemanticAction,
+  shouldHandleReviewGroupCommandForBot,
 } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
@@ -85,6 +86,47 @@ describe("review group ban command parsing", () => {
 
   test("审核群裸命令复用 CQ at 规范化", () => {
     expect(parseReviewGroupCommand("[CQ:at,qq=10000] ban 123456789 刷屏广告")).toEqual({ name: "ban", args: "123456789 刷屏广告" });
+  });
+});
+
+describe("review group multi-bot routing", () => {
+  test("未 @ 的审核群命令只由首选审核通知 Bot 处理", () => {
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-a",
+      currentBotQqUin: "10000",
+      mentionedBotQqUins: [],
+      preferredBotId: "bot-a",
+    })).toBe(true);
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-b",
+      currentBotQqUin: "20000",
+      mentionedBotQqUins: [],
+      preferredBotId: "bot-a",
+    })).toBe(false);
+  });
+
+  test("@ 指定 Bot 时由被 @ 的 Bot 处理", () => {
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-b",
+      currentBotQqUin: "20000",
+      mentionedBotQqUins: ["20000"],
+      preferredBotId: "bot-a",
+    })).toBe(true);
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-a",
+      currentBotQqUin: "10000",
+      mentionedBotQqUins: ["20000"],
+      preferredBotId: "bot-a",
+    })).toBe(false);
+  });
+
+  test("没有首选审核通知 Bot 时保持兼容由当前审核群 Bot 处理", () => {
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-b",
+      currentBotQqUin: "20000",
+      mentionedBotQqUins: [],
+      preferredBotId: null,
+    })).toBe(true);
   });
 });
 

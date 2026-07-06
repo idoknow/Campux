@@ -2256,8 +2256,13 @@ export class OneBotRuntime {
       return;
     }
 
-    // 如果消息 @ 了其他 bot 但不是当前 bot，跳过（对应 bot 会处理）
-    if (this.isMentioningOtherBot(event, botQqUin)) {
+    // 如果消息 @ 了其他 bot 但不是当前 bot，跳过（对应 bot 会处理）。未 @ 的审核群命令只由租户首选审核通知 Bot 响应，避免多 Bot 重复回复。
+    if (!shouldHandleReviewGroupCommandForBot({
+      currentBotId: bot.id,
+      currentBotQqUin: botQqUin,
+      mentionedBotQqUins: readMentionedQqUins(event),
+      preferredBotId: await this.findTenantReviewNotificationBot(bot.tenantId).then((candidate) => candidate?.id ?? null),
+    })) {
       return;
     }
 
@@ -3309,29 +3314,6 @@ export class OneBotRuntime {
     return text.trim() === intro || pattern.test(text.trim());
   }
 
-  /**
-   * 检查消息中是否 @ 了其他 bot（有 @ 但不是当前 bot）。
-   * 如果 @ 了别的 bot，当前 bot 应跳过处理。
-   */
-  private isMentioningOtherBot(event: OneBotMessageEvent, botQqUin: string): boolean {
-    if (typeof event.raw_message === "string" && /\[CQ:at,qq=\d+\]/.test(event.raw_message)) {
-      // 有 @ 且不是当前 bot
-      return !new RegExp(`\\[CQ:at,qq=${escapeRegex(botQqUin)}\\]`).test(event.raw_message);
-    }
-    if (Array.isArray(event.message)) {
-      const atSegments = event.message.filter((seg) => {
-        const item = seg as { type?: string };
-        return item.type === "at";
-      });
-      if (atSegments.length === 0) return false;
-      return atSegments.every((seg) => {
-        const item = seg as { data?: { qq?: string | number } };
-        return normalizeId(item.data?.qq) !== botQqUin;
-      });
-    }
-    return false;
-  }
-
   private async loadPostAttachmentSegments(attachments: unknown) {
     if (!this.config || !Array.isArray(attachments)) {
       return [];
@@ -3434,16 +3416,42 @@ function extractPlainText(event: OneBotMessageEvent) {
 }
 
 function isMentioningBot(event: OneBotMessageEvent, botQqUin: string) {
-  if (typeof event.raw_message === "string" && new RegExp(`\\[CQ:at,qq=${escapeRegex(botQqUin)}\\]`).test(event.raw_message)) {
-    return true;
+  return readMentionedQqUins(event).includes(botQqUin);
+}
+
+function readMentionedQqUins(event: OneBotMessageEvent) {
+  const mentions = new Set<string>();
+  if (typeof event.raw_message === "string") {
+    for (const match of event.raw_message.matchAll(/\[CQ:at,qq=(\d+)\]/g)) {
+      const qqUin = normalizeId(match[1]);
+      if (qqUin) {
+        mentions.add(qqUin);
+      }
+    }
   }
-  if (!Array.isArray(event.message)) {
-    return false;
+  if (Array.isArray(event.message)) {
+    for (const segment of event.message) {
+      const item = segment as { type?: string; data?: { qq?: string | number } };
+      const qqUin = item.type === "at" ? normalizeId(item.data?.qq) : null;
+      if (qqUin) {
+        mentions.add(qqUin);
+      }
+    }
   }
-  return event.message.some((segment) => {
-    const item = segment as { type?: string; data?: { qq?: string | number } };
-    return item.type === "at" && normalizeId(item.data?.qq) === botQqUin;
-  });
+  return [...mentions];
+}
+
+export function shouldHandleReviewGroupCommandForBot(input: {
+  currentBotId: string;
+  currentBotQqUin: string;
+  mentionedBotQqUins: string[];
+  preferredBotId: string | null;
+}) {
+  const mentioned = input.mentionedBotQqUins;
+  if (mentioned.length > 0) {
+    return mentioned.includes(input.currentBotQqUin);
+  }
+  return input.preferredBotId === null || input.preferredBotId === input.currentBotId;
 }
 
 function escapeRegex(value: string) {
