@@ -56,12 +56,21 @@ describe("private post AI semantic parsing", () => {
 
     expect(parsePrivatePostSemanticJson(JSON.stringify({
       intent: "command",
-      action: "取消提交",
+      action: "取消本次提交",
       text: "正文",
       anonymous: null,
       shouldSubmit: false,
       confidence: 0.8,
     }))?.action).toBe("cancel");
+
+    expect(parsePrivatePostSemanticJson(JSON.stringify({
+      intent: "command",
+      action: "撤回上一条内容",
+      text: "正文",
+      anonymous: null,
+      shouldSubmit: false,
+      confidence: 0.8,
+    }))?.action).toBe("undo");
   });
 
   test("fallback does not infer natural-language post intent without LLM", () => {

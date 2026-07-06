@@ -234,15 +234,18 @@ function normalizePrivatePostSemanticAction(action: unknown): PrivatePostSemanti
   if (typeof action !== "string") {
     return "none";
   }
-  const normalized = action.trim().toLowerCase();
-  if (/^(?:确认|确认提交|提交|发布|发布吧|发出去|结束|结束投稿|可以提交|可以发布|send|publish|confirm)$/.test(normalized)) {
-    return "submit";
+  const normalized = action.trim().toLowerCase().replace(/[\s，。！？!?,.；;：:、]/g, "");
+  if (!normalized) {
+    return "none";
   }
-  if (/^(?:取消|取消提交|取消投稿|取消本次投稿|算了|不投了|放弃|cancel)$/.test(normalized)) {
+  if (/^(?:undo|back)$/.test(normalized) || /撤回|撤销|删除上一|删掉刚才|返回上一步/.test(normalized)) {
+    return "undo";
+  }
+  if (/^(?:cancel)$/.test(normalized) || /取消|算了|不投|放弃/.test(normalized)) {
     return "cancel";
   }
-  if (/^(?:撤回|撤回上一条|撤回上一步|删除上一条|删掉刚才|undo|back)$/.test(normalized)) {
-    return "undo";
+  if (/^(?:send|publish|confirm)$/.test(normalized) || /确认|提交|发布|发出去|结束/.test(normalized)) {
+    return "submit";
   }
   return "none";
 }
