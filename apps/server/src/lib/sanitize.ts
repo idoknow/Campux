@@ -1,4 +1,5 @@
 import { URL } from "node:url";
+import { isDefaultFont } from "@campux/domain";
 import { prisma } from "./prisma";
 
 // ── 允许的背景色名称 ──────────────────────────────────
@@ -220,8 +221,8 @@ export function validateTextColor(value: string | null | undefined): boolean {
 }
 
 export function validateFont(value: string | null | undefined): boolean {
-  if (!value) return true;
-  return ALLOWED_FONTS.has(value);
+  if (isDefaultFont(value)) return true;
+  return typeof value === "string" && ALLOWED_FONTS.has(value);
 }
 
 /**

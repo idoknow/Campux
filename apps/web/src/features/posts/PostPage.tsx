@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
-import { FONT_OPTIONS } from "@campux/domain";
+import { FONT_OPTIONS, isDefaultFont } from "@campux/domain";
 import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
@@ -85,7 +85,7 @@ export function PostPage({
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
-  const hasNonDefaultFont = postFont && postFont !== "default";
+  const hasNonDefaultFont = !isDefaultFont(postFont);
 
   useEffect(() => {
     if (metadata.enableAnonymousAvatarSelection) {
@@ -373,7 +373,7 @@ export function PostPage({
                             : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                         }`}
                         onClick={() => onFontChange(postFont === opt.value ? "" : opt.value)}
-                        style={opt.value !== "default" && postFont === opt.value ? { fontFamily: opt.value } : {}}
+                        style={!isDefaultFont(opt.value) && postFont === opt.value ? { fontFamily: opt.value } : {}}
                       >
                         {opt.label}
                       </button>
