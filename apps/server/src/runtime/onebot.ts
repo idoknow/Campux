@@ -3545,10 +3545,18 @@ export function shouldConfirmPrivatePostSubmissionFromSemantic(semantic: Private
   if (action === "submit" || (semantic?.shouldSubmit === true && semantic.confidence >= 0.4)) {
     return { confirmed: true };
   }
-  if (action === "cancel") {
+  if (action === "cancel" || hasPrivatePostCancelSemanticCue(semantic)) {
     return { confirmed: false };
   }
   return null;
+}
+
+function hasPrivatePostCancelSemanticCue(semantic: PrivatePostSemanticResult | undefined) {
+  if (!semantic || semantic.confidence < 0.4 || semantic.shouldSubmit === true) {
+    return false;
+  }
+  const normalized = `${semantic.text}\n${semantic.reason}`.trim().replace(/[\s，。！？!?,.；;：:、]/g, "");
+  return /取消|算了|不投|放弃/.test(normalized);
 }
 
 export function resolvePrivatePostModeSelectionFromSemantic(semantic: PrivatePostSemanticResult | undefined) {

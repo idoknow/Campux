@@ -176,6 +176,21 @@ describe("private post semantic mode selection", () => {
     })).toEqual({ confirmed: true });
   });
 
+  test("AI 确认提交阶段从语义文本识别取消意图", () => {
+    for (const text of ["取消", "取消投稿", "确认取消投稿"]) {
+      expect(shouldConfirmPrivatePostSubmissionFromSemantic({
+        intent: "post",
+        action: "none",
+        text,
+        anonymous: null,
+        shouldSubmit: false,
+        sections: [text],
+        confidence: 0.82,
+        reason: "用户表达取消当前投稿",
+      })).toEqual({ confirmed: false });
+    }
+  });
+
   test("AI 草稿阶段普通内容应追加正文，不因语义非 post 被丢弃", () => {
     expect(shouldAppendPrivatePostContentForSemantic({
       intent: "chat",
