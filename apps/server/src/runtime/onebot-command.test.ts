@@ -163,6 +163,19 @@ describe("private post semantic mode selection", () => {
     })).toEqual({ confirmed: false });
   });
 
+  test("AI 确认提交阶段兼容只有 shouldSubmit 的语义结果", () => {
+    expect(shouldConfirmPrivatePostSubmissionFromSemantic({
+      intent: "post",
+      action: "none",
+      text: "正文",
+      anonymous: null,
+      shouldSubmit: true,
+      sections: ["正文"],
+      confidence: 0.82,
+      reason: "用户确认可以发布当前稿件",
+    })).toEqual({ confirmed: true });
+  });
+
   test("AI 草稿阶段普通内容应追加正文，不因语义非 post 被丢弃", () => {
     expect(shouldAppendPrivatePostContentForSemantic({
       intent: "chat",

@@ -3542,7 +3542,7 @@ export function shouldApplyPrivatePostSemanticText(semantic: PrivatePostSemantic
 
 export function shouldConfirmPrivatePostSubmissionFromSemantic(semantic: PrivatePostSemanticResult | undefined) {
   const action = resolvePrivatePostSemanticAction(semantic);
-  if (action === "submit") {
+  if (action === "submit" || (semantic?.shouldSubmit === true && semantic.confidence >= 0.4)) {
     return { confirmed: true };
   }
   if (action === "cancel") {

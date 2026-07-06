@@ -44,6 +44,26 @@ describe("private post AI semantic parsing", () => {
     expect(parsed?.sections).toEqual(["内容"]);
   });
 
+  test("normalizes Chinese semantic action values", () => {
+    expect(parsePrivatePostSemanticJson(JSON.stringify({
+      intent: "command",
+      action: "确认提交",
+      text: "正文",
+      anonymous: null,
+      shouldSubmit: true,
+      confidence: 0.8,
+    }))?.action).toBe("submit");
+
+    expect(parsePrivatePostSemanticJson(JSON.stringify({
+      intent: "command",
+      action: "取消提交",
+      text: "正文",
+      anonymous: null,
+      shouldSubmit: false,
+      confidence: 0.8,
+    }))?.action).toBe("cancel");
+  });
+
   test("fallback does not infer natural-language post intent without LLM", () => {
     const result = fallbackAnalyzePrivatePostSemantics({ messageText: "帮我匿名投稿：今天食堂阿姨特别好，可以直接发" });
     expect(result.intent).toBe("chat");

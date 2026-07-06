@@ -177,7 +177,7 @@ export function parsePrivatePostSemanticJson(raw: string): PrivatePostSemanticRe
   }
 
   const intent = parsed.intent === "post" || parsed.intent === "chat" || parsed.intent === "command" ? parsed.intent : "chat";
-  const action = parsed.action === "submit" || parsed.action === "cancel" || parsed.action === "undo" ? parsed.action : "none";
+  const action = normalizePrivatePostSemanticAction(parsed.action);
   const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
   const sections = Array.isArray(parsed.sections)
     ? parsed.sections.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 20)
@@ -225,6 +225,26 @@ function splitPostSections(text: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 20);
+}
+
+function normalizePrivatePostSemanticAction(action: unknown): PrivatePostSemanticResult["action"] {
+  if (action === "submit" || action === "cancel" || action === "undo") {
+    return action;
+  }
+  if (typeof action !== "string") {
+    return "none";
+  }
+  const normalized = action.trim().toLowerCase();
+  if (/^(?:确认|确认提交|提交|发布|发布吧|发出去|结束|结束投稿|可以提交|可以发布|send|publish|confirm)$/.test(normalized)) {
+    return "submit";
+  }
+  if (/^(?:取消|取消提交|取消投稿|取消本次投稿|算了|不投了|放弃|cancel)$/.test(normalized)) {
+    return "cancel";
+  }
+  if (/^(?:撤回|撤回上一条|撤回上一步|删除上一条|删掉刚才|undo|back)$/.test(normalized)) {
+    return "undo";
+  }
+  return "none";
 }
 
 function isCasualCrowdQuestion(text: string) {
