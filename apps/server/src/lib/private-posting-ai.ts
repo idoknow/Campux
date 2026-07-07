@@ -150,13 +150,27 @@ export function normalizePrivatePostSemanticResult(
   result: PrivatePostSemanticResult,
   context: { messageText: string; hasCurrentDraft?: boolean | undefined; imageCount?: number | undefined },
 ): PrivatePostSemanticResult {
-  if (result.intent !== "post") {
-    return result;
-  }
-
   const messageText = context.messageText.trim();
   const hasCurrentDraft = Boolean(context.hasCurrentDraft);
   const imageCount = context.imageCount ?? 0;
+
+  if (result.intent !== "post") {
+    if (!hasCurrentDraft && isExplicitPrivatePostRequest(messageText)) {
+      const postText = stripPrivatePostRequestText(result.text || messageText);
+      return {
+        ...result,
+        intent: "post",
+        action: result.shouldSubmit ? "submit" : result.action,
+        text: postText,
+        anonymous: result.anonymous ?? inferAnonymousPreference(messageText),
+        sections: splitPostSections(postText),
+        confidence: Math.max(result.confidence, 0.65),
+        reason: appendReason(result.reason, "explicit_private_post_request"),
+      };
+    }
+    return result;
+  }
+
   if (!hasCurrentDraft && imageCount === 0 && isCasualCrowdQuestion(messageText)) {
     return {
       ...defaultSemanticResult,
@@ -265,6 +279,46 @@ function isCasualCrowdQuestion(text: string) {
   const hasCasualCue = /好奇|想问|问问|问一下|有人知道|有无|有没有/.test(normalized);
   const hasPostCue = /投稿|发墙|上墙|帮我发|帮忙发|匿名|实名|求扩|墙墙|墙墙帮|提交|发出去|发布|谢谢/.test(normalized);
   return !hasPostCue && hasQuestionCue && (hasCrowdCue || hasCasualCue);
+}
+
+function isExplicitPrivatePostRequest(text: string) {
+  const normalized = text.trim().replace(/\s+/g, "");
+  if (!normalized) {
+    return false;
+  }
+  const hasDirectPostCue = /发墙|上墙|投到墙|帮我发|帮忙发|代发|墙墙投稿|墙墙帮(?:我)?发/.test(normalized) || /(?:^|[\n。！？!?，,；;：:])投稿(?:$|[\n。！？!?，,；;：:])/.test(text);
+  const hasContextualPostCue = /匿名|实名|不匿名|谢谢|感谢|辛苦墙|谢谢墙/.test(normalized);
+  const hasQuestionBody = /问问|问一下|想问|咋了|怎么了|多久|好久|为啥|为什么|吗|嘛|么|啥|什么|怎么样|咋样|如何|多少|几|\?|？/.test(normalized);
+  return hasDirectPostCue || (hasContextualPostCue && hasQuestionBody && normalized.length >= 12);
+}
+
+function inferAnonymousPreference(text: string) {
+  const normalized = text.trim().replace(/\s+/g, "");
+  if (/不匿名|不要匿名|别匿名|实名|署名|显示名字/.test(normalized) && !/别显示名字|不要显示名字/.test(normalized)) {
+    return false;
+  }
+  if (/匿名|别显示名字|不要显示名字/.test(normalized)) {
+    return true;
+  }
+  return null;
+}
+
+function stripPrivatePostRequestText(text: string) {
+  return text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^(?:请|麻烦|帮我|帮忙)?(?:投稿|发墙|上墙|代发)[:：,，。\s]*/g, ""))
+    .map((line) => line.replace(/(?:(?:谢谢|感谢|辛苦)(?:墙|墙墙)?|谢谢墙|不要匿名|别匿名|不匿名|匿名|实名)+[。！!，,\s]*$/g, ""))
+    .filter((line) => !isPrivatePostControlLine(line))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function isPrivatePostControlLine(text: string) {
+  const normalized = text.trim().replace(/[\s，。！？!?,.；;：:、]/g, "");
+  return /^(?:墙墙投稿|投稿|发墙|上墙|谢谢墙|谢谢墙墙|谢谢|感谢|辛苦墙|匿名|实名|不匿名|别显示名字|不要显示名字)$/.test(normalized);
 }
 
 function appendReason(reason: unknown, marker: string) {

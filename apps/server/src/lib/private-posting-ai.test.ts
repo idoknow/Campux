@@ -184,6 +184,115 @@ describe("private post AI semantic parsing", () => {
     expect(result.shouldSubmit).toBe(true);
   });
 
+  test("normalization upgrades weak-model chat result for aggregated multi-message wall post", () => {
+    const messageText = [
+      "墙墙投稿",
+      "我想问问另外一个墙咋了",
+      "我的稿件好久没发了",
+      "谢谢墙",
+      "匿名",
+    ].join("\n");
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "chat",
+        action: "none",
+        text: messageText,
+        anonymous: null,
+        shouldSubmit: false,
+        sections: ["墙墙投稿", "我想问问另外一个墙咋了", "我的稿件好久没发了", "谢谢墙", "匿名"],
+        confidence: 0.72,
+        reason: "模型将问句误判为咨询",
+      },
+      { messageText, hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("post");
+    expect(result.anonymous).toBe(true);
+    expect(result.text).toBe("我想问问另外一个墙咋了\n我的稿件好久没发了");
+    expect(result.sections).toEqual(["我想问问另外一个墙咋了", "我的稿件好久没发了"]);
+    expect(result.reason).toContain("explicit_private_post_request");
+  });
+
+  test("normalization keeps casual wall chat as chat", () => {
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "chat",
+        action: "none",
+        text: "",
+        anonymous: null,
+        shouldSubmit: false,
+        sections: [],
+        confidence: 0.8,
+        reason: "普通咨询",
+      },
+      { messageText: "墙墙在吗", hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("chat");
+  });
+
+  test("normalization infers anonymous preference from do-not-show-name phrasing", () => {
+    const messageText = "墙墙投稿\n我想问问另外一个墙咋了\n不要显示名字";
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "chat",
+        action: "none",
+        text: messageText,
+        anonymous: null,
+        shouldSubmit: false,
+        sections: ["墙墙投稿", "我想问问另外一个墙咋了", "不要显示名字"],
+        confidence: 0.72,
+        reason: "模型将问句误判为咨询",
+      },
+      { messageText, hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("post");
+    expect(result.anonymous).toBe(true);
+    expect(result.text).toBe("我想问问另外一个墙咋了");
+  });
+
+  test("normalization infers non-anonymous preference before anonymous substring", () => {
+    for (const modeLine of ["不匿名", "不要匿名", "别匿名"]) {
+      const messageText = `墙墙投稿\n我想问问另外一个墙咋了\n${modeLine}`;
+      const result = normalizePrivatePostSemanticResult(
+        {
+          intent: "chat",
+          action: "none",
+          text: messageText,
+          anonymous: null,
+          shouldSubmit: false,
+          sections: ["墙墙投稿", "我想问问另外一个墙咋了", modeLine],
+          confidence: 0.72,
+          reason: "模型将问句误判为咨询",
+        },
+        { messageText, hasCurrentDraft: false, imageCount: 0 },
+      );
+
+      expect(result.intent).toBe("post");
+      expect(result.anonymous).toBe(false);
+      expect(result.text).toBe("我想问问另外一个墙咋了");
+    }
+  });
+
+  test("normalization keeps how-to-submit question as chat", () => {
+    const result = normalizePrivatePostSemanticResult(
+      {
+        intent: "chat",
+        action: "none",
+        text: "",
+        anonymous: null,
+        shouldSubmit: false,
+        sections: [],
+        confidence: 0.8,
+        reason: "流程咨询",
+      },
+      { messageText: "如何投稿", hasCurrentDraft: false, imageCount: 0 },
+    );
+
+    expect(result.intent).toBe("chat");
+  });
+
   test("uses custom private post prompt as full system prompt", () => {
     const customPrompt = "请判断以下内容是否为校园墙稿件，只返回 JSON";
     const prompt = buildPrivatePostSystemPrompt(customPrompt);
