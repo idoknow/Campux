@@ -82,7 +82,7 @@ const underlineExtension = {
 
 marked.use(underlineExtension);
 
-let cachedFontCss: string | null = null;
+const cachedFontCssByName = new Map<string, string>();
 
 export function getRenderableFontFiles(): Record<string, string> {
   return { ...FONT_FILE_MAP };
@@ -104,25 +104,29 @@ function resolveFontDir(): string {
   return path.join(projectRoot, "font");
 }
 
-function getFontCss(): string {
-  if (cachedFontCss) return cachedFontCss;
+export function getRenderableFontCss(font: string | null | undefined): string {
+  if (!font || font === "default") return "";
+  const cached = cachedFontCssByName.get(font);
+  if (cached !== undefined) return cached;
 
   const fontDir = resolveFontDir();
-  const rules: string[] = [];
-
-  for (const [name, fileName] of Object.entries(FONT_FILE_MAP)) {
-    const filePath = path.join(fontDir, fileName);
-    try {
-      const buffer = readFileSync(filePath);
-      const b64 = buffer.toString("base64");
-      rules.push(`@font-face { font-family: "${name}"; src: url("data:font/ttf;base64,${b64}") format("truetype"); }`);
-    } catch {
-      // 字体文件不可用时跳过，回退系统字体
-    }
+  const fileName = FONT_FILE_MAP[font];
+  if (!fileName) {
+    cachedFontCssByName.set(font, "");
+    return "";
   }
 
-  cachedFontCss = rules.join("\n");
-  return cachedFontCss;
+  try {
+    const filePath = path.join(fontDir, fileName);
+    const buffer = readFileSync(filePath);
+    const b64 = buffer.toString("base64");
+    const css = `@font-face { font-family: "${font}"; src: url("data:font/ttf;base64,${b64}") format("truetype"); }`;
+    cachedFontCssByName.set(font, css);
+    return css;
+  } catch {
+    cachedFontCssByName.set(font, "");
+    return "";
+  }
 }
 
 export type RenderPostCardInput = {
@@ -197,7 +201,7 @@ async function renderPostCardInner(input: RenderPostCardInput): Promise<Uint8Arr
 
   try {
     const font = input.font && input.font !== "default" ? input.font : null;
-    const fontCss = font ? getFontCss() : "";
+    const fontCss = getRenderableFontCss(font);
 
     await page.setContent(await renderPostHtml(input), {
       waitUntil: "load",
