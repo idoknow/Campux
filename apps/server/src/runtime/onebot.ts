@@ -3520,10 +3520,16 @@ export function shouldRunPrivatePostKeywordCommand(aiIntakeEnabled: boolean) {
 }
 
 export function resolvePrivatePostSemanticAction(semantic: PrivatePostSemanticResult | undefined) {
-  if (!semantic || semantic.confidence < 0.4 || semantic.action === "none") {
+  if (!semantic || semantic.confidence < 0.4) {
     return null;
   }
-  return semantic.action;
+  if (semantic.action !== "none") {
+    return semantic.action;
+  }
+  if (hasPrivatePostCancelSemanticCue(semantic)) {
+    return "cancel";
+  }
+  return null;
 }
 
 export function shouldAppendPrivatePostContentForSemantic(semantic: PrivatePostSemanticResult | undefined) {
@@ -3555,8 +3561,11 @@ function hasPrivatePostCancelSemanticCue(semantic: PrivatePostSemanticResult | u
   if (!semantic || semantic.confidence < 0.4 || semantic.shouldSubmit === true) {
     return false;
   }
-  const normalized = `${semantic.text}\n${semantic.reason}`.trim().replace(/[\s，。！？!?,.；;：:、]/g, "");
-  return /取消|算了|不投|放弃/.test(normalized);
+  const normalizedText = semantic.text.trim().replace(/[\s，。！？!?,.；;：:、]/g, "");
+  if (!normalizedText || normalizedText.length > 12) {
+    return false;
+  }
+  return /^(取消|取消投稿|确认取消|确认取消投稿|算了|不投了?|不想投了?|不要投了?|不发了?|放弃|放弃投稿|撤销稿件|撤稿)$/.test(normalizedText);
 }
 
 export function resolvePrivatePostModeSelectionFromSemantic(semantic: PrivatePostSemanticResult | undefined) {
