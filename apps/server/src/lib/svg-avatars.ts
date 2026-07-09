@@ -4,10 +4,10 @@ import path from "node:path";
 /**
  * Resolve the project root by walking up from this file's location.
  * This file: apps/server/src/lib/svg-avatars.ts
- * Project root: apps/server/src/lib/../../..
+ * Project root: apps/server/src/lib/../../../..
  */
 function resolveProjectRoot(): string {
-  return path.resolve(import.meta.dirname!, "..", "..", "..");
+  return path.resolve(import.meta.dirname!, "..", "..", "..", "..");
 }
 
 function resolveSvgDir(): string {
@@ -25,7 +25,7 @@ export function listSvgAvatars(): string[] {
   const svgDir = resolveSvgDir();
   try {
     const files = readdirSync(svgDir);
-    return files.filter((f) => f.endsWith(".svg")).sort();
+    return files.filter((file: string) => file.endsWith(".svg")).sort();
   } catch {
     return [];
   }

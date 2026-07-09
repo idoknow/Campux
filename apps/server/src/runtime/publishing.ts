@@ -96,6 +96,37 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
 }
 
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
+  const post = await prisma.post.findUnique({
+    where: {
+      id: postId,
+    },
+    select: {
+      id: true,
+      status: true,
+      attempts: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  if (!post) {
+    return [];
+  }
+
+  if (post.status === "published") {
+    return [];
+  }
+
+  const hasActiveOrSucceededAttempt = post.attempts.some((attempt: { status: string }) =>
+    attempt.status === "queued" || attempt.status === "running" || attempt.status === "succeeded",
+  );
+  if (hasActiveOrSucceededAttempt) {
+    return [];
+  }
+
   const targets = await prisma.publishTarget.findMany({
     where: {
       tenantId,
@@ -172,6 +203,12 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
   const batch = await prisma.publishBatch.findUnique({
     where: { id: batchId },
     include: {
+      attempts: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
       items: {
         orderBy: { position: "asc" },
         select: { postId: true },
@@ -180,6 +217,17 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
   });
 
   if (!batch || batch.items.length === 0) {
+    return [];
+  }
+
+  if (batch.status === "published") {
+    return [];
+  }
+
+  const hasActiveOrSucceededAttempt = batch.attempts.some((attempt: { status: string }) =>
+    attempt.status === "queued" || attempt.status === "running" || attempt.status === "succeeded",
+  );
+  if (hasActiveOrSucceededAttempt) {
     return [];
   }
 
@@ -577,6 +625,49 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     });
     await refreshAttemptPostStatuses(attempt);
     return;
+  }
+
+  if (!attempt.batch) {
+    if (attempt.post.status === "published") {
+      await prisma.publishAttempt.update({
+        where: {
+          id: attempt.id,
+        },
+        data: {
+          status: "skipped",
+          lastError: "稿件已发布，跳过重复任务",
+        },
+      });
+      await refreshAttemptPostStatuses(attempt);
+      return;
+    }
+
+    const hasSucceededSibling = await prisma.publishAttempt.findFirst({
+      where: {
+        postId: attempt.postId,
+        publishTargetId: attempt.publishTargetId,
+        status: "succeeded",
+        id: {
+          not: attempt.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (hasSucceededSibling) {
+      await prisma.publishAttempt.update({
+        where: {
+          id: attempt.id,
+        },
+        data: {
+          status: "skipped",
+          lastError: "发布目标已有成功记录，跳过重复任务",
+        },
+      });
+      await refreshAttemptPostStatuses(attempt);
+      return;
+    }
   }
 
   try {
