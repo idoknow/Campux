@@ -19,6 +19,13 @@ import type { RuntimeJob, RuntimeQueue } from "./queue";
 const maxPublishAttempts = 3;
 export const defaultPublishIntervalSeconds = 10;
 
+const activePublishAttemptStatuses = new Set(["queued", "running", "succeeded"]);
+
+const publishSkipReasons = {
+  postAlreadyPublished: "稿件已发布，跳过重复任务",
+  targetAlreadySucceeded: "发布目标已有成功记录，跳过重复任务",
+} as const;
+
 type PublishScheduleClient = typeof prisma | Prisma.TransactionClient;
 
 type PublishingNotifier = {
@@ -34,6 +41,10 @@ type ImagePayload = {
   url?: string;
   fileName?: string;
 };
+
+function hasActiveOrSucceededAttempts(attempts: Array<{ status: string }>) {
+  return attempts.some((attempt) => activePublishAttemptStatuses.has(attempt.status));
+}
 
 export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, notifier?: PublishingNotifier) {
   queue.registerHandler("publishPost", async (job) => {
@@ -120,9 +131,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     return [];
   }
 
-  const hasActiveOrSucceededAttempt = post.publishAttempts.some((attempt: { status: string }) =>
-    attempt.status === "queued" || attempt.status === "running" || attempt.status === "succeeded",
-  );
+  const hasActiveOrSucceededAttempt = hasActiveOrSucceededAttempts(post.publishAttempts);
   if (hasActiveOrSucceededAttempt) {
     return [];
   }
@@ -224,9 +233,7 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
     return [];
   }
 
-  const hasActiveOrSucceededAttempt = batch.attempts.some((attempt: { status: string }) =>
-    attempt.status === "queued" || attempt.status === "running" || attempt.status === "succeeded",
-  );
+  const hasActiveOrSucceededAttempt = hasActiveOrSucceededAttempts(batch.attempts);
   if (hasActiveOrSucceededAttempt) {
     return [];
   }
@@ -635,7 +642,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         },
         data: {
           status: "skipped",
-          lastError: "稿件已发布，跳过重复任务",
+          lastError: publishSkipReasons.postAlreadyPublished,
         },
       });
       await refreshAttemptPostStatuses(attempt);
@@ -662,7 +669,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         },
         data: {
           status: "skipped",
-          lastError: "发布目标已有成功记录，跳过重复任务",
+          lastError: publishSkipReasons.targetAlreadySucceeded,
         },
       });
       await refreshAttemptPostStatuses(attempt);
