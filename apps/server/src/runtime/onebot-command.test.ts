@@ -256,6 +256,28 @@ describe("private post semantic mode selection", () => {
         reason: "用户表达取消当前投稿编辑",
       })).toBe("cancel");
     }
+    for (const text of ["撤回投稿", "撤销投稿", "撤销稿件"]) {
+      expect(resolvePrivatePostSemanticAction({
+        intent: "command",
+        action: "undo",
+        text,
+        anonymous: null,
+        shouldSubmit: false,
+        sections: [],
+        confidence: 0.82,
+        reason: "用户想撤回本次投稿",
+      })).toBe("cancel");
+    }
+    expect(resolvePrivatePostSemanticAction({
+      intent: "command",
+      action: "none",
+      text: "",
+      anonymous: null,
+      shouldSubmit: false,
+      sections: [],
+      confidence: 0.82,
+      reason: "用户明确表示取消投稿",
+    })).toBe("cancel");
     expect(resolvePrivatePostSemanticAction({
       intent: "post",
       action: "none",

@@ -73,6 +73,34 @@ describe("private post AI semantic parsing", () => {
     }))?.action).toBe("undo");
   });
 
+  test("fallback detects existing-draft cancellation controls without LLM", () => {
+    for (const messageText of ["取消", "取消投稿", "撤销稿件", "撤回投稿"]) {
+      const result = fallbackAnalyzePrivatePostSemantics({
+        messageText,
+        currentDraftText: "原稿内容",
+        hasCurrentDraft: true,
+      });
+      expect(result.intent).toBe("command");
+      expect(result.action).toBe("cancel");
+      expect(result.text).toBe("");
+      expect(result.sections).toEqual([]);
+      expect(result.reason).toBe("fallback_cancel_current_draft");
+    }
+  });
+
+  test("fallback detects existing-draft undo controls without LLM", () => {
+    const result = fallbackAnalyzePrivatePostSemantics({
+      messageText: "撤回上一条",
+      currentDraftText: "原稿内容",
+      hasCurrentDraft: true,
+    });
+    expect(result.intent).toBe("command");
+    expect(result.action).toBe("undo");
+    expect(result.text).toBe("");
+    expect(result.sections).toEqual([]);
+    expect(result.reason).toBe("fallback_undo_current_draft");
+  });
+
   test("fallback does not infer natural-language post intent without LLM", () => {
     const result = fallbackAnalyzePrivatePostSemantics({ messageText: "帮我匿名投稿：今天食堂阿姨特别好，可以直接发" });
     expect(result.intent).toBe("chat");

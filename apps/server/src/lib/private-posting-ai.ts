@@ -36,12 +36,44 @@ const defaultSemanticResult: PrivatePostSemanticResult = {
 
 const commandLikePattern = /^\s*(?:#|＃|\/|！|!)[\s\S]{1,40}$/;
 
+function parseExistingDraftFallbackControl(messageText: string): PrivatePostSemanticResult | null {
+  const normalized = messageText.trim().replace(/[\s，。！？!?,.；;：:、]/g, "");
+  if (!normalized || normalized.length > 12) {
+    return null;
+  }
+  if (/^(取消|取消投稿|确认取消|确认取消投稿|取消本次投稿|算了|不投了?|不想投了?|不要投了?|不发了?|放弃|放弃投稿|撤销稿件|撤销投稿|撤回投稿|撤稿)$/.test(normalized)) {
+    return {
+      ...defaultSemanticResult,
+      intent: "command",
+      action: "cancel",
+      confidence: 0.7,
+      reason: "fallback_cancel_current_draft",
+    };
+  }
+  if (/^(撤回|撤回上一条|撤回上一步)$/.test(normalized)) {
+    return {
+      ...defaultSemanticResult,
+      intent: "command",
+      action: "undo",
+      confidence: 0.7,
+      reason: "fallback_undo_current_draft",
+    };
+  }
+  return null;
+}
+
 export function fallbackAnalyzePrivatePostSemantics(input: {
   messageText: string;
   currentDraftText?: string | undefined;
   hasCurrentDraft?: boolean | undefined;
 }): PrivatePostSemanticResult {
   const messageText = input.messageText.trim();
+  if (input.hasCurrentDraft) {
+    const draftControl = parseExistingDraftFallbackControl(messageText);
+    if (draftControl) {
+      return draftControl;
+    }
+  }
   if (commandLikePattern.test(messageText)) {
     return { ...defaultSemanticResult, intent: "command", reason: "command_like_without_llm" };
   }
