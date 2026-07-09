@@ -103,7 +103,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     select: {
       id: true,
       status: true,
-      attempts: {
+      publishAttempts: {
         select: {
           id: true,
           status: true,
@@ -120,7 +120,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     return [];
   }
 
-  const hasActiveOrSucceededAttempt = post.attempts.some((attempt: { status: string }) =>
+  const hasActiveOrSucceededAttempt = post.publishAttempts.some((attempt: { status: string }) =>
     attempt.status === "queued" || attempt.status === "running" || attempt.status === "succeeded",
   );
   if (hasActiveOrSucceededAttempt) {
