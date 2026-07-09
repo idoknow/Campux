@@ -5,14 +5,25 @@ ARG BUN_VERSION=1.3.12
 FROM oven/bun:${BUN_VERSION}-alpine AS build
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache git openssl
 
 COPY package.json bun.lock tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
-# 注：自定义字体（「字体选择」雕花功能）默认不随仓库分发，避免数十 MB TTF 进 git 历史。
-# packages/render 在 <项目根>/font 缺失时会自动回退到下方 apk 安装的 noto-cjk 系统字体。
-# 自托管者若需启用该功能，可自行在此 COPY 字体目录。
+RUN git clone --depth=1 https://github.com/idoknow/Campux-ttf.git /tmp/Campux-ttf \
+	&& mkdir -p /app/font \
+	&& cp /tmp/Campux-ttf/BeiShiDaJiaGuWenZiTi-1.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/chengmingshouxieti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/hanchanhuokaiti.otf /app/font/ \
+	&& cp /tmp/Campux-ttf/lipinhuiziyouluoti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/yishanbeizhuanti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/cascadianextjianti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/hanchanbanyuanti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/hongmengsansscmediumziti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/linhailishu.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/namidiansong.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/siyuanyuanti.ttf /app/font/ \
+	&& cp /tmp/Campux-ttf/zhouzisongti.otf /app/font/
 
 RUN bun install --frozen-lockfile
 RUN bun run db:generate
@@ -35,6 +46,7 @@ ENV TZ=Asia/Shanghai
 ENV CAMPUX_SERVER_HOST=0.0.0.0
 ENV CAMPUX_SERVER_PORT=8989
 ENV CAMPUX_WEB_DIST_DIR=/app/apps/web/dist
+ENV CAMPUX_FONT_DIR=/app/font
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 COPY --from=build /app /app

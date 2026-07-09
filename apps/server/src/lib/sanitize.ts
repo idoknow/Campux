@@ -1,5 +1,5 @@
 import { URL } from "node:url";
-import { isDefaultFont } from "@campux/domain";
+import { FONT_OPTIONS, isDefaultFont } from "@campux/domain";
 import { prisma } from "./prisma";
 
 // ── 允许的背景色名称 ──────────────────────────────────
@@ -15,12 +15,7 @@ const ALLOWED_BG_COLORS = new Set([
 
 // ── 允许的字体名称 ────────────────────────────────────
 const ALLOWED_FONTS = new Set([
-  "beinidekeaitianyunle",
-  "dunhuangfeitiankai",
-  "mengxiangchaoyanningti",
-  "unifontdianzhenhei",
-  "zhuoteqingyati",
-  "zihuisongkexietiw4",
+  ...FONT_OPTIONS.filter((font) => !isDefaultFont(font.value)).map((font) => font.value),
 ]);
 
 // ── 允许的文字颜色名称 ────────────────────────────────
