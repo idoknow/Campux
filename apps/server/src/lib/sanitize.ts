@@ -14,7 +14,7 @@ const ALLOWED_BG_COLORS = new Set([
 ]);
 
 // ── 允许的字体名称 ────────────────────────────────────
-const ALLOWED_FONTS = new Set([
+const ALLOWED_FONTS = new Set<string>([
   ...FONT_OPTIONS.filter((font) => !isDefaultFont(font.value)).map((font) => font.value),
 ]);
 
