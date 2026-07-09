@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { FONT_FILE_MAP } from "@campux/domain";
 import type { Browser } from "playwright-core";
 import { marked, Tokens } from "marked";
 
@@ -81,17 +82,11 @@ const underlineExtension = {
 
 marked.use(underlineExtension);
 
-// ── 字体 base64 内联（Playwright 无 HTTP 服务，URL 无法解析） ──────────
-const FONT_FILES: Record<string, string> = {
-  beinidekeaitianyunle: "beinidekeaitianyunle.ttf",
-  dunhuangfeitiankai: "dunhuangfeitiankai.ttf",
-  mengxiangchaoyanningti: "mengxiangchaoyanningti.ttf",
-  unifontdianzhenhei: "unifontdianzhenhei.ttf",
-  zhuoteqingyati: "zhuoteqingyati.ttf",
-  zihuisongkexietiw4: "zihuisongkexietiw4.ttf",
-};
-
 let cachedFontCss: string | null = null;
+
+export function getRenderableFontFiles(): Record<string, string> {
+  return { ...FONT_FILE_MAP };
+}
 
 /**
  * 定位 font/ 目录。
@@ -115,7 +110,7 @@ function getFontCss(): string {
   const fontDir = resolveFontDir();
   const rules: string[] = [];
 
-  for (const [name, fileName] of Object.entries(FONT_FILES)) {
+  for (const [name, fileName] of Object.entries(FONT_FILE_MAP)) {
     const filePath = path.join(fontDir, fileName);
     try {
       const buffer = readFileSync(filePath);
