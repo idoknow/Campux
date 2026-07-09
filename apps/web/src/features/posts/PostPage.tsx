@@ -4,6 +4,7 @@ import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS, isDefaultFont } from "@campux/domain";
 import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
+import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,21 +81,12 @@ export function PostPage({
   const [fontPreviewOpen, setFontPreviewOpen] = useState(false);
   const [fontPreviewUrl, setFontPreviewUrl] = useState<string | null>(null);
   const [fontPreviewLoading, setFontPreviewLoading] = useState(false);
-  const [svgAvatars, setSvgAvatars] = useState<string[]>([]);
+  const svgAvatars = builtInSvgAvatarFilenames;
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
   const hasNonDefaultFont = !isDefaultFont(postFont);
-
-  useEffect(() => {
-    if (metadata.enableAnonymousAvatarSelection) {
-      fetch("/api/svg/avatars")
-        .then((res) => res.json() as Promise<{ avatars: string[] }>)
-        .then((data) => setSvgAvatars(data.avatars))
-        .catch(() => { /* silently ignore */ });
-    }
-  }, [metadata.enableAnonymousAvatarSelection]);
 
   // 关闭匿名时清除已选头像
   useEffect(() => {
