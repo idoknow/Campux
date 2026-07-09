@@ -19,6 +19,13 @@ import type { RuntimeJob, RuntimeQueue } from "./queue";
 const maxPublishAttempts = 3;
 export const defaultPublishIntervalSeconds = 10;
 
+const duplicateBlockingPublishAttemptStatuses = new Set(["queued", "running", "succeeded"]);
+
+const publishSkipReasons = {
+  postAlreadyPublished: "稿件已发布，跳过重复任务",
+  targetAlreadySucceeded: "发布目标已有成功记录，跳过重复任务",
+} as const;
+
 type PublishScheduleClient = typeof prisma | Prisma.TransactionClient;
 
 type PublishingNotifier = {
@@ -34,6 +41,34 @@ type ImagePayload = {
   url?: string;
   fileName?: string;
 };
+
+function hasActiveOrSucceededAttempts(attempts: Array<{ status: string }>) {
+  return attempts.some((attempt) => duplicateBlockingPublishAttemptStatuses.has(attempt.status));
+}
+
+function shouldSkipPublishFanout(options: {
+  ownerStatus: string;
+  attempts: Array<{ status: string }>;
+}) {
+  if (options.ownerStatus === "published") {
+    return true;
+  }
+
+  return hasActiveOrSucceededAttempts(options.attempts);
+}
+
+async function markPublishAttemptSkipped(attemptId: string, attempt: { postId: string; batchId: string | null }, reason: string) {
+  await prisma.publishAttempt.update({
+    where: {
+      id: attemptId,
+    },
+    data: {
+      status: "skipped",
+      lastError: reason,
+    },
+  });
+  await refreshAttemptPostStatuses(attempt);
+}
 
 export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, notifier?: PublishingNotifier) {
   queue.registerHandler("publishPost", async (job) => {
@@ -96,6 +131,35 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
 }
 
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
+  const post = await prisma.post.findUnique({
+    where: {
+      id: postId,
+    },
+    select: {
+      id: true,
+      status: true,
+      publishAttempts: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  if (!post) {
+    return [];
+  }
+
+  if (
+    shouldSkipPublishFanout({
+      ownerStatus: post.status,
+      attempts: post.publishAttempts,
+    })
+  ) {
+    return [];
+  }
+
   const targets = await prisma.publishTarget.findMany({
     where: {
       tenantId,
@@ -172,6 +236,12 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
   const batch = await prisma.publishBatch.findUnique({
     where: { id: batchId },
     include: {
+      attempts: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
       items: {
         orderBy: { position: "asc" },
         select: { postId: true },
@@ -180,6 +250,15 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
   });
 
   if (!batch || batch.items.length === 0) {
+    return [];
+  }
+
+  if (
+    shouldSkipPublishFanout({
+      ownerStatus: batch.status,
+      attempts: batch.attempts,
+    })
+  ) {
     return [];
   }
 
@@ -566,17 +645,33 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   }
 
   if (!attempt.publishTarget.enabled || !attempt.publishTarget.botAccount.enabled) {
-    await prisma.publishAttempt.update({
+    await markPublishAttemptSkipped(attempt.id, attempt, "发布目标已停用");
+    return;
+  }
+
+  if (!attempt.batch) {
+    if (attempt.post.status === "published") {
+      await markPublishAttemptSkipped(attempt.id, attempt, publishSkipReasons.postAlreadyPublished);
+      return;
+    }
+
+    const hasSucceededSibling = await prisma.publishAttempt.findFirst({
       where: {
-        id: attempt.id,
+        postId: attempt.postId,
+        publishTargetId: attempt.publishTargetId,
+        status: "succeeded",
+        id: {
+          not: attempt.id,
+        },
       },
-      data: {
-        status: "skipped",
-        lastError: "发布目标已停用",
+      select: {
+        id: true,
       },
     });
-    await refreshAttemptPostStatuses(attempt);
-    return;
+    if (hasSucceededSibling) {
+      await markPublishAttemptSkipped(attempt.id, attempt, publishSkipReasons.targetAlreadySucceeded);
+      return;
+    }
   }
 
   try {
