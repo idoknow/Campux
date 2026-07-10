@@ -18,6 +18,8 @@ import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
 export const defaultPublishIntervalSeconds = 10;
+export const republishFailureRetryDelayMs = 12 * 60 * 60 * 1000;
+export const republishFailureSweepIntervalMs = 15 * 60 * 1000;
 
 const duplicateBlockingPublishAttemptStatuses = new Set(["queued", "running", "succeeded"]);
 
@@ -128,6 +130,89 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
   }
 
   logger.info({ count: attempts.length, postsChecked: posts.length }, "publish attempts recovered");
+}
+
+export async function requeueExpiredFailedPublishAttempts(queue: RuntimeQueue, logger: FastifyBaseLogger, now = new Date()) {
+  const attempts = await prisma.publishAttempt.findMany({
+    where: {
+      status: "failed",
+      nextRunAt: null,
+      updatedAt: {
+        lte: new Date(now.getTime() - republishFailureRetryDelayMs),
+      },
+      post: {
+        status: {
+          in: ["partially_failed", "failed"],
+        },
+      },
+      publishTarget: {
+        enabled: true,
+        botAccount: {
+          enabled: true,
+        },
+      },
+    },
+    include: {
+      publishTarget: true,
+    },
+    orderBy: {
+      updatedAt: "asc",
+    },
+  });
+
+  for (const attempt of attempts) {
+    const { attempt: updated, nextRunAt } = await schedulePublishAttempt({
+      tenantId: attempt.tenantId,
+      postId: attempt.postId,
+      publishTargetId: attempt.publishTargetId,
+      botAccountId: attempt.publishTarget.botAccountId,
+      batchId: attempt.batchId,
+      intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+      excludeAttemptId: attempt.id,
+      resetAttempt: true,
+    });
+    enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
+    await prisma.postLog.create({
+      data: {
+        tenantId: attempt.tenantId,
+        postId: attempt.postId,
+        newStatus: "publishing",
+        comment: `${attempt.publishTarget.displayName} 发表失败超过 12 小时未手动重发，系统已自动重新排队`,
+      },
+    });
+    await refreshAttemptPostStatuses(attempt);
+  }
+
+  if (attempts.length > 0) {
+    logger.info({ count: attempts.length }, "failed publish attempts requeued after 12 hour timeout");
+  }
+
+  return attempts.length;
+}
+
+export function registerFailedPublishAttemptRepublisher(queue: RuntimeQueue, logger: FastifyBaseLogger) {
+  let running = false;
+
+  const run = async () => {
+    if (running) {
+      return;
+    }
+    running = true;
+    try {
+      await requeueExpiredFailedPublishAttempts(queue, logger);
+    } catch (error) {
+      logger.warn({ error }, "failed publish attempt republisher sweep failed");
+    } finally {
+      running = false;
+    }
+  };
+
+  void run();
+  const timer = setInterval(() => {
+    void run();
+  }, republishFailureSweepIntervalMs);
+
+  return () => clearInterval(timer);
 }
 
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {

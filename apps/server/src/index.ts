@@ -15,7 +15,7 @@ import fastifyStatic from "@fastify/static";
 import { loadConfig } from "@campux/config";
 import { createRuntimeQueue } from "./runtime/queue";
 import { OneBotRuntime } from "./runtime/onebot";
-import { recoverPublishAttempts, registerPublishingWorker } from "./runtime/publishing";
+import { recoverPublishAttempts, registerFailedPublishAttemptRepublisher, registerPublishingWorker } from "./runtime/publishing";
 import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from "./runtime/qzone-post-metrics";
 import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapshots";
 import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-comments";
@@ -126,6 +126,7 @@ const stopBotFriendSnapshotScheduler = registerBotFriendSnapshotScheduler({ call
 const stopFollowedPostCommentScheduler = registerFollowedPostCommentScheduler({ caller: oneBot, logger: app.log });
 const stopPostTagMaintenanceScheduler = registerPostTagMaintenanceScheduler({ logger: app.log });
 const stopTelemetryReporter = registerTelemetryReporter({ logger: app.log, config });
+const stopFailedPublishAttemptRepublisher = registerFailedPublishAttemptRepublisher(queue, app.log);
 registerBatchFlushSweeper(queue, app.log);
 
 app.addHook("onClose", async () => {
@@ -136,6 +137,7 @@ app.addHook("onClose", async () => {
   stopFollowedPostCommentScheduler();
   stopPostTagMaintenanceScheduler();
   stopTelemetryReporter();
+  stopFailedPublishAttemptRepublisher();
   stopBatchFlushSweeper();
 });
 
