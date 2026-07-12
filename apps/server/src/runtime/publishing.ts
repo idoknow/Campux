@@ -14,6 +14,7 @@ import { joinBatchCaptions } from "./publish-batching";
 import { generatePublishSummary } from "./publish-summary";
 import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
+import { createOfficialQqForumThread } from "./official-qq";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -253,6 +254,9 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
         enabled: true,
       },
     },
+    include: {
+      botAccount: true,
+    },
     orderBy: {
       displayName: "asc",
     },
@@ -304,7 +308,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
       postId,
       publishTargetId: target.id,
       botAccountId: target.botAccountId,
-      intervalSeconds: target.publishDelaySeconds,
+      intervalSeconds: target.botAccount.platform === "official_qq" ? 0 : target.publishDelaySeconds,
     });
     attempts.push(attempt);
     enqueueAttempt(queue, tenantId, attempt.id, nextRunAt);
@@ -361,6 +365,9 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
       botAccount: {
         enabled: true,
       },
+    },
+    include: {
+      botAccount: true,
     },
     orderBy: {
       displayName: "asc",
@@ -420,7 +427,7 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
       publishTargetId: target.id,
       botAccountId: target.botAccountId,
       batchId: batch.id,
-      intervalSeconds: target.publishDelaySeconds,
+      intervalSeconds: target.botAccount.platform === "official_qq" ? 0 : target.publishDelaySeconds,
     });
     attempts.push(attempt);
     enqueueAttempt(queue, tenantId, attempt.id, nextRunAt);
@@ -760,6 +767,81 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   }
 
   try {
+    if (attempt.publishTarget.botAccount.platform === "official_qq") {
+      await prisma.publishAttempt.update({
+        where: {
+          id: attempt.id,
+        },
+        data: {
+          attempt: {
+            increment: 1,
+          },
+        },
+      });
+
+      const postsToPublish = attempt.batch
+        ? attempt.batch.items.map((item) => item.post)
+        : [attempt.post];
+      const summaryEnabled = await readTenantPublishLlmSummaryEnabled(prisma, attempt.tenantId);
+      const forumBodyParts = [];
+      for (const target of postsToPublish) {
+        const summary = summaryEnabled
+          ? await ensurePostPublishSummary(attempt.tenantId, target.id, target.text, target.publishSummary, logger)
+          : null;
+        forumBodyParts.push(renderOfficialQqForumPostText({
+          postId: target.displayId,
+          text: target.text,
+          anonymous: target.anonymous,
+          authorQq: target.author.qqUin.toString(),
+          summary,
+        }));
+      }
+      const forumContent = forumBodyParts.join("\n\n---\n\n").trim();
+      const firstPost = postsToPublish[0] ?? attempt.post;
+      const result = await createOfficialQqForumThread(
+        {
+          id: attempt.publishTarget.botAccount.id,
+          officialAppId: attempt.publishTarget.botAccount.officialAppId,
+          officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
+        },
+        attempt.publishTarget.botAccount.reviewGroupId ?? "",
+        {
+          title: postsToPublish.length > 1 ? `#${firstPost.displayId} 等 ${postsToPublish.length} 条稿件` : `#${firstPost.displayId}`,
+          content: forumContent,
+        },
+      );
+
+      await prisma.publishAttempt.update({
+        where: {
+          id: attempt.id,
+        },
+        data: {
+          status: "succeeded",
+          externalId: result.externalId,
+          qzoneTid: result.threadId,
+          verbose: toInputJson(result.verbose),
+          lastError: null,
+          nextRunAt: null,
+        },
+      });
+
+      for (const target of postsToPublish) {
+        await prisma.postLog.create({
+          data: {
+            tenantId: attempt.tenantId,
+            postId: target.id,
+            newStatus: "publishing",
+            comment: `${attempt.publishTarget.displayName} QQ 频道帖子发表成功：${result.externalId}`,
+          },
+        });
+        await notifier?.notifyPublishSucceeded(target.id, attempt.publishTargetId, result.externalId).catch((error) => {
+          logger.warn({ error, postId: target.id, publishTargetId: attempt.publishTargetId }, "failed to notify publish success");
+        });
+      }
+      await refreshAttemptPostStatuses(attempt);
+      return;
+    }
+
     const cookies = await resolveCookiesForPublish({
       attemptId: attempt.id,
       tenantId: attempt.tenantId,
@@ -1540,6 +1622,19 @@ export function wrapBatchCaptionWithFixedText(value: Prisma.JsonValue | null | u
   const prefix = template.customText?.trim() ?? "";
   const suffix = template.suffixText?.trim() ?? "";
   const lines = [prefix, body.trim(), suffix].filter(Boolean);
+  return lines.join("\n").trim();
+}
+
+function renderOfficialQqForumPostText(post: { postId: number; text: string; anonymous: boolean; authorQq: string; summary?: string | null }) {
+  const headerParts = [`#${post.postId}`];
+  if (!post.anonymous) {
+    headerParts.push(post.authorQq);
+  }
+  const lines = [
+    headerParts.join(" "),
+    post.summary?.trim() ? `AI总结：${post.summary.trim()}` : null,
+    post.text.trim(),
+  ].filter((line): line is string => Boolean(line));
   return lines.join("\n").trim();
 }
 

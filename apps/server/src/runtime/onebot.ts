@@ -33,7 +33,6 @@ import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureC
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { selectReviewNotificationBot } from "./notification-routing";
-import { sendOfficialQqChannelMessage } from "./official-qq";
 import {
   formatNewPostReviewNotification,
   formatPostCancelled,
@@ -860,13 +859,6 @@ export class OneBotRuntime {
       return;
     }
     if (bot.platform === "official_qq") {
-      await sendOfficialQqChannelMessage(
-        { id: bot.officialAppId ?? bot.qqUin.toString(), officialAppId: bot.officialAppId ?? bot.qqUin.toString(), officialAppSecret: bot.officialAppSecret ?? null },
-        bot.reviewGroupId,
-        message,
-      ).catch((error) => {
-        this.logger.warn({ error, appId: bot.officialAppId ?? bot.qqUin.toString(), channelId: bot.reviewGroupId }, logMessage);
-      });
       return;
     }
     await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {

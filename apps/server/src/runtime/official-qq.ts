@@ -5,6 +5,8 @@ import { BotWorkflowError } from "../lib/bot-workflows";
 const qqBotTokenEndpoint = "https://bots.qq.com/app/getAppAccessToken";
 const qqBotOpenApiBaseUrl = "https://api.sgroup.qq.com";
 
+const qqForumTextFormat = 1;
+
 type TokenCacheEntry = {
   accessToken: string;
   expiresAt: number;
@@ -18,29 +20,87 @@ export type OfficialQqBotAccount = {
   officialAppSecret: Prisma.JsonValue | null;
 };
 
-export async function sendOfficialQqChannelMessage(bot: OfficialQqBotAccount, channelId: string, message: unknown) {
+export type OfficialQqForumThreadResult = {
+  externalId: string;
+  threadId: string | null;
+  taskId: string | null;
+  verbose: unknown;
+};
+
+export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, options: { title: string; content: string }): Promise<OfficialQqForumThreadResult> {
+  const title = options.title.trim();
+  const content = options.content.trim();
+  if (!title || !content) {
+    throw new BotWorkflowError("QQ 频道帖子标题或正文为空", 400);
+  }
+
+  const normalizedChannelId = channelId.trim();
+  if (!normalizedChannelId) {
+    throw new BotWorkflowError("QQ 频道 ID 为空", 400);
+  }
+
+  const payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(normalizedChannelId)}/threads`, {
+    method: "PUT",
+    body: {
+      title,
+      content,
+      format: qqForumTextFormat,
+    },
+    errorPrefix: "QQ 频道帖子发表失败",
+  }) as Record<string, unknown> | null;
+
+  const taskId = readStringField(payload, ["task_id", "taskId"]);
+  const directThreadId = readStringField(payload, ["thread_id", "threadId", "id"]);
+  const discoveredThreadId = directThreadId ?? await findRecentlyCreatedThreadId(bot, normalizedChannelId, { title, content });
+  const externalId = discoveredThreadId ?? taskId;
+  if (!externalId) {
+    throw new BotWorkflowError("QQ 频道帖子发表成功但未返回帖子 ID 或任务 ID", 502);
+  }
+
+  return {
+    externalId,
+    threadId: discoveredThreadId,
+    taskId,
+    verbose: {
+      create: payload,
+      threadId: discoveredThreadId,
+    },
+  };
+}
+
+export async function deleteOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, threadId: string) {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) {
+    throw new BotWorkflowError("QQ 频道帖子 ID 为空", 400);
+  }
+  return callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/threads/${encodeURIComponent(normalizedThreadId)}`, {
+    method: "DELETE",
+    errorPrefix: "QQ 频道帖子删除失败",
+  });
+}
+
+async function callOfficialQqOpenApi(bot: OfficialQqBotAccount, path: string, options: { method: "GET" | "PUT" | "DELETE" | "POST"; body?: unknown; errorPrefix: string }) {
   if (!bot.officialAppId || !bot.officialAppSecret) {
     throw new BotWorkflowError("QQ 官方机器人 AppID 或 AppSecret 未配置", 400);
   }
-  const content = normalizeOfficialQqMessageContent(message);
-  if (!content) {
-    throw new BotWorkflowError("QQ 官方机器人消息内容为空", 400);
-  }
 
   const accessToken = await getOfficialQqAccessToken(bot.officialAppId, bot.officialAppSecret);
-  const response = await fetch(`${qqBotOpenApiBaseUrl}/channels/${encodeURIComponent(channelId)}/messages`, {
-    method: "POST",
+  const response = await fetch(`${qqBotOpenApiBaseUrl}${path}`, {
+    method: options.method,
     headers: {
       Authorization: `QQBot ${accessToken}`,
-      "Content-Type": "application/json",
+      ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
     },
-    body: JSON.stringify({ content }),
+    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   });
   const responseText = await response.text();
   if (!response.ok) {
-    throw new BotWorkflowError(`QQ 官方机器人频道消息发送失败：${response.status} ${responseText}`, 502);
+    throw new BotWorkflowError(`${options.errorPrefix}：${response.status} ${responseText}`, 502);
   }
-  return responseText ? JSON.parse(responseText) : null;
+  if (!responseText.trim()) {
+    return null;
+  }
+  return JSON.parse(responseText);
 }
 
 async function getOfficialQqAccessToken(appId: string, secretValue: Prisma.JsonValue) {
@@ -85,24 +145,83 @@ function readOfficialQqAppSecret(value: Prisma.JsonValue) {
   throw new BotWorkflowError("QQ 官方机器人 AppSecret 无法解析", 500);
 }
 
-export function normalizeOfficialQqMessageContent(message: unknown): string {
-  if (typeof message === "string") return message.trim();
-  if (Array.isArray(message)) {
-    return message.map((segment) => {
-      if (typeof segment === "string") return segment;
-      if (segment && typeof segment === "object") {
-        const record = segment as Record<string, unknown>;
-        if (record.type === "text" && record.data && typeof record.data === "object") {
-          const text = (record.data as Record<string, unknown>).text;
-          return typeof text === "string" ? text : "";
-        }
-        if (record.type === "at" && record.data && typeof record.data === "object") {
-          const qq = (record.data as Record<string, unknown>).qq;
-          return qq === "all" ? "@全体成员" : `@${String(qq ?? "")}`;
-        }
-      }
-      return "";
-    }).join("").trim();
+async function findRecentlyCreatedThreadId(bot: OfficialQqBotAccount, channelId: string, expected: { title: string; content: string }) {
+  const payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/threads`, {
+    method: "GET",
+    errorPrefix: "QQ 频道帖子列表获取失败",
+  }).catch(() => null);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
   }
-  return String(message ?? "").trim();
+  const threads = (payload as Record<string, unknown>).threads;
+  if (!Array.isArray(threads)) {
+    return null;
+  }
+  for (const thread of threads) {
+    const info = readThreadInfo(thread);
+    if (!info) continue;
+    if (info.title === expected.title && threadContentIncludes(info.content, expected.content)) {
+      return info.threadId;
+    }
+  }
+  return null;
+}
+
+function readThreadInfo(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const threadInfo = record.thread_info ?? record.threadInfo;
+  if (!threadInfo || typeof threadInfo !== "object" || Array.isArray(threadInfo)) {
+    return null;
+  }
+  const info = threadInfo as Record<string, unknown>;
+  const threadId = readStringField(info, ["thread_id", "threadId", "id"]);
+  const title = readStringField(info, ["title"]);
+  const content = readStringField(info, ["content"]);
+  if (!threadId || !title || !content) {
+    return null;
+  }
+  return { threadId, title, content };
+}
+
+function threadContentIncludes(rawContent: string, expectedContent: string) {
+  if (rawContent.includes(expectedContent)) {
+    return true;
+  }
+  try {
+    const parsed = JSON.parse(rawContent) as unknown;
+    return extractForumText(parsed).includes(expectedContent);
+  } catch {
+    return false;
+  }
+}
+
+function extractForumText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(extractForumText).join("");
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.values(record).map(extractForumText).join("");
+  }
+  return "";
+}
+
+function readStringField(value: unknown, fieldNames: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  for (const fieldName of fieldNames) {
+    const fieldValue = record[fieldName];
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      return fieldValue.trim();
+    }
+  }
+  return null;
 }

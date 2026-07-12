@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { Prisma } from "@campux/db";
 import { QZoneRecallError, setQZoneEmotionPrivate } from "@campux/integrations";
+import { deleteOfficialQqForumThread } from "../runtime/official-qq";
 import { qzoneCookieDomain } from "./bot-workflows";
 import { checkAndUpdateQZoneSession } from "./qzone-cookies";
 import { prisma } from "./prisma";
@@ -136,6 +137,51 @@ export async function executePostRecall({
       if (!qzoneTid) {
         throw new Error("缺少 QZone TID");
       }
+      if (attempt.publishTarget.botAccount.platform === "official_qq") {
+        if (!attempt.qzoneTid) {
+          throw new Error("缺少 QQ 频道帖子 ID，无法调用删除帖子 API");
+        }
+        const recall = await deleteOfficialQqForumThread(
+          {
+            id: attempt.publishTarget.botAccount.id,
+            officialAppId: attempt.publishTarget.botAccount.officialAppId,
+            officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
+          },
+          attempt.publishTarget.botAccount.reviewGroupId ?? "",
+          attempt.qzoneTid,
+        );
+        await prisma.publishAttempt.update({
+          where: {
+            id: attempt.id,
+          },
+          data: {
+            qzoneTid,
+            verbose: toInputJson({
+              previous: attempt.verbose,
+              recall,
+            }),
+          },
+        });
+        await prisma.postLog.create({
+          data: {
+            tenantId,
+            postId: post.id,
+            actorId,
+            oldStatus: post.status,
+            newStatus: "pending_recall",
+            comment: `${targetName} QQ 频道帖子已删除：${qzoneTid}`,
+          },
+        });
+        results.push({
+          targetId: attempt.publishTargetId,
+          targetName,
+          qzoneTid,
+          ok: true,
+          message: "QQ 频道帖子已删除",
+        });
+        continue;
+      }
+
       const session = attempt.publishTarget.botAccount.sessions[0] ?? null;
       if (!session) {
         throw new Error("这个发布目标还没有 QZone cookies");

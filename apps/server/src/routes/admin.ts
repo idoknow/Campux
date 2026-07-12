@@ -626,7 +626,17 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           displayName: body.displayName,
           reviewGroupId: body.channelId.trim(),
           enabled: body.enabled,
-          reviewNotificationEnabled: true,
+          reviewNotificationEnabled: false,
+          publishTargets: {
+            create: {
+              tenantId: context.selectedTenant.id,
+              type: "qq_channel_forum",
+              displayName: `${body.displayName} QQ 频道`,
+              enabled: true,
+              required: false,
+              publishDelaySeconds: 0,
+            },
+          },
         },
         include: {
           sessions: true,
@@ -1028,18 +1038,15 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     if (!botAccount) {
       return reply.code(404).send({ message: "Bot 账号不存在" });
     }
-    if (botAccount.platform !== "onebot") {
-      return reply.code(400).send({ message: "QQ 官方机器人不支持创建 QZone 发布目标" });
-    }
-
     const target = await prisma.publishTarget.create({
       data: {
         tenantId: context.selectedTenant.id,
         botAccountId: botAccount.id,
+        type: botAccount.platform === "official_qq" ? "qq_channel_forum" : "qzone",
         displayName: body.displayName,
         enabled: body.enabled,
         required: body.required,
-        publishDelaySeconds: body.publishDelaySeconds,
+        publishDelaySeconds: botAccount.platform === "official_qq" ? 0 : body.publishDelaySeconds,
         qzoneRefreshMode: body.qzoneRefreshMode,
       },
       include: {

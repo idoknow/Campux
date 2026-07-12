@@ -870,7 +870,7 @@ export function AdminPage({
   }
 
   async function addPublishTarget() {
-    const botAccountId = targetForm.botAccountId || bots.find((bot) => bot.platform === "onebot")?.id;
+    const botAccountId = targetForm.botAccountId || bots.find((bot) => bot.platform === "onebot" || bot.platform === "official_qq")?.id;
     if (!botAccountId) {
       toast.error("需要先添加机器人。");
       return;
@@ -3131,7 +3131,7 @@ function PublishPanel({
   onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
 }) {
   const attemptGroups = groupPublishAttempts(attempts);
-  const publishBots = bots.filter((bot) => bot.platform === "onebot");
+  const publishBots = bots.filter((bot) => bot.platform === "onebot" || bot.platform === "official_qq");
 
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
@@ -3147,7 +3147,7 @@ function PublishPanel({
               <SelectContent>
                 <SelectItem value="none">选择机器人</SelectItem>
                 {publishBots.map((bot) => (
-                  <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.qqUin}</SelectItem>
+                  <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.platform === "official_qq" ? `QQ 频道 ${bot.reviewGroupId ?? "未设置"}` : `QQ ${bot.qqUin}`}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
