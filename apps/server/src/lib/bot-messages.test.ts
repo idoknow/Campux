@@ -88,14 +88,17 @@ describe("review queue messages", () => {
     expect(formatReviewQueue([], now)).toEqual(["当前没有待审核稿件"]);
   });
 
-  test("formats review queue summary", () => {
-    const lines = formatReviewQueue([item()], now, 3);
+  test("formats review queue summary without truncating post content", () => {
+    const longText = "第一行很长很长很长很长很长很长很长很长很长很长，第二行也必须完整展示，不能被省略或截断。";
+    const lines = formatReviewQueue([item({ text: longText })], now, 3);
 
     expect(lines[0]).toBe("当前待审核队列：4 条");
     expect(lines[1]).toContain("#123 等待 2小时15分");
     expect(lines[1]).toContain("张三(10001)");
     expect(lines[1]).toContain("匿名");
     expect(lines[1]).toContain("图 2");
+    expect(lines[1]).toContain(longText);
+    expect(lines[1]).not.toContain("...");
     expect(lines).toContain("还有 3 条未展示，请到后台审核页查看完整队列。");
     expect(lines.at(-1)).toBe("操作：#通过 <稿件id> / #拒绝 <理由> <稿件id>");
   });

@@ -877,7 +877,6 @@ export type ReviewQueueItem = {
   createdAt: Date;
 };
 
-const reviewQueuePreviewLimit = 40;
 export const reviewQueueDefaultDisplayLimit = 100;
 export const reviewQueueMessageMaxChars = 2500;
 
@@ -891,21 +890,19 @@ function formatReviewQueueDuration(createdAt: Date, now: Date) {
   return remainingMinutes > 0 ? `${hours}小时${remainingMinutes}分` : `${hours}小时`;
 }
 
-function formatReviewQueuePreview(text: string) {
+function formatReviewQueueContent(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) {
     return "（无文字）";
   }
-  return normalized.length > reviewQueuePreviewLimit
-    ? `${normalized.slice(0, reviewQueuePreviewLimit)}...`
-    : normalized;
+  return normalized;
 }
 
 function formatReviewQueueLine(item: ReviewQueueItem, index: number, now: Date) {
   const authorName = item.authorName || "未命名";
   const imageLabel = item.imageCount > 0 ? `图 ${item.imageCount}` : "无图";
   const anonymousLabel = item.anonymous ? "匿名" : "实名";
-  return `${index + 1}. #${item.displayId} 等待 ${formatReviewQueueDuration(item.createdAt, now)}｜${authorName}(${item.authorQqUin})｜${anonymousLabel}｜${imageLabel}｜${formatReviewQueuePreview(item.text)}`;
+  return `${index + 1}. #${item.displayId} 等待 ${formatReviewQueueDuration(item.createdAt, now)}｜${authorName}(${item.authorQqUin})｜${anonymousLabel}｜${imageLabel}｜${formatReviewQueueContent(item.text)}`;
 }
 
 export function formatReviewQueue(items: ReviewQueueItem[], now = new Date(), hiddenCount = 0): string[] {
