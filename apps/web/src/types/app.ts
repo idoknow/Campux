@@ -525,11 +525,18 @@ export type TenantStats = {
     avgReviewMinutes: number | null;
   };
   posts: {
+    totalPosts: number;
     byStatus: Record<string, number>;
     bySource: {
       private: number;
       web: number;
     };
+    anonymousPosts: number;
+    anonymousRate: number | null;
+    postsWithImages: number;
+    imageRate: number | null;
+    imagesTotal: number;
+    avgImagesPerPost: number | null;
     daily: Array<{ date: string; total: number; approved: number; rejected: number; published: number }>;
     userDaily: Array<{ date: string; newMembers: number; totalMembers: number }>;
     hourly: Array<{ hour: number; total: number }>;

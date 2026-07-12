@@ -3,10 +3,10 @@ import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
 import { buildBotFriendDailySeries, buildBotFriendTargetSeries } from "../lib/bot-friend-stats";
+import { buildPostRangeOverview } from "../lib/stats-post-overview";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const chinaTimezoneOffsetHours = 8;
-const postStatuses = ["pending_approval", "approved", "rejected", "cancelled", "publishing", "partially_failed", "failed", "published", "pending_recall", "recalled"];
 const publishAttemptStatuses = ["queued", "running", "succeeded", "failed", "skipped"];
 
 export function registerStatsRoutes(app: FastifyInstance) {
@@ -23,7 +23,6 @@ export function registerStatsRoutes(app: FastifyInstance) {
       posts,
       recentPosts30d,
       rangePosts,
-      postStatusGroups,
       memberRoleGroups,
       activeBanCount,
       totalBanCount,
@@ -37,7 +36,6 @@ export function registerStatsRoutes(app: FastifyInstance) {
       memberships,
       qzoneVisitorSnapshots,
       botFriendSnapshots,
-      sourceLogCount,
     ] = await Promise.all([
       prisma.post.findMany({
         where: { tenantId },
@@ -78,13 +76,15 @@ export function registerStatsRoutes(app: FastifyInstance) {
           anonymous: true,
           attachments: true,
           createdAt: true,
+          logs: {
+            where: {
+              oldStatus: null,
+              comment: { contains: "私聊" },
+            },
+            select: { id: true },
+          },
         },
         orderBy: { createdAt: "asc" },
-      }),
-      prisma.post.groupBy({
-        by: ["status"],
-        where: { tenantId },
-        _count: { _all: true },
       }),
       prisma.tenantMembership.groupBy({
         by: ["role"],
@@ -208,21 +208,9 @@ export function registerStatsRoutes(app: FastifyInstance) {
         },
         orderBy: { date: "asc" },
       }),
-      prisma.postLog.count({
-        where: {
-          tenantId,
-          oldStatus: null,
-          comment: { contains: "私聊" },
-        },
-      }),
     ]);
 
     const postById = new Map(posts.map((post) => [post.id, post]));
-    const statusCounts = Object.fromEntries(postStatuses.map((status) => [status, 0]));
-    for (const group of postStatusGroups) {
-      statusCounts[group.status] = group._count._all;
-    }
-
     const totalPosts = posts.length;
     const recent7Posts = recentPosts30d.filter((post) => post.createdAt >= since7);
     const reviewedLogs = reviewLogs.filter((log) => postById.has(log.postId));
@@ -239,6 +227,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
     const anonymousPosts = posts.filter((post) => post.anonymous).length;
     const uniqueAuthors = new Set(posts.map((post) => post.authorId)).size;
     const activeAuthors30d = new Set(recentPosts30d.map((post) => post.authorId)).size;
+    const postRangeOverview = buildPostRangeOverview(rangePosts);
 
     const publishStatusCounts = Object.fromEntries(publishAttemptStatuses.map((status) => [status, 0]));
     for (const group of publishAttemptGroups) {
@@ -316,11 +305,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
         avgReviewMinutes,
       },
       posts: {
-        byStatus: statusCounts,
-        bySource: {
-          private: sourceLogCount,
-          web: totalPosts - sourceLogCount,
-        },
+        ...postRangeOverview,
         daily: buildDailySeries(rangePosts, sinceRange, now),
         userDaily: buildUserDailySeries(memberships, sinceRange, now),
         hourly: buildHourlySeries(rangePosts),
