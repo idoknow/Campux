@@ -21,6 +21,7 @@ import { writeAuditLog } from "../lib/audit";
 import { decryptJson } from "../lib/secret-json";
 import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, type PostAttachment } from "../lib/attachments";
 import { findActiveBan, hasTenantRole } from "../lib/auth";
+import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
@@ -54,9 +55,8 @@ import {
   formatCookiesAutoRefreshed,
   formatCookiesRefreshed,
   formatSubmissionSuccess,
-  formatRegisterSuccess,
   formatRegisterAlready,
-  formatRegisterExtended,
+  formatFirstPrivateMessageRegistrationNotice,
   formatResetPassword,
   formatUndoText,
   formatUndoImages,
@@ -89,6 +89,7 @@ import {
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 import { collectOverdueReviewReminders, listPendingReviewQueue, reviewQueueReminderIntervalMs } from "./review-queue";
+import { PrivateRegistrationCoordinator } from "./private-registration";
 
 type OneBotConnection = {
   socket: WebSocketLike;
@@ -248,6 +249,8 @@ export class OneBotRuntime {
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostPendingConfirms = new Map<string, PrivatePostPendingConfirm>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
+  private readonly privateRegistrationCoordinator = new PrivateRegistrationCoordinator<Awaited<ReturnType<typeof registerUserViaBot>>>();
+  private readonly privatePasswordResetCoordinator = new PrivateRegistrationCoordinator<Awaited<ReturnType<typeof resetPasswordViaBot>>>();
   private readonly pendingFriendRequestFlags = new Set<string>();
   private readonly privateForwardMsgIdMap = new Map<string, { userQqUin: string; userNickname: string; botQqUin: string }>();
   private static readonly MAX_FORWARD_MSG_ID_MAP_SIZE = 500;
@@ -1132,36 +1135,6 @@ export class OneBotRuntime {
         },
       });
 
-      // 好友请求通过后自动注册账号，省去用户发送 #注册账号
-      try {
-        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, options.tenantId);
-        const result = await registerUserViaBot({
-          botQqUin: options.botQqUin,
-          userQqUin: options.userQqUin,
-        });
-        const message = result.password
-          ? formatRegisterSuccess(result.password, stylishEnabled)
-          : result.alreadyHadTenantAccess
-            ? formatRegisterAlready(stylishEnabled)
-            : formatRegisterExtended(stylishEnabled);
-        await this.sendPrivateMessage(options.botQqUin, options.userQqUin, message);
-        this.logger.info(
-          {
-            botAccountId: options.botAccountId,
-            tenantId: options.tenantId,
-            botQqUin: options.botQqUin,
-            userQqUin: options.userQqUin,
-            alreadyHadAccount: result.alreadyHadAccount,
-            alreadyHadTenantAccess: result.alreadyHadTenantAccess,
-          },
-          "onebot friend request auto registration completed",
-        );
-      } catch (registerError) {
-        this.logger.warn(
-          { error: registerError, botAccountId: options.botAccountId, tenantId: options.tenantId, userQqUin: options.userQqUin },
-          "onebot friend request auto registration failed",
-        );
-      }
     } finally {
       this.pendingFriendRequestFlags.delete(options.flag);
     }
@@ -1177,6 +1150,29 @@ export class OneBotRuntime {
     try {
       const bot = await findEnabledBot(botQqUin);
       const plainText = extractOneBotPlainText(event.message, event.raw_message).trim();
+      if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
+        return;
+      }
+      const loginUrl = await this.resolveCampuxLoginUrl(bot.tenantId);
+      const registration = await this.privateRegistrationCoordinator.run(
+        `${bot.tenantId}:${userQqUin}`,
+        () => registerUserViaBot({
+          botQqUin,
+          userQqUin,
+          displayName: event.sender?.card || event.sender?.nickname || null,
+        }),
+      );
+      const registrationCreatedAccess = !registration.result.alreadyHadTenantAccess;
+      let registrationNoticeSent = false;
+      if (registration.shouldAnnounce && registrationCreatedAccess) {
+        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+        const message = formatFirstPrivateMessageRegistrationNotice(registration.result, loginUrl, stylishEnabled);
+        if (message) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, message);
+          registrationNoticeSent = true;
+        }
+      }
+      const registrationGuidanceHandled = registrationNoticeSent || registrationCreatedAccess || registration.lostDatabaseRace;
 
       // 读取租户 AI 规则：额外投稿关键词与私聊语义收稿开关。
       const aiSettings = await readTenantAiSettings(bot.tenantId);
@@ -1429,11 +1425,6 @@ export class OneBotRuntime {
           }
         }
 
-        // 跳过好友请求等系统消息，不转发
-        if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
-          return;
-        }
-
         // 跳过纯 QQ 表情包（贴图/动画表情），不转发也不回复
         if (this.isStickerOnlyMessage(event)) {
           return;
@@ -1457,7 +1448,7 @@ export class OneBotRuntime {
         }
 
         // 保留原有自动回复
-        if (this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
+        if (!registrationGuidanceHandled && this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
           const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
           await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(stylishEnabled)).catch(() => undefined);
         }
@@ -1465,30 +1456,32 @@ export class OneBotRuntime {
       }
 
       if (command.name === "注册账号") {
-        const result = await registerUserViaBot({
-          botQqUin,
-          userQqUin,
-          displayName: event.sender?.card || event.sender?.nickname || null,
-        });
+        if (registrationGuidanceHandled) {
+          return;
+        }
         const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-        const message = result.password
-          ? formatRegisterSuccess(result.password, stylishEnabled)
-          : result.alreadyHadTenantAccess
-            ? formatRegisterAlready(stylishEnabled)
-            : formatRegisterExtended(stylishEnabled);
-        await this.sendPrivateMessage(botQqUin, userQqUin, message);
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatRegisterAlready(loginUrl, stylishEnabled));
         return;
       }
       if (command.name === "重置密码") {
-        const result = await resetPasswordViaBot({
-          botQqUin,
-          userQqUin,
-        });
+        if (registration.result.password || registration.lostDatabaseRace) {
+          return;
+        }
+        const reset = await this.privatePasswordResetCoordinator.run(
+          `${bot.tenantId}:${userQqUin}`,
+          () => resetPasswordViaBot({ botQqUin, userQqUin }),
+        );
+        if (!reset.shouldAnnounce) {
+          return;
+        }
         const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatResetPassword(result.password, stylishEnabled));
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatResetPassword(reset.result.password, stylishEnabled));
         return;
       }
 
+      if (registrationGuidanceHandled) {
+        return;
+      }
       const generalStylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled));
     } catch (error) {
@@ -1498,6 +1491,14 @@ export class OneBotRuntime {
 
   private getPrivatePostDraftKey(botQqUin: string, userQqUin: string) {
     return `${botQqUin}:${userQqUin}`;
+  }
+
+  private async resolveCampuxLoginUrl(tenantId: string) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { host: true },
+    });
+    return buildCampuxLoginUrl(tenant?.host, this.config?.webOrigin ?? "http://localhost:5180");
   }
 
   private async startPrivatePostDraft({

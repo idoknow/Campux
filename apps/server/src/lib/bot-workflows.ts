@@ -40,81 +40,123 @@ export async function registerUserViaBot({
   resetExistingPassword?: boolean;
 }) {
   const bot = await findEnabledBot(botQqUin);
-  const existingUser = await prisma.user.findUnique({
-    where: {
-      qqUin: BigInt(userQqUin),
-    },
-    include: {
-      memberships: true,
-    },
-  });
-  const existingMembership = existingUser?.memberships.find((membership) => membership.tenantId === bot.tenantId);
-  const shouldSetPassword = !existingUser || resetExistingPassword;
-  const passwordHash = shouldSetPassword ? await hashPassword(password) : null;
+  const registration = await prisma.$transaction(async (tx) => {
+    const existingUser = await tx.user.findUnique({
+      where: {
+        qqUin: BigInt(userQqUin),
+      },
+      include: {
+        memberships: true,
+      },
+    });
+    const existingMembership = existingUser?.memberships.find((membership) => membership.tenantId === bot.tenantId);
+    const shouldSetPassword = !existingUser || resetExistingPassword;
+    const membershipRole = existingMembership && hasTenantRole(existingMembership.role, role) ? existingMembership.role : role;
+    const shouldSetDisplayName = Boolean(existingUser && !existingUser.displayName && displayName);
 
-  const user = existingUser
-    ? await prisma.user.update({
-        where: {
-          id: existingUser.id,
-        },
-        data: {
-          ...(passwordHash ? { passwordHash } : {}),
-          ...(passwordHash ? { passwordChangeRequired: true } : {}),
-          ...(!existingUser.displayName && displayName ? { displayName } : {}),
-        },
-      })
-    : await prisma.user.create({
-        data: {
-          qqUin: BigInt(userQqUin),
-          passwordHash: passwordHash ?? (await hashPassword(password)),
-          passwordChangeRequired: true,
-          ...(displayName ? { displayName } : {}),
-        },
-      });
+    if (
+      existingUser
+      && existingMembership
+      && !shouldSetPassword
+      && !shouldSetDisplayName
+      && membershipRole === existingMembership.role
+    ) {
+      return {
+        user: serializeUser(existingUser),
+        membership: existingMembership,
+        password: null,
+        alreadyHadAccount: true,
+        alreadyHadTenantAccess: true,
+        didMutate: false,
+        membershipRole,
+      };
+    }
 
-  const membershipRole = existingMembership && hasTenantRole(existingMembership.role, role) ? existingMembership.role : role;
-  const membership = existingMembership
-    ? membershipRole === existingMembership.role
-      ? existingMembership
-      : await prisma.tenantMembership.update({
+    const passwordHash = shouldSetPassword ? await hashPassword(password) : null;
+    const user = existingUser
+      ? await tx.user.update({
           where: {
-            id: existingMembership.id,
+            id: existingUser.id,
           },
           data: {
-            role: membershipRole,
+            ...(passwordHash ? { passwordHash } : {}),
+            ...(passwordHash ? { passwordChangeRequired: true } : {}),
+            ...(!existingUser.displayName && displayName ? { displayName } : {}),
           },
         })
-    : await prisma.tenantMembership.create({
-        data: {
-          tenantId: bot.tenantId,
-          userId: user.id,
-          role: membershipRole,
-        },
-      });
+      : await tx.user.create({
+          data: {
+            qqUin: BigInt(userQqUin),
+            passwordHash: passwordHash ?? (await hashPassword(password)),
+            passwordChangeRequired: true,
+            ...(displayName ? { displayName } : {}),
+          },
+        });
+
+    const membership = existingMembership
+      ? membershipRole === existingMembership.role
+        ? existingMembership
+        : await tx.tenantMembership.update({
+            where: {
+              id: existingMembership.id,
+            },
+            data: {
+              role: membershipRole,
+            },
+          })
+      : await tx.tenantMembership.create({
+          data: {
+            tenantId: bot.tenantId,
+            userId: user.id,
+            role: membershipRole,
+          },
+        });
+
+    return {
+      user: serializeUser(user),
+      membership,
+      password: shouldSetPassword ? password : null,
+      alreadyHadAccount: Boolean(existingUser),
+      alreadyHadTenantAccess: Boolean(existingMembership),
+      didMutate: true,
+      membershipRole,
+    };
+  });
+
+  if (!registration.didMutate) {
+    return {
+      bot,
+      user: registration.user,
+      membership: registration.membership,
+      password: registration.password,
+      alreadyHadAccount: registration.alreadyHadAccount,
+      alreadyHadTenantAccess: registration.alreadyHadTenantAccess,
+    };
+  }
 
   await markBotSeen(bot.id);
   await writeAuditLog({
     tenantId: bot.tenantId,
-    actorId: user.id,
-    action: existingMembership ? "bot.membership.update" : "bot.register",
+    actorId: registration.user.id,
+    action: registration.alreadyHadTenantAccess ? "bot.membership.update" : "bot.register",
     targetType: "membership",
-    targetId: membership.id,
+    targetId: registration.membership.id,
     detail: {
       botQqUin,
       userQqUin,
       requestedRole: role,
-      role: membershipRole,
+      role: registration.membershipRole,
       resetExistingPassword,
     },
   });
 
   return {
     bot,
-    user: serializeUser(user),
-    membership,
-    password: shouldSetPassword ? password : null,
-    alreadyHadAccount: Boolean(existingUser),
-    alreadyHadTenantAccess: Boolean(existingMembership),
+    user: registration.user,
+    membership: registration.membership,
+    password: registration.password,
+    alreadyHadAccount: registration.alreadyHadAccount,
+    alreadyHadTenantAccess: registration.alreadyHadTenantAccess,
   };
 }
 

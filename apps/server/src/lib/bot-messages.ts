@@ -185,43 +185,84 @@ export const publishWaitingResumeHint = "系统不会继续发布这条稿件，
 
 // ── 注册成功 ──────────────────────────────────────────
 
-const registerSuccessDefault = (password: string) => `注册成功，初始密码：\n${password}\n\n发 #投稿 开始投稿吧~`;
+const registerSuccessDefault = (password: string, loginUrl: string) => [
+  "注册成功！",
+  "登录账号：当前 QQ",
+  `初始密码：\n${password}`,
+  `登录链接：${loginUrl}`,
+  "忘记密码时，请发送 #重置密码 获取新密码。",
+  "发 #投稿 开始投稿吧~",
+].join("\n\n");
 
 const registerSuccessStylish = [
-  (password: string) => `🎉 注册成功！这是你的初始密码：\n${password}\n建议登录后尽快修改哦~\n\n发 #投稿 开始投稿吧~`,
-  (password: string) => `✅ 注册完成！初始密码已送到：\n${password}\n收好它~\n\n发 #投稿 开始投稿吧~`,
+  (password: string, loginUrl: string) => [
+    "🎉 注册成功！",
+    "登录账号：当前 QQ",
+    `初始密码：\n${password}`,
+    `登录链接：${loginUrl}`,
+    "忘记密码时，请发送 #重置密码 获取新密码。",
+    "发 #投稿 开始投稿吧~",
+  ].join("\n\n"),
+  (password: string, loginUrl: string) => [
+    "✅ 注册完成！",
+    "登录账号：当前 QQ",
+    `初始密码：\n${password}`,
+    `登录链接：${loginUrl}`,
+    "忘记密码时，请发送 #重置密码 获取新密码。",
+    "发 #投稿 开始投稿吧~",
+  ].join("\n\n"),
   registerSuccessDefault,
 ];
 
-export function formatRegisterSuccess(password: string, stylishEnabled = false): string {
-  if (!stylishEnabled) return registerSuccessDefault(password);
-  return pick(registerSuccessStylish)(password);
+export function formatRegisterSuccess(password: string, loginUrl: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return registerSuccessDefault(password, loginUrl);
+  return pick(registerSuccessStylish)(password, loginUrl);
 }
 
-const registerAlreadyDefault = () => `这个 QQ 已经注册过啦。发 #投稿 开始投稿，忘记密码可以发 #重置密码。`;
+const registerAlreadyDefault = (loginUrl: string) => [
+  "这个 QQ 已经注册过啦。",
+  `登录链接：${loginUrl}`,
+  "忘记密码时，请发送 #重置密码 获取新密码。",
+  "发 #投稿 开始投稿吧~",
+].join("\n");
 
 const registerAlreadyStylish = [
-  () => `🤔 这个 QQ 早就注册过了呀~ 发 #投稿 开始投稿吧，忘记密码了？发 #重置密码 试试。`,
-  () => `📌 已经注册过啦。发 #投稿 开始投稿，密码忘了？#重置密码 安排一下~`,
+  (loginUrl: string) => `🤔 这个 QQ 早就注册过了呀~\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发 #投稿 开始投稿吧~`,
+  (loginUrl: string) => `📌 已经注册过啦。\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发 #投稿 开始投稿吧~`,
   registerAlreadyDefault,
 ];
 
-export function formatRegisterAlready(stylishEnabled = false): string {
-  if (!stylishEnabled) return registerAlreadyDefault();
-  return pick(registerAlreadyStylish)();
+export function formatRegisterAlready(loginUrl: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return registerAlreadyDefault(loginUrl);
+  return pick(registerAlreadyStylish)(loginUrl);
 }
 
-const registerExtendedDefault = () =>
-  `已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。发 #投稿 开始投稿，忘记密码就发 #重置密码。`;
+const registerExtendedDefault = (loginUrl: string) => [
+  "已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。",
+  `登录链接：${loginUrl}`,
+  "忘记密码时，请发送 #重置密码 获取新密码。",
+  "发 #投稿 开始投稿吧~",
+].join("\n");
 
 const registerExtendedStylish = [
-  () => `🔓 已开通本墙权限，密码和原来一样。发 #投稿 开始投稿吧，忘了就 #重置密码~`,
+  (loginUrl: string) => `🔓 已开通本墙权限，登录密码沿用原账号。\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发 #投稿 开始投稿吧~`,
   registerExtendedDefault,
 ];
 
-export function formatRegisterExtended(stylishEnabled = false): string {
-  if (!stylishEnabled) return registerExtendedDefault();
-  return pick(registerExtendedStylish)();
+export function formatRegisterExtended(loginUrl: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return registerExtendedDefault(loginUrl);
+  return pick(registerExtendedStylish)(loginUrl);
+}
+
+export function formatFirstPrivateMessageRegistrationNotice(
+  result: { password: string | null; alreadyHadTenantAccess: boolean },
+  loginUrl: string,
+  stylishEnabled = false,
+): string | null {
+  if (result.alreadyHadTenantAccess) return null;
+  return result.password
+    ? formatRegisterSuccess(result.password, loginUrl, stylishEnabled)
+    : formatRegisterExtended(loginUrl, stylishEnabled);
 }
 
 // ── 对话投稿正文编辑引导（选择模式后一次性提示） ──────
@@ -665,8 +706,8 @@ export function formatPrivatePostCancelled(stylishEnabled = false): string {
 // ── 对话投稿帮助 ──────────────────────────────────────
 
 const privateHelpDefault = [
-  "可以发送 #注册账号，用当前 QQ 注册本校园墙账号。",
-  "可以发送 #重置密码，重置你的登录密码。",
+  "首次给墙号发送私聊消息时，系统会自动注册本校园墙的 Campux 账号。",
+  "忘记密码时，请发送 #重置密码 获取新密码。",
   "想投稿时先发 #投稿，然后回复 #匿名 或 #实名 选择投稿方式。",
   "选择后继续发送添加稿件正文及图片，删除上一句话请发送 #撤回，结束投稿并发布请发送 #结束。",
   "取消本次投稿请发送 #取消。",
@@ -676,16 +717,16 @@ const privateHelpStylish = [
   [
     "📋 我可以帮你做这些事：",
     "",
-    "#注册账号 — 用当前 QQ 开通本墙账号",
-    "#重置密码 — 重置登录密码",
+    "首次私聊 — 自动注册本墙 Campux 账号",
+    "忘记密码时发送 #重置密码 — 获取新密码",
     "#投稿 正文 — 开始对话投稿",
     "#取消 — 取消本次投稿",
   ].join("\n"),
   [
-    "✨ 试试这些命令吧：",
+    "✨ 试试这些功能吧：",
     "",
-    "• #注册账号 — 开通本墙账号",
-    "• #重置密码 — 重置密码",
+    "• 首次私聊会自动注册本墙 Campux 账号",
+    "• 忘记密码时发送 #重置密码 获取新密码",
     "• #投稿 正文/图片 — 开始投稿",
     "• #取消 — 取消投稿",
   ].join("\n"),

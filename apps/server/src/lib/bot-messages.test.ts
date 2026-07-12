@@ -1,7 +1,87 @@
 import { describe, expect, test } from "bun:test";
 
 import { buildReviewQueueReminderMessages } from "../runtime/review-queue";
-import { formatPrivatePostBodyStart, formatPrivatePostConfirmPrompt, formatPrivatePostDraftPrompt, formatReviewQueue, formatReviewQueueMessages, formatReviewQueueReminder, formatReviewQueueReminderMessages, type ReviewQueueItem } from "./bot-messages";
+import {
+  formatFirstPrivateMessageRegistrationNotice,
+  formatPrivateHelp,
+  formatPrivatePostBodyStart,
+  formatPrivatePostConfirmPrompt,
+  formatPrivatePostDraftPrompt,
+  formatRegisterAlready,
+  formatRegisterExtended,
+  formatRegisterSuccess,
+  formatReviewQueue,
+  formatReviewQueueMessages,
+  formatReviewQueueReminder,
+  formatReviewQueueReminderMessages,
+  type ReviewQueueItem,
+} from "./bot-messages";
+
+const loginUrl = "https://wall.campux.top/login";
+
+function expectLoginAndForgotPasswordGuidance(message: string) {
+  expect(message).toContain(`登录链接：${loginUrl}`);
+  expect(message).toContain("忘记密码时");
+  expect(message).toContain("#重置密码");
+}
+
+describe("bot registration messages", () => {
+  test("new-account notice always includes initial password, login link, and forgotten-password reset instructions", () => {
+    const originalRandom = Math.random;
+    try {
+      for (const stylishEnabled of [false, true]) {
+        for (const randomValue of [0, 0.4, 0.8]) {
+          Math.random = () => randomValue;
+          const message = formatRegisterSuccess("InitPass9", loginUrl, stylishEnabled);
+
+          expect(message).toContain("InitPass9");
+          expectLoginAndForgotPasswordGuidance(message);
+        }
+      }
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
+
+  test("existing account extended to this wall gets the login link without a new password", () => {
+    const message = formatRegisterExtended(loginUrl, false);
+
+    expect(message).toContain("沿用原账号");
+    expectLoginAndForgotPasswordGuidance(message);
+  });
+
+  test("explicit registration command for an existing member still gives the login link", () => {
+    expectLoginAndForgotPasswordGuidance(formatRegisterAlready(loginUrl, false));
+  });
+
+  test("default help explains automatic registration and reserves password reset for forgotten passwords", () => {
+    const originalRandom = Math.random;
+    try {
+      for (const stylishEnabled of [false, true]) {
+        for (const randomValue of [0, 0.5, 0.9]) {
+          Math.random = () => randomValue;
+          const message = formatPrivateHelp(stylishEnabled);
+
+          expect(message).toContain("自动注册");
+          expect(message).toContain("忘记密码时");
+          expect(message).toContain("#重置密码");
+          expect(message).not.toContain("#注册账号");
+        }
+      }
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
+
+  test("first private message only announces registration when access was created", () => {
+    expect(formatFirstPrivateMessageRegistrationNotice({ password: "InitPass9", alreadyHadTenantAccess: false }, loginUrl, false))
+      .toContain("InitPass9");
+    expect(formatFirstPrivateMessageRegistrationNotice({ password: null, alreadyHadTenantAccess: false }, loginUrl, false))
+      .toContain("沿用原账号");
+    expect(formatFirstPrivateMessageRegistrationNotice({ password: null, alreadyHadTenantAccess: true }, loginUrl, false))
+      .toBeNull();
+  });
+});
 
 describe("bot private post messages", () => {
   test("keeps legacy command copy for non-AI intake", () => {

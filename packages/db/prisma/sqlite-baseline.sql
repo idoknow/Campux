@@ -237,8 +237,9 @@ CREATE TABLE "BotAccount" (
     "autoFriendRequestApprovalEnabled" BOOLEAN NOT NULL DEFAULT false,
     "connectionToken" TEXT NOT NULL,
     "publishTextTemplate" JSONB NOT NULL DEFAULT '{"includePostId":true,"includeAuthorMention":false,"includeLinks":false,"customText":""}',
-    "userMessageReply" TEXT NOT NULL DEFAULT '发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
-发送 #重置密码 可以重置你的登录密码。',
+    "userMessageReply" TEXT NOT NULL DEFAULT '首次私聊会自动注册 Campux 账号。
+发送 #投稿 开始投稿。
+忘记密码时，请发送 #重置密码 获取新密码。',
     "userMessageReplyCooldownSeconds" INTEGER NOT NULL DEFAULT 60,
     "reviewGroupMessageReply" TEXT NOT NULL DEFAULT '审核命令：
 #通过 <稿件id>

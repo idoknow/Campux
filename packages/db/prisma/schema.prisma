@@ -347,7 +347,7 @@ model BotAccount {
   autoFriendRequestApprovalEnabled Boolean @default(false)
   connectionToken String          @default(uuid())
   publishTextTemplate Json        @default("{\"includePostId\":true,\"includeAuthorMention\":false,\"includeLinks\":false,\"customText\":\"\"}")
-  userMessageReply String         @default("发送 #注册账号 可以用当前 QQ 注册本校园墙账号。\n发送 #重置密码 可以重置你的登录密码。")
+  userMessageReply String         @default("首次私聊会自动注册 Campux 账号。\n发送 #投稿 开始投稿。\n忘记密码时，请发送 #重置密码 获取新密码。")
   userMessageReplyCooldownSeconds Int @default(60)
   reviewGroupMessageReply String   @default("审核命令：\n#通过 <稿件id>\n#拒绝 <理由> <稿件id>\n#重发 <稿件id>\n#登录 或 #刷新qzone cookies\n#扫码登录")
   privateMessagesReceived Int    @default(0)
