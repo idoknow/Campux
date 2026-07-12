@@ -99,9 +99,13 @@ const memberSortLabels: Record<MemberSort, string> = {
 };
 
 type BotForm = {
+  platform: "onebot" | "official_qq";
   qqUin: string;
+  appId: string;
+  appSecret: string;
   displayName: string;
   reviewGroupId: string;
+  channelId: string;
   createPublishTarget: boolean;
 };
 
@@ -771,11 +775,18 @@ export function AdminPage({
     try {
       await api("/api/admin/bots", {
         method: "POST",
-        body: JSON.stringify({
+        body: JSON.stringify(botForm.platform === "onebot" ? {
+          platform: "onebot",
           qqUin: botForm.qqUin.trim(),
           displayName: botForm.displayName.trim(),
           reviewGroupId: botForm.reviewGroupId.trim() || undefined,
           createPublishTarget: botForm.createPublishTarget,
+        } : {
+          platform: "official_qq",
+          appId: botForm.appId.trim(),
+          appSecret: botForm.appSecret.trim(),
+          displayName: botForm.displayName.trim(),
+          channelId: botForm.channelId.trim(),
         }),
       });
       setBotForm(defaultBotForm());
@@ -805,7 +816,7 @@ export function AdminPage({
 
   async function updateBotConfig(
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) {
     setBusy(true);
     try {
@@ -859,7 +870,7 @@ export function AdminPage({
   }
 
   async function addPublishTarget() {
-    const botAccountId = targetForm.botAccountId || bots[0]?.id;
+    const botAccountId = targetForm.botAccountId || bots.find((bot) => bot.platform === "onebot")?.id;
     if (!botAccountId) {
       toast.error("需要先添加机器人。");
       return;
@@ -2465,7 +2476,7 @@ function BotsPanel({
   onDelete: (id: string) => void;
   onUpdateConfig: (
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) => void;
   onRefresh: () => void;
 }) {
@@ -2493,29 +2504,66 @@ function BotsPanel({
           <div className="grid gap-3 border-t border-slate-200 p-3">
             <div className="grid gap-3">
               <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                墙号 QQ
-                <Input className="bg-white" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })} />
+                接入方式
+                <Select value={form.platform} onValueChange={(value) => onFormChange({ ...form, platform: value as BotForm["platform"] })}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="onebot">QQ 号</SelectItem>
+                    <SelectItem value="official_qq">QQ 官方机器人</SelectItem>
+                  </SelectContent>
+                </Select>
               </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                显示名
-                <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                审核群号 <span className="font-normal text-slate-400">可选</span>
-                <Input className="bg-white" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value.replace(/\D/g, "") })} />
-              </label>
-              <Button className="font-medium" disabled={busy || !form.qqUin.trim() || !form.displayName.trim()} onClick={onAdd}>
+              {form.platform === "onebot" ? (
+                <>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    墙号 QQ
+                    <Input className="bg-white" value={form.qqUin} onChange={(event) => onFormChange({ ...form, qqUin: event.target.value.replace(/\D/g, "") })} />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    显示名
+                    <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    审核群号 <span className="font-normal text-slate-400">可选</span>
+                    <Input className="bg-white" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value.replace(/\D/g, "") })} />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    AppID
+                    <Input className="bg-white" value={form.appId} onChange={(event) => onFormChange({ ...form, appId: event.target.value.replace(/\D/g, "") })} />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    AppSecret
+                    <Input className="bg-white" type="password" value={form.appSecret} onChange={(event) => onFormChange({ ...form, appSecret: event.target.value })} />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    显示名
+                    <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    频道 ID <span className="font-normal text-slate-400">channel_id</span>
+                    <Input className="bg-white" value={form.channelId} onChange={(event) => onFormChange({ ...form, channelId: event.target.value.trim() })} />
+                  </label>
+                </>
+              )}
+              <Button className="font-medium" disabled={busy || !form.displayName.trim() || (form.platform === "onebot" ? !form.qqUin.trim() : !form.appId.trim() || !form.appSecret.trim() || !form.channelId.trim())} onClick={onAdd}>
                 <PlusIcon data-icon="inline-start" />
                 添加
               </Button>
             </div>
-            <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-              <span>
-                同时创建发布目标
-                <span className="block text-xs font-normal text-slate-500">添加墙号后自动创建一个对应的空间发布目标。</span>
-              </span>
-              <Switch checked={form.createPublishTarget} onCheckedChange={(checked) => onFormChange({ ...form, createPublishTarget: checked })} aria-label="同时创建发布目标" />
-            </label>
+            {form.platform === "onebot" ? (
+              <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                <span>
+                  同时创建发布目标
+                  <span className="block text-xs font-normal text-slate-500">添加墙号后自动创建一个对应的空间发布目标。</span>
+                </span>
+                <Switch checked={form.createPublishTarget} onCheckedChange={(checked) => onFormChange({ ...form, createPublishTarget: checked })} aria-label="同时创建发布目标" />
+              </label>
+            ) : null}
           </div>
         </details>
 
@@ -2535,12 +2583,21 @@ function BotsPanel({
                       {!bot.enabled ? <Badge className="rounded-full bg-red-50 text-red-700 ring-1 ring-red-200 shadow-none">停用</Badge> : null}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-600">
-                      <span><span className="mr-1 text-xs font-semibold text-slate-400">QQ</span><span className="font-semibold">{bot.qqUin}</span></span>
-                      <span><span className="mr-1 text-xs font-semibold text-slate-400">审核群</span><span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span></span>
+                      {bot.platform === "official_qq" ? (
+                        <>
+                          <span><span className="mr-1 text-xs font-semibold text-slate-400">AppID</span><span className="font-semibold">{bot.officialAppId ?? bot.qqUin}</span></span>
+                          <span><span className="mr-1 text-xs font-semibold text-slate-400">频道 ID</span><span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span></span>
+                        </>
+                      ) : (
+                        <>
+                          <span><span className="mr-1 text-xs font-semibold text-slate-400">QQ</span><span className="font-semibold">{bot.qqUin}</span></span>
+                          <span><span className="mr-1 text-xs font-semibold text-slate-400">审核群</span><span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span></span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <CopyBotUrlButton bot={bot} />
+                    {bot.platform === "onebot" ? <CopyBotUrlButton bot={bot} /> : null}
                     <Button variant="outline" size="sm" disabled={busy} onClick={() => onDelete(bot.id)}>
                       <Trash2Icon data-icon="inline-start" />
                       删除
@@ -2549,13 +2606,17 @@ function BotsPanel({
                 </div>
 
                 <div className="mt-3 grid gap-2 text-sm">
-                  <BotMetric icon={bot.connection.online ? WifiIcon : WifiOffIcon} label="连接" value={bot.connection.online ? `${bot.connection.connectionCount} 条` : "未连接"} />
+                  {bot.platform === "onebot" ? (
+                    <BotMetric icon={bot.connection.online ? WifiIcon : WifiOffIcon} label="连接" value={bot.connection.online ? `${bot.connection.connectionCount} 条` : "未连接"} />
+                  ) : (
+                    <BotMetric icon={bot.enabled ? WifiIcon : WifiOffIcon} label="状态" value={bot.enabled ? "已启用" : "已停用"} />
+                  )}
                   <BotMetric label="最近心跳" value={bot.lastSeenAt ? formatDateTime(bot.lastSeenAt) : "暂无"} />
-                  <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} />
+                  {bot.platform === "onebot" ? <BotMetric label="发布目标" value={`${bot.publishTargets.length} 个`} /> : null}
                 </div>
 
                 <BotConfigEditor bot={bot} busy={busy} onSave={(patch) => onUpdateConfig(bot.id, patch)} />
-                <OneBotConnectionBox bot={bot} />
+                {bot.platform === "onebot" ? <OneBotConnectionBox bot={bot} /> : null}
               </div>
             ))
           )}
@@ -2684,10 +2745,12 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
+  const [officialAppId, setOfficialAppId] = useState(bot.officialAppId ?? "");
+  const [officialAppSecret, setOfficialAppSecret] = useState("");
   const [userMessageReply, setUserMessageReply] = useState(bot.userMessageReply);
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
   const [reviewGroupMessageReply, setReviewGroupMessageReply] = useState(bot.reviewGroupMessageReply);
@@ -2700,6 +2763,8 @@ function BotConfigEditor({
   useEffect(() => {
     setDisplayName(bot.displayName);
     setReviewGroupId(bot.reviewGroupId ?? "");
+    setOfficialAppId(bot.officialAppId ?? "");
+    setOfficialAppSecret("");
     setUserMessageReply(bot.userMessageReply);
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
     setReviewGroupMessageReply(bot.reviewGroupMessageReply);
@@ -2708,27 +2773,41 @@ function BotConfigEditor({
     setReviewQueueReminderThresholdHours(String(bot.reviewQueueReminderThresholdHours));
     setAutoFriendRequestApprovalEnabled(bot.autoFriendRequestApprovalEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.officialAppId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
+  const trimmedOfficialAppId = officialAppId.trim();
+  const trimmedOfficialAppSecret = officialAppSecret.trim();
   const trimmedUserMessageReply = userMessageReply.trim();
   const trimmedReviewGroupMessageReply = reviewGroupMessageReply.trim();
   const normalizedCooldownSeconds = Math.max(0, Number(userMessageReplyCooldownSeconds || 0));
   const normalizedReviewQueueReminderThresholdHours = Math.min(168, Math.max(1, Number(reviewQueueReminderThresholdHours || 6)));
   const changed = trimmedDisplayName !== bot.displayName
     || trimmedReviewGroupId !== (bot.reviewGroupId ?? "")
-    || trimmedUserMessageReply !== bot.userMessageReply
-    || normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds
-    || trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply
-    || reviewNotificationEnabled !== bot.reviewNotificationEnabled
-    || reviewQueueAutoReminderEnabled !== bot.reviewQueueAutoReminderEnabled
-    || normalizedReviewQueueReminderThresholdHours !== bot.reviewQueueReminderThresholdHours
-    || autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled
+    || (bot.platform === "official_qq" && trimmedOfficialAppId !== (bot.officialAppId ?? ""))
+    || (bot.platform === "official_qq" && Boolean(trimmedOfficialAppSecret))
+    || (bot.platform === "onebot" && trimmedUserMessageReply !== bot.userMessageReply)
+    || (bot.platform === "onebot" && normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds)
+    || (bot.platform === "onebot" && trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply)
+    || (bot.platform === "onebot" && reviewNotificationEnabled !== bot.reviewNotificationEnabled)
+    || (bot.platform === "onebot" && reviewQueueAutoReminderEnabled !== bot.reviewQueueAutoReminderEnabled)
+    || (bot.platform === "onebot" && normalizedReviewQueueReminderThresholdHours !== bot.reviewQueueReminderThresholdHours)
+    || (bot.platform === "onebot" && autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled)
     || enabled !== bot.enabled;
-  const canSave = !busy && Boolean(trimmedDisplayName) && Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply) && changed;
+  const canSave = !busy && Boolean(trimmedDisplayName) && (bot.platform === "official_qq" ? Boolean(trimmedOfficialAppId) : Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply)) && changed;
 
   function saveConfig() {
+    if (bot.platform === "official_qq") {
+      onSave({
+        displayName: trimmedDisplayName,
+        reviewGroupId: trimmedReviewGroupId || null,
+        officialAppId: trimmedOfficialAppId,
+        ...(trimmedOfficialAppSecret ? { officialAppSecret: trimmedOfficialAppSecret } : {}),
+        enabled,
+      });
+      return;
+    }
     onSave({
       displayName: trimmedDisplayName,
       reviewGroupId: trimmedReviewGroupId || null,
@@ -2755,18 +2834,37 @@ function BotConfigEditor({
         </summary>
         <div className="grid gap-3 border-t border-slate-200 p-3">
           <div className="grid gap-3">
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-              墙号 QQ
-              <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
-            </label>
+            {bot.platform === "official_qq" ? (
+              <>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                  AppID
+                  <Input className="bg-white" value={officialAppId} onChange={(event) => setOfficialAppId(event.target.value.replace(/\D/g, ""))} />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                  AppSecret <span className="font-normal text-slate-400">留空则不修改</span>
+                  <Input className="bg-white" type="password" value={officialAppSecret} onChange={(event) => setOfficialAppSecret(event.target.value)} placeholder={bot.officialAppSecretConfigured ? "已配置，输入新值可替换" : "未配置"} />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                  频道 ID <span className="font-normal text-slate-400">channel_id</span>
+                  <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.trim())} />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                  墙号 QQ
+                  <Input className="bg-slate-50 text-slate-500" value={bot.qqUin} readOnly />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                  审核群号 <span className="font-normal text-slate-400">可留空</span>
+                  <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
+                </label>
+              </>
+            )}
             <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
               显示名
               <Input className="bg-white" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
               <span className="text-[11px] font-normal text-slate-400">建议填「1 号墙」这类名称。</span>
-            </label>
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-              审核群号 <span className="font-normal text-slate-400">可留空</span>
-              <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
             </label>
           </div>
           <div className="grid gap-2">
@@ -2777,31 +2875,35 @@ function BotConfigEditor({
               </span>
               <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="启用机器人" />
             </label>
-            <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-              <span>
-                发送审核通知
-                <span className="block text-xs font-normal leading-5 text-slate-500">新稿件、撤回等通知由这个墙号发送。</span>
-              </span>
-              <Switch checked={reviewNotificationEnabled} onCheckedChange={setReviewNotificationEnabled} aria-label="发送稿件审核通知" />
-            </label>
-            <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-              <span>
-                超时自动催审
-                <span className="block text-xs font-normal leading-5 text-slate-500">待审核稿件超过阈值后在审核群 @全体成员。</span>
-              </span>
-              <Switch checked={reviewQueueAutoReminderEnabled} onCheckedChange={setReviewQueueAutoReminderEnabled} aria-label="超时自动催审" />
-            </label>
-            <label className="grid gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
-              催审阈值（小时）
-              <Input
-                className="bg-white"
-                inputMode="numeric"
-                disabled={!reviewQueueAutoReminderEnabled}
-                value={reviewQueueReminderThresholdHours}
-                onChange={(event) => setReviewQueueReminderThresholdHours(event.target.value.replace(/\D/g, ""))}
-              />
-              <span className="text-[11px] font-normal text-slate-400">支持 1-168 小时；关闭自动催审后不会推送。</span>
-            </label>
+            {bot.platform === "onebot" ? (
+              <>
+                <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                  <span>
+                    发送审核通知
+                    <span className="block text-xs font-normal leading-5 text-slate-500">新稿件、撤回等通知由这个墙号发送。</span>
+                  </span>
+                  <Switch checked={reviewNotificationEnabled} onCheckedChange={setReviewNotificationEnabled} aria-label="发送稿件审核通知" />
+                </label>
+                <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                  <span>
+                    超时自动催审
+                    <span className="block text-xs font-normal leading-5 text-slate-500">待审核稿件超过阈值后在审核群 @全体成员。</span>
+                  </span>
+                  <Switch checked={reviewQueueAutoReminderEnabled} onCheckedChange={setReviewQueueAutoReminderEnabled} aria-label="超时自动催审" />
+                </label>
+                <label className="grid gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+                  催审阈值（小时）
+                  <Input
+                    className="bg-white"
+                    inputMode="numeric"
+                    disabled={!reviewQueueAutoReminderEnabled}
+                    value={reviewQueueReminderThresholdHours}
+                    onChange={(event) => setReviewQueueReminderThresholdHours(event.target.value.replace(/\D/g, ""))}
+                  />
+                  <span className="text-[11px] font-normal text-slate-400">支持 1-168 小时；关闭自动催审后不会推送。</span>
+                </label>
+              </>
+            ) : null}
           </div>
           <div className="flex justify-end">
             <Button variant="outline" size="sm" disabled={!canSave} onClick={saveConfig}>
@@ -2811,7 +2913,8 @@ function BotConfigEditor({
         </div>
       </details>
 
-      <details className="rounded-md border border-slate-200 bg-slate-50">
+      {bot.platform === "onebot" ? (
+        <details className="rounded-md border border-slate-200 bg-slate-50">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-sm font-semibold text-slate-800">自动回复</p>
@@ -2863,6 +2966,7 @@ function BotConfigEditor({
           </div>
         </div>
       </details>
+      ) : null}
     </div>
   );
 }
@@ -3027,6 +3131,7 @@ function PublishPanel({
   onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
 }) {
   const attemptGroups = groupPublishAttempts(attempts);
+  const publishBots = bots.filter((bot) => bot.platform === "onebot");
 
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
@@ -3041,13 +3146,13 @@ function PublishPanel({
               <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">选择机器人</SelectItem>
-                {bots.map((bot) => (
+                {publishBots.map((bot) => (
                   <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.qqUin}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <Input placeholder="目标名称，例如 1 号墙 QZone" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
-            <Button className="font-medium" disabled={busy || bots.length === 0 || form.displayName.trim().length === 0} onClick={onAdd}>
+            <Button className="font-medium" disabled={busy || publishBots.length === 0 || form.displayName.trim().length === 0} onClick={onAdd}>
               <PlusIcon data-icon="inline-start" />
               添加发布目标
             </Button>
@@ -3131,7 +3236,10 @@ function PublishPanel({
                   <BotPublishTemplateEditor
                     bot={{
                       id: target.botAccount.id,
+                      platform: "onebot",
                       qqUin: target.botAccount.qqUin,
+                      officialAppId: null,
+                      officialAppSecretConfigured: false,
                       displayName: target.botAccount.displayName,
                       enabled: target.botAccount.enabled,
                       reviewGroupId: null,
@@ -3610,9 +3718,13 @@ function defaultMemberForm(): MemberForm {
 
 function defaultBotForm(): BotForm {
   return {
+    platform: "onebot",
     qqUin: "",
+    appId: "",
+    appSecret: "",
     displayName: "",
     reviewGroupId: "",
+    channelId: "",
     createPublishTarget: true,
   };
 }

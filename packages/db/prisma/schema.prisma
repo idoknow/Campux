@@ -334,7 +334,10 @@ model PostLog {
 model BotAccount {
   id             String          @id @default(uuid())
   tenantId       String
+  platform       String          @default("onebot")
   qqUin          BigInt
+  officialAppId  String?
+  officialAppSecret Json?
   displayName    String
   enabled        Boolean         @default(true)
   reviewGroupId  String?
@@ -359,6 +362,7 @@ model BotAccount {
 
   @@unique([tenantId, qqUin])
   @@unique([qqUin])
+  @@unique([officialAppId])
   @@unique([connectionToken])
 }
 

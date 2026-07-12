@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
-import { TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
 import {
   BotWorkflowError,
   approveAllPendingPostsViaBot,
@@ -33,6 +33,7 @@ import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureC
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { selectReviewNotificationBot } from "./notification-routing";
+import { sendOfficialQqChannelMessage } from "./official-qq";
 import {
   formatNewPostReviewNotification,
   formatPostCancelled,
@@ -358,9 +359,7 @@ export class OneBotRuntime {
           ]
         : lines.join("\n");
 
-    await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {
-      this.logger.warn({ error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to notify review group");
-    });
+    await this.sendBotReviewGroupMessage(bot, message, "failed to notify review group");
   }
 
   async notifyPostCancelled(postId: string) {
@@ -853,11 +852,21 @@ export class OneBotRuntime {
   }
 
   private async sendBotReviewGroupMessage(
-    bot: { qqUin: bigint; displayName?: string; reviewGroupId: string | null },
+    bot: { platform?: string; qqUin: bigint; officialAppId?: string | null; officialAppSecret?: Prisma.JsonValue | null; displayName?: string; reviewGroupId: string | null },
     message: unknown,
     logMessage: string,
   ) {
     if (!bot.reviewGroupId) {
+      return;
+    }
+    if (bot.platform === "official_qq") {
+      await sendOfficialQqChannelMessage(
+        { id: bot.officialAppId ?? bot.qqUin.toString(), officialAppId: bot.officialAppId ?? bot.qqUin.toString(), officialAppSecret: bot.officialAppSecret ?? null },
+        bot.reviewGroupId,
+        message,
+      ).catch((error) => {
+        this.logger.warn({ error, appId: bot.officialAppId ?? bot.qqUin.toString(), channelId: bot.reviewGroupId }, logMessage);
+      });
       return;
     }
     await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {

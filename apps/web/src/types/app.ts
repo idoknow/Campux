@@ -396,7 +396,11 @@ export type PublishAttemptVerbose = {
 
 export type AdminBotAccount = {
   id: string;
+  platform: "onebot" | "official_qq";
   qqUin: string;
+  officialAppId: string | null;
+  officialAppSecretConfigured: boolean;
+  officialAppSecret?: string;
   displayName: string;
   enabled: boolean;
   reviewGroupId: string | null;

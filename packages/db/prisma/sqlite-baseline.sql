@@ -224,7 +224,10 @@ CREATE TABLE "PostLog" (
 CREATE TABLE "BotAccount" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
+    "platform" TEXT NOT NULL DEFAULT 'onebot',
     "qqUin" BIGINT NOT NULL,
+    "officialAppId" TEXT,
+    "officialAppSecret" JSONB,
     "displayName" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "reviewGroupId" TEXT,
@@ -539,6 +542,7 @@ CREATE UNIQUE INDEX "BotAccount_tenantId_qqUin_key" ON "BotAccount"("tenantId", 
 
 -- CreateIndex
 CREATE UNIQUE INDEX "BotAccount_qqUin_key" ON "BotAccount"("qqUin");
+CREATE UNIQUE INDEX "BotAccount_officialAppId_key" ON "BotAccount"("officialAppId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "BotAccount_connectionToken_key" ON "BotAccount"("connectionToken");

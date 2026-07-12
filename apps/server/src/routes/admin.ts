@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Prisma, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
-import { decryptJson } from "../lib/secret-json";
+import { decryptJson, encryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
 import { buildUserContainsSearch, findUserIdsByContainsSearch } from "../lib/user-search";
 import { defaultPublishIntervalSeconds, enqueueAttempt, resumePublishAttemptsWaitingForCookies, schedulePublishAttempt } from "../runtime/publishing";
@@ -56,17 +56,28 @@ const targetCreateSchema = z.object({
   qzoneRefreshMode: z.enum(["protocol", "qr"]).default("protocol"),
 });
 
-const botCreateSchema = z.object({
-  qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字"),
-  displayName: z.string().min(1).max(80),
-  reviewGroupId: z.string().trim().max(40).optional(),
-  reviewNotificationEnabled: z.boolean().default(false),
-  reviewQueueAutoReminderEnabled: z.boolean().default(false),
-  reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).default(6),
-  autoFriendRequestApprovalEnabled: z.boolean().default(false),
-  enabled: z.boolean().default(true),
-  createPublishTarget: z.boolean().default(true),
-});
+const botCreateSchema = z.discriminatedUnion("platform", [
+  z.object({
+    platform: z.literal("onebot"),
+    qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字"),
+    displayName: z.string().min(1).max(80),
+    reviewGroupId: z.string().trim().max(40).optional(),
+    reviewNotificationEnabled: z.boolean().default(false),
+    reviewQueueAutoReminderEnabled: z.boolean().default(false),
+    reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).default(6),
+    autoFriendRequestApprovalEnabled: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    createPublishTarget: z.boolean().default(true),
+  }),
+  z.object({
+    platform: z.literal("official_qq"),
+    appId: z.string().regex(/^\d+$/, "AppID 必须是数字"),
+    appSecret: z.string().trim().min(1, "AppSecret 不能为空").max(500),
+    displayName: z.string().min(1).max(80),
+    channelId: z.string().trim().min(1, "频道 ID 不能为空").max(40),
+    enabled: z.boolean().default(true),
+  }),
+]);
 
 const publishTextTemplateSchema = z.object({
   customText: z.string().max(1000).default(""),
@@ -80,6 +91,8 @@ const botPatchSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   enabled: z.boolean().optional(),
   reviewGroupId: z.string().trim().max(40).nullable().optional(),
+  officialAppId: z.string().regex(/^\d+$/, "AppID 必须是数字").optional(),
+  officialAppSecret: z.string().trim().min(1).max(500).optional(),
   reviewNotificationEnabled: z.boolean().optional(),
   reviewQueueAutoReminderEnabled: z.boolean().optional(),
   reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).optional(),
@@ -584,7 +597,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     });
 
     return {
-      bots: bots.map((bot) => toBotAccount(bot, oneBot?.getBotConnectionStatus(bot.qqUin.toString()))),
+      bots: bots.map((bot) => toBotAccount(bot, bot.platform === "official_qq" ? { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(bot.qqUin.toString()))),
       events: auditLogs.map(toTenantBotEvent),
     };
   });
@@ -592,17 +605,65 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
   app.post("/api/admin/bots", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const body = botCreateSchema.parse(request.body);
+    if (body.platform === "official_qq") {
+      const identityUin = BigInt(body.appId);
+      const existing = await prisma.botAccount.findUnique({
+        where: {
+          qqUin: identityUin,
+        },
+      });
+      if (existing) {
+        return reply.code(409).send({ message: "这个官方机器人 AppID 已经绑定到其他校园墙" });
+      }
+
+      const bot = await prisma.botAccount.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          platform: "official_qq",
+          qqUin: identityUin,
+          officialAppId: body.appId,
+          officialAppSecret: encryptJson(body.appSecret.trim()),
+          displayName: body.displayName,
+          reviewGroupId: body.channelId.trim(),
+          enabled: body.enabled,
+          reviewNotificationEnabled: true,
+        },
+        include: {
+          sessions: true,
+          publishTargets: true,
+        },
+      });
+
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "bot_account.create",
+        targetType: "bot_account",
+        targetId: bot.id,
+        detail: {
+          platform: body.platform,
+          appId: body.appId,
+          displayName: body.displayName,
+          channelId: body.channelId.trim(),
+        },
+      });
+
+      return {
+        bot: toBotAccount(bot, { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 }),
+      };
+    }
+    const identityUin = BigInt(body.qqUin);
     const existing = await prisma.botAccount.findUnique({
       where: {
-        qqUin: BigInt(body.qqUin),
+        qqUin: identityUin,
       },
     });
     if (existing) {
-      return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
+      return reply.code(409).send({ message: body.platform === "onebot" ? "这个机器人 QQ 已经绑定到其他校园墙" : "这个官方机器人 AppID 已经绑定到其他校园墙" });
     }
 
     const bot = await prisma.$transaction(async (tx) => {
-      if (body.reviewNotificationEnabled) {
+      if (body.platform === "onebot" && body.reviewNotificationEnabled) {
         await tx.botAccount.updateMany({
           where: {
             tenantId: context.selectedTenant.id,
@@ -617,7 +678,8 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       return tx.botAccount.create({
         data: {
           tenantId: context.selectedTenant.id,
-          qqUin: BigInt(body.qqUin),
+          platform: "onebot",
+          qqUin: identityUin,
           displayName: body.displayName,
           reviewGroupId: body.reviewGroupId?.trim() || null,
           reviewNotificationEnabled: body.reviewNotificationEnabled,
@@ -653,6 +715,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       targetType: "bot_account",
       targetId: bot.id,
       detail: {
+        platform: body.platform,
         qqUin: body.qqUin,
         displayName: body.displayName,
         reviewGroupId: body.reviewGroupId?.trim() || null,
@@ -683,7 +746,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      if (body.reviewNotificationEnabled === true) {
+      if (body.reviewNotificationEnabled === true && bot.platform === "onebot") {
         await tx.botAccount.updateMany({
           where: {
             tenantId: context.selectedTenant.id,
@@ -704,14 +767,16 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
           ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
           ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
-          ...(body.reviewNotificationEnabled === undefined ? {} : { reviewNotificationEnabled: body.reviewNotificationEnabled }),
-          ...(body.reviewQueueAutoReminderEnabled === undefined ? {} : { reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled }),
-          ...(body.reviewQueueReminderThresholdHours === undefined ? {} : { reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours }),
-          ...(body.autoFriendRequestApprovalEnabled === undefined ? {} : { autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled }),
-          ...(body.userMessageReply === undefined ? {} : { userMessageReply: body.userMessageReply }),
-          ...(body.userMessageReplyCooldownSeconds === undefined ? {} : { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds }),
-          ...(body.reviewGroupMessageReply === undefined ? {} : { reviewGroupMessageReply: body.reviewGroupMessageReply }),
-          ...(body.publishTextTemplate === undefined ? {} : { publishTextTemplate: body.publishTextTemplate }),
+          ...(bot.platform === "official_qq" && body.officialAppId !== undefined ? { qqUin: BigInt(body.officialAppId), officialAppId: body.officialAppId } : {}),
+          ...(bot.platform === "official_qq" && body.officialAppSecret !== undefined ? { officialAppSecret: encryptJson(body.officialAppSecret) } : {}),
+          ...(bot.platform === "onebot" && body.reviewNotificationEnabled !== undefined ? { reviewNotificationEnabled: body.reviewNotificationEnabled } : {}),
+          ...(bot.platform === "onebot" && body.reviewQueueAutoReminderEnabled !== undefined ? { reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled } : {}),
+          ...(bot.platform === "onebot" && body.reviewQueueReminderThresholdHours !== undefined ? { reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours } : {}),
+          ...(bot.platform === "onebot" && body.autoFriendRequestApprovalEnabled !== undefined ? { autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled } : {}),
+          ...(bot.platform === "onebot" && body.userMessageReply !== undefined ? { userMessageReply: body.userMessageReply } : {}),
+          ...(bot.platform === "onebot" && body.userMessageReplyCooldownSeconds !== undefined ? { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds } : {}),
+          ...(bot.platform === "onebot" && body.reviewGroupMessageReply !== undefined ? { reviewGroupMessageReply: body.reviewGroupMessageReply } : {}),
+          ...(bot.platform === "onebot" && body.publishTextTemplate !== undefined ? { publishTextTemplate: body.publishTextTemplate } : {}),
         },
         include: {
           sessions: true,
@@ -730,7 +795,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     });
 
     return {
-      bot: toBotAccount(updated, oneBot?.getBotConnectionStatus(updated.qqUin.toString())),
+      bot: toBotAccount(updated, updated.platform === "official_qq" ? { online: updated.enabled, connectionCount: updated.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(updated.qqUin.toString())),
     };
   });
 
@@ -905,7 +970,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       targetType: "bot_account",
       targetId: bot.id,
       detail: {
+        platform: bot.platform,
         qqUin: bot.qqUin.toString(),
+        appId: bot.officialAppId,
         displayName: bot.displayName,
         publishTargetCount: bot.publishTargets.length,
       },
@@ -960,6 +1027,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
 
     if (!botAccount) {
       return reply.code(404).send({ message: "Bot 账号不存在" });
+    }
+    if (botAccount.platform !== "onebot") {
+      return reply.code(400).send({ message: "QQ 官方机器人不支持创建 QZone 发布目标" });
     }
 
     const target = await prisma.publishTarget.create({
@@ -1297,7 +1367,10 @@ function toPublishTarget(target: {
 function toBotAccount(
   bot: {
     id: string;
+    platform: string;
     qqUin: bigint;
+    officialAppId: string | null;
+    officialAppSecret: Prisma.JsonValue | null;
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
@@ -1334,7 +1407,10 @@ function toBotAccount(
 ) {
   return {
     id: bot.id,
+    platform: bot.platform,
     qqUin: bot.qqUin.toString(),
+    officialAppId: bot.officialAppId,
+    officialAppSecretConfigured: bot.officialAppSecret !== null,
     displayName: bot.displayName,
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
