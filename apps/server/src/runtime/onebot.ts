@@ -23,7 +23,7 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
@@ -86,6 +86,7 @@ import {
   formatUnbanNotFound,
   formatBanNotify,
   formatUnbanNotify,
+  escapeCqCode,
 } from "../lib/bot-messages";
 import { buildFriendRequestAutoApprovePlan, buildSetFriendAddRequestParams, type OneBotRequestEvent } from "./onebot-friend-requests";
 import { collectOverdueReviewReminders, listPendingReviewQueue, reviewQueueReminderIntervalMs } from "./review-queue";
@@ -165,6 +166,7 @@ type PrivatePostPendingConfirm = PrivatePostDraft;
 type PrivateForwardEntry = {
   time: number;
   text: string;
+  segments: OneBotMessageSegment[];
 };
 
 type PrivateForwardBuffer = {
@@ -1425,8 +1427,8 @@ export class OneBotRuntime {
           }
         }
 
-        // 跳过纯 QQ 表情包（贴图/动画表情），不转发也不回复
-        if (this.isStickerOnlyMessage(event)) {
+// 跳过好友请求等系统消息，不转发
+        if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
           return;
         }
 
@@ -1436,6 +1438,8 @@ export class OneBotRuntime {
           return;
         }
 
+        const isStickerOnly = this.isStickerOnlyMessage(event);
+
         // 非投稿、非命令消息：缓存到缓冲区，1 分钟无新消息后合并转发到审核群
         if (bot.reviewGroupId) {
           this.bufferPrivateForwardMessage({
@@ -1444,7 +1448,13 @@ export class OneBotRuntime {
             userQqUin,
             userNickname: event.sender?.card || event.sender?.nickname || userQqUin,
             text: plainText || event.raw_message || "（不支持的消息类型）",
+            segments: extractOneBotMessageSegments(event.message),
           });
+        }
+
+        // 纯表情包消息不自动回复，避免骚扰用户
+        if (isStickerOnly) {
+          return;
         }
 
         // 保留原有自动回复
@@ -2725,7 +2735,7 @@ export class OneBotRuntime {
     buffer.userNickname = userNickname;
     buffer.delayMs = delaySeconds * 1000;
     buffer.events.push(event);
-    buffer.messages.push({ time: Math.floor(Date.now() / 1000), text });
+    buffer.messages.push({ time: Math.floor(Date.now() / 1000), text, segments: extractOneBotMessageSegments(event.message) });
     this.schedulePrivatePostAggregateFlush(key, buffer);
   }
 
@@ -2812,6 +2822,7 @@ export class OneBotRuntime {
           userQqUin: buffer.userQqUin,
           userNickname: buffer.userNickname,
           text: entry.text,
+          segments: entry.segments,
         });
       }
     }
@@ -2827,12 +2838,14 @@ export class OneBotRuntime {
     userQqUin,
     userNickname,
     text,
+    segments,
   }: {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null };
     botQqUin: string;
     userQqUin: string;
     userNickname: string;
     text: string;
+    segments?: OneBotMessageSegment[];
   }) {
     // 异步递增私信接收计数
     prisma.botAccount.update({
@@ -2859,6 +2872,7 @@ export class OneBotRuntime {
     buffer.messages.push({
       time: Math.floor(Date.now() / 1000),
       text,
+      segments: segments ?? [],
     });
 
     // 重置计时器：最后一条消息后等待 1 分钟
@@ -2901,25 +2915,26 @@ export class OneBotRuntime {
           name: string;
           uin: string;
           time?: number;
-          content: Array<{ type: "text"; data: { text: string } }>;
+          content: OneBotMessageSegment[];
         };
       }> = [];
 
       for (const entry of buffer.messages) {
+        // 如果保留了原始消息段（face/image 等），直接使用；否则降级为纯文本
+        // 合并转发中不支持的段（mface/marketface/markdown）替换为文本提示
+        const rawSegments =
+          entry.segments.length > 0
+            ? entry.segments
+            : [{ type: "text", data: { text: entry.text } }];
+        const content = this.sanitizeForwardSegments(rawSegments);
+
         nodes.push({
           type: "node",
           data: {
             name: buffer.userNickname,
             uin: buffer.userQqUin,
             time: entry.time,
-            content: [
-              {
-                type: "text",
-                data: {
-                  text: entry.text,
-                },
-              },
-            ],
+            content,
           },
         });
       }
@@ -2937,7 +2952,7 @@ export class OneBotRuntime {
         this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "合并转发失败，降级为普通消息发送");
         const lines = [
           `📩 ${buffer.userNickname}（${buffer.userQqUin}）发来私聊消息：`,
-          ...buffer.messages.map((entry, i) => `${i + 1}. ${entry.text}`),
+          ...buffer.messages.map((entry, i) => `${i + 1}. ${escapeCqCode(entry.text)}`),
         ];
         const fallbackData = await this.callAction(buffer.botQqUin, "send_group_msg", {
           group_id: Number(bot.reviewGroupId),
@@ -2952,6 +2967,31 @@ export class OneBotRuntime {
     } catch (error) {
       this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "转发私聊消息到审核群失败");
     }
+  }
+
+  /**
+   * 清理合并转发节点中可能不被 QQ 支持的段。
+   * mface（商城表情/超级表情）、marketface image、markdown 等在合并转发中可能显示为
+   * "此消息不支持查看"。将这些段替换为文本提示，保留其他段不变。
+   */
+  private sanitizeForwardSegments(segments: OneBotMessageSegment[]): OneBotMessageSegment[] {
+    return segments.flatMap((seg) => {
+      // mface 类型段（商城表情/超级表情）
+      if (seg.type === "mface") {
+        const summary = String(seg.data?.summary ?? "[超级表情]");
+        return [{ type: "text", data: { text: `[${summary}]` } }];
+      }
+      // image 中的 marketface（商城表情以 image 段上报）
+      if (seg.type === "image" && String(seg.data?.file ?? "") === "marketface") {
+        const summary = String(seg.data?.summary ?? "[商城表情]");
+        return [{ type: "text", data: { text: `[${summary}]` } }];
+      }
+      // markdown 段在双层合并转发中无法发送
+      if (seg.type === "markdown") {
+        return [{ type: "text", data: { text: "[Markdown消息]" } }];
+      }
+      return [seg];
+    });
   }
 
   private async tryResolveDisplayIdFromReply(event: OneBotMessageEvent, botQqUin: string): Promise<number | null> {
