@@ -807,7 +807,7 @@ export function PostsPage({
     }
     setMineSearchLoading(true);
     try {
-      const data = await api<{ posts: PostItem[]; pagination: Pagination }>(`/api/posts/mine?q=${encodeURIComponent(keyword)}&page=${page}&limit=10`);
+      const data = await api<{ posts: PostItem[]; pagination: Pagination }>(`/api/posts/mine?q=${encodeURIComponent(keyword)}&page=${page}&limit=${minePagination.limit}`);
       setMineSearchPosts(data.posts);
       setMineSearchPagination(data.pagination);
     } catch (caught) {
@@ -853,6 +853,7 @@ export function PostsPage({
 
   function clearPublishedSearch() {
     setPublishedKeyword("");
+    setPublishedPage(1);
     void refreshPublishedFeed(1);
   }
 

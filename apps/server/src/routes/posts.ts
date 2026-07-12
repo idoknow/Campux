@@ -729,6 +729,27 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
 
     const authorSelect = { select: { displayName: true, qqUin: true } } as const;
 
+    // Build keyword filter for Prisma queries
+    let keywordSingleFilter: Record<string, unknown> = {};
+    let keywordBatchFilter: Record<string, unknown> = {};
+    if (keyword) {
+      const displayIdFilter = /^\d+$/.test(keyword) ? Number.parseInt(keyword, 10) : null;
+      const orClauses: Record<string, unknown>[] = [{ text: { contains: keyword } }];
+      if (displayIdFilter !== null) {
+        orClauses.push({ displayId: displayIdFilter });
+      }
+      keywordSingleFilter = { OR: orClauses };
+      keywordBatchFilter = {
+        items: {
+          some: {
+            post: {
+              OR: orClauses,
+            },
+          },
+        },
+      };
+    }
+
     const [singlePosts, batches] = await Promise.all([
       // A) 独立发布稿件：已发布且不属于任何批次
       prisma.post.findMany({
@@ -736,6 +757,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           tenantId,
           status: "published",
           batchItem: { is: null },
+          ...keywordSingleFilter,
         },
         include: {
           author: authorSelect,
@@ -749,7 +771,11 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       }),
       // B) 已发布批次（批量）
       prisma.publishBatch.findMany({
-        where: { tenantId, status: "published" },
+        where: {
+          tenantId,
+          status: "published",
+          ...(keyword ? keywordBatchFilter : {}),
+        },
         include: {
           items: {
             orderBy: { position: "asc" },
