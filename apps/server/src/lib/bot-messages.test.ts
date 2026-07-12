@@ -14,8 +14,7 @@ describe("bot private post messages", () => {
   test("uses semantic edit-state copy for AI intake", () => {
     const message = formatPrivatePostBodyStart(false, true);
 
-    expect(message).toContain("已进入投稿编辑");
-    expect(message).toContain("直接说清楚想继续补充、发布、撤回或取消");
+    expect(message).toBe("内容都准备好了吗？接下来你可以继续发图文补充，如果确认没问题，直接告诉我发布即可，也可以随时撤回或取消！");
     expect(message).not.toContain("可以提交/发出去");
     expect(message).not.toContain("以下是正文内容");
   });
@@ -64,8 +63,8 @@ describe("bot private post messages", () => {
   test("uses semantic confirmation copy for AI intake", () => {
     const message = formatPrivatePostConfirmPrompt("正文", 0, true);
 
-    expect(message).toContain("请确认投稿内容");
-    expect(message).toContain("如果内容无误，就用自然语言告诉我可以发布");
+    expect(message).toBe("请确认投稿内容：\n\n正文\n\n检查一下没问题的话，直接跟我说发布就行；要是想取消，也请随时告诉我。");
+    expect(message).not.toContain("如果内容无误，就用自然语言告诉我可以发布");
     expect(message).not.toContain("确认提交/可以发布");
     expect(message).not.toContain("#确认");
   });

@@ -229,7 +229,7 @@ export function formatRegisterExtended(stylishEnabled = false): string {
 const privatePostBodyStartDefault =
   "好的，以下是正文内容，直接发送文字或图片即可添加。发送 #撤回 可撤回上一条，发送 #结束 提交投稿。（发送 #取消 取消本次投稿）";
 const privatePostBodyStartAiDefault =
-  "好的，已进入投稿编辑。可以继续发送文字或图片补充内容；写完后直接说清楚想继续补充、发布、撤回或取消，我会按语义理解你的意思。";
+  "内容都准备好了吗？接下来你可以继续发图文补充，如果确认没问题，直接告诉我发布即可，也可以随时撤回或取消！";
 
 const privatePostBodyStartStylish = [
   "📝 好的，以下是正文内容~ 直接发文字或图片就行，发完记得 #结束 提交！",
@@ -642,7 +642,7 @@ function formatPrivatePostPreview(text: string, attachmentCount: number) {
 
 export function formatPrivatePostConfirmPrompt(text: string, attachmentCount: number, aiIntakeEnabled = false): string {
   const actionHint = aiIntakeEnabled
-    ? "如果内容无误，就用自然语言告诉我可以发布；如果要取消，也直接说明你的意思。"
+    ? "检查一下没问题的话，直接跟我说发布就行；要是想取消，也请随时告诉我。"
     : "确认无误请发送 #确认，取消提交请发送 #取消。";
   return [formatPrivatePostPreview(text, attachmentCount), "", actionHint].join("\n");
 }
