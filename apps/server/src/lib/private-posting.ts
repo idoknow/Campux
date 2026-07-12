@@ -97,6 +97,29 @@ export function extractOneBotImageSegments(message: unknown) {
   });
 }
 
+/**
+ * 提取所有消息段，过滤掉空白的纯 text 段。
+ * 用于转发场景，保留 face、image 等非文本段，以便合并转发时正确渲染表情和图片。
+ */
+export function extractOneBotMessageSegments(message: unknown): OneBotMessageSegment[] {
+  if (!Array.isArray(message)) {
+    return [];
+  }
+
+  return message.filter((segment): segment is OneBotMessageSegment => {
+    if (!segment || typeof segment !== "object") {
+      return false;
+    }
+    const seg = segment as OneBotMessageSegment;
+    // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
+    if (seg.type === "text") {
+      const t = String(seg.data?.text ?? "").trim();
+      return t.length > 0;
+    }
+    return true;
+  });
+}
+
 export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
   if (Array.isArray(message)) {
     return message
