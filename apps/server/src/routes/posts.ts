@@ -33,6 +33,7 @@ const postParamsSchema = z.object({
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
+  q: z.string().trim().max(200).optional(),
 });
 
 const publishedListQuerySchema = listQuerySchema.extend({
@@ -602,10 +603,18 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
   app.get("/api/posts/mine", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = listQuerySchema.parse(request.query);
-    const where = {
+    const where: Record<string, unknown> = {
       tenantId: context.selectedTenant.id,
       authorId: context.user.id,
     };
+    const keyword = query.q?.trim();
+    if (keyword) {
+      const displayId = /^\d+$/.test(keyword) ? Number.parseInt(keyword, 10) : null;
+      where.OR = [
+        { text: { contains: keyword } },
+        ...(displayId !== null ? [{ displayId }] : []),
+      ];
+    }
     const [total, posts] = await Promise.all([
       prisma.post.count({ where }),
       prisma.post.findMany({
@@ -696,6 +705,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     const query = publishedListQuerySchema.parse(request.query);
     const tenantId = context.selectedTenant.id;
     const viewerIsReviewer = hasTenantRole(context.selectedMembership.role, "reviewer");
+    const keyword = query.q?.trim();
 
     const metricInclude = {
       include: {
@@ -805,10 +815,28 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       };
     });
 
-    const allItems = filterPublishedFeedByTag(
+    let allItems = filterPublishedFeedByTag(
       buildPublishedFeed({ singles, batches: batchInputs, viewerIsReviewer }),
       query.tag,
     );
+
+    // 按关键词过滤已发布稿件（匹配正文内容或稿件编号）
+    if (keyword) {
+      const keywordLower = keyword.toLowerCase();
+      const displayIdFilter = /^\d+$/.test(keyword) ? Number.parseInt(keyword, 10) : null;
+      allItems = allItems.filter((item) => {
+        for (const post of item.posts) {
+          if (displayIdFilter !== null && post.displayId === displayIdFilter) {
+            return true;
+          }
+          if (post.text.toLowerCase().includes(keywordLower)) {
+            return true;
+          }
+        }
+        return false;
+      });
+    }
+
     const total = allItems.length;
     const start = (query.page - 1) * query.limit;
     const items = allItems.slice(start, start + query.limit);

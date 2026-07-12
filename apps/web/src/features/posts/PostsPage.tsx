@@ -293,6 +293,11 @@ export function PostsPage({
   const [publishedPagination, setPublishedPagination] = useState<Pagination>(() => defaultPagination());
   const [publishedLoading, setPublishedLoading] = useState(false);
   const [publishedPage, setPublishedPage] = useState(1);
+  const [publishedKeyword, setPublishedKeyword] = useState("");
+  const [mineKeyword, setMineKeyword] = useState("");
+  const [mineSearchPosts, setMineSearchPosts] = useState<PostItem[] | null>(null);
+  const [mineSearchPagination, setMineSearchPagination] = useState<Pagination | null>(null);
+  const [mineSearchLoading, setMineSearchLoading] = useState(false);
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
@@ -372,10 +377,16 @@ export function PostsPage({
     if (activeTab !== "published") {
       return;
     }
-    void Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]).catch((caught) => {
-      toast.error(caught instanceof Error ? caught.message : "无法读取已发布稿件");
-    });
-  }, [activeTab, publishedPage, publishedTagFilter, tenantId]);
+    if (publishedKeyword.trim()) {
+      void Promise.all([refreshPublishedTags(), searchPublishedFeed(publishedPage)]).catch((caught) => {
+        toast.error(caught instanceof Error ? caught.message : "无法搜索已发布稿件");
+      });
+    } else {
+      void Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]).catch((caught) => {
+        toast.error(caught instanceof Error ? caught.message : "无法读取已发布稿件");
+      });
+    }
+  }, [activeTab, publishedPage, publishedTagFilter, tenantId, publishedKeyword]);
 
   async function refreshAll() {
     await onRefresh();
@@ -787,6 +798,64 @@ export function PostsPage({
     writeQueryParams({ post: null });
   }
 
+  async function searchMinePosts(page = 1) {
+    const keyword = mineKeyword.trim();
+    if (!keyword) {
+      setMineSearchPosts(null);
+      setMineSearchPagination(null);
+      return;
+    }
+    setMineSearchLoading(true);
+    try {
+      const data = await api<{ posts: PostItem[]; pagination: Pagination }>(`/api/posts/mine?q=${encodeURIComponent(keyword)}&page=${page}&limit=10`);
+      setMineSearchPosts(data.posts);
+      setMineSearchPagination(data.pagination);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "搜索失败");
+    } finally {
+      setMineSearchLoading(false);
+    }
+  }
+
+  function clearMineSearch() {
+    setMineKeyword("");
+    setMineSearchPosts(null);
+    setMineSearchPagination(null);
+  }
+
+  function searchMinePostsPage(page: number) {
+    void searchMinePosts(page);
+  }
+
+  async function searchPublishedFeed(page = 1) {
+    const keyword = publishedKeyword.trim();
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(publishedPagination.limit),
+    });
+    if (publishedTagFilter !== "all") {
+      params.set("tag", publishedTagFilter);
+    }
+    if (keyword) {
+      params.set("q", keyword);
+    }
+    setPublishedLoading(true);
+    try {
+      const data = await api<{ items: PublishedFeedItem[]; pagination: Pagination }>(`/api/posts/published?${params}`);
+      setPublishedItems(data.items);
+      setPublishedPagination(data.pagination);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "搜索失败");
+    } finally {
+      setPublishedLoading(false);
+    }
+  }
+
+  function clearPublishedSearch() {
+    setPublishedKeyword("");
+    void refreshPublishedFeed(1);
+  }
+
   return (
     <MarkdownContext.Provider value={Boolean(enableMarkdownRender)}>
     <ImageLightboxContext.Provider value={openImagePreview}>
@@ -818,7 +887,54 @@ export function PostsPage({
           </div>
         </div>
         <TabsContent value="mine" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-          {mineLoading ? (
+          <div className="mb-3 flex items-center gap-2">
+            <input
+              value={mineKeyword}
+              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+              placeholder="按内容或编号搜索你的稿件"
+              onChange={(event) => setMineKeyword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void searchMinePosts();
+                }
+              }}
+            />
+            <Button variant="outline" size="sm" className="h-9 shrink-0 font-bold" disabled={mineSearchLoading} onClick={() => void searchMinePosts()}>
+              <SearchIcon className="mr-1 size-4" />
+              搜索
+            </Button>
+            {mineKeyword ? (
+              <Button variant="ghost" size="sm" className="h-9 shrink-0 text-slate-500" onClick={clearMineSearch}>
+                清除
+              </Button>
+            ) : null}
+          </div>
+          {mineSearchLoading ? (
+            <LoadingBlock title="正在搜索你的稿件..." />
+          ) : mineSearchPosts !== null ? (
+            <>
+              <div className="mb-2 text-xs font-semibold text-slate-500">
+                搜索 "{mineKeyword}" 的结果（共 {mineSearchPagination?.total ?? 0} 条）
+              </div>
+              <PostList
+                posts={mineSearchPosts}
+                busyCancelPostId={busyCancelPostId}
+                busyRecallPostId={busyRecallPostId}
+                busyFollowPostId={busyFollowPostId}
+                onPreview={(post) => void openRenderPreview(post)}
+                onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+                onCancel={(post) => void cancelPost(post.id)}
+                onRecall={(post) => {
+                  setRecallReason("");
+                  setRecallConfirm({ open: true, mode: "request", post });
+                }}
+                onToggleFollow={(post) => void toggleFollowPost(post)}
+              />
+              {mineSearchPagination ? (
+                <PaginationControls pagination={mineSearchPagination} busy={mineSearchLoading} onPageChange={searchMinePostsPage} />
+              ) : null}
+            </>
+          ) : mineLoading ? (
             <LoadingBlock title="正在加载你的稿件..." />
           ) : (
             <>
@@ -843,6 +959,28 @@ export function PostsPage({
         <TabsContent value="published" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <PublishedTagFilter tags={publishedTags} value={publishedTagFilter} onChange={changePublishedTagFilter} />
+            <div className="flex items-center gap-2">
+              <input
+                value={publishedKeyword}
+                className="h-8 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400 md:w-48"
+                placeholder="搜索已发布稿件..."
+                onChange={(event) => setPublishedKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    setPublishedPage(1);
+                    void searchPublishedFeed(1);
+                  }
+                }}
+              />
+              <Button variant="outline" size="sm" className="h-8 shrink-0 font-bold" disabled={publishedLoading} onClick={() => { setPublishedPage(1); void searchPublishedFeed(1); }}>
+                <SearchIcon className="size-4" />
+              </Button>
+              {publishedKeyword ? (
+                <Button variant="ghost" size="sm" className="h-8 shrink-0 text-xs text-slate-500" onClick={clearPublishedSearch}>
+                  清除
+                </Button>
+              ) : null}
+            </div>
             {isAdmin ? (
               <PublishedTagMaintenanceToolbar
                 value={tagMaintenanceDays}
