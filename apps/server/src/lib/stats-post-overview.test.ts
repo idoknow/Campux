@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { buildPostRangeOverview } from "./stats-post-overview";
+import { buildCreatedAtRange, buildPostRangeOverview } from "./stats-post-overview";
 
 describe("stats post range overview", () => {
+  test("uses both inclusive bounds for the selected post range", () => {
+    const since = new Date("2026-07-01T00:00:00.000Z");
+    const until = new Date("2026-07-07T23:59:59.999Z");
+
+    expect(buildCreatedAtRange(since, until)).toEqual({ gte: since, lte: until });
+  });
+
   test("summarizes only the posts supplied for the selected time range", () => {
     const overview = buildPostRangeOverview([
       {

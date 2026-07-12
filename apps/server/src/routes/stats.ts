@@ -3,7 +3,7 @@ import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
 import { buildBotFriendDailySeries, buildBotFriendTargetSeries } from "../lib/bot-friend-stats";
-import { buildPostRangeOverview } from "../lib/stats-post-overview";
+import { buildCreatedAtRange, buildPostRangeOverview } from "../lib/stats-post-overview";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const chinaTimezoneOffsetHours = 8;
@@ -67,7 +67,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
       prisma.post.findMany({
         where: {
           tenantId,
-          createdAt: { gte: sinceRange },
+          createdAt: buildCreatedAtRange(sinceRange, now),
         },
         select: {
           id: true,

@@ -18,6 +18,10 @@ type StatsPost = {
   logs: unknown[];
 };
 
+export function buildCreatedAtRange(since: Date, until: Date) {
+  return { gte: since, lte: until };
+}
+
 export function buildPostRangeOverview(posts: StatsPost[]) {
   const byStatus: Record<string, number> = Object.fromEntries(postStatuses.map((status) => [status, 0]));
   for (const post of posts) {
