@@ -6,9 +6,8 @@ import { mkdirSync } from "node:fs";
 /**
  * SQLite 自包含迁移器。
  *
- * 单文件 / 自托管 SQLite 形态下，数据库总是从零创建，因此不需要 PostgreSQL 那套
- * 46 步逐项迁移历史——只需把「派生出来的 baseline 建库 DDL」（scripts/generate-sqlite-schema.ts
- * 产出的 packages/db/prisma/sqlite-baseline.sql，编译期内嵌为文本）一次性应用即可。
+ * 单文件 / 自托管 SQLite 形态以派生 baseline 建库，并在每次启动时继续执行本文件登记的
+ * 增量迁移。baseline 由 scripts/generate-sqlite-schema.ts 生成并在编译期内嵌。
  *
  * 记账：沿用与 Prisma 兼容的 `_prisma_migrations` 表，把 baseline 记作一条名为
  * `0_sqlite_baseline` 的迁移（checksum = sha256(baselineSql)）。重复启动时按 name 跳过，
@@ -18,6 +17,12 @@ import { mkdirSync } from "node:fs";
  */
 
 const SQLITE_BASELINE_NAME = "0_sqlite_baseline";
+const FIRST_PRIVATE_MESSAGE_MIGRATION_NAME = "20260713120000_auto_register_on_first_private_message";
+const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
+发送 #重置密码 可以重置你的登录密码。`;
+const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
+发送 #投稿 开始投稿。
+忘记密码时，请发送 #重置密码 获取新密码。`;
 
 const PRISMA_MIGRATIONS_DDL_SQLITE = `CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
   "id" TEXT PRIMARY KEY NOT NULL,
@@ -60,8 +65,107 @@ export function sqliteFilePathFromUrl(databaseUrl: string): string {
   return p;
 }
 
+function sqlStringLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function applyFirstPrivateMessageSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const botTable = db
+    .query(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'BotAccount'`)
+    .get() as { sql: string } | null;
+  // Small migration-unit tests and pre-Campux databases may not contain this product table.
+  if (!botTable) return;
+
+  if (doneNames.has(FIRST_PRIVATE_MESSAGE_MIGRATION_NAME)) {
+    skipped.push(FIRST_PRIVATE_MESSAGE_MIGRATION_NAME);
+    return;
+  }
+
+  const oldDefault = `DEFAULT ${sqlStringLiteral(OLD_PRIVATE_MESSAGE_REPLY)}`;
+  const newDefault = `DEFAULT ${sqlStringLiteral(NEW_PRIVATE_MESSAGE_REPLY)}`;
+  const schemaObjects = db
+    .query(
+      `SELECT type, name, sql FROM sqlite_master
+       WHERE tbl_name = 'BotAccount' AND type IN ('index', 'trigger') AND sql IS NOT NULL
+       ORDER BY type, name`,
+    )
+    .all() as Array<{ type: string; name: string; sql: string }>;
+
+  logger.info({ migration: FIRST_PRIVATE_MESSAGE_MIGRATION_NAME }, "applying sqlite incremental migration");
+  // Rebuilding a referenced table requires foreign_keys=OFF outside the transaction. The
+  // transaction plus foreign_key_check still makes the operation atomic and integrity-checked.
+  db.exec("PRAGMA foreign_keys=OFF");
+  db.exec("BEGIN");
+  try {
+    if (botTable.sql.includes(oldDefault)) {
+      const temporaryTable = "BotAccount__first_private_message_migration";
+      const createSql = botTable.sql
+        .replace(/^CREATE TABLE\s+"?BotAccount"?/i, `CREATE TABLE ${quoteIdentifier(temporaryTable)}`)
+        .replace(oldDefault, newDefault);
+      if (createSql === botTable.sql || !createSql.includes(newDefault)) {
+        throw new Error("could not rewrite BotAccount userMessageReply default");
+      }
+
+      const columns = (
+        db.query(`SELECT name FROM pragma_table_info('BotAccount') ORDER BY cid`).all() as Array<{ name: string }>
+      ).map((row) => quoteIdentifier(row.name));
+      const columnList = columns.join(", ");
+      db.exec(createSql);
+      db.exec(
+        `INSERT INTO ${quoteIdentifier(temporaryTable)} (${columnList}) SELECT ${columnList} FROM "BotAccount"`,
+      );
+      db.exec(`DROP TABLE "BotAccount"`);
+      db.exec(`ALTER TABLE ${quoteIdentifier(temporaryTable)} RENAME TO "BotAccount"`);
+      for (const schemaObject of schemaObjects) {
+        db.exec(schemaObject.sql);
+      }
+    } else if (!botTable.sql.includes(newDefault)) {
+      throw new Error("BotAccount userMessageReply has an unrecognized default; refusing unsafe schema rewrite");
+    }
+
+    db.run(`UPDATE "BotAccount" SET "userMessageReply" = ? WHERE "userMessageReply" = ?`, [
+      NEW_PRIVATE_MESSAGE_REPLY,
+      OLD_PRIVATE_MESSAGE_REPLY,
+    ]);
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`${oldDefault}\n${newDefault}`),
+        FIRST_PRIVATE_MESSAGE_MIGRATION_NAME,
+      ],
+    );
+    const violations = db.query("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error(`sqlite migration introduced ${violations.length} foreign-key violation(s)`);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys=ON");
+  }
+
+  doneNames.add(FIRST_PRIVATE_MESSAGE_MIGRATION_NAME);
+  applied.push(FIRST_PRIVATE_MESSAGE_MIGRATION_NAME);
+  logger.info({ migration: FIRST_PRIVATE_MESSAGE_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 /**
- * 应用 SQLite baseline 建库脚本（幂等）。
+ * 应用 SQLite baseline 建库脚本及后续增量迁移（幂等）。
  *
  * @param baselineSql 内嵌的建库 DDL（sqlite-baseline.sql 文本）
  * @param databaseUrl 形如 `file:./data/campux.db`
@@ -93,32 +197,34 @@ export function applySqliteBaseline(
     if (doneNames.has(SQLITE_BASELINE_NAME)) {
       skipped.push(SQLITE_BASELINE_NAME);
       logger.info({ skipped: skipped.length }, "sqlite baseline already applied");
-      return { applied, skipped };
+    } else {
+      const checksum = checksumOf(baselineSql);
+      const id = randomUUID();
+
+      logger.info({ migration: SQLITE_BASELINE_NAME }, "applying sqlite baseline schema");
+
+      // bun:sqlite 的 exec 支持多语句；整个 baseline 在一个事务里执行，失败回滚。
+      db.exec("BEGIN");
+      try {
+        db.exec(baselineSql);
+        db.run(
+          `INSERT INTO "_prisma_migrations"
+             ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+          [id, checksum, SQLITE_BASELINE_NAME],
+        );
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+
+      doneNames.add(SQLITE_BASELINE_NAME);
+      applied.push(SQLITE_BASELINE_NAME);
+      logger.info({ applied }, "sqlite baseline applied");
     }
 
-    const checksum = checksumOf(baselineSql);
-    const id = randomUUID();
-
-    logger.info({ migration: SQLITE_BASELINE_NAME }, "applying sqlite baseline schema");
-
-    // bun:sqlite 的 exec 支持多语句；整个 baseline 在一个事务里执行，失败回滚。
-    db.exec("BEGIN");
-    try {
-      db.exec(baselineSql);
-      db.run(
-        `INSERT INTO "_prisma_migrations"
-           ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
-         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
-        [id, checksum, SQLITE_BASELINE_NAME],
-      );
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-
-    applied.push(SQLITE_BASELINE_NAME);
-    logger.info({ applied }, "sqlite baseline applied");
+    applyFirstPrivateMessageSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

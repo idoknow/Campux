@@ -251,7 +251,11 @@ export class OneBotRuntime {
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostPendingConfirms = new Map<string, PrivatePostPendingConfirm>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
-  private readonly privateRegistrationCoordinator = new PrivateRegistrationCoordinator<Awaited<ReturnType<typeof registerUserViaBot>>>();
+  private readonly privateRegistrationCoordinator = new PrivateRegistrationCoordinator<{
+    registration: Awaited<ReturnType<typeof registerUserViaBot>>;
+    createdAccess: boolean;
+    noticeSent: boolean;
+  }>();
   private readonly privatePasswordResetCoordinator = new PrivateRegistrationCoordinator<Awaited<ReturnType<typeof resetPasswordViaBot>>>();
   private readonly pendingFriendRequestFlags = new Set<string>();
   private readonly privateForwardMsgIdMap = new Map<string, { userQqUin: string; userNickname: string; botQqUin: string }>();
@@ -1156,25 +1160,33 @@ export class OneBotRuntime {
         return;
       }
       const loginUrl = await this.resolveCampuxLoginUrl(bot.tenantId);
-      const registration = await this.privateRegistrationCoordinator.run(
+      const registrationExecution = await this.privateRegistrationCoordinator.run(
         `${bot.tenantId}:${userQqUin}`,
-        () => registerUserViaBot({
-          botQqUin,
-          userQqUin,
-          displayName: event.sender?.card || event.sender?.nickname || null,
-        }),
+        async () => {
+          const result = await registerUserViaBot({
+            botQqUin,
+            userQqUin,
+            displayName: event.sender?.card || event.sender?.nickname || null,
+          });
+          const createdAccess = !result.alreadyHadTenantAccess;
+          let noticeSent = false;
+          if (createdAccess) {
+            const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+            const message = formatFirstPrivateMessageRegistrationNotice(result, loginUrl, stylishEnabled);
+            if (message) {
+              await this.sendPrivateMessage(botQqUin, userQqUin, message);
+              noticeSent = true;
+            }
+          }
+          return { registration: result, createdAccess, noticeSent };
+        },
       );
-      const registrationCreatedAccess = !registration.result.alreadyHadTenantAccess;
-      let registrationNoticeSent = false;
-      if (registration.shouldAnnounce && registrationCreatedAccess) {
-        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
-        const message = formatFirstPrivateMessageRegistrationNotice(registration.result, loginUrl, stylishEnabled);
-        if (message) {
-          await this.sendPrivateMessage(botQqUin, userQqUin, message);
-          registrationNoticeSent = true;
-        }
-      }
-      const registrationGuidanceHandled = registrationNoticeSent || registrationCreatedAccess || registration.lostDatabaseRace;
+      const registration = registrationExecution.result.registration;
+      const registrationCreatedAccess = registrationExecution.result.createdAccess;
+      const registrationNoticeSent = registrationExecution.result.noticeSent;
+      const registrationGuidanceHandled = registrationNoticeSent
+        || registrationCreatedAccess
+        || registrationExecution.lostDatabaseRace;
 
       // 读取租户 AI 规则：额外投稿关键词与私聊语义收稿开关。
       const aiSettings = await readTenantAiSettings(bot.tenantId);
@@ -1474,7 +1486,7 @@ export class OneBotRuntime {
         return;
       }
       if (command.name === "重置密码") {
-        if (registration.result.password || registration.lostDatabaseRace) {
+        if (registration.password || registrationExecution.lostDatabaseRace) {
           return;
         }
         const reset = await this.privatePasswordResetCoordinator.run(

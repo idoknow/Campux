@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { PrivateRegistrationCoordinator, runWithUniqueConflictRetry } from "./private-registration";
 
 describe("PrivateRegistrationCoordinator", () => {
-  test("coalesces concurrent first messages and only lets the leader announce registration", async () => {
-    const coordinator = new PrivateRegistrationCoordinator<{ password: string | null }>();
+  test("coalesces concurrent first messages until the leader finishes the registration notice", async () => {
+    const coordinator = new PrivateRegistrationCoordinator<{ password: string | null; noticeSent: boolean }>();
     let registrations = 0;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -13,15 +13,15 @@ describe("PrivateRegistrationCoordinator", () => {
     const register = async () => {
       registrations += 1;
       await gate;
-      return { password: "InitPass9" };
+      return { password: "InitPass9", noticeSent: true };
     };
 
     const first = coordinator.run("bot:user", register);
     const second = coordinator.run("bot:user", register);
     release();
 
-    expect(await first).toEqual({ result: { password: "InitPass9" }, shouldAnnounce: true, coalesced: false, lostDatabaseRace: false });
-    expect(await second).toEqual({ result: { password: "InitPass9" }, shouldAnnounce: false, coalesced: true, lostDatabaseRace: false });
+    expect(await first).toEqual({ result: { password: "InitPass9", noticeSent: true }, shouldAnnounce: true, coalesced: false, lostDatabaseRace: false });
+    expect(await second).toEqual({ result: { password: "InitPass9", noticeSent: true }, shouldAnnounce: false, coalesced: true, lostDatabaseRace: false });
     expect(registrations).toBe(1);
   });
 
