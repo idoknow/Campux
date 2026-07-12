@@ -113,7 +113,9 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
     const seg = segment as OneBotMessageSegment;
     // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
     if (seg.type === "text") {
-      const t = String(seg.data?.text ?? "").trim();
+      const t = String(seg.data?.text ?? "")
+        .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
+        .trim();
       return t.length > 0;
     }
     return true;
