@@ -75,31 +75,6 @@ export async function listOfficialQqChannels(bot: OfficialQqBotAccount, guildId:
   });
 }
 
-export async function sendOfficialQqChannelReply(bot: OfficialQqBotAccount, channelId: string, messageId: string, content: string) {
-  return callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/messages`, {
-    method: "POST",
-    body: { content, msg_id: messageId },
-    errorPrefix: "QQ 频道消息回复失败",
-  });
-}
-
-export async function getOfficialQqGateway(bot: OfficialQqBotAccount) {
-  const payload = await callOfficialQqOpenApi(bot, "/gateway", {
-    method: "GET",
-    errorPrefix: "QQ 机器人网关地址获取失败",
-  });
-  const url = readStringField(payload, ["url"]);
-  if (!url) throw new BotWorkflowError("QQ 机器人网关未返回连接地址", 502);
-  return url;
-}
-
-export async function getOfficialQqAuthorization(bot: OfficialQqBotAccount) {
-  if (!bot.officialAppId || !bot.officialAppSecret) {
-    throw new BotWorkflowError("QQ 官方机器人 AppID 或 AppSecret 未配置", 400);
-  }
-  return `QQBot ${await getOfficialQqAccessToken(bot.officialAppId, bot.officialAppSecret)}`;
-}
-
 export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, options: { title: string; content: string }): Promise<OfficialQqForumThreadResult> {
   const title = options.title.trim();
   const content = options.content.trim();

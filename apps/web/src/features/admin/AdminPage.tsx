@@ -2779,12 +2779,12 @@ function BotSetupGuide() {
     {
       icon: RadioTowerIcon,
       title: "完成连接",
-      detail: "QQ 号复制 OneBot URL 到 NapCat；官方机器人由 Campux 自动连接 QQ Gateway，无需另配反向 WebSocket。",
+      detail: "QQ 号复制 OneBot URL 到 NapCat；官方机器人使用 AppID、AppSecret 调用 QQ OpenAPI。",
     },
     {
       icon: MessageSquareTextIcon,
       title: "确认消息流",
-      detail: "官方机器人在频道内收到 /id 后会回复当前 guild_id、channel_id 和 message_id；后台也可直接选择对应子频道。",
+      detail: "官方机器人可在后台直接读取已加入的 QQ 频道，并选择对应子频道。",
     },
   ];
 
