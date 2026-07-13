@@ -43,6 +43,7 @@ import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
 import { registerTenantLifecycleScheduler } from "./runtime/tenant-lifecycle";
 import { registerPostTagMaintenanceScheduler } from "./runtime/post-tagging";
 import { ensureBotSessionSecretConfigured } from "./lib/secret-json";
+import { OfficialQqGatewayRuntime } from "./runtime/official-qq-gateway";
 
 const config = loadConfig();
 ensureBotSessionSecretConfigured();
@@ -66,6 +67,7 @@ const queue = createRuntimeQueue({
   logger: app.log,
 });
 const oneBot = new OneBotRuntime(queue, app.log, config);
+const officialQqGateway = new OfficialQqGatewayRuntime(app.log);
 registerPublishingWorker(queue, app.log, config, oneBot);
 registerQZonePostMetricWorker(queue, app.log);
 
@@ -112,12 +114,14 @@ if (existsSync(webDistDir)) {
 }
 
 app.addHook("onClose", async () => {
+  officialQqGateway.close();
   oneBot.close();
   await queue.stop();
   await prisma.$disconnect();
 });
 
 await queue.start();
+await officialQqGateway.start();
 await recoverPublishAttempts(queue, app.log);
 const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
 const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: app.log, config });

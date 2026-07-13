@@ -320,6 +320,7 @@ export type PublishTargetItem = {
   qzoneRefreshMode: "protocol" | "qr";
   botAccount: {
     id: string;
+    platform: "onebot" | "official_qq";
     qqUin: string;
     displayName: string;
     enabled: boolean;

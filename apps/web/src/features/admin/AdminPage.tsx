@@ -105,9 +105,13 @@ type BotForm = {
   appSecret: string;
   displayName: string;
   reviewGroupId: string;
+  guildId: string;
   channelId: string;
   createPublishTarget: boolean;
 };
+
+type OfficialQqGuildOption = { id: string; name: string; icon: string | null };
+type OfficialQqChannelOption = { id: string; guildId: string; name: string; type: number | null; parentId: string | null };
 
 type PublishTargetForm = {
   botAccountId: string;
@@ -2480,6 +2484,49 @@ function BotsPanel({
   ) => void;
   onRefresh: () => void;
 }) {
+  const [guilds, setGuilds] = useState<OfficialQqGuildOption[]>([]);
+  const [channels, setChannels] = useState<OfficialQqChannelOption[]>([]);
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
+
+  async function loadGuilds() {
+    if (!form.appId.trim() || !form.appSecret.trim()) {
+      toast.error("请先填写 AppID 和 AppSecret。");
+      return;
+    }
+    setDiscoveryBusy(true);
+    try {
+      const result = await api<{ guilds: OfficialQqGuildOption[] }>("/api/admin/official-qq/discovery", {
+        method: "POST",
+        body: JSON.stringify({ appId: form.appId.trim(), appSecret: form.appSecret.trim() }),
+      });
+      setGuilds(result.guilds);
+      setChannels([]);
+      onFormChange({ ...form, guildId: "", channelId: "" });
+      if (result.guilds.length === 0) toast.info("机器人当前没有加入任何 QQ 频道。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "获取 QQ 频道失败");
+    } finally {
+      setDiscoveryBusy(false);
+    }
+  }
+
+  async function selectGuild(guildId: string) {
+    onFormChange({ ...form, guildId, channelId: "" });
+    setChannels([]);
+    setDiscoveryBusy(true);
+    try {
+      const result = await api<{ channels: OfficialQqChannelOption[] }>("/api/admin/official-qq/discovery", {
+        method: "POST",
+        body: JSON.stringify({ appId: form.appId.trim(), appSecret: form.appSecret.trim(), guildId }),
+      });
+      setChannels(result.channels);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "获取子频道失败");
+    } finally {
+      setDiscoveryBusy(false);
+    }
+  }
+
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
@@ -2534,20 +2581,50 @@ function BotsPanel({
                 <>
                   <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
                     AppID
-                    <Input className="bg-white" value={form.appId} onChange={(event) => onFormChange({ ...form, appId: event.target.value.replace(/\D/g, "") })} />
+                    <Input className="bg-white" value={form.appId} onChange={(event) => {
+                      setGuilds([]);
+                      setChannels([]);
+                      onFormChange({ ...form, appId: event.target.value.replace(/\D/g, ""), guildId: "", channelId: "" });
+                    }} />
                   </label>
                   <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
                     AppSecret
-                    <Input className="bg-white" type="password" value={form.appSecret} onChange={(event) => onFormChange({ ...form, appSecret: event.target.value })} />
+                    <Input className="bg-white" type="password" value={form.appSecret} onChange={(event) => {
+                      setGuilds([]);
+                      setChannels([]);
+                      onFormChange({ ...form, appSecret: event.target.value, guildId: "", channelId: "" });
+                    }} />
                   </label>
                   <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
                     显示名
                     <Input className="bg-white" value={form.displayName} onChange={(event) => onFormChange({ ...form, displayName: event.target.value })} />
                   </label>
-                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                    频道 ID <span className="font-normal text-slate-400">channel_id</span>
-                    <Input className="bg-white" value={form.channelId} onChange={(event) => onFormChange({ ...form, channelId: event.target.value.trim() })} />
-                  </label>
+                  <div className="grid gap-2 rounded-md border border-sky-100 bg-sky-50/50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700">选择 QQ 频道与子频道</p>
+                        <p className="mt-0.5 text-xs font-normal text-slate-500">使用上方凭证调用 QQ OpenAPI 自动读取 guild_id 和 channel_id。</p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" disabled={discoveryBusy || !form.appId.trim() || !form.appSecret.trim()} onClick={() => void loadGuilds()}>
+                        {discoveryBusy ? "读取中…" : "获取频道列表"}
+                      </Button>
+                    </div>
+                    <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                      QQ 频道 <span className="font-normal text-slate-400">guild_id</span>
+                      <Select value={form.guildId} onValueChange={(value) => void selectGuild(value)} disabled={guilds.length === 0 || discoveryBusy}>
+                        <SelectTrigger className="bg-white"><SelectValue placeholder="请先获取并选择 QQ 频道" /></SelectTrigger>
+                        <SelectContent>{guilds.map((guild) => <SelectItem key={guild.id} value={guild.id}>{guild.name} · {guild.id}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                      子频道 <span className="font-normal text-slate-400">channel_id</span>
+                      <Select value={form.channelId} onValueChange={(value) => onFormChange({ ...form, channelId: value })} disabled={!form.guildId || channels.length === 0 || discoveryBusy}>
+                        <SelectTrigger className="bg-white"><SelectValue placeholder="选择对应的子频道" /></SelectTrigger>
+                        <SelectContent>{channels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name} · {channel.id}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </label>
+                    {form.channelId ? <p className="text-xs font-semibold text-sky-700">已选择 channel_id：{form.channelId}</p> : null}
+                  </div>
                 </>
               )}
               <Button className="font-medium" disabled={busy || !form.displayName.trim() || (form.platform === "onebot" ? !form.qqUin.trim() : !form.appId.trim() || !form.appSecret.trim() || !form.channelId.trim())} onClick={onAdd}>
@@ -2696,18 +2773,18 @@ function BotSetupGuide() {
   const steps = [
     {
       icon: BotIcon,
-      title: "添加 Bot",
-      detail: "填写墙号 QQ、显示名和审核群号。只有这个审核群里的命令和 @ 提示会被处理，其他群会静默忽略。",
+      title: "选择接入方式",
+      detail: "QQ 号使用 NapCat / OneBot；QQ 官方机器人填写 AppID、AppSecret 后可直接读取已加入的 QQ 频道和子频道。",
     },
     {
       icon: RadioTowerIcon,
-      title: "连接 NapCat",
-      detail: "在机器人卡片复制 OneBot URL，粘贴到 NapCat 的反向 WebSocket 客户端配置里。",
+      title: "完成连接",
+      detail: "QQ 号复制 OneBot URL 到 NapCat；官方机器人由 Campux 自动连接 QQ Gateway，无需另配反向 WebSocket。",
     },
     {
       icon: MessageSquareTextIcon,
       title: "确认消息流",
-      detail: "新投稿会发到审核群；审核员可以在群内 #通过、#拒绝、#重发、#登录 或 #扫码登录。",
+      detail: "官方机器人在频道内收到 /id 后会回复当前 guild_id、channel_id 和 message_id；后台也可直接选择对应子频道。",
     },
   ];
 
@@ -2759,6 +2836,10 @@ function BotConfigEditor({
   const [reviewQueueReminderThresholdHours, setReviewQueueReminderThresholdHours] = useState(String(bot.reviewQueueReminderThresholdHours));
   const [autoFriendRequestApprovalEnabled, setAutoFriendRequestApprovalEnabled] = useState(bot.autoFriendRequestApprovalEnabled);
   const [enabled, setEnabled] = useState(bot.enabled);
+  const [officialGuilds, setOfficialGuilds] = useState<OfficialQqGuildOption[]>([]);
+  const [officialChannels, setOfficialChannels] = useState<OfficialQqChannelOption[]>([]);
+  const [officialGuildId, setOfficialGuildId] = useState("");
+  const [officialDiscoveryBusy, setOfficialDiscoveryBusy] = useState(false);
 
   useEffect(() => {
     setDisplayName(bot.displayName);
@@ -2822,13 +2903,42 @@ function BotConfigEditor({
     });
   }
 
+  async function loadExistingOfficialGuilds() {
+    setOfficialDiscoveryBusy(true);
+    try {
+      const result = await api<{ guilds: OfficialQqGuildOption[] }>(`/api/admin/bots/${bot.id}/official-qq/guilds`);
+      setOfficialGuilds(result.guilds);
+      setOfficialChannels([]);
+      setOfficialGuildId("");
+      if (result.guilds.length === 0) toast.info("机器人当前没有加入任何 QQ 频道。");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "获取 QQ 频道失败");
+    } finally {
+      setOfficialDiscoveryBusy(false);
+    }
+  }
+
+  async function loadExistingOfficialChannels(guildId: string) {
+    setOfficialGuildId(guildId);
+    setOfficialChannels([]);
+    setOfficialDiscoveryBusy(true);
+    try {
+      const result = await api<{ channels: OfficialQqChannelOption[] }>(`/api/admin/bots/${bot.id}/official-qq/channels?guildId=${encodeURIComponent(guildId)}`);
+      setOfficialChannels(result.channels);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "获取子频道失败");
+    } finally {
+      setOfficialDiscoveryBusy(false);
+    }
+  }
+
   return (
     <div className="mt-2 grid gap-2">
       <details className="rounded-md border border-slate-200 bg-slate-50">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-sm font-semibold text-slate-800">基础设置</p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-500">显示名、审核群、启用状态。</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">{bot.platform === "official_qq" ? "显示名、QQ 频道文字子频道、凭证和启用状态。" : "显示名、审核群、启用状态。"}</p>
           </div>
           <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
         </summary>
@@ -2844,10 +2954,25 @@ function BotConfigEditor({
                   AppSecret <span className="font-normal text-slate-400">留空则不修改</span>
                   <Input className="bg-white" type="password" value={officialAppSecret} onChange={(event) => setOfficialAppSecret(event.target.value)} placeholder={bot.officialAppSecretConfigured ? "已配置，输入新值可替换" : "未配置"} />
                 </label>
-                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                  频道 ID <span className="font-normal text-slate-400">channel_id</span>
-                  <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.trim())} />
-                </label>
+                <div className="grid gap-2 rounded-md border border-sky-100 bg-sky-50/50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700">发布子频道</p>
+                      <p className="mt-0.5 text-xs font-normal text-slate-500">当前 channel_id：{reviewGroupId || "未设置"}</p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" disabled={officialDiscoveryBusy} onClick={() => void loadExistingOfficialGuilds()}>
+                      {officialDiscoveryBusy ? "读取中…" : "重新获取频道"}
+                    </Button>
+                  </div>
+                  <Select value={officialGuildId} onValueChange={(value) => void loadExistingOfficialChannels(value)} disabled={officialGuilds.length === 0 || officialDiscoveryBusy}>
+                    <SelectTrigger className="bg-white"><SelectValue placeholder="选择 QQ 频道（guild_id）" /></SelectTrigger>
+                    <SelectContent>{officialGuilds.map((guild) => <SelectItem key={guild.id} value={guild.id}>{guild.name} · {guild.id}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Select value={reviewGroupId} onValueChange={setReviewGroupId} disabled={!officialGuildId || officialChannels.length === 0 || officialDiscoveryBusy}>
+                    <SelectTrigger className="bg-white"><SelectValue placeholder="选择子频道（channel_id）" /></SelectTrigger>
+                    <SelectContent>{officialChannels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name} · {channel.id}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
               </>
             ) : (
               <>
@@ -3185,7 +3310,9 @@ function PublishPanel({
           {targets.length === 0 ? (
             <EmptyCard title="还没有发布目标，添加后审核通过的稿件会自动进入发布队列" />
           ) : (
-            targets.map((target) => (
+            targets.map((target) => {
+              const isOfficialQqTarget = target.botAccount.platform === "official_qq" || target.type === "qq_channel_forum";
+              return (
               <details key={target.id} className="product-row-card group overflow-hidden p-0">
                 <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-3 [&::-webkit-details-marker]:hidden">
                   <div className="min-w-0 flex-1">
@@ -3193,46 +3320,67 @@ function PublishPanel({
                       <p className="font-semibold">{target.displayName}</p>
                       <Badge className={`rounded-full shadow-none ${target.required ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200" : "bg-slate-100 text-slate-600"}`}>{target.required ? "必需" : "可选"}</Badge>
                       <Badge className={`rounded-full shadow-none ${target.botAccount.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>{target.botAccount.enabled ? "机器人启用" : "机器人停用"}</Badge>
-                      <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(target.botAccount.qzoneSession?.status ?? "unchecked")}`}>登录态 {sessionStatusLabel(target.botAccount.qzoneSession?.status ?? "unchecked")}</Badge>
+                      {isOfficialQqTarget ? (
+                        <Badge className="rounded-full bg-sky-50 text-sky-700 ring-1 ring-sky-200 shadow-none">无需登录态</Badge>
+                      ) : (
+                        <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(target.botAccount.qzoneSession?.status ?? "unchecked")}`}>登录态 {sessionStatusLabel(target.botAccount.qzoneSession?.status ?? "unchecked")}</Badge>
+                      )}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {target.botAccount.displayName} · QQ {target.botAccount.qqUin}
+                      {target.botAccount.displayName} · {isOfficialQqTarget ? "官方机器人" : `QQ ${target.botAccount.qqUin}`}
                     </p>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
-                      最近检测：{target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"}
+                      {isOfficialQqTarget ? "发布到 QQ 频道论坛，不需要 QZone 登录态。" : `最近检测：${target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"}`}
                     </p>
                   </div>
                   <span className="rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500 group-open:bg-slate-100">详情</span>
                 </summary>
                 <div className="border-t border-slate-100 bg-slate-50/70 p-3">
-                  <div className="grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-4">
-                    <InfoPill label="刷新模式" value={target.qzoneRefreshMode === "qr" ? "扫码登录" : "协议获取"} />
-                    <InfoPill label="风控间隔" value={`${target.publishDelaySeconds}s`} />
-                    <InfoPill label="最近刷新" value={target.botAccount.qzoneSession?.refreshedAt ? formatDateTime(target.botAccount.qzoneSession.refreshedAt) : "还没有登录态"} />
-                    <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
-                    <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测空间登录态可用性"}</p>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button variant={target.enabled ? "secondary" : "outline"} size="sm" onClick={() => onToggleTarget(target)}>
-                      {target.enabled ? "启用中" : "已停用"}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { required: !target.required })}>
-                      {target.required ? "改为可选" : "设为必需"}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { qzoneRefreshMode: target.qzoneRefreshMode === "qr" ? "protocol" : "qr" })}>
-                      切换登录模式
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => onCheckQZone(target.botAccount.id)}>
-                      检测登录态
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => onRefreshQZone(target.botAccount.id, target.qzoneRefreshMode)}>
-                      重新登录
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={!target.botAccount.qzoneSession} onClick={() => onViewCookies(target.botAccount.id)}>
-                      查看登录态
-                    </Button>
-                  </div>
-                  <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
+                <div className="grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-4">
+                  {isOfficialQqTarget ? (
+                    <>
+                      <InfoPill label="发布方式" value="QQ 频道论坛" />
+                      <InfoPill label="登录态" value="无需登录" />
+                      <InfoPill label="风控间隔" value="无需排队" />
+                      <InfoPill label="认证方式" value="AppID / AppSecret" />
+                      <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1.5 text-sky-700 md:col-span-4">官方机器人发布走 QQ OpenAPI，不使用 QZone cookies，也不需要扫码或协议登录。</p>
+                    </>
+                  ) : (
+                    <>
+                      <InfoPill label="刷新模式" value={target.qzoneRefreshMode === "qr" ? "扫码登录" : "协议获取"} />
+                      <InfoPill label="风控间隔" value={`${target.publishDelaySeconds}s`} />
+                      <InfoPill label="最近刷新" value={target.botAccount.qzoneSession?.refreshedAt ? formatDateTime(target.botAccount.qzoneSession.refreshedAt) : "还没有登录态"} />
+                      <InfoPill label="最近检测" value={target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"} />
+                      <p className="rounded-md border border-slate-200 bg-white px-2 py-1.5 md:col-span-4">检测结果：{target.botAccount.qzoneSession?.message ?? "尚未检测空间登录态可用性"}</p>
+                    </>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button variant={target.enabled ? "secondary" : "outline"} size="sm" onClick={() => onToggleTarget(target)}>
+                    {target.enabled ? "启用中" : "已停用"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { required: !target.required })}>
+                    {target.required ? "改为可选" : "设为必需"}
+                  </Button>
+                  {isOfficialQqTarget ? null : (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { qzoneRefreshMode: target.qzoneRefreshMode === "qr" ? "protocol" : "qr" })}>
+                        切换登录模式
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => onCheckQZone(target.botAccount.id)}>
+                        检测登录态
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => onRefreshQZone(target.botAccount.id, target.qzoneRefreshMode)}>
+                        重新登录
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={!target.botAccount.qzoneSession} onClick={() => onViewCookies(target.botAccount.id)}>
+                        查看登录态
+                      </Button>
+                    </>
+                  )}
+                </div>
+                <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
+                {isOfficialQqTarget ? null : (
                   <BotPublishTemplateEditor
                     bot={{
                       id: target.botAccount.id,
@@ -3261,9 +3409,11 @@ function PublishPanel({
                     busy={busy}
                     onSave={(template) => onSaveTemplate(target.botAccount.id, template)}
                   />
+                )}
                 </div>
               </details>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -3393,21 +3543,21 @@ function PublishTargetConfigEditor({
     setQzoneRefreshMode(target.qzoneRefreshMode);
   }, [target.displayName, target.enabled, target.required, target.publishDelaySeconds, target.qzoneRefreshMode]);
 
-  const normalizedDelay = Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), 0);
+  const isOfficialQqTarget = target.botAccount.platform === "official_qq" || target.type === "qq_channel_forum";
+  const normalizedDelay = isOfficialQqTarget ? 0 : Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), 0);
   const normalizedName = displayName.trim();
   const changed = normalizedName !== target.displayName
     || enabled !== target.enabled
     || required !== target.required
-    || normalizedDelay !== target.publishDelaySeconds
-    || qzoneRefreshMode !== target.qzoneRefreshMode;
+    || (!isOfficialQqTarget && normalizedDelay !== target.publishDelaySeconds)
+    || (!isOfficialQqTarget && qzoneRefreshMode !== target.qzoneRefreshMode);
 
   function saveConfig() {
     onSave({
       displayName: normalizedName,
       enabled,
       required,
-      publishDelaySeconds: normalizedDelay,
-      qzoneRefreshMode,
+      ...(isOfficialQqTarget ? {} : { publishDelaySeconds: normalizedDelay, qzoneRefreshMode }),
     });
   }
 
@@ -3416,7 +3566,7 @@ function PublishTargetConfigEditor({
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
           <p className="text-sm font-semibold text-slate-800">目标设置</p>
-          <p className="mt-0.5 text-xs font-semibold text-slate-500">名称、启用状态、风控间隔、登录方式。</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">{isOfficialQqTarget ? "名称、启用状态和必发策略。官方机器人发布无需登录态。" : "名称、启用状态、风控间隔、登录方式。"}</p>
         </div>
         <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
       </summary>
@@ -3433,22 +3583,26 @@ function PublishTargetConfigEditor({
             保存目标设置
           </Button>
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_180px]">
+        <div className={`mt-3 grid gap-2 ${isOfficialQqTarget ? "md:grid-cols-[minmax(180px,1fr)]" : "md:grid-cols-[minmax(180px,1fr)_150px_180px]"}`}>
           <Input className="bg-white" placeholder="发布目标名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-          <Input
-            className="bg-white"
-            inputMode="numeric"
-            placeholder="风控间隔秒"
-            value={publishDelaySeconds}
-            onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
-          />
-          <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
-            <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="protocol">协议自动获取登录态</SelectItem>
-              <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
-            </SelectContent>
-          </Select>
+          {isOfficialQqTarget ? null : (
+            <>
+              <Input
+                className="bg-white"
+                inputMode="numeric"
+                placeholder="风控间隔秒"
+                value={publishDelaySeconds}
+                onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
+              />
+              <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
+                <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="protocol">协议自动获取登录态</SelectItem>
+                  <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          )}
         </div>
         <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
           <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
@@ -3724,6 +3878,7 @@ function defaultBotForm(): BotForm {
     appSecret: "",
     displayName: "",
     reviewGroupId: "",
+    guildId: "",
     channelId: "",
     createPublishTarget: true,
   };

@@ -1,4 +1,5 @@
 import type { Prisma } from "@campux/db";
+import { createHash } from "node:crypto";
 import { decryptJson } from "../lib/secret-json";
 import { BotWorkflowError } from "../lib/bot-workflows";
 
@@ -26,6 +27,78 @@ export type OfficialQqForumThreadResult = {
   taskId: string | null;
   verbose: unknown;
 };
+
+export type OfficialQqGuild = {
+  id: string;
+  name: string;
+  icon: string | null;
+};
+
+export type OfficialQqChannel = {
+  id: string;
+  guildId: string;
+  name: string;
+  type: number | null;
+  parentId: string | null;
+};
+
+export async function listOfficialQqGuilds(bot: OfficialQqBotAccount): Promise<OfficialQqGuild[]> {
+  const payload = await callOfficialQqOpenApi(bot, "/users/@me/guilds?limit=100", {
+    method: "GET",
+    errorPrefix: "QQ 频道列表获取失败",
+  });
+  return readObjectArray(payload).flatMap((item) => {
+    const id = readStringField(item, ["id"]);
+    const name = readStringField(item, ["name"]);
+    return id && name ? [{ id, name, icon: readStringField(item, ["icon"]) }] : [];
+  });
+}
+
+export async function listOfficialQqChannels(bot: OfficialQqBotAccount, guildId: string): Promise<OfficialQqChannel[]> {
+  const normalizedGuildId = guildId.trim();
+  if (!normalizedGuildId) throw new BotWorkflowError("QQ 频道 guild_id 为空", 400);
+  const payload = await callOfficialQqOpenApi(bot, `/guilds/${encodeURIComponent(normalizedGuildId)}/channels`, {
+    method: "GET",
+    errorPrefix: "QQ 子频道列表获取失败",
+  });
+  return readObjectArray(payload).flatMap((item) => {
+    const id = readStringField(item, ["id"]);
+    const name = readStringField(item, ["name"]);
+    if (!id || !name) return [];
+    return [{
+      id,
+      guildId: readStringField(item, ["guild_id", "guildId"]) ?? normalizedGuildId,
+      name,
+      type: typeof item.type === "number" ? item.type : null,
+      parentId: readStringField(item, ["parent_id", "parentId"]),
+    }];
+  });
+}
+
+export async function sendOfficialQqChannelReply(bot: OfficialQqBotAccount, channelId: string, messageId: string, content: string) {
+  return callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    body: { content, msg_id: messageId },
+    errorPrefix: "QQ 频道消息回复失败",
+  });
+}
+
+export async function getOfficialQqGateway(bot: OfficialQqBotAccount) {
+  const payload = await callOfficialQqOpenApi(bot, "/gateway", {
+    method: "GET",
+    errorPrefix: "QQ 机器人网关地址获取失败",
+  });
+  const url = readStringField(payload, ["url"]);
+  if (!url) throw new BotWorkflowError("QQ 机器人网关未返回连接地址", 502);
+  return url;
+}
+
+export async function getOfficialQqAuthorization(bot: OfficialQqBotAccount) {
+  if (!bot.officialAppId || !bot.officialAppSecret) {
+    throw new BotWorkflowError("QQ 官方机器人 AppID 或 AppSecret 未配置", 400);
+  }
+  return `QQBot ${await getOfficialQqAccessToken(bot.officialAppId, bot.officialAppSecret)}`;
+}
 
 export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, options: { title: string; content: string }): Promise<OfficialQqForumThreadResult> {
   const title = options.title.trim();
@@ -105,12 +178,13 @@ async function callOfficialQqOpenApi(bot: OfficialQqBotAccount, path: string, op
 
 async function getOfficialQqAccessToken(appId: string, secretValue: Prisma.JsonValue) {
   const now = Date.now();
-  const cached = tokenCache.get(appId);
+  const clientSecret = readOfficialQqAppSecret(secretValue);
+  const cacheKey = `${appId}:${createHash("sha256").update(clientSecret).digest("hex")}`;
+  const cached = tokenCache.get(cacheKey);
   if (cached && cached.expiresAt - now > 60_000) {
     return cached.accessToken;
   }
 
-  const clientSecret = readOfficialQqAppSecret(secretValue);
   const response = await fetch(qqBotTokenEndpoint, {
     method: "POST",
     headers: {
@@ -124,7 +198,7 @@ async function getOfficialQqAccessToken(appId: string, secretValue: Prisma.JsonV
   }
 
   const expiresInSeconds = Number(payload.expires_in ?? 7200);
-  tokenCache.set(appId, {
+  tokenCache.set(cacheKey, {
     accessToken: payload.access_token,
     expiresAt: now + Math.max(60, expiresInSeconds) * 1000,
   });
@@ -224,4 +298,9 @@ function readStringField(value: unknown, fieldNames: string[]) {
     }
   }
   return null;
+}
+
+function readObjectArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item));
 }

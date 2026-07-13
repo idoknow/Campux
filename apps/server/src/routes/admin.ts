@@ -14,6 +14,8 @@ import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflo
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { formatBanNotify, formatUnbanNotify } from "../lib/bot-messages";
+import { listOfficialQqChannels, listOfficialQqGuilds } from "../runtime/official-qq";
+import { BotWorkflowError } from "../lib/bot-workflows";
 
 const roleSchema = z.enum(["submitter", "reviewer", "admin"]);
 
@@ -114,6 +116,16 @@ const botLoginParamsSchema = z.object({
 
 const botParamsOnlySchema = z.object({
   id: z.string().min(1),
+});
+
+const officialQqChannelQuerySchema = z.object({
+  guildId: z.string().trim().min(1).max(40),
+});
+
+const officialQqDiscoverySchema = z.object({
+  appId: z.string().regex(/^\d+$/, "AppID 必须是数字"),
+  appSecret: z.string().trim().min(1).max(500),
+  guildId: z.string().trim().min(1).max(40).optional(),
 });
 
 const attemptParamsSchema = z.object({
@@ -600,6 +612,46 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       bots: bots.map((bot) => toBotAccount(bot, bot.platform === "official_qq" ? { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(bot.qqUin.toString()))),
       events: auditLogs.map(toTenantBotEvent),
     };
+  });
+
+  app.post("/api/admin/official-qq/discovery", async (request, reply) => {
+    await requireTenantRole(request, reply, "admin");
+    const body = officialQqDiscoverySchema.parse(request.body);
+    const bot = { id: `discovery:${body.appId}`, officialAppId: body.appId, officialAppSecret: encryptJson(body.appSecret) as Prisma.JsonValue };
+    try {
+      if (body.guildId) return { channels: await listOfficialQqChannels(bot, body.guildId) };
+      return { guilds: await listOfficialQqGuilds(bot) };
+    } catch (error) {
+      if (error instanceof BotWorkflowError) return reply.code(error.statusCode).send({ message: error.message });
+      throw error;
+    }
+  });
+
+  app.get("/api/admin/bots/:id/official-qq/guilds", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsOnlySchema.parse(request.params);
+    const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "official_qq" } });
+    if (!bot) return reply.code(404).send({ message: "QQ 官方机器人不存在" });
+    try {
+      return { guilds: await listOfficialQqGuilds(bot) };
+    } catch (error) {
+      if (error instanceof BotWorkflowError) return reply.code(error.statusCode).send({ message: error.message });
+      throw error;
+    }
+  });
+
+  app.get("/api/admin/bots/:id/official-qq/channels", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = botParamsOnlySchema.parse(request.params);
+    const query = officialQqChannelQuerySchema.parse(request.query);
+    const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "official_qq" } });
+    if (!bot) return reply.code(404).send({ message: "QQ 官方机器人不存在" });
+    try {
+      return { channels: await listOfficialQqChannels(bot, query.guildId) };
+    } catch (error) {
+      if (error instanceof BotWorkflowError) return reply.code(error.statusCode).send({ message: error.message });
+      throw error;
+    }
   });
 
   app.post("/api/admin/bots", async (request, reply) => {
@@ -1129,9 +1181,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
       ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
       ...(body.required === undefined ? {} : { required: body.required }),
-      ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
+      ...(target.type === "qq_channel_forum" ? {} : {
+        ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
+        ...(body.qzoneRefreshMode === undefined ? {} : { qzoneRefreshMode: body.qzoneRefreshMode }),
+      }),
       ...(body.failurePolicy === undefined ? {} : { failurePolicy: body.failurePolicy }),
-      ...(body.qzoneRefreshMode === undefined ? {} : { qzoneRefreshMode: body.qzoneRefreshMode }),
     };
     const updated = await prisma.publishTarget.update({
       where: {
@@ -1332,6 +1386,7 @@ function toPublishTarget(target: {
   qzoneRefreshMode: string;
   botAccount: {
     id: string;
+    platform: string;
     qqUin: bigint;
     displayName: string;
     enabled: boolean;
@@ -1361,6 +1416,7 @@ function toPublishTarget(target: {
     qzoneRefreshMode: target.qzoneRefreshMode,
     botAccount: {
       id: target.botAccount.id,
+      platform: target.botAccount.platform,
       qqUin: target.botAccount.qqUin.toString(),
       displayName: target.botAccount.displayName,
       enabled: target.botAccount.enabled,
