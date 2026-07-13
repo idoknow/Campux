@@ -7,6 +7,7 @@ const qqBotTokenEndpoint = "https://bots.qq.com/app/getAppAccessToken";
 const qqBotOpenApiBaseUrl = "https://api.sgroup.qq.com";
 
 const qqForumTextFormat = 1;
+const qqForumChannelType = 10007;
 
 type TokenCacheEntry = {
   accessToken: string;
@@ -64,7 +65,7 @@ export async function listOfficialQqChannels(bot: OfficialQqBotAccount, guildId:
   return readObjectArray(payload).flatMap((item) => {
     const id = readStringField(item, ["id"]);
     const name = readStringField(item, ["name"]);
-    if (!id || !name) return [];
+    if (!id || !name || item.type !== qqForumChannelType) return [];
     return [{
       id,
       guildId: readStringField(item, ["guild_id", "guildId"]) ?? normalizedGuildId,

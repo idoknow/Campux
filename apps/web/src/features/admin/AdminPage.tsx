@@ -113,6 +113,12 @@ type BotForm = {
 type OfficialQqGuildOption = { id: string; name: string; icon: string | null };
 type OfficialQqChannelOption = { id: string; guildId: string; name: string; type: number | null; parentId: string | null };
 
+const officialQqForumChannelType = 10007;
+
+function officialQqForumChannels(channels: OfficialQqChannelOption[]) {
+  return channels.filter((channel) => channel.type === officialQqForumChannelType);
+}
+
 type PublishTargetForm = {
   botAccountId: string;
   displayName: string;
@@ -2519,7 +2525,9 @@ function BotsPanel({
         method: "POST",
         body: JSON.stringify({ appId: form.appId.trim(), appSecret: form.appSecret.trim(), guildId }),
       });
-      setChannels(result.channels);
+      const forumChannels = officialQqForumChannels(result.channels);
+      setChannels(forumChannels);
+      if (forumChannels.length === 0) toast.info("该 QQ 频道下没有可用于稿件推送的论坛子频道。");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "获取子频道失败");
     } finally {
@@ -2602,8 +2610,8 @@ function BotsPanel({
                   <div className="grid gap-2 rounded-md border border-sky-100 bg-sky-50/50 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <p className="text-xs font-semibold text-slate-700">选择 QQ 频道与子频道</p>
-                        <p className="mt-0.5 text-xs font-normal text-slate-500">使用上方凭证调用 QQ OpenAPI 自动读取 guild_id 和 channel_id。</p>
+                        <p className="text-xs font-semibold text-slate-700">选择 QQ 频道与论坛子频道</p>
+                        <p className="mt-0.5 text-xs font-normal text-slate-500">自动读取 guild_id 和 channel_id；稿件将推送到所选论坛子频道。</p>
                       </div>
                       <Button type="button" variant="outline" size="sm" disabled={discoveryBusy || !form.appId.trim() || !form.appSecret.trim()} onClick={() => void loadGuilds()}>
                         {discoveryBusy ? "读取中…" : "获取频道列表"}
@@ -2617,9 +2625,9 @@ function BotsPanel({
                       </Select>
                     </label>
                     <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                      子频道 <span className="font-normal text-slate-400">channel_id</span>
+                      论坛子频道 <span className="font-normal text-slate-400">channel_id</span>
                       <Select value={form.channelId} onValueChange={(value) => onFormChange({ ...form, channelId: value })} disabled={!form.guildId || channels.length === 0 || discoveryBusy}>
-                        <SelectTrigger className="bg-white"><SelectValue placeholder="选择对应的子频道" /></SelectTrigger>
+                        <SelectTrigger className="bg-white"><SelectValue placeholder="选择用于稿件推送的论坛子频道" /></SelectTrigger>
                         <SelectContent>{channels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name} · {channel.id}</SelectItem>)}</SelectContent>
                       </Select>
                     </label>
@@ -2876,7 +2884,7 @@ function BotConfigEditor({
     || (bot.platform === "onebot" && normalizedReviewQueueReminderThresholdHours !== bot.reviewQueueReminderThresholdHours)
     || (bot.platform === "onebot" && autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled)
     || enabled !== bot.enabled;
-  const canSave = !busy && Boolean(trimmedDisplayName) && (bot.platform === "official_qq" ? Boolean(trimmedOfficialAppId) : Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply)) && changed;
+  const canSave = !busy && Boolean(trimmedDisplayName) && (bot.platform === "official_qq" ? Boolean(trimmedOfficialAppId) && Boolean(trimmedReviewGroupId) : Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply)) && changed;
 
   function saveConfig() {
     if (bot.platform === "official_qq") {
@@ -2924,7 +2932,9 @@ function BotConfigEditor({
     setOfficialDiscoveryBusy(true);
     try {
       const result = await api<{ channels: OfficialQqChannelOption[] }>(`/api/admin/bots/${bot.id}/official-qq/channels?guildId=${encodeURIComponent(guildId)}`);
-      setOfficialChannels(result.channels);
+      const forumChannels = officialQqForumChannels(result.channels);
+      setOfficialChannels(forumChannels);
+      if (forumChannels.length === 0) toast.info("该 QQ 频道下没有可用于稿件推送的论坛子频道。");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "获取子频道失败");
     } finally {
@@ -2938,7 +2948,7 @@ function BotConfigEditor({
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-sm font-semibold text-slate-800">基础设置</p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-500">{bot.platform === "official_qq" ? "显示名、QQ 频道文字子频道、凭证和启用状态。" : "显示名、审核群、启用状态。"}</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">{bot.platform === "official_qq" ? "显示名、稿件推送论坛子频道、凭证和启用状态。" : "显示名、审核群、启用状态。"}</p>
           </div>
           <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
         </summary>
@@ -2957,7 +2967,7 @@ function BotConfigEditor({
                 <div className="grid gap-2 rounded-md border border-sky-100 bg-sky-50/50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-xs font-semibold text-slate-700">发布子频道</p>
+                      <p className="text-xs font-semibold text-slate-700">稿件推送论坛子频道</p>
                       <p className="mt-0.5 text-xs font-normal text-slate-500">当前 channel_id：{reviewGroupId || "未设置"}</p>
                     </div>
                     <Button type="button" variant="outline" size="sm" disabled={officialDiscoveryBusy} onClick={() => void loadExistingOfficialGuilds()}>
@@ -2969,7 +2979,7 @@ function BotConfigEditor({
                     <SelectContent>{officialGuilds.map((guild) => <SelectItem key={guild.id} value={guild.id}>{guild.name} · {guild.id}</SelectItem>)}</SelectContent>
                   </Select>
                   <Select value={reviewGroupId} onValueChange={setReviewGroupId} disabled={!officialGuildId || officialChannels.length === 0 || officialDiscoveryBusy}>
-                    <SelectTrigger className="bg-white"><SelectValue placeholder="选择子频道（channel_id）" /></SelectTrigger>
+                    <SelectTrigger className="bg-white"><SelectValue placeholder="选择论坛子频道（channel_id）" /></SelectTrigger>
                     <SelectContent>{officialChannels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name} · {channel.id}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>

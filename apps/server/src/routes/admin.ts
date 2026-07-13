@@ -806,6 +806,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     if (!bot) {
       return reply.code(404).send({ message: "Bot 账号不存在" });
     }
+    if (bot.platform === "official_qq" && body.reviewGroupId !== undefined && !body.reviewGroupId?.trim()) {
+      return reply.code(400).send({ message: "稿件推送论坛子频道 ID 不能为空" });
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       if (body.reviewNotificationEnabled === true && bot.platform === "onebot") {
