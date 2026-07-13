@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { deriveAggregateStatus, republishFailureRetryDelayMs } from "./publishing";
+import { deriveAggregateStatus, renderOfficialQqForumPostText, republishFailureRetryDelayMs } from "./publishing";
 
 describe("republish failure timeout", () => {
   it("uses a 12 hour retry delay", () => {
@@ -36,5 +36,25 @@ describe("deriveAggregateStatus", () => {
       status: "failed",
       comment: "发布目标失败，请在管理页查看详情",
     });
+  });
+});
+
+describe("renderOfficialQqForumPostText", () => {
+  it("将稿件 ID 和非匿名发稿人放在首行，内容从下一行开始", () => {
+    expect(renderOfficialQqForumPostText({
+      postId: 10,
+      text: "1111测试",
+      anonymous: false,
+      authorQq: "2069528060",
+    })).toBe("#10 2069528060\n1111测试");
+  });
+
+  it("匿名稿在首行明确显示匿名", () => {
+    expect(renderOfficialQqForumPostText({
+      postId: 10,
+      text: "1111测试",
+      anonymous: true,
+      authorQq: "2069528060",
+    })).toBe("#10 匿名\n1111测试");
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { createOfficialQqForumThread, listOfficialQqChannels } from "./official-qq";
+import { createOfficialQqForumThread, listOfficialQqChannels, serializeOfficialQqForumRichText } from "./official-qq";
 
 const originalFetch = globalThis.fetch;
 
@@ -64,11 +64,22 @@ describe("QQ 官方机器人论坛子频道", () => {
     expect(publishRequest?.init?.method).toBe("PUT");
     expect(JSON.parse(String(publishRequest?.init?.body))).toEqual({
       title: "#123",
-      content: "稿件正文",
-      format: 1,
+      content: serializeOfficialQqForumRichText("稿件正文"),
+      format: 4,
     });
     expect(new Headers(publishRequest?.init?.headers).get("Authorization")).toBe("QQBot publish-token");
     expect(result.threadId).toBe("thread-1");
+  });
+
+  it("将每一行转换成独立富文本段落以保留换行", () => {
+    expect(JSON.parse(serializeOfficialQqForumRichText("#10 匿名\r\n1111测试\n\n尾行"))).toEqual({
+      paragraphs: [
+        { elems: [{ type: 1, text: { text: "#10 匿名" } }], props: {} },
+        { elems: [{ type: 1, text: { text: "1111测试" } }], props: {} },
+        { elems: [], props: {} },
+        { elems: [{ type: 1, text: { text: "尾行" } }], props: {} },
+      ],
+    });
   });
 
   it("拒绝空的稿件推送子频道 ID", async () => {

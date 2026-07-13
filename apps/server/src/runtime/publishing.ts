@@ -1625,11 +1625,8 @@ export function wrapBatchCaptionWithFixedText(value: Prisma.JsonValue | null | u
   return lines.join("\n").trim();
 }
 
-function renderOfficialQqForumPostText(post: { postId: number; text: string; anonymous: boolean; authorQq: string; summary?: string | null }) {
-  const headerParts = [`#${post.postId}`];
-  if (!post.anonymous) {
-    headerParts.push(post.authorQq);
-  }
+export function renderOfficialQqForumPostText(post: { postId: number; text: string; anonymous: boolean; authorQq: string; summary?: string | null }) {
+  const headerParts = [`#${post.postId}`, post.anonymous ? "匿名" : post.authorQq];
   const lines = [
     headerParts.join(" "),
     post.summary?.trim() ? `AI总结：${post.summary.trim()}` : null,

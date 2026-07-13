@@ -6,7 +6,7 @@ import { BotWorkflowError } from "../lib/bot-workflows";
 const qqBotTokenEndpoint = "https://bots.qq.com/app/getAppAccessToken";
 const qqBotOpenApiBaseUrl = "https://api.sgroup.qq.com";
 
-const qqForumTextFormat = 1;
+const qqForumRichTextFormat = 4;
 const qqForumChannelType = 10007;
 
 type TokenCacheEntry = {
@@ -92,8 +92,8 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
     method: "PUT",
     body: {
       title,
-      content,
-      format: qqForumTextFormat,
+      content: serializeOfficialQqForumRichText(content),
+      format: qqForumRichTextFormat,
     },
     errorPrefix: "QQ 频道帖子发表失败",
   }) as Record<string, unknown> | null;
@@ -115,6 +115,15 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
       threadId: discoveredThreadId,
     },
   };
+}
+
+export function serializeOfficialQqForumRichText(content: string) {
+  return JSON.stringify({
+    paragraphs: content.replace(/\r\n?/g, "\n").split("\n").map((line) => ({
+      elems: line ? [{ type: 1, text: { text: line } }] : [],
+      props: {},
+    })),
+  });
 }
 
 export async function deleteOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, threadId: string) {
@@ -257,6 +266,9 @@ function extractForumText(value: unknown): string {
   }
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
+    if (Array.isArray(record.paragraphs)) {
+      return record.paragraphs.map(extractForumText).join("\n");
+    }
     return Object.values(record).map(extractForumText).join("");
   }
   return "";
