@@ -363,6 +363,15 @@ export function sanitizeTextForStorage(text: string): string {
     .replace(/javascript\s*:/gi, "");
 }
 
+/**
+ * 移除 Unicode 格式控制字符（Cf 类别），包括零宽空格、零宽连字、
+ * 零宽非连字、字节顺序标记等不可见字符。
+ * 使用 Unicode property escape `\p{Cf}` 覆盖整个类别，避免硬编码码点列表。
+ */
+export function stripZeroWidthChars(text: string): string {
+  return text.replace(/\p{Cf}/gu, "");
+}
+
 // ── 自动封禁 ──────────────────────────────────────────
 
 const BAN_DURATION_MS = 24 * 60 * 60 * 1000; // 1 天

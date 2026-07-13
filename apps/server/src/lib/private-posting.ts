@@ -3,6 +3,8 @@ export type OneBotMessageSegment = {
   data?: Record<string, unknown>;
 };
 
+import { stripZeroWidthChars } from "./sanitize";
+
 /**
  * 检查 input 是否以指定的关键词开头（支持半角 # 和全角 ＃ 前缀）。
  * 关键词本身不应包含 # 前缀。
@@ -113,7 +115,7 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
     const seg = segment as OneBotMessageSegment;
     // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
     if (seg.type === "text") {
-      const t = String(seg.data?.text ?? "").trim();
+      const t = stripZeroWidthChars(String(seg.data?.text ?? "")).trim();
       return t.length > 0;
     }
     return true;
