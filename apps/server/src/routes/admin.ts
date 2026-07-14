@@ -659,14 +659,6 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     const body = botCreateSchema.parse(request.body);
     if (body.platform === "official_qq") {
       const identityUin = BigInt(body.appId);
-      const existing = await prisma.botAccount.findUnique({
-        where: {
-          qqUin: identityUin,
-        },
-      });
-      if (existing) {
-        return reply.code(409).send({ message: "这个官方机器人 AppID 已经绑定到其他校园墙" });
-      }
 
       const bot = await prisma.botAccount.create({
         data: {
@@ -715,13 +707,14 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       };
     }
     const identityUin = BigInt(body.qqUin);
-    const existing = await prisma.botAccount.findUnique({
+    const existing = await prisma.botAccount.findFirst({
       where: {
+        platform: "onebot",
         qqUin: identityUin,
       },
     });
     if (existing) {
-      return reply.code(409).send({ message: body.platform === "onebot" ? "这个机器人 QQ 已经绑定到其他校园墙" : "这个官方机器人 AppID 已经绑定到其他校园墙" });
+      return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
     }
 
     const bot = await prisma.$transaction(async (tx) => {

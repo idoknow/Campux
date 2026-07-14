@@ -542,9 +542,6 @@ CREATE INDEX "PostLog_tenantId_postId_createdAt_idx" ON "PostLog"("tenantId", "p
 CREATE UNIQUE INDEX "BotAccount_tenantId_qqUin_key" ON "BotAccount"("tenantId", "qqUin");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BotAccount_qqUin_key" ON "BotAccount"("qqUin");
-CREATE UNIQUE INDEX "BotAccount_officialAppId_key" ON "BotAccount"("officialAppId");
-
 -- CreateIndex
 CREATE UNIQUE INDEX "BotAccount_connectionToken_key" ON "BotAccount"("connectionToken");
 

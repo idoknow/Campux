@@ -329,8 +329,9 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "这个网址标识已经被其他校园墙使用" });
     }
     if (body.botQqUin) {
-      const existingBot = await prisma.botAccount.findUnique({
+      const existingBot = await prisma.botAccount.findFirst({
         where: {
+          platform: "onebot",
           qqUin: BigInt(body.botQqUin),
         },
         select: {

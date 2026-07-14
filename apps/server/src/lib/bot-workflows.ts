@@ -508,8 +508,9 @@ export function parseCookieString(rawCookies: string) {
 }
 
 export async function findEnabledBot(botQqUin: string) {
-  const bot = await prisma.botAccount.findUnique({
+  const bot = await prisma.botAccount.findFirst({
     where: {
+      platform: "onebot",
       qqUin: BigInt(botQqUin),
     },
   });

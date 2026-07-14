@@ -1,5 +1,5 @@
 import type { Prisma } from "@campux/db";
-import { createHash, createPrivateKey, sign as signEd25519 } from "node:crypto";
+import { createHash } from "node:crypto";
 import { decryptJson } from "../lib/secret-json";
 import { BotWorkflowError } from "../lib/bot-workflows";
 
@@ -29,11 +29,6 @@ export type OfficialQqForumThreadResult = {
   verbose: unknown;
 };
 
-export type OfficialQqChannelMessageResult = {
-  id: string | null;
-  timestamp: string | number | null;
-  verbose: unknown;
-};
 
 export type OfficialQqGuild = {
   id: string;
@@ -80,67 +75,6 @@ export async function listOfficialQqChannels(bot: OfficialQqBotAccount, guildId:
       parentId: readStringField(item, ["parent_id", "parentId"]),
     }];
   });
-}
-
-export async function sendOfficialQqChannelMessage(bot: OfficialQqBotAccount, channelId: string, options: { content: string; msgId?: string | null; eventId?: string | null; msgSeq?: number }): Promise<OfficialQqChannelMessageResult> {
-  const content = options.content.trim();
-  if (!content) {
-    throw new BotWorkflowError("QQ 频道回复内容为空", 400);
-  }
-  const normalizedChannelId = channelId.trim();
-  if (!normalizedChannelId) {
-    throw new BotWorkflowError("QQ 频道 ID 为空", 400);
-  }
-  const payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(normalizedChannelId)}/messages`, {
-    method: "POST",
-    body: {
-      content,
-      ...(options.msgId ? { msg_id: options.msgId } : {}),
-      ...(options.eventId ? { event_id: options.eventId } : {}),
-      ...(options.msgSeq ? { msg_seq: options.msgSeq } : {}),
-    },
-    errorPrefix: "QQ 频道消息回复失败",
-  }) as Record<string, unknown> | null;
-
-  return {
-    id: readStringField(payload, ["id"]),
-    timestamp: typeof payload?.timestamp === "string" || typeof payload?.timestamp === "number" ? payload.timestamp : null,
-    verbose: payload,
-  };
-}
-
-export function signOfficialQqWebhookValidation(bot: OfficialQqBotAccount, plainToken: string, eventTs: string) {
-  if (!bot.officialAppSecret) {
-    throw new BotWorkflowError("QQ 官方机器人 AppSecret 未配置", 400);
-  }
-  const secret = readOfficialQqAppSecret(bot.officialAppSecret);
-  let seed = secret;
-  while (Buffer.byteLength(seed) < 32) {
-    seed += seed;
-  }
-  const seedBytes = Buffer.from(seed).subarray(0, 32);
-  const pkcs8Prefix = Buffer.from("302e020100300506032b657004220420", "hex");
-  const key = createPrivateKey({ key: Buffer.concat([pkcs8Prefix, seedBytes]), format: "der", type: "pkcs8" });
-  return signEd25519(null, Buffer.from(`${eventTs}${plainToken}`), key).toString("hex");
-}
-
-export function isOfficialQqIdCommand(content: string) {
-  const normalized = content
-    .replace(/<@!?\d+>/g, " ")
-    .replace(/@\S+/g, " ")
-    .trim();
-  return normalized === "/id" || normalized.startsWith("/id ");
-}
-
-export function formatOfficialQqIdReply(input: { guildId?: string | null; channelId?: string | null; messageId?: string | null; authorId?: string | null; eventId?: string | null }) {
-  return [
-    "当前 QQ 频道信息：",
-    `guild_id：${input.guildId?.trim() || "未知"}`,
-    `channel_id：${input.channelId?.trim() || "未知"}`,
-    input.messageId ? `message_id：${input.messageId}` : null,
-    input.authorId ? `author_id：${input.authorId}` : null,
-    input.eventId ? `event_id：${input.eventId}` : null,
-  ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
 export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, options: { title: string; content: string; imageUrls?: string[] }): Promise<OfficialQqForumThreadResult> {

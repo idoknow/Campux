@@ -361,8 +361,6 @@ model BotAccount {
   friendSnapshots BotFriendSnapshot[]
 
   @@unique([tenantId, qqUin])
-  @@unique([qqUin])
-  @@unique([officialAppId])
   @@unique([connectionToken])
 }
 
