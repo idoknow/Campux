@@ -3106,7 +3106,7 @@ function BotConfigEditor({
   );
 }
 
-function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
+function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: Pick<AdminBotAccount, "id" | "platform" | "publishTextTemplate">; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
   const [template, setTemplate] = useState<PublishTextTemplate>(() => normalizePublishTemplate(bot.publishTextTemplate));
   const [dirty, setDirty] = useState(false);
   const persistedTemplate = normalizePublishTemplate(bot.publishTextTemplate);
@@ -3138,7 +3138,7 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
   const previewParts = [];
   if (template.customText.trim()) previewParts.push(template.customText.trim());
   if (template.includePostId) previewParts.push("#12");
-  if (template.includeAuthorMention) previewParts.push("@{uin:10000,nick:,who:1}");
+  if (template.includeAuthorMention) previewParts.push(bot.platform === "official_qq" ? "10000" : "@{uin:10000,nick:,who:1}");
   const preview = [
     previewParts.join(" ").trim(),
     ...(template.includeLinks ? ["https://example.com/activity"] : []),
@@ -3151,8 +3151,8 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
     <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
-          <p className="text-sm font-semibold text-slate-800">说说配文模板</p>
-          <p className="mt-0.5 text-xs font-semibold text-slate-500">正文在渲染图里，这里只改发布文案。</p>
+          <p className="text-sm font-semibold text-slate-800">{bot.platform === "official_qq" ? "频道帖子配文模板" : "说说配文模板"}</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">正文在渲染图里，这里只改发布配文。</p>
         </div>
         <Badge variant={dirty ? "secondary" : "outline"}>{dirty ? "有改动" : "低频"}</Badge>
       </summary>
@@ -3170,7 +3170,7 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
               className="mt-1 min-h-20 resize-y bg-white text-sm"
               value={template.customText}
               onChange={(event) => updateTemplate({ customText: event.target.value })}
-              placeholder="会显示在稿件编号和 @ 用户之前"
+              placeholder={bot.platform === "official_qq" ? "会显示在稿件编号和投稿人 QQ 之前" : "会显示在稿件编号和 @ 用户之前"}
             />
           </label>
           <label className="text-xs font-semibold text-slate-500">
@@ -3179,7 +3179,7 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
               className="mt-1 min-h-20 resize-y bg-white text-sm"
               value={template.suffixText}
               onChange={(event) => updateTemplate({ suffixText: event.target.value })}
-              placeholder="会另起一行显示在正文链接之后"
+              placeholder="会另起一行显示在发布配文之后"
             />
           </label>
         </div>
@@ -3190,11 +3190,11 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: AdminBotAccount;
           </label>
           <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
             <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => updateTemplate({ includeAuthorMention: event.target.checked })} />
-            非匿名时 @ 用户
+            {bot.platform === "official_qq" ? "非匿名时显示投稿人 QQ" : "非匿名时 @ 用户"}
           </label>
           <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
             <input type="checkbox" checked={template.includeLinks} onChange={(event) => updateTemplate({ includeLinks: event.target.checked })} />
-            提取正文链接
+            {bot.platform === "official_qq" ? "附上正文中的链接" : "提取正文链接"}
           </label>
         </div>
         <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
@@ -3390,36 +3390,15 @@ function PublishPanel({
                   )}
                 </div>
                 <PublishTargetConfigEditor target={target} busy={busy} onSave={(patch) => onPatchTarget(target, patch)} />
-                {isOfficialQqTarget ? null : (
-                  <BotPublishTemplateEditor
-                    bot={{
-                      id: target.botAccount.id,
-                      platform: "onebot",
-                      qqUin: target.botAccount.qqUin,
-                      officialAppId: null,
-                      officialAppSecretConfigured: false,
-                      displayName: target.botAccount.displayName,
-                      enabled: target.botAccount.enabled,
-                      reviewGroupId: null,
-                      reviewNotificationEnabled: false,
-                      reviewQueueAutoReminderEnabled: false,
-                      reviewQueueReminderThresholdHours: 6,
-                      autoFriendRequestApprovalEnabled: false,
-                      connectionToken: target.botAccount.connectionToken,
-                      publishTextTemplate: target.botAccount.publishTextTemplate,
-                      userMessageReply: "",
-                      userMessageReplyCooldownSeconds: 60,
-                      reviewGroupMessageReply: "",
-                      lastSeenAt: null,
-                      createdAt: "",
-                      connection: { online: false, connectionCount: 0 },
-                      sessions: target.botAccount.qzoneSession ? [target.botAccount.qzoneSession] : [],
-                      publishTargets: [],
-                    }}
-                    busy={busy}
-                    onSave={(template) => onSaveTemplate(target.botAccount.id, template)}
-                  />
-                )}
+                <BotPublishTemplateEditor
+                  bot={{
+                    id: target.botAccount.id,
+                    platform: target.botAccount.platform,
+                    publishTextTemplate: target.botAccount.publishTextTemplate,
+                  }}
+                  busy={busy}
+                  onSave={(template) => onSaveTemplate(target.botAccount.id, template)}
+                />
                 </div>
               </details>
               );

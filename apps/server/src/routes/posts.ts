@@ -21,9 +21,15 @@ import { formatBanNotify } from "../lib/bot-messages";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 import { autoTagPost } from "../runtime/post-tagging";
+import { verifyPublicForumMediaSignature } from "../lib/public-forum-media";
 
 const fileQuerySchema = z.object({
   key: z.string().min(1),
+});
+
+const publicForumMediaQuerySchema = fileQuerySchema.extend({
+  expires: z.coerce.number().int().positive(),
+  signature: z.string().min(1),
 });
 
 const postParamsSchema = z.object({
@@ -188,6 +194,27 @@ function isTransactionSerializationFailure(value: unknown) {
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _queue: RuntimeQueue, oneBot?: OneBotRuntime) {
+  app.get("/api/public/forum-media", async (request, reply) => {
+    const query = publicForumMediaQuerySchema.parse(request.query);
+    if (!verifyPublicForumMediaSignature(query.key, query.expires, query.signature)) {
+      return reply.code(403).send({ message: "图片链接无效或已过期" });
+    }
+    if (!/^tenants\/[^/]+\/(?:uploads|legacy|published\/qq-forum)\//.test(query.key)) {
+      return reply.code(403).send({ message: "图片路径不允许公开访问" });
+    }
+
+    const storage = getStorageDriver(config);
+    const object = await storage.getBytes(query.key);
+    if (!object) {
+      return reply.code(404).send({ message: "图片不存在" });
+    }
+    if (object.contentType) {
+      reply.header("Content-Type", object.contentType);
+    }
+    reply.header("Cache-Control", "public, max-age=3600");
+    return reply.send(Buffer.from(object.bytes));
+  });
+
   app.get("/api/uploads/post-image", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);

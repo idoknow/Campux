@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { createOfficialQqForumThread, listOfficialQqChannels, serializeOfficialQqForumRichText } from "./official-qq";
+import {
+  createOfficialQqForumThread,
+  formatOfficialQqIdReply,
+  isOfficialQqIdCommand,
+  listOfficialQqChannels,
+  sendOfficialQqChannelMessage,
+  serializeOfficialQqForumRichText,
+} from "./official-qq";
 
 const originalFetch = globalThis.fetch;
 
@@ -80,6 +87,59 @@ describe("QQ 官方机器人论坛子频道", () => {
         { elems: [{ type: 1, text: { text: "尾行" } }], props: {} },
       ],
     });
+  });
+
+  it("将正文图片作为独立富文本图片段落追加到频道帖子", () => {
+    expect(JSON.parse(serializeOfficialQqForumRichText("#10", ["https://example.com/card.png", "https://example.com/photo.jpg"]))).toEqual({
+      paragraphs: [
+        { elems: [{ type: 1, text: { text: "#10" } }], props: {} },
+        { elems: [{ type: 2, image: { third_url: "https://example.com/card.png", width_percent: 1 } }], props: {} },
+        { elems: [{ type: 2, image: { third_url: "https://example.com/photo.jpg", width_percent: 1 } }], props: {} },
+      ],
+    });
+  });
+
+  it("能够识别 /id 并回复当前频道上下文", async () => {
+    const requests: Array<{ url: string; init: RequestInit | BunFetchRequestInit | undefined }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "message-token", expires_in: 7200 });
+      }
+      return Response.json({ id: "reply-message", timestamp: "2026-07-14T00:00:00+08:00" });
+    }) as typeof fetch;
+
+    const reply = formatOfficialQqIdReply({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      messageId: "message-1",
+      authorId: "author-1",
+      eventId: "event-1",
+    });
+    const result = await sendOfficialQqChannelMessage({
+      id: "bot-reply",
+      officialAppId: "10004",
+      officialAppSecret: "reply-secret",
+    }, "channel-1", {
+      content: reply,
+      msgId: "message-1",
+      eventId: "event-1",
+    });
+
+    expect(isOfficialQqIdCommand("<@12345> /id")).toBe(true);
+    expect(isOfficialQqIdCommand("随便说说 /id")).toBe(false);
+    expect(reply).toContain("guild_id：guild-1");
+    expect(reply).toContain("channel_id：channel-1");
+    const messageRequest = requests.find((request) => request.url.startsWith("https://api.sgroup.qq.com/"));
+    expect(messageRequest?.url).toBe("https://api.sgroup.qq.com/channels/channel-1/messages");
+    expect(messageRequest?.init?.method).toBe("POST");
+    expect(JSON.parse(String(messageRequest?.init?.body))).toEqual({
+      content: reply,
+      msg_id: "message-1",
+      event_id: "event-1",
+    });
+    expect(result.id).toBe("reply-message");
   });
 
   it("拒绝空的稿件推送子频道 ID", async () => {

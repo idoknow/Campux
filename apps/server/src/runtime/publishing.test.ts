@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   buildQZonePostUrl,
   deriveAggregateStatus,
-  renderOfficialQqForumPostText,
+  renderOfficialQqForumCaption,
   renderOfficialQqForumThreadTitle,
   republishFailureRetryDelayMs,
   shouldWaitForQZoneAttempt,
@@ -46,41 +46,53 @@ describe("deriveAggregateStatus", () => {
   });
 });
 
-describe("renderOfficialQqForumPostText", () => {
-  it("将非匿名发稿人、内容和对应的 QQ 空间链接依次放入正文", () => {
-    expect(renderOfficialQqForumPostText({
+describe("renderOfficialQqForumCaption", () => {
+  it("按频道配文模板渲染稿件编号、投稿人和正文链接", () => {
+    expect(renderOfficialQqForumCaption({
+      customText: "校园墙",
+      suffixText: "欢迎互动",
+      includePostId: true,
+      includeAuthorMention: true,
+      includeLinks: true,
+    }, {
       postId: 10,
-      text: "1111测试",
+      text: "1111测试 https://example.com/activity",
       anonymous: false,
       authorQq: "2069528060",
-      qzoneUrls: ["https://user.qzone.qq.com/123/mood/abc"],
-    })).toBe("2069528060\n1111测试\nhttps://user.qzone.qq.com/123/mood/abc");
+    })).toBe("校园墙 #10 2069528060\nhttps://example.com/activity\n欢迎互动");
   });
 
-  it("匿名稿不泄露 QQ，并在没有 tid 时省略链接", () => {
-    expect(renderOfficialQqForumPostText({
+  it("匿名稿不泄露 QQ，批量单稿片段不重复固定前后缀", () => {
+    expect(renderOfficialQqForumCaption({
+      customText: "校园墙",
+      suffixText: "欢迎互动",
+      includePostId: true,
+      includeAuthorMention: true,
+      includeLinks: false,
+    }, {
       postId: 10,
       text: "1111测试",
       anonymous: true,
       authorQq: "2069528060",
-    })).toBe("匿名\n1111测试");
+      omitFixedText: true,
+    })).toBe("#10");
   });
 });
 
 describe("renderOfficialQqForumThreadTitle", () => {
-  it("将稿件 ID 和 AI 总结放入单稿标题", () => {
-    expect(renderOfficialQqForumThreadTitle([{ postId: 10, summary: "校园里的夏日碎片" }]))
-      .toBe("#10 校园里的夏日碎片");
+  it("将稿件 ID 和非匿名投稿人 QQ 放入单稿标题", () => {
+    expect(renderOfficialQqForumThreadTitle([{ postId: 10, anonymous: false, authorQq: "2069528060" }]))
+      .toBe("#10 2069528060");
   });
 
-  it("没有总结时只显示稿件 ID", () => {
-    expect(renderOfficialQqForumThreadTitle([{ postId: 10, summary: "  " }])).toBe("#10");
+  it("匿名稿标题不泄露投稿人 QQ", () => {
+    expect(renderOfficialQqForumThreadTitle([{ postId: 10, anonymous: true, authorQq: "2069528060" }])).toBe("#10");
   });
 
-  it("批量稿件保留批量标题，避免把首稿总结误标成整批总结", () => {
+  it("批量稿件保留批量标题", () => {
     expect(renderOfficialQqForumThreadTitle([
-      { postId: 10, summary: "第一条总结" },
-      { postId: 11, summary: "第二条总结" },
+      { postId: 10, anonymous: false, authorQq: "10000" },
+      { postId: 11, anonymous: false, authorQq: "10001" },
     ])).toBe("#10 等 2 条稿件");
   });
 });

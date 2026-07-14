@@ -15,6 +15,7 @@ import { generatePublishSummary } from "./publish-summary";
 import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { createOfficialQqForumThread } from "./official-qq";
+import { buildPublicForumMediaUrl } from "../lib/public-forum-media";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
 const maxPublishAttempts = 3;
@@ -806,23 +807,60 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         },
       });
 
-      const summaryEnabled = await readTenantPublishLlmSummaryEnabled(prisma, attempt.tenantId);
       const forumBodyParts = [];
-      const forumTitles: Array<{ postId: number; summary: string | null }> = [];
+      const isForumBatch = Boolean(attempt.batch);
+      const forumTitles: Array<{ postId: number; anonymous: boolean; authorQq: string }> = [];
+      const forumImageUrls: string[] = [];
+      const storage = getStorageDriver(config);
+      await storage.ensureReady();
       for (const target of postsToPublish) {
-        const summary = summaryEnabled
-          ? await ensurePostPublishSummary(attempt.tenantId, target.id, target.text, target.publishSummary, logger)
-          : null;
-        forumTitles.push({ postId: target.displayId, summary });
-        forumBodyParts.push(renderOfficialQqForumPostText({
+        const authorQq = target.author.qqUin.toString();
+        forumTitles.push({ postId: target.displayId, anonymous: target.anonymous, authorQq });
+        forumBodyParts.push(renderOfficialQqForumCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
           postId: target.displayId,
           text: target.text,
           anonymous: target.anonymous,
-          authorQq: target.author.qqUin.toString(),
-          qzoneUrls: qzonePublication.urls,
+          authorQq,
+          omitFixedText: isForumBatch,
         }));
+
+        const avatarFilename = target.anonymous
+          ? (target as Record<string, unknown>).anonymousAvatar as string | null | undefined
+          : undefined;
+        const anonymousAvatar = avatarFilename ? readSvgAvatarDataUrl(avatarFilename) : undefined;
+        const renderedCard = await renderPostCard({
+          tenantName: target.tenant.name,
+          displayHost: target.tenant.host,
+          displayId: target.displayId,
+          authorName: target.author.displayName ?? authorQq,
+          authorQq,
+          cornerQq: attempt.publishTarget.botAccount.qqUin.toString(),
+          text: target.text,
+          createdAt: target.createdAt,
+          anonymous: target.anonymous,
+          anonymousAvatar: anonymousAvatar ?? undefined,
+          bgColor: (target as { bgColor?: string | null }).bgColor ?? null,
+          textColor: (target as { textColor?: string | null }).textColor ?? null,
+          font: (target as { font?: string | null }).font ?? null,
+          tags: serializeAssignedPostTags((target as { tagAssignments?: Parameters<typeof serializeAssignedPostTags>[0] }).tagAssignments).map((tag) => ({
+            name: tag.name,
+            color: tag.color,
+          })),
+        });
+        const cardKey = `tenants/${attempt.tenantId}/published/qq-forum/${attempt.publishTargetId}/${target.id}.png`;
+        await storage.put(cardKey, renderedCard, "image/png");
+        forumImageUrls.push(buildPublicForumMediaUrl(config, cardKey));
+        for (const attachment of await readPostImageKeys(config, attempt.tenantId, target.attachments)) {
+          forumImageUrls.push(buildPublicForumMediaUrl(config, attachment));
+        }
       }
-      const forumContent = forumBodyParts.join("\n\n---\n\n").trim();
+      const forumCaption = forumBodyParts.join("\n\n---\n\n").trim();
+      const forumContent = [
+        isForumBatch
+          ? wrapBatchCaptionWithFixedText(attempt.publishTarget.botAccount.publishTextTemplate, forumCaption)
+          : forumCaption,
+        ...qzonePublication.urls,
+      ].filter(Boolean).join("\n").trim();
       const result = await createOfficialQqForumThread(
         {
           id: attempt.publishTarget.botAccount.id,
@@ -833,6 +871,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         {
           title: renderOfficialQqForumThreadTitle(forumTitles),
           content: forumContent,
+          imageUrls: forumImageUrls,
         },
       );
 
@@ -1654,29 +1693,62 @@ export function buildQZonePostUrl(uin: string, tid: string) {
   return `https://user.qzone.qq.com/${encodeURIComponent(uin)}/mood/${encodeURIComponent(tid)}`;
 }
 
-export function renderOfficialQqForumThreadTitle(posts: Array<{ postId: number; summary?: string | null }>) {
+export function renderOfficialQqForumThreadTitle(posts: Array<{ postId: number; anonymous?: boolean; authorQq?: string }>) {
   const firstPost = posts[0];
   if (!firstPost) {
     return "稿件";
   }
-  const prefix = posts.length > 1 ? `#${firstPost.postId} 等 ${posts.length} 条稿件` : `#${firstPost.postId}`;
-  const summary = posts.length === 1 ? firstPost.summary?.trim() : null;
-  return [prefix, summary].filter(Boolean).join(" ");
+  if (posts.length > 1) {
+    return `#${firstPost.postId} 等 ${posts.length} 条稿件`;
+  }
+  return [`#${firstPost.postId}`, firstPost.anonymous ? null : firstPost.authorQq?.trim()].filter(Boolean).join(" ");
 }
 
-export function renderOfficialQqForumPostText(post: {
+export function renderOfficialQqForumCaption(value: Prisma.JsonValue | null | undefined, post: {
   postId: number;
   text: string;
   anonymous: boolean;
   authorQq: string;
-  qzoneUrls?: string[];
+  omitFixedText?: boolean;
 }) {
+  const template = normalizePublishCaptionTemplate(value);
+  const omitFixedText = Boolean(post.omitFixedText);
+  const firstLine = [
+    omitFixedText ? null : template.customText?.trim(),
+    template.includePostId ? `#${post.postId}` : null,
+    template.includeAuthorMention && !post.anonymous ? post.authorQq : null,
+  ].filter(Boolean).join(" ").trim();
   const lines = [
-    post.anonymous ? "匿名" : post.authorQq,
-    post.text.trim(),
-    ...(post.qzoneUrls ?? []),
+    firstLine,
+    ...(template.includeLinks ? extractLinks(post.text) : []),
+    omitFixedText ? null : template.suffixText?.trim(),
   ].filter((line): line is string => Boolean(line));
+  if (lines.length === 0 && !omitFixedText) {
+    return `#${post.postId}`;
+  }
   return lines.join("\n").trim();
+}
+
+async function readPostImageKeys(config: CampuxConfig, tenantId: string, attachments: unknown) {
+  if (!Array.isArray(attachments)) {
+    throw new Error("稿件图片数据格式错误：attachments 不是数组");
+  }
+  const storage = getStorageDriver(config);
+  const keys = attachments.map((attachment) => {
+    const key = (attachment as ImagePayload).key?.trim();
+    if (!key) {
+      throw new Error("稿件图片数据缺少 key 字段");
+    }
+    assertValidImageKey(key, tenantId);
+    return key;
+  });
+  for (const key of keys) {
+    const head = await storage.head(key);
+    if (!head || head.size <= 0) {
+      throw new Error(`图片 ${key} 不存在或内容为空`);
+    }
+  }
+  return keys;
 }
 
 async function resolveQZonePublicationForOfficialForum(input: { postId: string; batchId: string | null }) {

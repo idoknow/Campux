@@ -30,6 +30,7 @@ import { registerHealthRoutes } from "./routes/health";
 import { registerMetadataRoutes } from "./routes/metadata";
 import { registerOAuthRoutes } from "./routes/oauth";
 import { registerOneBotRoutes } from "./routes/onebot";
+import { registerOfficialQqRoutes } from "./routes/official-qq";
 import { registerPostRoutes } from "./routes/posts";
 import { registerPostTagRoutes } from "./routes/post-tags";
 import { registerReviewRoutes } from "./routes/review";
@@ -70,6 +71,7 @@ registerPublishingWorker(queue, app.log, config, oneBot);
 registerQZonePostMetricWorker(queue, app.log);
 
 await registerOneBotRoutes(app, oneBot);
+registerOfficialQqRoutes(app);
 registerHealthRoutes(app, queue);
 registerSetupRoutes(app);
 registerAuthRoutes(app, config);

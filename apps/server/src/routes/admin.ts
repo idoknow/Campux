@@ -841,7 +841,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(bot.platform === "onebot" && body.userMessageReply !== undefined ? { userMessageReply: body.userMessageReply } : {}),
           ...(bot.platform === "onebot" && body.userMessageReplyCooldownSeconds !== undefined ? { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds } : {}),
           ...(bot.platform === "onebot" && body.reviewGroupMessageReply !== undefined ? { reviewGroupMessageReply: body.reviewGroupMessageReply } : {}),
-          ...(bot.platform === "onebot" && body.publishTextTemplate !== undefined ? { publishTextTemplate: body.publishTextTemplate } : {}),
+          ...(body.publishTextTemplate !== undefined ? { publishTextTemplate: body.publishTextTemplate } : {}),
         },
         include: {
           sessions: true,
