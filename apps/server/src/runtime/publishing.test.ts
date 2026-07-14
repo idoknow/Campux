@@ -47,7 +47,7 @@ describe("deriveAggregateStatus", () => {
 });
 
 describe("renderOfficialQqForumCaption", () => {
-  it("按频道配文模板渲染稿件编号、投稿人和正文链接", () => {
+  it("频道正文不重复标题里的稿件编号和投稿人", () => {
     expect(renderOfficialQqForumCaption({
       customText: "校园墙",
       suffixText: "欢迎互动",
@@ -59,10 +59,10 @@ describe("renderOfficialQqForumCaption", () => {
       text: "1111测试 https://example.com/activity",
       anonymous: false,
       authorQq: "2069528060",
-    })).toBe("校园墙 #10 2069528060\nhttps://example.com/activity\n欢迎互动");
+    })).toBe("校园墙\nhttps://example.com/activity\n欢迎互动");
   });
 
-  it("匿名稿不泄露 QQ，批量单稿片段不重复固定前后缀", () => {
+  it("批量单稿片段不再输出标题信息，避免出现重复的 #编号 投稿人", () => {
     expect(renderOfficialQqForumCaption({
       customText: "校园墙",
       suffixText: "欢迎互动",
@@ -72,10 +72,10 @@ describe("renderOfficialQqForumCaption", () => {
     }, {
       postId: 10,
       text: "1111测试",
-      anonymous: true,
+      anonymous: false,
       authorQq: "2069528060",
       omitFixedText: true,
-    })).toBe("#10");
+    })).toBe("");
   });
 });
 

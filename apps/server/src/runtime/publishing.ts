@@ -854,7 +854,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           forumImageUrls.push(buildPublicForumMediaUrl(config, attachment));
         }
       }
-      const forumCaption = forumBodyParts.join("\n\n---\n\n").trim();
+      const forumCaption = forumBodyParts.filter(Boolean).join("\n\n---\n\n").trim();
       const forumContent = [
         isForumBatch
           ? wrapBatchCaptionWithFixedText(attempt.publishTarget.botAccount.publishTextTemplate, forumCaption)
@@ -1713,19 +1713,11 @@ export function renderOfficialQqForumCaption(value: Prisma.JsonValue | null | un
 }) {
   const template = normalizePublishCaptionTemplate(value);
   const omitFixedText = Boolean(post.omitFixedText);
-  const firstLine = [
-    omitFixedText ? null : template.customText?.trim(),
-    template.includePostId ? `#${post.postId}` : null,
-    template.includeAuthorMention && !post.anonymous ? post.authorQq : null,
-  ].filter(Boolean).join(" ").trim();
   const lines = [
-    firstLine,
+    omitFixedText ? null : template.customText?.trim(),
     ...(template.includeLinks ? extractLinks(post.text) : []),
     omitFixedText ? null : template.suffixText?.trim(),
   ].filter((line): line is string => Boolean(line));
-  if (lines.length === 0 && !omitFixedText) {
-    return `#${post.postId}`;
-  }
   return lines.join("\n").trim();
 }
 
