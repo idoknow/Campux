@@ -23,7 +23,7 @@ export class PostRecallExecutionError extends Error {
   }
 }
 
-/** 批量发布（多条稿件合并为一条说说）的稿件不支持程序撤回。 */
+/** 批量发布（多条稿件合并为一条外部内容）的稿件不支持程序撤回。 */
 export class PostRecallNotSupportedError extends Error {
   constructor(message: string) {
     super(message);

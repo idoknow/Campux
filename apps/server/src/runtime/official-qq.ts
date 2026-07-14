@@ -134,11 +134,15 @@ export function serializeOfficialQqForumRichText(content: string, imageUrls: str
 }
 
 export async function deleteOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, threadId: string) {
+  const normalizedChannelId = channelId.trim();
+  if (!normalizedChannelId) {
+    throw new BotWorkflowError("QQ 频道 ID 为空", 400);
+  }
   const normalizedThreadId = threadId.trim();
   if (!normalizedThreadId) {
     throw new BotWorkflowError("QQ 频道帖子 ID 为空", 400);
   }
-  return callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/threads/${encodeURIComponent(normalizedThreadId)}`, {
+  return callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(normalizedChannelId)}/threads/${encodeURIComponent(normalizedThreadId)}`, {
     method: "DELETE",
     errorPrefix: "QQ 频道帖子删除失败",
   });

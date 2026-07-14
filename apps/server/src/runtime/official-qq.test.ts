@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   createOfficialQqForumThread,
+  deleteOfficialQqForumThread,
   listOfficialQqChannels,
   serializeOfficialQqForumRichText,
 } from "./official-qq";
@@ -96,6 +97,30 @@ describe("QQ 官方机器人论坛子频道", () => {
     });
   });
 
+
+  it("调用删除帖子接口撤回指定论坛帖", async () => {
+    const requests: Array<{ url: string; init: RequestInit | BunFetchRequestInit | undefined }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "delete-token", expires_in: 7200 });
+      }
+      return new Response("", { status: 204 });
+    }) as typeof fetch;
+
+    await expect(deleteOfficialQqForumThread({
+      id: "bot-delete",
+      officialAppId: "10004",
+      officialAppSecret: "delete-secret",
+    }, " selected/channel ", " thread/1 ")).resolves.toBeNull();
+
+    const deleteRequest = requests.find((request) => request.url.startsWith("https://api.sgroup.qq.com/"));
+    expect(deleteRequest?.url).toBe("https://api.sgroup.qq.com/channels/selected%2Fchannel/threads/thread%2F1");
+    expect(deleteRequest?.init?.method).toBe("DELETE");
+    expect(deleteRequest?.init?.body).toBeUndefined();
+    expect(new Headers(deleteRequest?.init?.headers).get("Authorization")).toBe("QQBot delete-token");
+  });
 
   it("拒绝空的稿件推送子频道 ID", async () => {
     await expect(createOfficialQqForumThread({
