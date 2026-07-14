@@ -87,6 +87,8 @@ const publishTextTemplateSchema = z.object({
   includePostId: z.boolean().default(true),
   includeAuthorMention: z.boolean().default(false),
   includeLinks: z.boolean().default(false),
+  includeQZoneLink: z.boolean().default(false),
+  qzoneLinkBotAccountId: z.string().trim().max(80).default(""),
 });
 
 const botPatchSchema = z.object({
@@ -1510,6 +1512,8 @@ function normalizePublishTextTemplate(value: Prisma.JsonValue) {
     includePostId: typeof record.includePostId === "boolean" ? record.includePostId : true,
     includeAuthorMention: typeof record.includeAuthorMention === "boolean" ? record.includeAuthorMention : false,
     includeLinks: typeof record.includeLinks === "boolean" ? record.includeLinks : false,
+    includeQZoneLink: typeof record.includeQZoneLink === "boolean" ? record.includeQZoneLink : false,
+    qzoneLinkBotAccountId: typeof record.qzoneLinkBotAccountId === "string" ? record.qzoneLinkBotAccountId : "",
   };
 }
 
@@ -1520,6 +1524,8 @@ function defaultPublishTextTemplate() {
     includePostId: true,
     includeAuthorMention: false,
     includeLinks: false,
+    includeQZoneLink: false,
+    qzoneLinkBotAccountId: "",
   };
 }
 

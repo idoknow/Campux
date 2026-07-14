@@ -3106,7 +3106,7 @@ function BotConfigEditor({
   );
 }
 
-function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: Pick<AdminBotAccount, "id" | "platform" | "publishTextTemplate">; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
+function BotPublishTemplateEditor({ bot, qzoneBots = [], busy, onSave }: { bot: Pick<AdminBotAccount, "id" | "platform" | "publishTextTemplate">; qzoneBots?: Array<Pick<AdminBotAccount, "id" | "displayName" | "qqUin">>; busy: boolean; onSave: (template: PublishTextTemplate) => void }) {
   const [template, setTemplate] = useState<PublishTextTemplate>(() => normalizePublishTemplate(bot.publishTextTemplate));
   const [dirty, setDirty] = useState(false);
   const persistedTemplate = normalizePublishTemplate(bot.publishTextTemplate);
@@ -3142,6 +3142,7 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: Pick<AdminBotAcc
   const preview = [
     previewParts.join(" ").trim(),
     ...(template.includeLinks ? ["https://example.com/activity"] : []),
+    ...(bot.platform === "official_qq" && template.includeQZoneLink ? ["https://user.qzone.qq.com/123456789/mood/example_tid"] : []),
     template.suffixText.trim(),
   ]
     .filter(Boolean)
@@ -3197,6 +3198,24 @@ function BotPublishTemplateEditor({ bot, busy, onSave }: { bot: Pick<AdminBotAcc
             {bot.platform === "official_qq" ? "附上正文中的链接" : "提取正文链接"}
           </label>
         </div>
+        {bot.platform === "official_qq" ? (
+          <div className="mt-2 grid gap-2 rounded-md border border-sky-100 bg-sky-50 p-2 text-xs font-semibold text-sky-800 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)] md:items-center">
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={template.includeQZoneLink} onChange={(event) => updateTemplate({ includeQZoneLink: event.target.checked })} />
+              频道正文附带对应 QQ 空间说说链接
+            </label>
+            <Select value={template.qzoneLinkBotAccountId || "auto"} onValueChange={(qzoneLinkBotAccountId) => updateTemplate({ qzoneLinkBotAccountId: qzoneLinkBotAccountId === "auto" ? "" : qzoneLinkBotAccountId })} disabled={!template.includeQZoneLink || qzoneBots.length === 0}>
+              <SelectTrigger className="h-8 bg-white text-xs font-bold"><SelectValue placeholder="选择空间墙号" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">当前校园墙首选 QQ 机器人</SelectItem>
+                {qzoneBots.map((qzoneBot) => (
+                  <SelectItem key={qzoneBot.id} value={qzoneBot.id}>{qzoneBot.displayName} · QQ {qzoneBot.qqUin}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] leading-5 text-sky-700 md:col-span-2">开启后会等待所选 QQ 机器人对应的 QZone 发布成功，再在频道帖子正文追加说说链接；未指定时按当前校园墙发布目标排序选择首个成功的 QZone 链接。</p>
+          </div>
+        ) : null}
         <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
           <p className="text-[11px] font-bold text-slate-400">预览</p>
           <p className="mt-1 whitespace-pre-wrap text-xs font-semibold text-slate-700">{preview}</p>
@@ -3213,6 +3232,8 @@ function normalizePublishTemplate(template: PublishTextTemplate): PublishTextTem
     includePostId: template.includePostId,
     includeAuthorMention: template.includeAuthorMention,
     includeLinks: template.includeLinks,
+    includeQZoneLink: template.includeQZoneLink ?? false,
+    qzoneLinkBotAccountId: template.qzoneLinkBotAccountId ?? "",
   };
 }
 
@@ -3396,6 +3417,7 @@ function PublishPanel({
                     platform: target.botAccount.platform,
                     publishTextTemplate: target.botAccount.publishTextTemplate,
                   }}
+                  qzoneBots={bots.filter((bot) => bot.platform === "onebot")}
                   busy={busy}
                   onSave={(template) => onSaveTemplate(target.botAccount.id, template)}
                 />

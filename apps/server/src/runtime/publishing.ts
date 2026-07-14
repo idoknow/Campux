@@ -778,10 +778,14 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       const postsToPublish = attempt.batch
         ? attempt.batch.items.map((item) => item.post)
         : [attempt.post];
-      const qzonePublication = await resolveQZonePublicationForOfficialForum({
-        postId: attempt.postId,
-        batchId: attempt.batchId,
-      });
+      const qzoneLinkBotAccountId = getOfficialQqForumQZoneLinkBotAccountId(attempt.publishTarget.botAccount.publishTextTemplate);
+      const qzonePublication = shouldAppendOfficialQqForumQZoneLink(attempt.publishTarget.botAccount.publishTextTemplate)
+        ? await resolveQZonePublicationForOfficialForum({
+          postId: attempt.postId,
+          batchId: attempt.batchId,
+          botAccountId: qzoneLinkBotAccountId,
+        })
+        : { pending: false, urls: [] };
       if (qzonePublication.pending) {
         const nextRunAt = new Date(Date.now() + 30_000);
         await prisma.publishAttempt.update({
@@ -1610,6 +1614,8 @@ type PublishCaptionTemplate = {
   includePostId?: boolean;
   includeAuthorMention?: boolean;
   includeLinks?: boolean;
+  includeQZoneLink?: boolean;
+  qzoneLinkBotAccountId?: string;
 };
 
 /**
@@ -1721,6 +1727,14 @@ export function renderOfficialQqForumCaption(value: Prisma.JsonValue | null | un
   return lines.join("\n").trim();
 }
 
+export function shouldAppendOfficialQqForumQZoneLink(value: Prisma.JsonValue | null | undefined) {
+  return normalizePublishCaptionTemplate(value).includeQZoneLink;
+}
+
+export function getOfficialQqForumQZoneLinkBotAccountId(value: Prisma.JsonValue | null | undefined) {
+  return normalizePublishCaptionTemplate(value).qzoneLinkBotAccountId?.trim() || null;
+}
+
 async function readPostImageKeys(config: CampuxConfig, tenantId: string, attachments: unknown) {
   if (!Array.isArray(attachments)) {
     throw new Error("稿件图片数据格式错误：attachments 不是数组");
@@ -1743,12 +1757,13 @@ async function readPostImageKeys(config: CampuxConfig, tenantId: string, attachm
   return keys;
 }
 
-async function resolveQZonePublicationForOfficialForum(input: { postId: string; batchId: string | null }) {
+async function resolveQZonePublicationForOfficialForum(input: { postId: string; batchId: string | null; botAccountId?: string | null }) {
   const attempts = await prisma.publishAttempt.findMany({
     where: {
       ...(input.batchId ? { batchId: input.batchId } : { postId: input.postId, batchId: null }),
       publishTarget: {
         type: "qzone",
+        ...(input.botAccountId ? { botAccountId: input.botAccountId } : {}),
       },
     },
     select: {
@@ -1798,6 +1813,8 @@ function normalizePublishCaptionTemplate(value: Prisma.JsonValue | null | undefi
     includePostId: typeof record.includePostId === "boolean" ? record.includePostId : true,
     includeAuthorMention: typeof record.includeAuthorMention === "boolean" ? record.includeAuthorMention : false,
     includeLinks: typeof record.includeLinks === "boolean" ? record.includeLinks : false,
+    includeQZoneLink: typeof record.includeQZoneLink === "boolean" ? record.includeQZoneLink : false,
+    qzoneLinkBotAccountId: typeof record.qzoneLinkBotAccountId === "string" ? record.qzoneLinkBotAccountId : "",
   };
 }
 
@@ -1808,6 +1825,8 @@ function defaultPublishCaptionTemplate(): Required<PublishCaptionTemplate> {
     includePostId: true,
     includeAuthorMention: false,
     includeLinks: false,
+    includeQZoneLink: false,
+    qzoneLinkBotAccountId: "",
   };
 }
 

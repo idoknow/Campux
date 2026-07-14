@@ -2,9 +2,11 @@ import { describe, expect, it } from "bun:test";
 import {
   buildQZonePostUrl,
   deriveAggregateStatus,
+  getOfficialQqForumQZoneLinkBotAccountId,
   renderOfficialQqForumCaption,
   renderOfficialQqForumThreadTitle,
   republishFailureRetryDelayMs,
+  shouldAppendOfficialQqForumQZoneLink,
   shouldWaitForQZoneAttempt,
 } from "./publishing";
 
@@ -76,6 +78,16 @@ describe("renderOfficialQqForumCaption", () => {
       authorQq: "2069528060",
       omitFixedText: true,
     })).toBe("");
+  });
+
+  it("频道正文空间链接由独立开关控制并可指定首选 QQ 机器人", () => {
+    const template = {
+      includeQZoneLink: true,
+      qzoneLinkBotAccountId: "bot-1",
+    };
+
+    expect(shouldAppendOfficialQqForumQZoneLink(template)).toBe(true);
+    expect(getOfficialQqForumQZoneLinkBotAccountId(template)).toBe("bot-1");
   });
 });
 

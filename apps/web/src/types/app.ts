@@ -490,6 +490,8 @@ export type PublishTextTemplate = {
   includePostId: boolean;
   includeAuthorMention: boolean;
   includeLinks: boolean;
+  includeQZoneLink: boolean;
+  qzoneLinkBotAccountId: string;
 };
 
 export type AdminBotSession = AdminBotAccount["sessions"][number];
