@@ -3631,6 +3631,10 @@ function PublishTargetConfigEditor({
 }
 
 function PublishAttemptDetail({ attempt, onRetry }: { attempt: PublishAttemptItem; onRetry: (id: string) => void }) {
+  const isOfficialQq = attempt.platform === "official_qq" || attempt.publishTarget.botAccount.platform === "official_qq";
+  const botIdentity = isOfficialQq
+    ? `AppID ${attempt.publishTarget.botAccount.officialAppId ?? attempt.publishTarget.botAccount.qqUin}`
+    : `QQ ${attempt.publishTarget.botAccount.qqUin}`;
   return (
     <details className="rounded-md border border-slate-200 bg-white">
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
@@ -3653,35 +3657,50 @@ function PublishAttemptDetail({ attempt, onRetry }: { attempt: PublishAttemptIte
       <div className="border-t border-slate-100 p-3">
         <div className="grid gap-1 text-xs font-semibold text-slate-500 md:grid-cols-2">
           <p>目标：{attempt.publishTarget.displayName}</p>
-          <p>Bot：{attempt.publishTarget.botAccount.displayName} · QQ {attempt.publishTarget.botAccount.qqUin}</p>
-          {attempt.qzoneTid ? <p className="break-all md:col-span-2">QZone TID：{attempt.qzoneTid}</p> : null}
-          {attempt.externalId ? <p className="break-all md:col-span-2">外部 ID：{attempt.externalId}</p> : null}
+          <p>Bot：{attempt.publishTarget.botAccount.displayName} · {botIdentity}</p>
+          <p className="break-all md:col-span-2">{attempt.destinationLabel}：{attempt.destinationId || "未记录"}</p>
+          {attempt.qzoneTid ? <p className="break-all md:col-span-2">{attempt.qzoneTidLabel}：{attempt.qzoneTid}</p> : null}
+          {attempt.externalId ? <p className="break-all md:col-span-2">{attempt.externalIdLabel}：{attempt.externalId}</p> : null}
           {attempt.nextRunAt ? <p className="font-bold text-amber-700 md:col-span-2">下次执行：{formatDateTime(attempt.nextRunAt)}</p> : null}
         </div>
         {attempt.lastError ? <p className="mt-2 break-all rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{attempt.lastError}</p> : null}
-        {attempt.verbose ? <PublishVerboseLog verbose={attempt.verbose} /> : null}
+        {attempt.verbose ? <PublishVerboseLog verbose={attempt.verbose} isOfficialQq={isOfficialQq} /> : null}
       </div>
     </details>
   );
 }
 
-function PublishVerboseLog({ verbose }: { verbose: NonNullable<PublishAttemptItem["verbose"]> }) {
+function PublishVerboseLog({ verbose, isOfficialQq }: { verbose: NonNullable<PublishAttemptItem["verbose"]>; isOfficialQq?: boolean }) {
   const httpLogs = Array.isArray(verbose.http) ? verbose.http : [];
 
   return (
     <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge className="rounded-full bg-slate-100 text-slate-700 shadow-none">模式 {String(verbose.mode ?? "unknown")}</Badge>
-        <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none ring-1 ring-blue-200">登录态 {String(verbose.cookieStatus ?? "unknown")}</Badge>
+        {isOfficialQq ? (
+          <Badge className="rounded-full bg-violet-50 text-violet-700 shadow-none ring-1 ring-violet-200">QQ 频道论坛</Badge>
+        ) : (
+          <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none ring-1 ring-blue-200">登录态 {String(verbose.cookieStatus ?? "unknown")}</Badge>
+        )}
         <span className="text-xs font-bold text-slate-500">
-          渲染图 {formatBytes(verbose.renderedBytes)} · 图片 {typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张
+          {isOfficialQq ? `正文 ${typeof verbose.contentLength === "number" ? verbose.contentLength : 0} 字 · 图片 ${typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张` : `渲染图 ${formatBytes(verbose.renderedBytes)} · 图片 ${typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张`}
         </span>
         {verbose.publishedAt ? <span className="text-xs font-bold text-slate-500">发布 {formatDateTime(verbose.publishedAt)}</span> : null}
       </div>
       {verbose.note ? <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">{verbose.note}</p> : null}
       <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-500 md:grid-cols-2">
-        <p>QQ：{verbose.uin ?? "未知"}</p>
-        <p className="break-all">Cookie 名称：{verbose.cookieNames?.length ? verbose.cookieNames.join(", ") : "无"}</p>
+        {isOfficialQq ? (
+          <>
+            <p className="break-all">AppID：{verbose.appId ?? "未知"}</p>
+            <p className="break-all">频道 ID：{verbose.channelId ?? "未知"}</p>
+            {verbose.title ? <p className="break-all md:col-span-2">帖子标题：{verbose.title}</p> : null}
+          </>
+        ) : (
+          <>
+            <p>QQ：{verbose.uin ?? "未知"}</p>
+            <p className="break-all">Cookie 名称：{verbose.cookieNames?.length ? verbose.cookieNames.join(", ") : "无"}</p>
+          </>
+        )}
       </div>
 
       {httpLogs.length === 0 ? (

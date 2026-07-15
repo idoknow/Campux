@@ -26,7 +26,21 @@ export type OfficialQqForumThreadResult = {
   externalId: string;
   threadId: string | null;
   taskId: string | null;
-  verbose: unknown;
+  verbose: OfficialQqForumThreadVerbose;
+};
+
+export type OfficialQqForumThreadVerbose = {
+  mode: "official-qq-forum";
+  appId: string | null;
+  channelId: string;
+  title: string;
+  contentLength: number;
+  imageCount: number;
+  threadId: string | null;
+  taskId: string | null;
+  externalId: string;
+  publishedAt: string;
+  create: Record<string, unknown> | null;
 };
 
 
@@ -112,8 +126,17 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
     threadId: discoveredThreadId,
     taskId,
     verbose: {
+      mode: "official-qq-forum",
+      appId: bot.officialAppId,
+      channelId: normalizedChannelId,
+      title,
+      contentLength: content.length,
+      imageCount: options.imageUrls?.length ?? 0,
+      externalId,
       create: payload,
       threadId: discoveredThreadId,
+      taskId,
+      publishedAt: new Date().toISOString(),
     },
   };
 }

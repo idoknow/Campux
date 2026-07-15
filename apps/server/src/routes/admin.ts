@@ -1634,11 +1634,15 @@ function toPublishAttempt(attempt: {
     displayName: string;
     required: boolean;
     botAccount: {
+      platform: string;
       qqUin: bigint;
+      officialAppId: string | null;
+      reviewGroupId: string | null;
       displayName: string;
     };
   };
 }) {
+  const isOfficialQq = attempt.publishTarget.botAccount.platform === "official_qq";
   return {
     id: attempt.id,
     status: attempt.status,
@@ -1654,10 +1658,18 @@ function toPublishAttempt(attempt: {
       displayName: attempt.publishTarget.displayName,
       required: attempt.publishTarget.required,
       botAccount: {
+        platform: attempt.publishTarget.botAccount.platform,
         qqUin: attempt.publishTarget.botAccount.qqUin.toString(),
+        officialAppId: attempt.publishTarget.botAccount.officialAppId,
+        reviewGroupId: attempt.publishTarget.botAccount.reviewGroupId,
         displayName: attempt.publishTarget.botAccount.displayName,
       },
     },
+    platform: attempt.publishTarget.botAccount.platform,
+    destinationLabel: isOfficialQq ? "QQ 频道论坛" : "QQ 空间",
+    destinationId: isOfficialQq ? attempt.publishTarget.botAccount.reviewGroupId : attempt.publishTarget.botAccount.qqUin.toString(),
+    externalIdLabel: isOfficialQq ? "频道帖子 ID / 任务 ID" : "外部 ID",
+    qzoneTidLabel: isOfficialQq ? "频道帖子 ID" : "QZone TID",
     post: {
       id: attempt.post.id,
       displayId: attempt.post.displayId,

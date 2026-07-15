@@ -340,6 +340,11 @@ export type PublishAttemptItem = {
   qzoneTid: string | null;
   verbose: PublishAttemptVerbose | null;
   updatedAt: string;
+  platform: "onebot" | "official_qq" | string;
+  destinationLabel: string;
+  destinationId: string | null;
+  externalIdLabel: string;
+  qzoneTidLabel: string;
   post: {
     id: string;
     displayId: number;
@@ -356,7 +361,10 @@ export type PublishAttemptItem = {
     displayName: string;
     required: boolean;
     botAccount: {
+      platform: "onebot" | "official_qq" | string;
       qqUin: string;
+      officialAppId: string | null;
+      reviewGroupId: string | null;
       displayName: string;
     };
   };
@@ -364,6 +372,10 @@ export type PublishAttemptItem = {
 
 export type PublishAttemptVerbose = {
   mode?: string;
+  appId?: string | null;
+  channelId?: string | null;
+  title?: string | null;
+  contentLength?: number;
   targetName?: string;
   renderedBytes?: number;
   imageCount?: number;

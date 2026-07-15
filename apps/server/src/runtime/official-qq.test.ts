@@ -74,6 +74,19 @@ describe("QQ 官方机器人论坛子频道", () => {
     });
     expect(new Headers(publishRequest?.init?.headers).get("Authorization")).toBe("QQBot publish-token");
     expect(result.threadId).toBe("thread-1");
+    expect(result.verbose).toMatchObject({
+      mode: "official-qq-forum",
+      appId: "10002",
+      channelId: "selected/channel",
+      title: "#123",
+      contentLength: 4,
+      imageCount: 0,
+      externalId: "thread-1",
+      threadId: "thread-1",
+      taskId: null,
+      create: { thread_id: "thread-1" },
+    });
+    expect((result.verbose as { publishedAt?: string }).publishedAt).toBeString();
   });
 
   it("将每一行转换成独立富文本段落以保留换行", () => {
