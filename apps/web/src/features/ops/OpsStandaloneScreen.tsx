@@ -43,7 +43,7 @@ export function OpsStandaloneScreen({
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mx-auto max-w-6xl">
-          <OpsPanel mode={mode} onTenantCreated={onTenantCreated} onEnterTenant={onEnterTenant} />
+          <OpsPanel currentUserId={me.user.id} mode={mode} onTenantCreated={onTenantCreated} onEnterTenant={onEnterTenant} />
         </div>
       </div>
     </main>

@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "./password";
+import { membershipRoleUpdateForSeed } from "./seed-membership";
 
 // Guard: the demo seed creates well-known accounts with a shared weak password
 // ("campux123"), including a system_operator. That is fine for local dev but a
@@ -176,9 +177,7 @@ async function seedUser({
           userId: user.id,
         },
       },
-      update: {
-        role: membership.role,
-      },
+      update: membershipRoleUpdateForSeed(membership.role),
       create: {
         tenantId: membership.tenantId,
         userId: user.id,

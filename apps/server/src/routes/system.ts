@@ -1,10 +1,20 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { Prisma, createManyDedup } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, createManyDedup, type Tenant } from "@campux/db";
 import { z } from "zod";
 import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
+import {
+  LastTenantAdminRemovalError,
+  TenantAdminRequiredError,
+  assertTenantActivationAllowed,
+  assertTenantMembershipRemovalAllowed,
+  assertTenantMembershipRoleChangeAllowed,
+  buildTenantAdminUserIds,
+  isTransactionSerializationFailure,
+  retryTransactionSerializationFailures,
+} from "../lib/tenant-membership-removal";
 import { normalizeTenantHost } from "../lib/tenant-host";
 import {
   buildTenantDomainHost,
@@ -399,18 +409,16 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             .then((users) => users.map((user) => user.id))
         : [context.user.id];
 
-      const uniqueAdminUserIds = [...new Set([...adminUserIds, context.user.id])];
-      if (uniqueAdminUserIds.length > 0) {
-        await createManyDedup(
-          tx.tenantMembership,
-          uniqueAdminUserIds.map((userId) => ({
-            tenantId: created.id,
-            userId,
-            role: "admin" as const,
-          })),
-          (row) => `${row.tenantId}:${row.userId}`,
-        );
-      }
+      const uniqueAdminUserIds = buildTenantAdminUserIds(adminUserIds, context.user.id);
+      await createManyDedup(
+        tx.tenantMembership,
+        uniqueAdminUserIds.map((userId) => ({
+          tenantId: created.id,
+          userId,
+          role: "admin" as const,
+        })),
+        (row) => `${row.tenantId}:${row.userId}`,
+      );
 
       if (body.botQqUin) {
         const bot = await tx.botAccount.create({
@@ -465,6 +473,23 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (conflict) return conflict;
     }
 
+    if (body.status === "active") {
+      const adminCount = await prisma.tenantMembership.count({
+        where: { tenantId: params.tenantId, role: "admin" },
+      });
+      try {
+        assertTenantActivationAllowed(adminCount);
+      } catch (error) {
+        if (error instanceof TenantAdminRequiredError) {
+          return reply.code(409).send({
+            code: "TENANT_ADMIN_REQUIRED",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }
+
     // When the host is changing and either the old or new host is managed by
     // the auto-domain automation, sync Cloudflare BEFORE writing the DB so a
     // failed DNS change leaves the tenant's stored host untouched (no drift
@@ -514,10 +539,35 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     // scheduler does not immediately re-archive it.
     if (body.status === "active") updateData.archiveWarningAt = null;
 
-    const tenant = await prisma.tenant.update({
-      where: { id: params.tenantId },
-      data: updateData,
-    });
+    let tenant: Tenant;
+    try {
+      tenant = body.status === "active"
+        ? await retryTransactionSerializationFailures(
+          () => prisma.$transaction(async (tx) => {
+            const adminCount = await tx.tenantMembership.count({
+              where: { tenantId: params.tenantId, role: "admin" },
+            });
+            assertTenantActivationAllowed(adminCount);
+            return tx.tenant.update({
+              where: { id: params.tenantId },
+              data: updateData,
+            });
+          }, { isolationLevel: TransactionIsolationLevel.Serializable }),
+          isTransactionSerializationFailure,
+        )
+        : await prisma.tenant.update({
+          where: { id: params.tenantId },
+          data: updateData,
+        });
+    } catch (error) {
+      if (error instanceof TenantAdminRequiredError) {
+        return reply.code(409).send({
+          code: "TENANT_ADMIN_REQUIRED",
+          message: error.message,
+        });
+      }
+      throw error;
+    }
     await writeAuditLog({
       tenantId: tenant.id,
       actorId: context.user.id,
@@ -694,6 +744,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!body.tenantId) {
       return reply.code(400).send({ message: "添加租户身份时必须选择校园墙" });
     }
+    const tenantRole = body.role;
     assertCanManageTenant(context, body.tenantId, reply);
 
     const tenant = await prisma.tenant.findUnique({ where: { id: body.tenantId } });
@@ -701,22 +752,58 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(404).send({ message: "租户不存在" });
     }
 
-    const membership = await prisma.tenantMembership.upsert({
-      where: {
-        tenantId_userId: {
-          tenantId: tenant.id,
-          userId: user.id,
-        },
-      },
-      update: {
-        role: body.role,
-      },
-      create: {
-        tenantId: tenant.id,
-        userId: user.id,
-        role: body.role,
-      },
-    });
+    let membership;
+    try {
+      membership = await retryTransactionSerializationFailures(
+        () => prisma.$transaction(async (tx) => {
+          const existingMembership = await tx.tenantMembership.findUnique({
+            where: {
+              tenantId_userId: {
+                tenantId: tenant.id,
+                userId: user.id,
+              },
+            },
+          });
+
+          if (existingMembership?.role === "admin" && tenantRole !== "admin") {
+            const adminCount = await tx.tenantMembership.count({
+              where: { tenantId: tenant.id, role: "admin" },
+            });
+            assertTenantMembershipRoleChangeAllowed({
+              currentRole: existingMembership.role,
+              nextRole: tenantRole,
+              adminCount,
+            });
+          }
+
+          return tx.tenantMembership.upsert({
+            where: {
+              tenantId_userId: {
+                tenantId: tenant.id,
+                userId: user.id,
+              },
+            },
+            update: {
+              role: tenantRole,
+            },
+            create: {
+              tenantId: tenant.id,
+              userId: user.id,
+              role: tenantRole,
+            },
+          });
+        }, { isolationLevel: TransactionIsolationLevel.Serializable }),
+        isTransactionSerializationFailure,
+      );
+    } catch (error) {
+      if (error instanceof LastTenantAdminRemovalError) {
+        return reply.code(409).send({
+          code: "LAST_TENANT_ADMIN",
+          message: error.message,
+        });
+      }
+      throw error;
+    }
 
     await writeAuditLog({
       tenantId: tenant.id,
@@ -728,7 +815,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         qqUin: user.qqUin.toString(),
         tenantId: tenant.id,
         tenantName: tenant.name,
-        role: body.role,
+        role: tenantRole,
       },
     });
 
@@ -744,26 +831,55 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   app.delete("/api/system/users/:userId/memberships/:membershipId", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
     const params = z.object({ userId: z.string().min(1), membershipId: z.string().min(1) }).parse(request.params);
-    const membership = await prisma.tenantMembership.findFirst({
-      where: {
-        id: params.membershipId,
-        userId: params.userId,
-      },
-      include: {
-        tenant: true,
-        user: true,
-      },
-    });
+    let membership;
+    try {
+      membership = await retryTransactionSerializationFailures(
+        () => prisma.$transaction(async (tx) => {
+          const existingMembership = await tx.tenantMembership.findFirst({
+            where: {
+              id: params.membershipId,
+              userId: params.userId,
+            },
+            include: {
+              tenant: true,
+              user: true,
+            },
+          });
+          if (!existingMembership) {
+            return null;
+          }
+          assertCanManageTenant(context, existingMembership.tenantId, reply);
+
+          if (existingMembership.role === "admin") {
+            const adminCount = await tx.tenantMembership.count({
+              where: { tenantId: existingMembership.tenantId, role: "admin" },
+            });
+            assertTenantMembershipRemovalAllowed({
+              role: existingMembership.role,
+              adminCount,
+            });
+          }
+
+          await tx.tenantMembership.delete({
+            where: { id: existingMembership.id },
+          });
+          return existingMembership;
+        }, { isolationLevel: TransactionIsolationLevel.Serializable }),
+        isTransactionSerializationFailure,
+      );
+    } catch (error) {
+      if (error instanceof LastTenantAdminRemovalError) {
+        return reply.code(409).send({
+          code: "LAST_TENANT_ADMIN",
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+
     if (!membership) {
       return reply.code(404).send({ message: "租户身份不存在" });
     }
-    assertCanManageTenant(context, membership.tenantId, reply);
-
-    await prisma.tenantMembership.delete({
-      where: {
-        id: membership.id,
-      },
-    });
 
     await writeAuditLog({
       tenantId: membership.tenantId,

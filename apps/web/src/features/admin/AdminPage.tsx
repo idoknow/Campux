@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
+import { buildMembershipRoleChangeConfirmation } from "../ops/membership-removal-confirmation";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
@@ -292,6 +293,7 @@ function writeBanListPreferences(tenantId: string, preferences: BanListPreferenc
 
 export function AdminPage({
   activeTab,
+  currentUserId,
   selectedTenant,
   metadata,
   detailTarget,
@@ -301,6 +303,7 @@ export function AdminPage({
   onSaved,
 }: {
   activeTab: AdminTab;
+  currentUserId: string;
   selectedTenant: TenantSummary;
   metadata: TenantMetadata;
   detailTarget?: { userId: string; nonce: number } | null;
@@ -719,12 +722,27 @@ export function AdminPage({
     }
   }
 
-  async function updateMemberRole(id: string, role: TenantRole) {
-    await api(`/api/admin/members/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ role }),
+  async function updateMemberRole(member: AdminMember, role: TenantRole) {
+    const confirmation = buildMembershipRoleChangeConfirmation({
+      actorUserId: currentUserId,
+      targetUserId: member.user.id,
+      tenantName: selectedTenant.name,
+      currentRole: member.role,
+      nextRole: role,
     });
-    await refreshAdminData();
+    if (confirmation && !window.confirm(confirmation)) {
+      return;
+    }
+
+    try {
+      await api(`/api/admin/members/${member.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+      await refreshAdminData();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "更新用户身份失败");
+    }
   }
 
   async function addMember() {
@@ -1073,7 +1091,7 @@ export function AdminPage({
                 }}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
-                onRoleChange={(id, role) => void updateMemberRole(id, role)}
+                onRoleChange={(member, role) => void updateMemberRole(member, role)}
                 onViewMember={(member) => void openMemberDetail(member.user.id)}
                 onPrepareBan={(member) => {
                   setBanForm((current) => ({ ...current, qqUin: member.user.qqUin }));
@@ -1325,7 +1343,7 @@ function UsersPanel({
   onPageChange: (page: number) => void;
   onFormChange: (form: MemberForm) => void;
   onAddMember: () => void;
-  onRoleChange: (id: string, role: TenantRole) => void;
+  onRoleChange: (member: AdminMember, role: TenantRole) => void;
   onViewMember: (member: AdminMember) => void;
   onPrepareBan: (member: AdminMember) => void;
 }) {
@@ -1417,7 +1435,7 @@ function UsersPanel({
               </div>
               <div className="flex items-center gap-2">
                 <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                  <Select value={member.role} onValueChange={(role) => onRoleChange(member.id, role as TenantRole)}>
+                  <Select value={member.role} onValueChange={(role) => onRoleChange(member, role as TenantRole)}>
                     <SelectTrigger className="bg-white font-bold">
                       <SelectValue />
                     </SelectTrigger>
