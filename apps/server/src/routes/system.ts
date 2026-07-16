@@ -1,29 +1,31 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { Prisma, TransactionIsolationLevel, createManyDedup, type Tenant } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, createManyDedup } from "@campux/db";
 import { z } from "zod";
 import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import {
-  LastTenantAdminRemovalError,
-  TenantAdminRequiredError,
   assertTenantActivationAllowed,
   assertTenantMembershipRemovalAllowed,
   assertTenantMembershipRoleChangeAllowed,
   buildTenantAdminUserIds,
   isTransactionSerializationFailure,
   retryTransactionSerializationFailures,
+  tenantAdminInvariantErrorResponse,
+  updateTenantAfterAdminCheck,
 } from "../lib/tenant-membership-removal";
 import { normalizeTenantHost } from "../lib/tenant-host";
 import {
   buildTenantDomainHost,
   hostIsUnderTenantSuffix,
   normalizeDomainSuffix,
+  persistAfterTenantDomainReprovision,
   provisionTenantDomain,
-  reprovisionTenantDomain,
+  reprovisionTenantDomainWithCompensation,
   resolveDnsTargetHost,
   tenantDomainAutomationEnabled,
+  TenantDomainCompensationError,
   TenantDomainProvisioningError,
 } from "../lib/tenant-domain";
 import { buildUserContainsSearch } from "../lib/user-search";
@@ -474,28 +476,36 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     if (body.status === "active") {
-      const adminCount = await prisma.tenantMembership.count({
-        where: { tenantId: params.tenantId, role: "admin" },
-      });
       try {
-        assertTenantActivationAllowed(adminCount);
+        await retryTransactionSerializationFailures(
+          () => prisma.$transaction(async (tx) => {
+            const adminCount = await tx.tenantMembership.count({
+              where: { tenantId: params.tenantId, role: "admin" },
+            });
+            assertTenantActivationAllowed(adminCount);
+          }, { isolationLevel: TransactionIsolationLevel.Serializable }),
+          isTransactionSerializationFailure,
+        );
       } catch (error) {
-        if (error instanceof TenantAdminRequiredError) {
-          return reply.code(409).send({
-            code: "TENANT_ADMIN_REQUIRED",
-            message: error.message,
-          });
+        const response = tenantAdminInvariantErrorResponse(error);
+        if (response) {
+          return reply.code(response.statusCode).send({ code: response.code, message: response.message });
         }
         throw error;
       }
     }
 
     // When the host is changing and either the old or new host is managed by
-    // the auto-domain automation, sync Cloudflare BEFORE writing the DB so a
-    // failed DNS change leaves the tenant's stored host untouched (no drift
-    // between DB and DNS).
+    // the auto-domain automation, sync Cloudflare before the authoritative DB
+    // transaction. If that transaction fails, the DNS move is compensated in
+    // reverse below so the two systems converge on the previous host.
     const hostChanging = body.host !== undefined;
     let cloudflareDnsRecordId: string | null = null;
+    let dnsChange: {
+      previousHost: string | null;
+      nextHost: string | null;
+      compensate: () => Promise<void>;
+    } | null = null;
     if (hostChanging && tenantDomainAutomationEnabled(config)) {
       const current = await prisma.tenant.findUnique({
         where: { id: params.tenantId },
@@ -512,12 +522,15 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           if (!targetHost) {
             return reply.code(500).send({ message: "自动域名已启用，但没有可用的 DNS CNAME 目标" });
           }
-          cloudflareDnsRecordId = await reprovisionTenantDomain({
+          const nextHost = normalizedHost ?? null;
+          const change = await reprovisionTenantDomainWithCompensation({
             config,
             previousHost,
-            nextHost: normalizedHost ?? null,
+            nextHost,
             targetHost,
           });
+          cloudflareDnsRecordId = change.recordId;
+          dnsChange = { previousHost, nextHost, compensate: change.compensate };
         } catch (caught) {
           request.log.error({ err: caught, tenantId: params.tenantId, host: normalizedHost }, "failed to reprovision tenant domain");
           if (caught instanceof TenantDomainProvisioningError) {
@@ -539,47 +552,80 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     // scheduler does not immediately re-archive it.
     if (body.status === "active") updateData.archiveWarningAt = null;
 
-    let tenant: Tenant;
-    try {
-      tenant = body.status === "active"
-        ? await retryTransactionSerializationFailures(
-          () => prisma.$transaction(async (tx) => {
-            const adminCount = await tx.tenantMembership.count({
-              where: { tenantId: params.tenantId, role: "admin" },
-            });
-            assertTenantActivationAllowed(adminCount);
-            return tx.tenant.update({
-              where: { id: params.tenantId },
-              data: updateData,
-            });
-          }, { isolationLevel: TransactionIsolationLevel.Serializable }),
-          isTransactionSerializationFailure,
-        )
-        : await prisma.tenant.update({
-          where: { id: params.tenantId },
-          data: updateData,
-        });
-    } catch (error) {
-      if (error instanceof TenantAdminRequiredError) {
-        return reply.code(409).send({
-          code: "TENANT_ADMIN_REQUIRED",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-    await writeAuditLog({
-      tenantId: tenant.id,
+    const auditInput = {
+      tenantId: params.tenantId,
       actorId: context.user.id,
       action: "tenant.lifecycle.update",
       targetType: "tenant",
-      targetId: tenant.id,
+      targetId: params.tenantId,
       detail: {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.host !== undefined ? { host: normalizedHost } : {}),
         ...(cloudflareDnsRecordId ? { cloudflareDnsRecordId } : {}),
       },
-    });
+    };
+    const persistTenant = () => body.status === "active"
+      ? retryTransactionSerializationFailures(
+        () => prisma.$transaction(
+          async (tx) => {
+            const tenant = await updateTenantAfterAdminCheck({
+              countAdmins: () => tx.tenantMembership.count({
+                where: { tenantId: params.tenantId, role: "admin" },
+              }),
+              updateTenant: () => tx.tenant.update({
+                where: { id: params.tenantId },
+                data: updateData,
+              }),
+            });
+            await writeAuditLog(auditInput, tx);
+            return tenant;
+          },
+          { isolationLevel: TransactionIsolationLevel.Serializable },
+        ),
+        isTransactionSerializationFailure,
+      )
+      : prisma.$transaction(async (tx) => {
+        const tenant = await tx.tenant.update({
+          where: { id: params.tenantId },
+          data: updateData,
+        });
+        await writeAuditLog(auditInput, tx);
+        return tenant;
+      });
+
+    const appliedDnsChange = dnsChange;
+    try {
+      await (appliedDnsChange
+        ? persistAfterTenantDomainReprovision({
+          persist: persistTenant,
+          compensate: appliedDnsChange.compensate,
+        })
+        : persistTenant());
+    } catch (error) {
+      if (error instanceof TenantDomainCompensationError) {
+        request.log.error({
+          err: error.compensationError,
+          persistenceError: error.persistenceError,
+          tenantId: params.tenantId,
+          previousHost: appliedDnsChange?.previousHost,
+          nextHost: appliedDnsChange?.nextHost,
+        }, "tenant update and tenant domain compensation both failed");
+        throw error;
+      }
+      if (appliedDnsChange) {
+        request.log.warn({
+          err: error,
+          tenantId: params.tenantId,
+          previousHost: appliedDnsChange.previousHost,
+          nextHost: appliedDnsChange.nextHost,
+        }, "tenant update failed; compensated tenant domain change");
+      }
+      const response = tenantAdminInvariantErrorResponse(error);
+      if (response) {
+        return reply.code(response.statusCode).send({ code: response.code, message: response.message });
+      }
+      throw error;
+    }
 
     return {
       tenants: await listSystemTenants(context),
@@ -796,11 +842,9 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         isTransactionSerializationFailure,
       );
     } catch (error) {
-      if (error instanceof LastTenantAdminRemovalError) {
-        return reply.code(409).send({
-          code: "LAST_TENANT_ADMIN",
-          message: error.message,
-        });
+      const response = tenantAdminInvariantErrorResponse(error);
+      if (response) {
+        return reply.code(response.statusCode).send({ code: response.code, message: response.message });
       }
       throw error;
     }
@@ -868,11 +912,9 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         isTransactionSerializationFailure,
       );
     } catch (error) {
-      if (error instanceof LastTenantAdminRemovalError) {
-        return reply.code(409).send({
-          code: "LAST_TENANT_ADMIN",
-          message: error.message,
-        });
+      const response = tenantAdminInvariantErrorResponse(error);
+      if (response) {
+        return reply.code(response.statusCode).send({ code: response.code, message: response.message });
       }
       throw error;
     }

@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { membershipRoleUpdateForSeed } from "./seed-membership";
+import { resolveMembershipRoleForSeed } from "./seed-membership";
 
-describe("membershipRoleUpdateForSeed", () => {
-  test("never demotes an existing membership during reseeding", () => {
-    expect(membershipRoleUpdateForSeed("submitter")).toEqual({});
-    expect(membershipRoleUpdateForSeed("reviewer")).toEqual({});
+describe("resolveMembershipRoleForSeed", () => {
+  test("never demotes an existing admin during reseeding", () => {
+    expect(resolveMembershipRoleForSeed("admin", "reviewer")).toBe("admin");
+    expect(resolveMembershipRoleForSeed("admin", "submitter")).toBe("admin");
   });
 
-  test("allows a safe promotion to admin during reseeding", () => {
-    expect(membershipRoleUpdateForSeed("admin")).toEqual({ role: "admin" });
+  test("restores the declared role for existing non-admin fixtures", () => {
+    expect(resolveMembershipRoleForSeed("submitter", "reviewer")).toBe("reviewer");
+    expect(resolveMembershipRoleForSeed("reviewer", "submitter")).toBe("submitter");
+  });
+
+  test("uses the declared role for a new membership and permits admin promotion", () => {
+    expect(resolveMembershipRoleForSeed(undefined, "submitter")).toBe("submitter");
+    expect(resolveMembershipRoleForSeed("reviewer", "admin")).toBe("admin");
   });
 });

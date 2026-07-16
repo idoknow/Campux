@@ -1,6 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { hashPassword } from "./password";
-import { membershipRoleUpdateForSeed } from "./seed-membership";
+import { resolveMembershipRoleForSeed } from "./seed-membership";
+import { runSeedInTransaction } from "./seed-transaction";
 
 // Guard: the demo seed creates well-known accounts with a shared weak password
 // ("campux123"), including a system_operator. That is fine for local dev but a
@@ -48,8 +49,8 @@ const services = [
   { title: "校园服务", description: "推荐入口" },
 ];
 
-async function seedTenant(tenant: (typeof tenants)[number]) {
-  await prisma.tenant.upsert({
+async function seedTenant(db: Prisma.TransactionClient, tenant: (typeof tenants)[number]) {
+  await db.tenant.upsert({
     where: { id: tenant.id },
     update: {
       slug: tenant.slug,
@@ -74,7 +75,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
     { key: "pending_post_limit", value: 1 },
     { key: "services", value: services },
   ]) {
-    await prisma.tenantMetadata.upsert({
+    await db.tenantMetadata.upsert({
       where: {
         tenantId_key: {
           tenantId: tenant.id,
@@ -92,9 +93,13 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
     });
   }
 
-  const botAccount = await prisma.botAccount.upsert({
+  const botQqUin = BigInt(tenant.id === "tenant-canton" ? "2854199010" : "2854199020");
+  const botAccount = await db.botAccount.upsert({
     where: {
-      qqUin: BigInt(tenant.id === "tenant-canton" ? "2854199010" : "2854199020"),
+      tenantId_qqUin: {
+        tenantId: tenant.id,
+        qqUin: botQqUin,
+      },
     },
     update: {
       displayName: `${tenant.name} 1 号墙`,
@@ -103,14 +108,14 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
     },
     create: {
       tenantId: tenant.id,
-      qqUin: BigInt(tenant.id === "tenant-canton" ? "2854199010" : "2854199020"),
+      qqUin: botQqUin,
       displayName: `${tenant.name} 1 号墙`,
       enabled: true,
       reviewGroupId: tenant.id === "tenant-canton" ? "91000001" : "91000002",
     },
   });
 
-  await prisma.publishTarget.upsert({
+  await db.publishTarget.upsert({
     where: {
       id: `${tenant.id}-qzone-primary`,
     },
@@ -133,7 +138,7 @@ async function seedTenant(tenant: (typeof tenants)[number]) {
   });
 }
 
-async function seedUser({
+async function seedUser(db: Prisma.TransactionClient, {
   qqUin,
   email,
   displayName,
@@ -148,7 +153,7 @@ async function seedUser({
   memberships: Array<{ tenantId: string; role: "submitter" | "reviewer" | "admin" }>;
   isTestAccount?: boolean;
 }) {
-  const user = await prisma.user.upsert({
+  const user = await db.user.upsert({
     where: { qqUin: BigInt(qqUin) },
     update: {
       displayName,
@@ -170,14 +175,25 @@ async function seedUser({
   });
 
   for (const membership of memberships) {
-    await prisma.tenantMembership.upsert({
+    const existingMembership = await db.tenantMembership.findUnique({
       where: {
         tenantId_userId: {
           tenantId: membership.tenantId,
           userId: user.id,
         },
       },
-      update: membershipRoleUpdateForSeed(membership.role),
+      select: { role: true },
+    });
+    await db.tenantMembership.upsert({
+      where: {
+        tenantId_userId: {
+          tenantId: membership.tenantId,
+          userId: user.id,
+        },
+      },
+      update: {
+        role: resolveMembershipRoleForSeed(existingMembership?.role, membership.role),
+      },
       create: {
         tenantId: membership.tenantId,
         userId: user.id,
@@ -187,48 +203,50 @@ async function seedUser({
   }
 }
 
-for (const tenant of tenants) {
-  await seedTenant(tenant);
-}
+await runSeedInTransaction<Prisma.TransactionClient>(prisma, async (tx) => {
+  for (const tenant of tenants) {
+    await seedTenant(tx, tenant);
+  }
 
-await seedUser({
-  qqUin: "10000",
-  email: "submitter@example.com",
-  displayName: "投稿测试号",
-  memberships: [{ tenantId: "tenant-canton", role: "submitter" }],
-});
+  await seedUser(tx, {
+    qqUin: "10000",
+    email: "submitter@example.com",
+    displayName: "投稿测试号",
+    memberships: [{ tenantId: "tenant-canton", role: "submitter" }],
+  });
 
-await seedUser({
-  qqUin: "20000",
-  email: "reviewer@example.com",
-  displayName: "审核测试号",
-  memberships: [{ tenantId: "tenant-canton", role: "reviewer" }],
-});
+  await seedUser(tx, {
+    qqUin: "20000",
+    email: "reviewer@example.com",
+    displayName: "审核测试号",
+    memberships: [{ tenantId: "tenant-canton", role: "reviewer" }],
+  });
 
-await seedUser({
-  qqUin: "30000",
-  email: "admin@example.com",
-  displayName: "多墙管理员",
-  memberships: [
-    { tenantId: "tenant-canton", role: "admin" },
-    { tenantId: "tenant-riverside", role: "admin" },
-  ],
-});
+  await seedUser(tx, {
+    qqUin: "30000",
+    email: "admin@example.com",
+    displayName: "多墙管理员",
+    memberships: [
+      { tenantId: "tenant-canton", role: "admin" },
+      { tenantId: "tenant-riverside", role: "admin" },
+    ],
+  });
 
-await seedUser({
-  qqUin: "40000",
-  email: "operator@example.com",
-  displayName: "系统运维",
-  systemRole: "system_operator",
-  memberships: [{ tenantId: "tenant-canton", role: "admin" }],
-});
+  await seedUser(tx, {
+    qqUin: "40000",
+    email: "operator@example.com",
+    displayName: "系统运维",
+    systemRole: "system_operator",
+    memberships: [{ tenantId: "tenant-canton", role: "admin" }],
+  });
 
-await seedUser({
-  qqUin: "50000",
-  email: "operations@example.com",
-  displayName: "运营管理员",
-  systemRole: "operations_admin",
-  memberships: [{ tenantId: "tenant-riverside", role: "admin" }],
+  await seedUser(tx, {
+    qqUin: "50000",
+    email: "operations@example.com",
+    displayName: "运营管理员",
+    systemRole: "operations_admin",
+    memberships: [{ tenantId: "tenant-riverside", role: "admin" }],
+  });
 });
 
 console.log("Seeded CampuxNext demo tenants and accounts. Password for all accounts: campux123");

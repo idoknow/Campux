@@ -24,6 +24,24 @@ export function buildMembershipRoleChangeConfirmation(options: {
   return `你正在将自己在「${options.tenantName}」的身份从管理员改为${membershipRoleLabels[options.nextRole]}，将失去管理员权限。确认继续？如果这是最后一名管理员，系统会阻止操作。`;
 }
 
+export async function refreshMembershipDataAfterRoleChange(options: {
+  actorUserId: string;
+  targetUserId: string;
+  currentRole: TenantRole;
+  nextRole: TenantRole;
+  refreshAdminData: () => Promise<void>;
+  refreshSessionData: () => Promise<void>;
+}) {
+  const actorLostAdminAccess = options.actorUserId === options.targetUserId
+    && options.currentRole === "admin"
+    && options.nextRole !== "admin";
+  if (actorLostAdminAccess) {
+    await options.refreshSessionData();
+    return;
+  }
+  await options.refreshAdminData();
+}
+
 export function buildMembershipRemovalConfirmation(options: {
   actorUserId: string;
   targetUserId: string;

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildMembershipRemovalConfirmation,
   buildMembershipRoleChangeConfirmation,
+  refreshMembershipDataAfterRoleChange,
 } from "./membership-removal-confirmation";
 
 describe("buildMembershipRoleChangeConfirmation", () => {
@@ -33,6 +34,34 @@ describe("buildMembershipRoleChangeConfirmation", () => {
       currentRole: "admin",
       nextRole: "admin",
     })).toBeNull();
+  });
+});
+
+describe("refreshMembershipDataAfterRoleChange", () => {
+  test("refreshes session state instead of admin endpoints after self-demotion", async () => {
+    const calls: string[] = [];
+    await refreshMembershipDataAfterRoleChange({
+      actorUserId: "user-1",
+      targetUserId: "user-1",
+      currentRole: "admin",
+      nextRole: "reviewer",
+      refreshAdminData: async () => { calls.push("admin"); },
+      refreshSessionData: async () => { calls.push("session"); },
+    });
+    expect(calls).toEqual(["session"]);
+  });
+
+  test("keeps the normal admin refresh for changes that preserve actor access", async () => {
+    const calls: string[] = [];
+    await refreshMembershipDataAfterRoleChange({
+      actorUserId: "user-1",
+      targetUserId: "user-2",
+      currentRole: "admin",
+      nextRole: "reviewer",
+      refreshAdminData: async () => { calls.push("admin"); },
+      refreshSessionData: async () => { calls.push("session"); },
+    });
+    expect(calls).toEqual(["admin"]);
   });
 });
 

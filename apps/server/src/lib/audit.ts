@@ -15,7 +15,7 @@ export async function writeAuditLog({
   targetType: string;
   targetId?: string | null;
   detail?: unknown;
-}) {
+}, client: Pick<Prisma.TransactionClient, "auditLog"> = prisma) {
   const data = {
     tenantId: tenantId ?? null,
     actorId: actorId ?? null,
@@ -25,7 +25,7 @@ export async function writeAuditLog({
     ...(detail === undefined ? {} : { detail: toJsonValue(detail) }),
   };
 
-  await prisma.auditLog.create({
+  await client.auditLog.create({
     data,
   });
 }
