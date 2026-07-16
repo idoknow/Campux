@@ -703,6 +703,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!body.tenantId) {
       return reply.code(400).send({ message: "添加租户身份时必须选择校园墙" });
     }
+    const tenantRole = body.role;
     assertCanManageTenant(context, body.tenantId, reply);
 
     const tenant = await prisma.tenant.findUnique({ where: { id: body.tenantId } });
@@ -723,13 +724,13 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             },
           });
 
-          if (existingMembership?.role === "admin" && body.role !== "admin") {
+          if (existingMembership?.role === "admin" && tenantRole !== "admin") {
             const adminCount = await tx.tenantMembership.count({
               where: { tenantId: tenant.id, role: "admin" },
             });
             assertTenantMembershipRoleChangeAllowed({
               currentRole: existingMembership.role,
-              nextRole: body.role,
+              nextRole: tenantRole,
               adminCount,
             });
           }
@@ -742,12 +743,12 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
               },
             },
             update: {
-              role: body.role,
+              role: tenantRole,
             },
             create: {
               tenantId: tenant.id,
               userId: user.id,
-              role: body.role,
+              role: tenantRole,
             },
           });
         }, { isolationLevel: TransactionIsolationLevel.Serializable }),
@@ -773,7 +774,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         qqUin: user.qqUin.toString(),
         tenantId: tenant.id,
         tenantName: tenant.name,
-        role: body.role,
+        role: tenantRole,
       },
     });
 
