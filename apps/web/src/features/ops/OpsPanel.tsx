@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
+import { buildMembershipRemovalConfirmation } from "./membership-removal-confirmation";
 import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -149,10 +150,12 @@ function createTenantFormState(existingSlugs?: ReadonlySet<string>) {
 }
 
 export function OpsPanel({
+  currentUserId,
   mode = "system",
   onTenantCreated,
   onEnterTenant,
 }: {
+  currentUserId: string;
   mode?: OpsPanelMode;
   onTenantCreated?: (() => Promise<void>) | undefined;
   onEnterTenant?: ((tenantId: string) => Promise<void>) | undefined;
@@ -624,6 +627,18 @@ export function OpsPanel({
   }
 
   async function revokeOperationsAdminTenant(user: SystemUser, membershipId: string, tenantName: string) {
+    const confirmation = buildMembershipRemovalConfirmation({
+      actorUserId: currentUserId,
+      targetUserId: user.id,
+      targetLabel: user.displayName ?? user.qqUin,
+      tenantName,
+      role: "admin",
+      roleLabel: roleLabels.admin,
+    });
+    if (!window.confirm(confirmation)) {
+      return;
+    }
+
     const busyKey = `revoke:${membershipId}`;
     setAccessBusyKey(busyKey);
     try {
@@ -640,7 +655,15 @@ export function OpsPanel({
   }
 
   async function revokeUserTenantMembership(user: SystemUser, membership: SystemUser["memberships"][number]) {
-    if (!window.confirm(`确认移除 ${user.displayName ?? user.qqUin} 在 ${membership.tenant.name} 的${roleLabels[membership.role]}身份？`)) {
+    const confirmation = buildMembershipRemovalConfirmation({
+      actorUserId: currentUserId,
+      targetUserId: user.id,
+      targetLabel: user.displayName ?? user.qqUin,
+      tenantName: membership.tenant.name,
+      role: membership.role,
+      roleLabel: roleLabels[membership.role],
+    });
+    if (!window.confirm(confirmation)) {
       return;
     }
 
