@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { Prisma, TransactionIsolationLevel, isPrismaKnownRequestError, type TenantRole } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import {
   LastTenantAdminRemovalError,
   assertTenantMembershipRoleChangeAllowed,
+  isTransactionSerializationFailure,
   retryTransactionSerializationFailures,
 } from "../lib/tenant-membership-removal";
 import { decryptJson, encryptJson } from "../lib/secret-json";
@@ -164,10 +165,6 @@ const memberQuerySchema = paginationQuerySchema.extend({
   role: z.enum(["all", "submitter", "reviewer", "admin"]).default("all"),
   sort: memberSortSchema.default("joined_asc"),
 });
-
-function isTransactionSerializationFailure(error: unknown) {
-  return isPrismaKnownRequestError(error) && error.code === "P2034";
-}
 
 function memberOrderBy(sort: z.infer<typeof memberSortSchema>): Prisma.TenantMembershipOrderByWithRelationInput[] {
   switch (sort) {

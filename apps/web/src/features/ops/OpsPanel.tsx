@@ -21,7 +21,10 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
-import { buildMembershipRemovalConfirmation } from "./membership-removal-confirmation";
+import {
+  buildMembershipRemovalConfirmation,
+  buildMembershipRoleChangeConfirmation,
+} from "./membership-removal-confirmation";
 import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -575,6 +578,28 @@ export function OpsPanel({
     const assigningGlobalRole = membershipForm.role === "system_operator" || membershipForm.role === "operations_admin";
     if (!membershipDialogUser || (!assigningGlobalRole && !membershipForm.tenantId)) {
       return;
+    }
+
+    if (
+      membershipForm.role === "submitter"
+      || membershipForm.role === "reviewer"
+      || membershipForm.role === "admin"
+    ) {
+      const existingMembership = membershipDialogUser.memberships.find(
+        (membership) => membership.tenant.id === membershipForm.tenantId,
+      );
+      if (existingMembership) {
+        const confirmation = buildMembershipRoleChangeConfirmation({
+          actorUserId: currentUserId,
+          targetUserId: membershipDialogUser.id,
+          tenantName: existingMembership.tenant.name,
+          currentRole: existingMembership.role,
+          nextRole: membershipForm.role,
+        });
+        if (confirmation && !window.confirm(confirmation)) {
+          return;
+        }
+      }
     }
 
     setAssigningMembership(true);

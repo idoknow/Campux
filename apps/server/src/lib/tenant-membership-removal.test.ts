@@ -1,11 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import {
   LastTenantAdminRemovalError,
+  TenantAdminRequiredError,
+  assertTenantActivationAllowed,
   assertTenantMembershipRemovalAllowed,
   assertTenantMembershipRoleChangeAllowed,
   buildTenantAdminUserIds,
   retryTransactionSerializationFailures,
 } from "./tenant-membership-removal";
+
+describe("assertTenantActivationAllowed", () => {
+  test("rejects activating a tenant without an admin", () => {
+    expect(() => assertTenantActivationAllowed(0)).toThrow(TenantAdminRequiredError);
+  });
+
+  test("allows activating a tenant with an admin", () => {
+    expect(() => assertTenantActivationAllowed(1)).not.toThrow();
+  });
+});
 
 describe("assertTenantMembershipRemovalAllowed", () => {
   test("rejects removing the only tenant admin", () => {

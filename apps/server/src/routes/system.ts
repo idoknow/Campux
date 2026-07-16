@@ -1,15 +1,18 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { Prisma, TransactionIsolationLevel, createManyDedup, isPrismaKnownRequestError } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, createManyDedup, type Tenant } from "@campux/db";
 import { z } from "zod";
 import { requirePlatformAdmin } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import {
   LastTenantAdminRemovalError,
+  TenantAdminRequiredError,
+  assertTenantActivationAllowed,
   assertTenantMembershipRemovalAllowed,
   assertTenantMembershipRoleChangeAllowed,
   buildTenantAdminUserIds,
+  isTransactionSerializationFailure,
   retryTransactionSerializationFailures,
 } from "../lib/tenant-membership-removal";
 import { normalizeTenantHost } from "../lib/tenant-host";
@@ -165,10 +168,6 @@ function assertCanManageTenant(context: PlatformContext, tenantId: string, reply
 
   reply.code(403);
   throw new Error("只能管理自己所属的校园墙");
-}
-
-function isTransactionSerializationFailure(error: unknown) {
-  return isPrismaKnownRequestError(error) && error.code === "P2034";
 }
 
 async function getManagementHost() {
@@ -474,6 +473,23 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (conflict) return conflict;
     }
 
+    if (body.status === "active") {
+      const adminCount = await prisma.tenantMembership.count({
+        where: { tenantId: params.tenantId, role: "admin" },
+      });
+      try {
+        assertTenantActivationAllowed(adminCount);
+      } catch (error) {
+        if (error instanceof TenantAdminRequiredError) {
+          return reply.code(409).send({
+            code: "TENANT_ADMIN_REQUIRED",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }
+
     // When the host is changing and either the old or new host is managed by
     // the auto-domain automation, sync Cloudflare BEFORE writing the DB so a
     // failed DNS change leaves the tenant's stored host untouched (no drift
@@ -523,10 +539,35 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     // scheduler does not immediately re-archive it.
     if (body.status === "active") updateData.archiveWarningAt = null;
 
-    const tenant = await prisma.tenant.update({
-      where: { id: params.tenantId },
-      data: updateData,
-    });
+    let tenant: Tenant;
+    try {
+      tenant = body.status === "active"
+        ? await retryTransactionSerializationFailures(
+          () => prisma.$transaction(async (tx) => {
+            const adminCount = await tx.tenantMembership.count({
+              where: { tenantId: params.tenantId, role: "admin" },
+            });
+            assertTenantActivationAllowed(adminCount);
+            return tx.tenant.update({
+              where: { id: params.tenantId },
+              data: updateData,
+            });
+          }, { isolationLevel: TransactionIsolationLevel.Serializable }),
+          isTransactionSerializationFailure,
+        )
+        : await prisma.tenant.update({
+          where: { id: params.tenantId },
+          data: updateData,
+        });
+    } catch (error) {
+      if (error instanceof TenantAdminRequiredError) {
+        return reply.code(409).send({
+          code: "TENANT_ADMIN_REQUIRED",
+          message: error.message,
+        });
+      }
+      throw error;
+    }
     await writeAuditLog({
       tenantId: tenant.id,
       actorId: context.user.id,

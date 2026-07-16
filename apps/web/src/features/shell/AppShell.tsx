@@ -161,6 +161,7 @@ export function AppShell({
             <TabsContent value="admin" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <AdminPage
                 activeTab={adminTab}
+                currentUserId={me.user.id}
                 selectedTenant={me.currentTenant}
                 metadata={metadata}
                 detailTarget={adminUserDetailTarget}
