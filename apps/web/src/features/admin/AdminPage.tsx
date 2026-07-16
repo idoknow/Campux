@@ -26,7 +26,10 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabels, statusLabels } from "@/lib/app-model";
-import { buildMembershipRoleChangeConfirmation } from "../ops/membership-removal-confirmation";
+import {
+  buildMembershipRoleChangeConfirmation,
+  refreshMembershipDataAfterRoleChange,
+} from "../ops/membership-removal-confirmation";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
@@ -739,9 +742,23 @@ export function AdminPage({
         method: "PATCH",
         body: JSON.stringify({ role }),
       });
-      await refreshAdminData();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "更新用户身份失败");
+      return;
+    }
+
+    try {
+      await refreshMembershipDataAfterRoleChange({
+        actorUserId: currentUserId,
+        targetUserId: member.user.id,
+        currentRole: member.role,
+        nextRole: role,
+        refreshAdminData,
+        refreshSessionData: onSaved,
+      });
+      toast.success("用户身份已更新。");
+    } catch {
+      toast.error("用户身份已更新，但权限状态刷新失败，请重新加载页面。");
     }
   }
 

@@ -4,10 +4,10 @@ import { Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import {
-  LastTenantAdminRemovalError,
   assertTenantMembershipRoleChangeAllowed,
   isTransactionSerializationFailure,
   retryTransactionSerializationFailures,
+  tenantAdminInvariantErrorResponse,
 } from "../lib/tenant-membership-removal";
 import { decryptJson, encryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
@@ -400,11 +400,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         isTransactionSerializationFailure,
       );
     } catch (error) {
-      if (error instanceof LastTenantAdminRemovalError) {
-        return reply.code(409).send({
-          code: "LAST_TENANT_ADMIN",
-          message: error.message,
-        });
+      const response = tenantAdminInvariantErrorResponse(error);
+      if (response) {
+        return reply.code(response.statusCode).send({ code: response.code, message: response.message });
       }
       throw error;
     }
@@ -465,11 +463,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         isTransactionSerializationFailure,
       );
     } catch (error) {
-      if (error instanceof LastTenantAdminRemovalError) {
-        return reply.code(409).send({
-          code: "LAST_TENANT_ADMIN",
-          message: error.message,
-        });
+      const response = tenantAdminInvariantErrorResponse(error);
+      if (response) {
+        return reply.code(response.statusCode).send({ code: response.code, message: response.message });
       }
       throw error;
     }

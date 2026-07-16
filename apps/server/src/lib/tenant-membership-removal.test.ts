@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   LastTenantAdminRemovalError,
   TenantAdminRequiredError,
+  TransactionSerializationRetriesExhaustedError,
   assertTenantActivationAllowed,
   assertTenantMembershipRemovalAllowed,
   assertTenantMembershipRoleChangeAllowed,
   buildTenantAdminUserIds,
   retryTransactionSerializationFailures,
+  tenantAdminInvariantErrorResponse,
+  updateTenantAfterAdminCheck,
 } from "./tenant-membership-removal";
 
 describe("assertTenantActivationAllowed", () => {
@@ -16,6 +19,37 @@ describe("assertTenantActivationAllowed", () => {
 
   test("allows activating a tenant with an admin", () => {
     expect(() => assertTenantActivationAllowed(1)).not.toThrow();
+  });
+});
+
+describe("updateTenantAfterAdminCheck", () => {
+  test("does not write the active status when the transaction sees no admin", async () => {
+    let updated = false;
+    await expect(updateTenantAfterAdminCheck({
+      countAdmins: async () => 0,
+      updateTenant: async () => {
+        updated = true;
+        return "active";
+      },
+    })).rejects.toBeInstanceOf(TenantAdminRequiredError);
+    expect(updated).toBe(false);
+  });
+
+  test("writes the active status after the transaction sees an admin", async () => {
+    const events: string[] = [];
+    const result = await updateTenantAfterAdminCheck({
+      countAdmins: async () => {
+        events.push("count");
+        return 1;
+      },
+      updateTenant: async () => {
+        events.push("update");
+        return "active";
+      },
+    });
+
+    expect(result).toBe("active");
+    expect(events).toEqual(["count", "update"]);
   });
 });
 
@@ -103,5 +137,29 @@ describe("retryTransactionSerializationFailures", () => {
       () => false,
     )).rejects.toThrow("permission denied");
     expect(attempts).toBe(1);
+  });
+
+  test("turns exhausted serialization retries into a 409 response contract", async () => {
+    let attempts = 0;
+    let caught: unknown;
+    try {
+      await retryTransactionSerializationFailures(
+        async () => {
+          attempts += 1;
+          throw new Error("serialization");
+        },
+        (error) => error instanceof Error && error.message === "serialization",
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(attempts).toBe(3);
+    expect(caught).toBeInstanceOf(TransactionSerializationRetriesExhaustedError);
+    expect(tenantAdminInvariantErrorResponse(caught)).toEqual({
+      statusCode: 409,
+      code: "TENANT_ADMIN_CONCURRENT_UPDATE",
+      message: "管理员状态发生并发变化，请刷新后重试",
+    });
   });
 });

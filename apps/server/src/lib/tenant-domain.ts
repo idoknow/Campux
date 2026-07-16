@@ -21,6 +21,8 @@ type CloudflareDnsRecord = {
   name: string;
   type: string;
   content: string;
+  ttl?: number;
+  proxied?: boolean;
   comment?: string | null;
 };
 
@@ -33,6 +35,37 @@ export class TenantDomainProvisioningError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "TenantDomainProvisioningError";
+  }
+}
+
+export class TenantDomainCompensationError extends Error {
+  readonly persistenceError: unknown;
+  readonly compensationError: unknown;
+
+  constructor(persistenceError: unknown, compensationError: unknown) {
+    super("主操作失败，且自动域名补偿也失败");
+    this.name = "TenantDomainCompensationError";
+    this.persistenceError = persistenceError;
+    this.compensationError = compensationError;
+  }
+}
+
+export async function persistAfterTenantDomainReprovision<T>({
+  persist,
+  compensate,
+}: {
+  persist: () => Promise<T>;
+  compensate: () => Promise<void>;
+}) {
+  try {
+    return await persist();
+  } catch (persistenceError) {
+    try {
+      await compensate();
+    } catch (compensationError) {
+      throw new TenantDomainCompensationError(persistenceError, compensationError);
+    }
+    throw persistenceError;
   }
 }
 
@@ -199,6 +232,78 @@ export async function reprovisionTenantDomain({
   return createdRecordId;
 }
 
+export async function reprovisionTenantDomainWithCompensation({
+  config,
+  previousHost,
+  nextHost,
+  targetHost,
+  fetchImpl = fetch,
+}: {
+  config: CampuxConfig;
+  previousHost: string | null | undefined;
+  nextHost: string | null | undefined;
+  targetHost: string;
+  fetchImpl?: FetchLike;
+}) {
+  const apiToken = config.tenantDomains.cloudflare.apiToken;
+  const suffix = normalizeDomainSuffix(config.tenantDomains.suffix);
+  if (!apiToken || !suffix) {
+    return { recordId: null, compensate: async () => {} };
+  }
+
+  const zoneId = await resolveZoneId({ config, apiToken, suffix, fetchImpl });
+  const managedHosts = [...new Set([previousHost, nextHost]
+    .filter((host): host is string => Boolean(host && hostIsUnderTenantSuffix(config, host))))];
+  const before = await captureDnsRecords({ apiToken, zoneId, hosts: managedHosts, fetchImpl });
+
+  try {
+    const recordId = await reprovisionTenantDomain({
+      config,
+      previousHost,
+      nextHost,
+      targetHost,
+      fetchImpl,
+    });
+    const after = await captureDnsRecords({ apiToken, zoneId, hosts: managedHosts, fetchImpl });
+    return {
+      recordId,
+      compensate: () => restoreDnsRecords({
+        config,
+        apiToken,
+        zoneId,
+        before,
+        expectedCurrent: after,
+        fetchImpl,
+      }),
+    };
+  } catch (persistenceError) {
+    try {
+      await restoreDnsRecords({ config, apiToken, zoneId, before, fetchImpl });
+    } catch (compensationError) {
+      throw new TenantDomainCompensationError(persistenceError, compensationError);
+    }
+    throw persistenceError;
+  }
+}
+
+async function captureDnsRecords({
+  apiToken,
+  zoneId,
+  hosts,
+  fetchImpl,
+}: {
+  apiToken: string;
+  zoneId: string;
+  hosts: string[];
+  fetchImpl: FetchLike;
+}) {
+  const records = new Map<string, CloudflareDnsRecord | null>();
+  for (const host of hosts) {
+    records.set(host, await findCloudflareRecordByName({ apiToken, zoneId, name: host, fetchImpl }));
+  }
+  return records;
+}
+
 async function resolveZoneId({
   config,
   apiToken,
@@ -232,6 +337,98 @@ async function findCloudflareRecordByName({
     failurePrefix: "查询 Cloudflare DNS 记录失败",
   });
   return records[0] ?? null;
+}
+
+function sameDnsRecord(left: CloudflareDnsRecord | null, right: CloudflareDnsRecord | null) {
+  if (left === null || right === null) return left === right;
+  return left.name === right.name
+    && left.type === right.type
+    && left.content === right.content
+    && (left.ttl ?? null) === (right.ttl ?? null)
+    && (left.proxied ?? null) === (right.proxied ?? null)
+    && (left.comment ?? null) === (right.comment ?? null);
+}
+
+async function restoreDnsRecords({
+  config,
+  apiToken,
+  zoneId,
+  before,
+  expectedCurrent,
+  fetchImpl,
+}: {
+  config: CampuxConfig;
+  apiToken: string;
+  zoneId: string;
+  before: Map<string, CloudflareDnsRecord | null>;
+  expectedCurrent?: Map<string, CloudflareDnsRecord | null>;
+  fetchImpl: FetchLike;
+}) {
+  for (const [host, original] of before) {
+    const current = await findCloudflareRecordByName({ apiToken, zoneId, name: host, fetchImpl });
+    const expected = expectedCurrent?.get(host) ?? null;
+    if (expectedCurrent && !sameDnsRecord(current, expected)) {
+      if (sameDnsRecord(current, original)) continue;
+      throw new TenantDomainProvisioningError(`补偿自动域名时检测到并发 DNS 变更：${host}`);
+    }
+    if (sameDnsRecord(current, original)) continue;
+
+    if (original === null) {
+      if (!current || current.comment !== automationComment) {
+        throw new TenantDomainProvisioningError(`补偿自动域名时拒绝删除非自动化 DNS 记录：${host}`);
+      }
+      await deleteCloudflareRecord({ apiToken, zoneId, recordId: current.id, fetchImpl });
+      continue;
+    }
+
+    if (!expectedCurrent && current && current.comment !== automationComment) {
+      throw new TenantDomainProvisioningError(`补偿自动域名时检测到非自动化 DNS 变更：${host}`);
+    }
+    await writeCloudflareRecordSnapshot({
+      config,
+      apiToken,
+      zoneId,
+      ...(current ? { currentRecordId: current.id } : {}),
+      record: original,
+      fetchImpl,
+    });
+  }
+}
+
+async function writeCloudflareRecordSnapshot({
+  config,
+  apiToken,
+  zoneId,
+  currentRecordId,
+  record,
+  fetchImpl,
+}: {
+  config: CampuxConfig;
+  apiToken: string;
+  zoneId: string;
+  currentRecordId?: string;
+  record: CloudflareDnsRecord;
+  fetchImpl: FetchLike;
+}) {
+  return cloudflareRequest<CloudflareDnsRecord>({
+    apiToken,
+    path: currentRecordId
+      ? `/zones/${encodeURIComponent(zoneId)}/dns_records/${encodeURIComponent(currentRecordId)}`
+      : `/zones/${encodeURIComponent(zoneId)}/dns_records`,
+    fetchImpl,
+    failurePrefix: "恢复 Cloudflare DNS 记录失败",
+    init: {
+      method: currentRecordId ? "PUT" : "POST",
+      body: JSON.stringify({
+        type: record.type,
+        name: record.name,
+        content: record.content,
+        ttl: record.ttl ?? config.tenantDomains.ttl,
+        proxied: record.proxied ?? config.tenantDomains.proxied,
+        comment: record.comment ?? null,
+      }),
+    },
+  });
 }
 
 async function updateCloudflareRecord({
