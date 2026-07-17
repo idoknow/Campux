@@ -1,5 +1,6 @@
 import { Prisma } from "@campux/db";
 import { prisma } from "./prisma";
+import { normalizeImageMaxSizeMb } from "./image-upload-policy";
 
 type MetadataClient = typeof prisma | Prisma.TransactionClient;
 
@@ -10,6 +11,7 @@ export const pendingPostLimitMetadataKey = "pending_post_limit";
 export const imageCompressionEnabledKey = "image_compression_enabled";
 export const imageCompressionQualityKey = "image_compression_quality";
 export const imageCompressionMaxDimensionKey = "image_compression_max_dimension";
+export const imageMaxSizeMetadataKey = "image_max_size_mb";
 
 export const imageCompressionDefaults = {
   enabled: true,
@@ -118,7 +120,7 @@ export async function readTenantImageCompression(client: MetadataClient, tenantI
     where: {
       tenantId,
       key: {
-        in: [imageCompressionEnabledKey, imageCompressionQualityKey, imageCompressionMaxDimensionKey],
+        in: [imageCompressionEnabledKey, imageCompressionQualityKey, imageCompressionMaxDimensionKey, imageMaxSizeMetadataKey],
       },
     },
     select: {
@@ -133,6 +135,7 @@ export async function readTenantImageCompression(client: MetadataClient, tenantI
     enabled: normalizeImageCompressionEnabled(record[imageCompressionEnabledKey]),
     quality: normalizeImageCompressionQuality(record[imageCompressionQualityKey]),
     maxDimension: normalizeImageCompressionMaxDimension(record[imageCompressionMaxDimensionKey]),
+    maxSizeMb: normalizeImageMaxSizeMb(record[imageMaxSizeMetadataKey]),
   };
 }
 

@@ -115,6 +115,7 @@ export type TenantMetadata = {
     quality: number;
     maxDimension: number;
   };
+  imageMaxSizeMb: number;
   botStylishMessagesEnabled: boolean;
   botPrivatePostStylishEnabled: boolean;
   publishMode: "single" | "accumulate";

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
-import { FONT_OPTIONS, isDefaultFont } from "@campux/domain";
+import { FONT_OPTIONS, IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB, isDefaultFont } from "@campux/domain";
 import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
@@ -198,7 +198,11 @@ export function PostPage({
           <input ref={inputRef} hidden multiple accept="image/*,video/*" type="file" onChange={(event) => onFilesSelected(event.target.files)} />
         </div>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          最多 9 个文件。图片 ≤ 10MB，视频 ≤ 15MB（上传后自动转为 GIF）。
+          最多 9 个文件。
+          {metadata.imageCompression.enabled
+            ? `图片原图 ≤ ${IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB}MB，上传时自动压缩至 ≤ ${metadata.imageMaxSizeMb}MB。`
+            : `图片 ≤ ${metadata.imageMaxSizeMb}MB，自动压缩已关闭。`}
+          视频 ≤ 15MB（上传后自动转为 GIF）。
           {hasConverting ? (
             <span className="ml-1 text-amber-600">视频转换中，请稍候…</span>
           ) : null}

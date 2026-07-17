@@ -99,7 +99,10 @@ export function App() {
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments();
+  const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments({
+    maxSizeMb: metadata.imageMaxSizeMb,
+    compressionEnabled: metadata.imageCompression.enabled,
+  });
 
   const hostTenant = authContext.currentTenant;
   // In single-wall deployments tenant mechanics are hidden: no ops-panel entry,

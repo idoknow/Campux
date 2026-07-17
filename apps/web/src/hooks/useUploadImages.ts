@@ -2,15 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
 import { uploadVideoToGif, ScdnApiError, SCDN_MAX_VIDEO_SIZE } from "@/lib/scdn-api";
-
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+import { getSelectedImageRejection } from "@/lib/image-upload-policy";
 
 type ConversionJob = {
   attachmentId: string;
   file: File;
 };
 
-export function usePendingAttachments() {
+export function usePendingAttachments({
+  maxSizeMb,
+  compressionEnabled,
+}: {
+  maxSizeMb: number;
+  compressionEnabled: boolean;
+}) {
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const blobUrlsRef = useRef<string[]>([]);
   const conversionQueueRef = useRef<ConversionJob[]>([]);
@@ -127,9 +132,17 @@ export function usePendingAttachments() {
             toast.error(`${file.name || "视频"} 超过 15MB 限制`);
             continue;
           }
-          if (!isVideo && file.size > MAX_IMAGE_SIZE) {
-            toast.error(`${file.name || "图片"} 超过 10MB 限制`);
-            continue;
+          if (!isVideo) {
+            const rejection = getSelectedImageRejection({
+              fileName: file.name,
+              sizeBytes: file.size,
+              maxSizeMb,
+              compressionEnabled,
+            });
+            if (rejection) {
+              toast.error(rejection);
+              continue;
+            }
           }
 
           const id = crypto.randomUUID();
@@ -164,7 +177,7 @@ export function usePendingAttachments() {
         return [...current, ...accepted];
       });
     },
-    [processNextConversion],
+    [compressionEnabled, maxSizeMb, processNextConversion],
   );
 
   const remove = useCallback((id: string) => {

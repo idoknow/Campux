@@ -16,6 +16,7 @@ import {
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  imageMaxSizeMetadataKey,
   botStylishMessagesEnabledKey,
   normalizeBotStylishMessagesEnabled,
   botPrivatePostStylishEnabledKey,
@@ -41,6 +42,7 @@ import {
   enableAnonymousAvatarSelectionKey,
   normalizeEnableAnonymousAvatarSelection,
 } from "../lib/tenant-metadata";
+import { maxImageMaxSizeMb, minImageMaxSizeMb, normalizeImageMaxSizeMb } from "../lib/image-upload-policy";
 
 const publicMetadataKeys = [
   "brand",
@@ -52,6 +54,7 @@ const publicMetadataKeys = [
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
+  imageMaxSizeMetadataKey,
   botStylishMessagesEnabledKey,
   botPrivatePostStylishEnabledKey,
   publishModeKey,
@@ -84,6 +87,7 @@ const patchMetadataSchema = z.object({
   imageCompressionEnabled: z.boolean().optional(),
   imageCompressionQuality: z.number().int().min(40).max(95).optional(),
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
+  imageMaxSizeMb: z.number().int().min(minImageMaxSizeMb).max(maxImageMaxSizeMb).optional(),
   botStylishMessagesEnabled: z.boolean().optional(),
   botPrivatePostStylishEnabled: z.boolean().optional(),
   publishMode: z.enum(["single", "accumulate"]).optional(),
@@ -122,6 +126,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
       quality: normalizeQuality(record[imageCompressionQualityKey]),
       maxDimension: normalizeMaxDimension(record[imageCompressionMaxDimensionKey]),
     },
+    imageMaxSizeMb: normalizeImageMaxSizeMb(record[imageMaxSizeMetadataKey]),
     botStylishMessagesEnabled: normalizeBotStylishMessagesEnabled(record[botStylishMessagesEnabledKey]),
     botPrivatePostStylishEnabled: normalizeBotPrivatePostStylishEnabled(record[botPrivatePostStylishEnabledKey]),
     publishMode: normalizePublishMode(record[publishModeKey]),
@@ -351,6 +356,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.imageCompressionMaxDimension !== undefined) {
       updates.push({ key: imageCompressionMaxDimensionKey, value: body.imageCompressionMaxDimension });
+    }
+    if (body.imageMaxSizeMb !== undefined) {
+      updates.push({ key: imageMaxSizeMetadataKey, value: normalizeImageMaxSizeMb(body.imageMaxSizeMb) });
     }
     if (body.botStylishMessagesEnabled !== undefined) {
       updates.push({ key: botStylishMessagesEnabledKey, value: body.botStylishMessagesEnabled });

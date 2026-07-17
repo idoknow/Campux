@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PRIVATE_POST_PROMPT_MAX_LENGTH, type TenantSummary } from "@campux/domain";
+import { MAX_IMAGE_MAX_SIZE_MB, MIN_IMAGE_MAX_SIZE_MB, PRIVATE_POST_PROMPT_MAX_LENGTH, type TenantSummary } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -57,6 +57,7 @@ type TenantSettingsForm = {
   imageCompressionEnabled: boolean;
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
+  imageMaxSizeMb: number;
   botStylishMessagesEnabled: boolean;
   publishMode: "single" | "accumulate";
   publishAccumulateMinImages: number;
@@ -364,7 +365,7 @@ export function AdminPage({
 
   useEffect(() => {
     setForm(toForm(selectedTenant, metadata));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -538,6 +539,7 @@ export function AdminPage({
           imageCompressionEnabled: form.imageCompressionEnabled,
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
+          imageMaxSizeMb: form.imageMaxSizeMb,
           botStylishMessagesEnabled: form.botStylishMessagesEnabled,
           botPrivatePostStylishEnabled: form.botStylishMessagesEnabled,
           publishMode: form.publishMode,
@@ -1814,11 +1816,23 @@ function MetadataPanel({
             />
             <span className="text-xs font-normal text-slate-500">0 表示不限制，默认建议 1 条。</span>
           </label>
-          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div className="flex items-center justify-between gap-3">
+          <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <label className="grid gap-1 text-sm font-medium md:max-w-xs">
+              单张投稿图片上限 (MB)
+              <Input
+                type="number"
+                min={MIN_IMAGE_MAX_SIZE_MB}
+                max={MAX_IMAGE_MAX_SIZE_MB}
+                value={form.imageMaxSizeMb}
+                disabled={busy}
+                onChange={(event) => onFormChange({ ...form, imageMaxSizeMb: Number(event.target.value) })}
+              />
+              <span className="text-xs font-normal text-slate-500">允许 {MIN_IMAGE_MAX_SIZE_MB}-{MAX_IMAGE_MAX_SIZE_MB}MB；自动压缩后仍须小于该上限，默认 10MB。</span>
+            </label>
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
               <div>
-                <p className="text-sm font-medium text-slate-900">图片压缩</p>
-                <p className="text-xs text-slate-500">投稿图片会自动压缩，关闭后按原图存储。</p>
+                <p className="text-sm font-medium text-slate-900">自动压缩投稿图片</p>
+                <p className="text-xs text-slate-500">默认开启；上传原图后立即压缩，关闭后按原图存储并直接校验大小。</p>
               </div>
               <Switch
                 checked={form.imageCompressionEnabled}
@@ -3860,6 +3874,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionEnabled: metadata.imageCompression.enabled,
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
+    imageMaxSizeMb: metadata.imageMaxSizeMb,
     botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
     publishMode: metadata.publishMode,
     publishAccumulateMinImages: metadata.publishAccumulate.minImages,
