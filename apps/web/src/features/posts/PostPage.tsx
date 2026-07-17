@@ -178,7 +178,7 @@ export function PostPage({
               ) : null}
               {item.status === "failed" ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-500/35 px-1 text-center text-[11px] font-medium leading-tight text-red-900">
-                  <span>转换失败</span>
+                  <span>无法上传</span>
                   <span className="line-clamp-2 max-w-full break-words font-normal">{item.errorMessage || "请重试"}</span>
                 </div>
               ) : null}

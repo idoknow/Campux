@@ -15,11 +15,20 @@ import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import {
   buildImageSourceSizeErrorMessage,
+  buildVideoGifFfmpegArgs,
   convertedVideoGifSizeErrorMessage,
+  createConvertedGifClaim,
+  hasGifSignature,
   imageStorageHardMaxBytes,
+  isAttachmentOrderCompatible,
+  isTrustedConvertedGifUrl,
   readResponseBufferWithLimit,
   resolveImageUploadLimits,
+  restoreAttachmentOrder,
   ResponseBodyTooLargeError,
+  shouldExposeRemoteGifIndexes,
+  type AttachmentOrderKind,
+  validateConvertedGifClaim,
   validateConvertedVideoGifSize,
   validateProcessedImageSize,
 } from "../lib/image-upload-policy";
@@ -32,6 +41,14 @@ import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 import { autoTagPost } from "../runtime/post-tagging";
 import { verifyPublicForumMediaSignature } from "../lib/public-forum-media";
+import { getServerSigningSecret } from "../lib/server-signing-secret";
+import {
+  ConvertedGifClaimStore,
+  ConvertedGifClaimUnavailableError,
+  convertedGifClaimSettingPrefix,
+  type ConvertedGifClaimSetting,
+} from "../lib/converted-gif-claim-store";
+import { readSingleVideoUpload, SingleVideoUploadError } from "../lib/single-video-upload";
 
 const fileQuerySchema = z.object({
   key: z.string().min(1),
@@ -66,6 +83,13 @@ class PendingPostLimitError extends Error {
     readonly limit: number,
   ) {
     super("pending post limit exceeded");
+  }
+}
+
+class ConvertedVideoGifSizeError extends Error {
+  constructor() {
+    super(convertedVideoGifSizeErrorMessage);
+    this.name = "ConvertedVideoGifSizeError";
   }
 }
 
@@ -106,21 +130,170 @@ function isConvertibleVideoType(contentType: string): boolean {
   return VIDEO_CONVERT_MIME_TYPES.has(contentType);
 }
 
-const VIDEO_SIZE_CAP = 100 * 1024 * 1024; // 100MB
+const VIDEO_SIZE_CAP = 15 * 1024 * 1024;
+const REMOTE_VIDEO_SIZE_CAP = VIDEO_SIZE_CAP;
 const MAX_VIDEO_DURATION_SEC = 60;
+const SCDN_API_URL = "https://img.scdn.io/api/v1.php";
+const SCDN_RESPONSE_MAX_BYTES = 64 * 1024;
+const MAX_CONCURRENT_VIDEO_GIF_CONVERSIONS = 2;
+const VIDEO_UPLOAD_DEADLINE_MS = 30_000;
+const activeVideoGifConversions = new Set<string>();
+const convertedGifClaimStore = new ConvertedGifClaimStore({
+  transaction: (callback) => prisma.$transaction(async (tx) => callback({
+    deleteByKeys: async (keys) => {
+      const deleted = await tx.systemSetting.deleteMany({
+        where: { key: { in: keys } },
+      });
+      return deleted.count;
+    },
+  })),
+  pruneAndCreate: async (cutoff, setting) => {
+    await prisma.$transaction([
+      prisma.systemSetting.deleteMany({
+        where: {
+          key: { startsWith: convertedGifClaimSettingPrefix },
+          updatedAt: { lte: cutoff },
+        },
+      }),
+      prisma.systemSetting.create({ data: setting }),
+    ]);
+  },
+  restore: async (settings) => {
+    await prisma.systemSetting.createMany({ data: settings });
+  },
+});
+
+function reserveVideoGifConversion(conversionKey: string): (() => void) | null {
+  if (activeVideoGifConversions.has(conversionKey)
+    || activeVideoGifConversions.size >= MAX_CONCURRENT_VIDEO_GIF_CONVERSIONS) {
+    return null;
+  }
+  activeVideoGifConversions.add(conversionKey);
+  return () => {
+    activeVideoGifConversions.delete(conversionKey);
+  };
+}
+
+const VIDEO_CONTAINER_FORMATS = new Set([
+  "3gp",
+  "3g2",
+  "avi",
+  "matroska",
+  "mj2",
+  "mov",
+  "mp4",
+  "webm",
+]);
+
+async function probeVideoFile(inputPath: string): Promise<number> {
+  const { spawn } = await import("node:child_process");
+  return new Promise<number>((resolve, reject) => {
+    const proc = spawn("ffprobe", [
+      "-v", "quiet",
+      "-print_format", "json",
+      "-show_entries", "format=duration,format_name:stream=codec_type",
+      inputPath,
+    ], { timeout: 10000 });
+    let stdout = "";
+    let stdoutBytes = 0;
+    let stdoutTooLarge = false;
+    proc.stdout?.on("data", (data: Buffer) => {
+      stdoutBytes += data.byteLength;
+      if (stdoutBytes > 64 * 1024) {
+        stdoutTooLarge = true;
+        proc.kill("SIGKILL");
+        return;
+      }
+      stdout += data.toString();
+    });
+    proc.on("close", (code) => {
+      if (stdoutTooLarge) {
+        reject(new Error("视频元数据过大"));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error("无法解析视频信息"));
+        return;
+      }
+      try {
+        const info = JSON.parse(stdout) as {
+          format?: { duration?: string; format_name?: string };
+          streams?: Array<{ codec_type?: string }>;
+        };
+        const duration = Number(info.format?.duration);
+        const formats = new Set((info.format?.format_name ?? "").split(","));
+        const hasSupportedContainer = [...formats].some((format) => VIDEO_CONTAINER_FORMATS.has(format));
+        const hasVideoStream = info.streams?.some((stream) => stream.codec_type === "video") ?? false;
+        if (!Number.isFinite(duration) || duration <= 0 || !hasSupportedContainer || !hasVideoStream) {
+          reject(new Error("文件不是受支持的视频"));
+          return;
+        }
+        resolve(duration);
+      } catch {
+        reject(new Error("无法解析视频信息"));
+      }
+    });
+    proc.on("error", (error: NodeJS.ErrnoException) => {
+      reject(error.code === "ENOENT"
+        ? new Error("服务端未安装 ffprobe，请使用 Web 前端投稿")
+        : error);
+    });
+  });
+}
+
+async function probeVideoBuffer(videoBuffer: Buffer): Promise<number> {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const tmpDir = mkdtempSync(join(tmpdir(), "campux-video-probe-"));
+  const inputPath = join(tmpDir, "input.bin");
+  try {
+    writeFileSync(inputPath, videoBuffer);
+    return await probeVideoFile(inputPath);
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+async function uploadVideoToScdn(videoBuffer: Buffer, fileName: string, mimeType: string): Promise<string> {
+  const formData = new FormData();
+  formData.append("image", new Blob([Uint8Array.from(videoBuffer)], { type: mimeType }), fileName);
+  formData.append("outputFormat", "gif");
+  formData.append("cdn_domain", "cloudflarecnimg.scdn.io");
+  formData.append("storage_destination", "telegram");
+
+  const response = await fetch(SCDN_API_URL, {
+    method: "POST",
+    body: formData,
+    redirect: "manual",
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`视频转换服务返回 HTTP ${response.status}`);
+  }
+  const body = await readResponseBufferWithLimit(response, SCDN_RESPONSE_MAX_BYTES);
+  let payload: { success?: boolean; data?: { url?: string }; message?: string; error?: string };
+  try {
+    payload = JSON.parse(body.toString("utf8"));
+  } catch {
+    throw new Error("视频转换服务返回了无效响应");
+  }
+  const url = payload.data?.url;
+  if (!payload.success || typeof url !== "string" || !isTrustedConvertedGifUrl(url)) {
+    throw new Error(payload.message || payload.error || "视频转换服务未返回可信 GIF 地址");
+  }
+  return url;
+}
 
 /**
- * Convert video buffer to GIF using ffmpeg.
- * Uses original resolution and framerate with full 256-color palette
- * for maximum quality (every frame, original dimensions).
- *
- * Note: The web frontend now converts videos to GIF in-browser, so this
- * server-side path is only hit by API clients. If ffmpeg is not available,
- * a clear error is thrown.
+ * Convert a bounded video buffer to a bounded GIF using ffmpeg.
+ * Output is constrained before encoding starts so crafted videos cannot grow
+ * unbounded temporary files or heap allocations.
  */
-async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Promise<{ buffer: Buffer }> {
+async function convertVideoToGif(videoBuffer: Buffer): Promise<{ buffer: Buffer }> {
   const { spawn } = await import("node:child_process");
-  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
 
@@ -131,42 +304,18 @@ async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Pro
   try {
     writeFileSync(inputPath, videoBuffer);
 
-    // Check duration
-    const duration = await new Promise<number>((resolve, reject) => {
-      const proc = spawn("ffprobe", [
-        "-v", "quiet", "-print_format", "json", "-show_format", inputPath,
-      ], { timeout: 10000 });
-      let stdout = "";
-      proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
-      proc.on("close", (code) => {
-        if (code !== 0) { reject(new Error("无法解析视频信息")); return; }
-        try {
-          const info = JSON.parse(stdout);
-          resolve(parseFloat(info.format?.duration || "0"));
-        } catch { reject(new Error("无法解析视频时长")); }
-      });
-      proc.on("error", (err: NodeJS.ErrnoException) => {
-        if (err.code === "ENOENT") {
-          reject(new Error("服务端未安装 ffprobe，请使用 Web 前端投稿"));
-        } else {
-          reject(err);
-        }
-      });
-    });
+    const duration = await probeVideoFile(inputPath);
 
     if (duration > MAX_VIDEO_DURATION_SEC) {
       throw new Error(`视频时长 ${Math.round(duration)}s 超过限制 (${MAX_VIDEO_DURATION_SEC}s)`);
     }
 
-    // Convert to GIF: original resolution & framerate, full 256-color palette
     await new Promise<void>((resolve, reject) => {
-      const ffmpeg = spawn("ffmpeg", [
-        "-y", "-i", inputPath,
-        "-vf", "fps=source,split[s0][s1];[s0]palettegen=stats_mode=full:max_colors=256[p];[s1][p]paletteuse=dither=floyd_steinberg",
-        "-loop", "0", outputPath,
-      ], { timeout: 60000 });
+      const ffmpeg = spawn("ffmpeg", buildVideoGifFfmpegArgs(inputPath, outputPath), { timeout: 60000 });
       let stderr = "";
-      ffmpeg.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+      ffmpeg.stderr?.on("data", (d: Buffer) => {
+        stderr = `${stderr}${d.toString()}`.slice(-4_096);
+      });
       ffmpeg.on("close", (code) => {
         if (code !== 0) { reject(new Error(`ffmpeg 转换失败: ${stderr.slice(-200)}`)); return; }
         resolve();
@@ -180,6 +329,10 @@ async function convertVideoToGif(videoBuffer: Buffer, originalName: string): Pro
       });
     });
 
+    const sizeValidation = validateConvertedVideoGifSize(statSync(outputPath).size);
+    if (!sizeValidation.ok) {
+      throw new ConvertedVideoGifSizeError();
+    }
     return { buffer: readFileSync(outputPath) };
   } finally {
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -196,6 +349,20 @@ function isUploadTooLargeError(error: unknown) {
   }
   const code = "code" in error ? String(error.code) : "";
   return code === "FST_REQ_FILE_TOO_LARGE" || error.message.includes("size limit exceeded") || error.message.includes("File size limit exceeded");
+}
+
+const multipartLimitErrorCodes = new Set([
+  "FST_PARTS_LIMIT",
+  "FST_FILES_LIMIT",
+  "FST_FIELDS_LIMIT",
+  "FST_REQ_FILE_TOO_LARGE",
+]);
+
+function isMultipartLimitError(error: unknown): boolean {
+  return Boolean(error
+    && typeof error === "object"
+    && "code" in error
+    && multipartLimitErrorCodes.has(String(error.code)));
 }
 
 function isTransactionSerializationFailure(value: unknown) {
@@ -248,6 +415,98 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     return reply.send(Buffer.from(object.bytes));
   });
 
+  app.post("/api/uploads/video-gif", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "submitter");
+    const activeBan = await prisma.banRecord.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        userId: context.user.id,
+        endsAt: { gt: new Date() },
+      },
+      orderBy: { endsAt: "desc" },
+    });
+    if (activeBan) {
+      return reply.code(403).send({ message: `账号已被封禁：${activeBan.comment}` });
+    }
+    const signingSecret = getServerSigningSecret();
+    const conversionKey = `${context.selectedTenant.id}:${context.user.id}`;
+    const releaseConversion = reserveVideoGifConversion(conversionKey);
+    if (!releaseConversion) {
+      reply.header("Connection", "close");
+      reply.raw.once("finish", () => request.raw.destroy());
+      return reply.code(429).send({ message: "视频转换繁忙，请稍后重试" });
+    }
+    const uploadDeadline = setTimeout(() => {
+      request.raw.destroy(new Error("video upload deadline exceeded"));
+    }, VIDEO_UPLOAD_DEADLINE_MS);
+
+    try {
+      let videoUpload: Awaited<ReturnType<typeof readSingleVideoUpload>>;
+      try {
+        videoUpload = await readSingleVideoUpload(request, {
+          maxBytes: REMOTE_VIDEO_SIZE_CAP,
+          isAllowedMimeType: isConvertibleVideoType,
+          missingMessage: "请选择视频文件",
+          sizeMessage: "视频原文件不能超过 15MB",
+          shapeMessage: "视频上传字段或附件超过限制",
+          typeMessage: "仅支持 MP4、WebM、MOV、AVI、MKV 或 3GP 视频",
+        });
+        clearTimeout(uploadDeadline);
+      } catch (error) {
+        if (error instanceof SingleVideoUploadError) {
+          return reply.code(error.status).send({ message: error.message });
+        }
+        throw error;
+      }
+      const {
+        buffer: videoBuffer,
+        filename: videoFilename,
+        mimetype: videoMimetype,
+      } = videoUpload;
+
+      try {
+        const duration = await probeVideoBuffer(videoBuffer);
+        if (duration > MAX_VIDEO_DURATION_SEC) {
+          return reply.code(400).send({ message: `视频时长不能超过 ${MAX_VIDEO_DURATION_SEC} 秒` });
+        }
+      } catch (error) {
+        return reply.code(400).send({
+          message: error instanceof Error ? error.message : "无法解析视频信息",
+        });
+      }
+
+      let url: string;
+      try {
+        url = await uploadVideoToScdn(
+          videoBuffer,
+          videoFilename,
+          videoMimetype,
+        );
+      } catch (error) {
+        app.log.warn({ error }, "server-side video GIF conversion failed");
+        return reply.code(502).send({
+          message: error instanceof Error ? error.message : "视频转换服务暂时不可用",
+        });
+      }
+
+      const claimNow = Date.now();
+      const proof = createConvertedGifClaim({
+        url,
+        tenantId: context.selectedTenant.id,
+        userId: context.user.id,
+        sessionTokenHash: context.session.tokenHash,
+        signingSecret,
+        now: claimNow,
+      });
+      await convertedGifClaimStore.issue(proof, claimNow);
+      reply.header("Cache-Control", "no-store");
+      return reply.send({ url, proof });
+    } finally {
+      clearTimeout(uploadDeadline);
+      releaseConversion();
+    }
+  });
+
   app.post("/api/posts", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
     const compression = await readTenantImageCompression(prisma, context.selectedTenant.id);
@@ -281,12 +540,30 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     let textColor: string | null = null;
     let font: string | null = null;
     const staged: PostAttachment[] = [];
-    const remoteGifUrls: string[] = [];
+    const remoteGifClaims: Array<{ url: string; proof: string }> = [];
+    let attachmentOrder: AttachmentOrderKind[] | null = null;
+    let consumedConvertedGifClaimSettings: ConvertedGifClaimSetting[] = [];
 
     try {
       let fileIndex = 0;
-      for await (const part of request.parts()) {
+      for await (const part of request.parts({
+        limits: {
+          fieldNameSize: 64,
+          fieldSize: 32 * 1024,
+          fields: 10,
+          files: 9,
+          headerPairs: 32,
+          parts: 19,
+          fileSize: Math.max(REMOTE_VIDEO_SIZE_CAP, imageUploadLimits.sourceMaxBytes),
+        },
+      })) {
         if (part.type === "field") {
+          if (part.fieldnameTruncated || part.valueTruncated) {
+            throw {
+              status: 413,
+              message: "投稿字段过大",
+            };
+          }
           if (part.fieldname === "text") {
             text = String(part.value ?? "");
           } else if (part.fieldname === "anonymous") {
@@ -299,15 +576,48 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
             textColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "font") {
             font = String(part.value ?? "") || null;
-          } else if (part.fieldname === "remoteGifUrls") {
-            // Accept JSON array of GIF URLs from 失控图床 API conversion
+          } else if (part.fieldname === "attachmentOrder") {
             try {
               const parsed = JSON.parse(String(part.value ?? "[]"));
-              if (Array.isArray(parsed)) {
-                remoteGifUrls.push(...parsed.filter((u): u is string => typeof u === "string" && u.length > 0));
+              if (!Array.isArray(parsed)
+                || parsed.length > 9
+                || parsed.some((kind) => kind !== "local" && kind !== "remote")) {
+                throw new Error("invalid attachment order");
               }
+              attachmentOrder = parsed;
             } catch {
-              // ignore malformed JSON
+              throw {
+                status: 400,
+                message: "附件顺序格式无效",
+              };
+            }
+          } else if (part.fieldname === "remoteGifUrls") {
+            throw {
+              status: 400,
+              message: "视频转换凭证缺失，请重新转换",
+            };
+          } else if (part.fieldname === "remoteGifClaims") {
+            try {
+              const parsed = JSON.parse(String(part.value ?? "[]"));
+              if (!Array.isArray(parsed)
+                || parsed.length > 9
+                || parsed.some((claim) => !claim
+                  || typeof claim !== "object"
+                  || typeof claim.url !== "string"
+                  || claim.url.length > 2_048
+                  || typeof claim.proof !== "string"
+                  || claim.proof.length > 256)) {
+                throw new Error("invalid claims");
+              }
+              remoteGifClaims.push(...parsed.map((claim) => ({
+                url: claim.url,
+                proof: claim.proof,
+              })));
+            } catch {
+              throw {
+                status: 400,
+                message: "视频转换凭证格式无效",
+              };
             }
           }
           continue;
@@ -342,37 +652,74 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         const isVideo = isConvertibleVideoType(mime);
         const cap = isVideo ? VIDEO_SIZE_CAP : imageUploadLimits.sourceMaxBytes;
         const sizeErrorMessage = isVideo
-          ? "视频原文件不能超过 100MB"
+          ? "视频原文件不能超过 15MB"
           : buildImageSourceSizeErrorMessage({
               compressionEnabled: compression.enabled,
               maxSizeMb: compression.maxSizeMb,
             });
-
-        // Read file with size cap using Transform
-        const buf = await readPartCapped(part.file, cap, fileIndex, sizeErrorMessage);
+        const releaseConversion = isVideo
+          ? reserveVideoGifConversion(`${context.selectedTenant.id}:${context.user.id}`)
+          : null;
+        if (isVideo && !releaseConversion) {
+          part.file.destroy();
+          reply.header("Connection", "close");
+          reply.raw.once("finish", () => request.raw.destroy());
+          throw {
+            status: 429,
+            message: "视频转换繁忙，请稍后重试",
+            fileIndex,
+          };
+        }
+        const uploadDeadline = isVideo
+          ? setTimeout(() => request.raw.destroy(new Error("video upload deadline exceeded")), VIDEO_UPLOAD_DEADLINE_MS)
+          : null;
 
         let finalBuf: Buffer;
         let finalMime: string;
         let finalFileName: string;
-
-        if (isVideo) {
-          // Convert video to GIF
-          try {
-            const converted = await convertVideoToGif(buf, part.filename || "video");
-            finalBuf = converted.buffer;
-            finalMime = "image/gif";
-            finalFileName = (part.filename || "video").replace(/\.[^.]+$/, ".gif");
-          } catch (convErr) {
+        try {
+          const buf = await readPartCapped(part.file, cap, fileIndex, sizeErrorMessage);
+          if (uploadDeadline) {
+            clearTimeout(uploadDeadline);
+          }
+          if (part.file.truncated) {
             throw {
-              status: 400,
-              message: `视频转换失败：${convErr instanceof Error ? convErr.message : "未知错误"}`,
+              status: 413,
+              message: sizeErrorMessage,
               fileIndex,
             };
           }
-        } else {
-          finalBuf = await compressImageBuffer(buf, mime, compression);
-          finalMime = mime;
-          finalFileName = part.filename || "attachment.jpg";
+
+          if (isVideo) {
+            try {
+              const converted = await convertVideoToGif(buf);
+              finalBuf = converted.buffer;
+              finalMime = "image/gif";
+              finalFileName = (part.filename || "video").replace(/\.[^.]+$/, ".gif");
+            } catch (convErr) {
+              if (convErr instanceof ConvertedVideoGifSizeError) {
+                throw {
+                  status: 413,
+                  message: convertedVideoGifSizeErrorMessage,
+                  fileIndex,
+                };
+              }
+              throw {
+                status: 400,
+                message: `视频转换失败：${convErr instanceof Error ? convErr.message : "未知错误"}`,
+                fileIndex,
+              };
+            }
+          } else {
+            finalBuf = await compressImageBuffer(buf, mime, compression);
+            finalMime = mime;
+            finalFileName = part.filename || "attachment.jpg";
+          }
+        } finally {
+          if (uploadDeadline) {
+            clearTimeout(uploadDeadline);
+          }
+          releaseConversion?.();
         }
 
         const sizeValidation = isVideo
@@ -400,68 +747,25 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         fileIndex += 1;
       }
 
-      // 检查远程 GIF URL 的 SSRF 风险
-      const urlValidation = validateRemoteGifUrls(remoteGifUrls);
-      if (!urlValidation.valid) {
+      if (staged.length + remoteGifClaims.length > 9) {
         throw {
           status: 400,
-          message: urlValidation.reason,
+          message: "最多 9 个文件",
+        };
+      }
+      const localAttachmentCount = staged.length;
+      if (attachmentOrder && !isAttachmentOrderCompatible(
+        attachmentOrder,
+        localAttachmentCount,
+        remoteGifClaims.length,
+      )) {
+        throw {
+          status: 400,
+          message: "附件顺序与文件数量不匹配",
         };
       }
 
-      // Process remote GIF URLs (from 失控图床 API conversion)
-      for (const gifUrl of remoteGifUrls) {
-        if (staged.length >= 9) {
-          break;
-        }
-        try {
-          const response = await fetch(gifUrl);
-          if (!response.ok) {
-            app.log.warn({ url: gifUrl, status: response.status }, "failed to fetch remote GIF");
-            continue;
-          }
-          let buf: Buffer;
-          try {
-            buf = await readResponseBufferWithLimit(response, imageStorageHardMaxBytes);
-          } catch (error) {
-            if (error instanceof ResponseBodyTooLargeError) {
-              throw {
-                status: 413,
-                message: convertedVideoGifSizeErrorMessage,
-                fileIndex: staged.length,
-              };
-            }
-            throw error;
-          }
-          const sizeValidation = validateConvertedVideoGifSize(buf.byteLength);
-          if (!sizeValidation.ok) {
-            throw {
-              status: sizeValidation.status,
-              message: sizeValidation.message,
-              fileIndex: staged.length,
-            };
-          }
-
-          const att = await uploadAttachmentBytes({
-            config,
-            tenantId: context.selectedTenant.id,
-            kind: "image",
-            contentType: "image/gif",
-            fileName: "video.gif",
-            body: buf,
-          });
-          uploadedKeys.push(att.key);
-          staged.push(att);
-        } catch (fetchErr) {
-          if (fetchErr && typeof fetchErr === "object" && "status" in fetchErr && "message" in fetchErr) {
-            throw fetchErr;
-          }
-          app.log.warn({ error: fetchErr, url: gifUrl }, "failed to process remote GIF");
-          // Skip failed URLs rather than failing the entire post
-        }
-      }
-
-      // Validate text
+      // Validate content before any remote GIF network work.
       if (text.trim().length === 0) {
         throw {
           status: 400,
@@ -501,6 +805,175 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           status: 403,
           message: `投稿包含不安全内容，账号已被封禁 24 小时：${injectionResult.reason}`,
         };
+      }
+
+      const remoteGifUrls = remoteGifClaims.map((claim) => claim.url);
+      const remoteGifSigningSecret = remoteGifClaims.length > 0
+        ? getServerSigningSecret()
+        : null;
+      const invalidRemoteGifUrlIndexes = remoteGifUrls.flatMap((url, remoteGifIndex) => {
+        const validation = validateRemoteGifUrls([url]);
+        return validation.valid && isTrustedConvertedGifUrl(url) ? [] : [remoteGifIndex];
+      });
+      if (invalidRemoteGifUrlIndexes.length > 0) {
+        throw {
+          status: 400,
+          message: "视频转换结果来源不受信任",
+          remoteGifIndexes: invalidRemoteGifUrlIndexes,
+        };
+      }
+      const invalidRemoteGifIndexes = remoteGifClaims.flatMap((claim, remoteGifIndex) => (
+        validateConvertedGifClaim({
+          url: claim.url,
+          proof: claim.proof,
+          tenantId: context.selectedTenant.id,
+          userId: context.user.id,
+          sessionTokenHash: context.session.tokenHash,
+          signingSecret: remoteGifSigningSecret!,
+        }) ? [] : [remoteGifIndex]
+      ));
+      if (invalidRemoteGifIndexes.length > 0) {
+        throw {
+          status: 403,
+          message: "视频转换凭证无效或已过期，请重新转换",
+          remoteGifIndexes: invalidRemoteGifIndexes,
+        };
+      }
+
+      const releaseRemoteGifIngestion = remoteGifClaims.length > 0
+        ? reserveVideoGifConversion(`${context.selectedTenant.id}:${context.user.id}`)
+        : null;
+      if (remoteGifClaims.length > 0 && !releaseRemoteGifIngestion) {
+        throw {
+          status: 429,
+          message: "视频处理繁忙，请稍后重试",
+        };
+      }
+      const remoteGifIngestionSignal = remoteGifClaims.length > 0
+        ? AbortSignal.timeout(60_000)
+        : null;
+
+      try {
+        if (remoteGifClaims.length > 0) {
+          try {
+            consumedConvertedGifClaimSettings = await convertedGifClaimStore.consume(
+              remoteGifClaims.map((claim) => claim.proof),
+            );
+          } catch (error) {
+            if (error instanceof ConvertedGifClaimUnavailableError) {
+              throw {
+                status: 403,
+                message: "视频转换凭证已使用、重复或已失效，请重新转换",
+                remoteGifIndexes: remoteGifClaims.map((_, index) => index),
+              };
+            }
+            throw error;
+          }
+        }
+
+        // Only server-issued converted-video claims receive the stable 50MB cap.
+        for (const [remoteGifIndex, { url: gifUrl }] of remoteGifClaims.entries()) {
+        try {
+          const response = await fetch(gifUrl, {
+            redirect: "manual",
+            signal: remoteGifIngestionSignal,
+          });
+          if (response.status >= 300 && response.status < 400) {
+            await response.body?.cancel().catch(() => undefined);
+            throw {
+              status: 400,
+              message: "视频转换结果不允许重定向",
+              remoteGifIndexes: [remoteGifIndex],
+              permanentRemoteGifFailure: true,
+            };
+          }
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => undefined);
+            app.log.warn({ url: gifUrl, status: response.status }, "failed to fetch remote GIF");
+            const permanentRemoteGifFailure = response.status >= 400
+              && response.status < 500
+              && ![408, 425, 429].includes(response.status);
+            throw {
+              status: permanentRemoteGifFailure ? 410 : 502,
+              message: permanentRemoteGifFailure
+                ? "视频转换结果已失效，请重新转换"
+                : "视频转换结果下载失败，请重试",
+              remoteGifIndexes: [remoteGifIndex],
+              permanentRemoteGifFailure,
+            };
+          }
+          if (response.url && !isTrustedConvertedGifUrl(response.url)) {
+            await response.body?.cancel().catch(() => undefined);
+            throw {
+              status: 400,
+              message: "视频转换结果来源不受信任",
+              remoteGifIndexes: [remoteGifIndex],
+              permanentRemoteGifFailure: true,
+            };
+          }
+          let buf: Buffer;
+          try {
+            buf = await readResponseBufferWithLimit(response, imageStorageHardMaxBytes);
+          } catch (error) {
+            if (error instanceof ResponseBodyTooLargeError) {
+              throw {
+                status: 413,
+                message: convertedVideoGifSizeErrorMessage,
+                remoteGifIndexes: [remoteGifIndex],
+                permanentRemoteGifFailure: true,
+              };
+            }
+            throw error;
+          }
+          if (!hasGifSignature(buf)) {
+            throw {
+              status: 415,
+              message: "视频转换结果不是有效的 GIF",
+              remoteGifIndexes: [remoteGifIndex],
+              permanentRemoteGifFailure: true,
+            };
+          }
+          const sizeValidation = validateConvertedVideoGifSize(buf.byteLength);
+          if (!sizeValidation.ok) {
+            throw {
+              status: sizeValidation.status,
+              message: sizeValidation.message,
+              remoteGifIndexes: [remoteGifIndex],
+              permanentRemoteGifFailure: true,
+            };
+          }
+
+          const att = await uploadAttachmentBytes({
+            config,
+            tenantId: context.selectedTenant.id,
+            kind: "image",
+            contentType: "image/gif",
+            fileName: "video.gif",
+            body: buf,
+          });
+          uploadedKeys.push(att.key);
+          staged.push(att);
+        } catch (fetchErr) {
+          if (fetchErr && typeof fetchErr === "object" && "status" in fetchErr && "message" in fetchErr) {
+            throw fetchErr;
+          }
+          app.log.warn({ error: fetchErr, url: gifUrl }, "failed to process remote GIF");
+          throw {
+            status: 502,
+            message: "视频转换结果下载失败，请重试",
+            remoteGifIndexes: [remoteGifIndex],
+          };
+        }
+        }
+      } finally {
+        releaseRemoteGifIngestion?.();
+      }
+
+      if (attachmentOrder) {
+        const localAttachments = staged.slice(0, localAttachmentCount);
+        const remoteAttachments = staged.slice(localAttachmentCount);
+        const ordered = restoreAttachmentOrder(localAttachments, remoteAttachments, attachmentOrder)!;
+        staged.splice(0, staged.length, ...ordered);
       }
 
       const initialStatus: "pending_approval" = "pending_approval";
@@ -598,6 +1071,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         };
       }
 
+      // Post creation commits one-time converted-GIF claim consumption.
+      consumedConvertedGifClaimSettings = [];
+
       oneBot?.notifyNewPost(post.id).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to notify review group");
       });
@@ -613,12 +1089,36 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         post: toPostListItem(post),
       };
     } catch (err) {
+      let convertedGifClaimRestoreFailed = false;
+      let convertedGifClaimsRestored = false;
+      if (consumedConvertedGifClaimSettings.length > 0) {
+        try {
+          await convertedGifClaimStore.restore(consumedConvertedGifClaimSettings);
+          consumedConvertedGifClaimSettings = [];
+          convertedGifClaimsRestored = true;
+        } catch (restoreErr) {
+          convertedGifClaimRestoreFailed = true;
+          app.log.error({ error: restoreErr }, "failed to restore converted GIF claims");
+        }
+      }
+
       // Cleanup uploaded files on error
       await deleteAttachmentObjects(config, uploadedKeys).catch((cleanupErr) => {
         app.log.warn({ error: cleanupErr }, "failed to cleanup uploaded attachments");
       });
 
+      if (convertedGifClaimRestoreFailed) {
+        return reply.code(503).send({
+          message: "视频处理失败且转换凭证无法恢复，请移除视频后重新添加",
+          remoteGifIndexes: remoteGifClaims.map((_, index) => index),
+        });
+      }
+
       // Handle errors
+      if (isMultipartLimitError(err)) {
+        return reply.code(413).send({ message: "投稿附件或字段超过限制" });
+      }
+
       if (err instanceof PendingPostLimitError) {
         return reply.code(409).send({
           message: `你还有 ${err.pendingCount} 条稿件待审核，当前校园墙最多同时保留 ${err.limit} 条待审核稿件。`,
@@ -626,10 +1126,23 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       }
 
       if (typeof err === "object" && err !== null && "status" in err && "message" in err) {
-        const errorObj = err as { status: number; message: string; fileIndex?: number };
+        const errorObj = err as {
+          status: number;
+          message: string;
+          fileIndex?: number;
+          remoteGifIndexes?: number[];
+          permanentRemoteGifFailure?: boolean;
+        };
         return reply.code(errorObj.status).send({
           message: errorObj.message,
           ...(errorObj.fileIndex !== undefined ? { fileIndex: errorObj.fileIndex } : {}),
+          ...(errorObj.remoteGifIndexes
+            && shouldExposeRemoteGifIndexes(
+              convertedGifClaimsRestored,
+              errorObj.permanentRemoteGifFailure,
+            )
+            ? { remoteGifIndexes: errorObj.remoteGifIndexes }
+            : {}),
         });
       }
 

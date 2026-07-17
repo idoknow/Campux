@@ -448,27 +448,34 @@ export function App() {
   }
 
   async function submitPost() {
+    if (pendingAttachments.some((p) => p.status === "converting")) {
+      toast.error("请等待视频转换完成后再投稿");
+      return;
+    }
+    if (!validateBeforeUpload()) {
+      return;
+    }
     if (pendingAttachments.some((p) => p.status === "failed")) {
-      toast.error("请移除上传失败的图片后再投稿");
+      toast.error("请移除上传失败的附件后再投稿");
       return;
     }
     if (postText.trim().length === 0) {
       toast.error("正文不能为空");
       return;
     }
-    if (!validateBeforeUpload()) {
-      return;
-    }
     setBusy(true);
     markUploading();
     try {
-      // Local image files only (remote GIF URLs are sent separately)
+      // Local image files only; claimed remote GIFs are sent separately.
       const files = pendingAttachments
         .filter((p) => !p.remoteGifUrl)
         .map((p) => p.file);
-      const remoteGifUrls = pendingAttachments
-        .map((p) => p.remoteGifUrl)
-        .filter((url): url is string => Boolean(url));
+      const remoteGifClaims = pendingAttachments
+        .filter((p) => p.remoteGifUrl)
+        .map((p) => ({ url: p.remoteGifUrl!, proof: p.remoteGifProof ?? "" }));
+      const attachmentOrder = pendingAttachments.map((p) => (
+        p.remoteGifUrl ? "remote" as const : "local" as const
+      ));
       await createPostWithAttachments(
         postText,
         anonymous,
@@ -476,7 +483,8 @@ export function App() {
         (totalPercent) => {
           setProgress(totalPercent);
         },
-        remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
+        remoteGifClaims.length > 0 ? remoteGifClaims : undefined,
+        attachmentOrder,
         postBgColor || undefined,
         postTextColor || undefined,
         postFont || undefined,
@@ -498,9 +506,9 @@ export function App() {
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "投稿失败";
       if (caught instanceof CreatePostError) {
-        markFailed(caught.fileIndex, message);
+        markFailed(caught.fileIndex, caught.remoteGifIndexes, message);
       } else {
-        markFailed(undefined, message);
+        markFailed(undefined, undefined, message);
       }
       toast.error(message);
     } finally {
