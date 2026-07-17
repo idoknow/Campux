@@ -8,10 +8,13 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   BotIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   CopyIcon,
+  GripVerticalIcon,
   KeyRoundIcon,
   MegaphoneIcon,
   MessageSquareTextIcon,
@@ -32,6 +35,13 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { normalizeImageMaxSizeDraft } from "@/lib/image-upload-policy";
 import { roleLabels, statusLabels } from "@/lib/app-model";
+import {
+  createEmptyServiceEntryDraft,
+  moveServiceEntryDraft,
+  prepareServiceEntriesForSave,
+  toCustomServiceEntryDrafts,
+  type ServiceEntryDraft,
+} from "@/lib/service-entry-editor";
 import {
   buildMembershipRoleChangeConfirmation,
   refreshMembershipDataAfterRoleChange,
@@ -59,7 +69,7 @@ type TenantSettingsForm = {
   logoUrl: string;
   pendingPostLimit: number;
   postRulesText: string;
-  servicesText: string;
+  services: ServiceEntryDraft[];
   imageCompressionEnabled: boolean;
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
@@ -546,7 +556,7 @@ export function AdminPage({
           logoUrl: form.logoUrl.trim(),
           pendingPostLimit: form.pendingPostLimit,
           postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
-          services: JSON.parse(form.servicesText) as TenantMetadata["services"],
+          services: prepareServiceEntriesForSave(form.services),
           imageCompressionEnabled: form.imageCompressionEnabled,
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
@@ -567,7 +577,7 @@ export function AdminPage({
       await onSaved();
       toast.success("墙面设置已保存。");
     } catch (caught) {
-      toast.error(caught instanceof SyntaxError ? "服务入口配置格式不正确" : caught instanceof Error ? caught.message : "保存失败");
+      toast.error(caught instanceof Error ? caught.message : "保存失败");
     } finally {
       setBusy(false);
     }
@@ -1749,6 +1759,20 @@ function MetadataPanel({
   onUploaded: () => Promise<void>;
 }) {
   const [logoUploading, setLogoUploading] = useState(false);
+  const [draggedServiceIndex, setDraggedServiceIndex] = useState<number | null>(null);
+
+  function updateServiceEntry(index: number, changes: Partial<ServiceEntryDraft>) {
+    onFormChange({
+      ...form,
+      services: form.services.map((service, serviceIndex) => (
+        serviceIndex === index ? { ...service, ...changes } : service
+      )),
+    });
+  }
+
+  function moveServiceEntry(fromIndex: number, toIndex: number) {
+    onFormChange({ ...form, services: moveServiceEntryDraft(form.services, fromIndex, toIndex) });
+  }
 
   async function uploadLogo(file: File) {
     const formData = new FormData();
@@ -2065,14 +2089,134 @@ function MetadataPanel({
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
           </label>
-          <details className="rounded-md border border-slate-200 bg-slate-50 p-3 md:col-span-2">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-700">高级：服务入口配置</summary>
-            <label className="mt-3 grid gap-1 text-sm font-medium">
-              服务入口 JSON
-              <Textarea className="min-h-36 font-mono text-xs" value={form.servicesText} onChange={(event) => onFormChange({ ...form, servicesText: event.target.value })} />
-              <span className="text-xs font-normal text-slate-500">用于批量配置服务页入口；普通账户设置入口会自动保留。</span>
-            </label>
-          </details>
+          <section className="overflow-hidden rounded-md border border-slate-200 bg-slate-50 md:col-span-2">
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">服务入口</h3>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">维护服务页里的校园入口；修改名称、修改密码和投稿规则等账户入口会自动保留。</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="self-start bg-white sm:self-auto"
+                disabled={busy}
+                onClick={() => onFormChange({ ...form, services: [...form.services, createEmptyServiceEntryDraft()] })}
+              >
+                <PlusIcon data-icon="inline-start" />
+                添加入口
+              </Button>
+            </div>
+
+            {form.services.length === 0 ? (
+              <div className="px-4 py-8 text-center">
+                <p className="text-sm font-medium text-slate-600">还没有自定义服务入口</p>
+                <p className="mt-1 text-xs text-slate-500">点击“添加入口”，填写名称、说明和跳转链接。</p>
+              </div>
+            ) : (
+              <div className="grid gap-2 p-3">
+                {form.services.map((service, index) => (
+                  <div
+                    key={index}
+                    className={`rounded-md border bg-white p-3 transition ${draggedServiceIndex === index ? "border-sky-300 opacity-60" : "border-slate-200"}`}
+                    onDragOver={(event) => {
+                      if (draggedServiceIndex !== null) event.preventDefault();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (draggedServiceIndex !== null) moveServiceEntry(draggedServiceIndex, index);
+                      setDraggedServiceIndex(null);
+                    }}
+                  >
+                    <div className="mb-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        draggable={!busy}
+                        disabled={busy}
+                        className="grid size-7 cursor-grab place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing disabled:cursor-not-allowed"
+                        aria-label={`拖动第 ${index + 1} 个服务入口排序`}
+                        title="拖动排序"
+                        onDragStart={(event) => {
+                          setDraggedServiceIndex(index);
+                          event.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => setDraggedServiceIndex(null)}
+                      >
+                        <GripVerticalIcon className="size-4" />
+                      </button>
+                      <span className="text-xs font-semibold text-slate-500">入口 {index + 1}</span>
+                      <div className="ml-auto flex items-center gap-1">
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          disabled={busy || index === 0}
+                          onClick={() => moveServiceEntry(index, index - 1)}
+                          aria-label={`上移第 ${index + 1} 个服务入口`}
+                          title="上移"
+                        >
+                          <ArrowUpIcon />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          disabled={busy || index === form.services.length - 1}
+                          onClick={() => moveServiceEntry(index, index + 1)}
+                          aria-label={`下移第 ${index + 1} 个服务入口`}
+                          title="下移"
+                        >
+                          <ArrowDownIcon />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                          disabled={busy}
+                          onClick={() => onFormChange({ ...form, services: form.services.filter((_, serviceIndex) => serviceIndex !== index) })}
+                          aria-label={`删除第 ${index + 1} 个服务入口`}
+                          title="删除入口"
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="grid gap-1 text-sm font-medium">
+                        <span>入口名称 <span className="text-rose-600">*</span></span>
+                        <Input
+                          value={service.title}
+                          placeholder="例如：校园地图"
+                          disabled={busy}
+                          onChange={(event) => updateServiceEntry(index, { title: event.target.value })}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-medium">
+                        跳转链接
+                        <Input
+                          type="url"
+                          value={service.url}
+                          placeholder="https://example.com"
+                          disabled={busy}
+                          onChange={(event) => updateServiceEntry(index, { url: event.target.value })}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                        入口说明
+                        <Input
+                          value={service.description}
+                          placeholder="简要说明这个入口的用途"
+                          disabled={busy}
+                          onChange={(event) => updateServiceEntry(index, { description: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
         <Button className="mt-4 px-5 font-medium" disabled={busy || logoUploading} onClick={onSave}>
           <SaveIcon data-icon="inline-start" />
@@ -3902,7 +4046,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     logoUrl: metadata.logoUrl,
     pendingPostLimit: metadata.pendingPostLimit,
     postRulesText: metadata.postRules.join("\n"),
-    servicesText: JSON.stringify(metadata.services, null, 2),
+    services: toCustomServiceEntryDrafts(metadata.services),
     imageCompressionEnabled: metadata.imageCompression.enabled,
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,

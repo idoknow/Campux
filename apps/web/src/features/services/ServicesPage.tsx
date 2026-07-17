@@ -4,6 +4,7 @@ import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIc
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
+import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
 import type { AuthenticatedMe, TenantMetadata } from "@/types/app";
 import { LoadingBlock } from "@/components/app/utility";
 import { Button } from "@/components/ui/button";
@@ -51,19 +52,16 @@ export function ServicesPage({
 
   function openService(service: TenantMetadata["services"][number]) {
     if (service.url) {
+      if (!isSafeServiceEntryUrl(service.url)) {
+        toast.error("服务链接无效，请联系管理员更新。");
+        return;
+      }
       window.open(service.url, "_blank", "noopener,noreferrer");
       return;
     }
-    if (isProfileService(service)) {
-      setActiveAction("profile");
-      return;
-    }
-    if (isPasswordService(service)) {
-      setActiveAction("password");
-      return;
-    }
-    if (service.title.includes("规则") || service.title.includes("指南")) {
-      setActiveAction("rules");
+    const builtInAction = getBuiltInServiceEntryAction(service);
+    if (builtInAction) {
+      setActiveAction(builtInAction);
       return;
     }
 
@@ -99,25 +97,12 @@ export function ServicesPage({
 }
 
 function buildServiceEntries(services: TenantMetadata["services"]) {
-  const builtInServices = defaultMetadata.services.filter((service) => isProfileService(service) || isPasswordService(service) || isRulesService(service));
-  const sourceServices = services.length > 0 ? services : defaultMetadata.services;
-  const customServices = sourceServices.filter((service) => !isProfileService(service) && !isPasswordService(service) && !isRulesService(service));
+  const builtInServices = defaultMetadata.services.filter(isBuiltInServiceEntry);
+  const customServices = services.filter((service) => !isBuiltInServiceEntry(service));
   return {
     accountServices: builtInServices,
     campusServices: customServices,
   };
-}
-
-function isProfileService(service: TenantMetadata["services"][number]) {
-  return service.title.includes("名称") || service.title.includes("昵称");
-}
-
-function isPasswordService(service: TenantMetadata["services"][number]) {
-  return service.title.includes("密码");
-}
-
-function isRulesService(service: TenantMetadata["services"][number]) {
-  return service.title.includes("规则") || service.title.includes("指南");
 }
 
 function ServiceGroup({ title, description, children }: { title: string; description: string; children: ReactNode }) {
