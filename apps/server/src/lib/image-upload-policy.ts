@@ -42,6 +42,66 @@ export function resolveImageUploadLimits({
   };
 }
 
+export const convertedVideoGifSizeErrorMessage = `视频转换后的 GIF 不能超过 ${imageUploadSourceHardMaxSizeMb}MB`;
+
+export function validateConvertedVideoGifSize(sizeBytes: number):
+  | { ok: true }
+  | { ok: false; status: 413; message: string } {
+  if (sizeBytes <= imageStorageHardMaxBytes) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    status: 413,
+    message: convertedVideoGifSizeErrorMessage,
+  };
+}
+
+export class ResponseBodyTooLargeError extends Error {
+  constructor(public readonly maxBytes: number) {
+    super(`response body exceeds ${maxBytes} bytes`);
+    this.name = "ResponseBodyTooLargeError";
+  }
+}
+
+export async function readResponseBufferWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new TypeError("maxBytes must be a non-negative safe integer");
+  }
+
+  const contentLength = response.headers.get("content-length")?.trim();
+  if (contentLength && /^\d+$/.test(contentLength) && BigInt(contentLength) > BigInt(maxBytes)) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new ResponseBodyTooLargeError(maxBytes);
+  }
+
+  if (!response.body) {
+    return Buffer.alloc(0);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new ResponseBodyTooLargeError(maxBytes);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+}
+
 export function validateProcessedImageSize(sizeBytes: number, maxSizeMb: unknown):
   | { ok: true }
   | { ok: false; status: 413; message: string } {

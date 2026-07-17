@@ -197,6 +197,37 @@ export function usePendingAttachments({
     );
   }, []);
 
+  const validateBeforeUpload = useCallback(() => {
+    let rejected: { item: PendingAttachment; message: string } | null = null;
+    for (const item of pending) {
+      if (item.status !== "ready" || item.originalVideo || item.remoteGifUrl) {
+        continue;
+      }
+      const message = getSelectedImageRejection({
+        fileName: item.file.name,
+        sizeBytes: item.file.size,
+        maxSizeMb,
+        compressionEnabled,
+      });
+      if (message) {
+        rejected = { item, message };
+        break;
+      }
+    }
+    if (!rejected) {
+      return true;
+    }
+
+    const { item: rejectedItem, message } = rejected;
+    setPending((current) => current.map((item) =>
+      item.id === rejectedItem.id
+        ? { ...item, status: "failed" as const, errorMessage: message, progress: 0 }
+        : item,
+    ));
+    toast.error(message);
+    return false;
+  }, [compressionEnabled, maxSizeMb, pending]);
+
   const markUploading = useCallback(() => {
     setPending((current) =>
       current.map((p) => ({
@@ -247,6 +278,7 @@ export function usePendingAttachments({
     pending,
     add,
     remove,
+    validateBeforeUpload,
     markUploading,
     setProgress,
     markFailed,
