@@ -12,7 +12,21 @@ export const defaultImageMaxSizeMb = DEFAULT_IMAGE_MAX_SIZE_MB;
 export const minImageMaxSizeMb = MIN_IMAGE_MAX_SIZE_MB;
 export const maxImageMaxSizeMb = MAX_IMAGE_MAX_SIZE_MB;
 export const imageUploadSourceHardMaxSizeMb = IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB;
+export const imageStorageHardMaxBytes = imageUploadSourceHardMaxSizeMb * bytesPerMegabyte;
 export { normalizeImageMaxSizeMb };
+
+export function buildImageSourceSizeErrorMessage({
+  compressionEnabled,
+  maxSizeMb,
+}: {
+  compressionEnabled: boolean;
+  maxSizeMb: unknown;
+}): string {
+  if (compressionEnabled) {
+    return `图片原图不能超过 ${imageUploadSourceHardMaxSizeMb}MB，无法自动压缩`;
+  }
+  return `图片不能超过 ${normalizeImageMaxSizeMb(maxSizeMb)}MB`;
+}
 
 export function resolveImageUploadLimits({
   maxSizeMb,

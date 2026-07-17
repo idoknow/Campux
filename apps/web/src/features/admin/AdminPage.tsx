@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { MAX_IMAGE_MAX_SIZE_MB, MIN_IMAGE_MAX_SIZE_MB, PRIVATE_POST_PROMPT_MAX_LENGTH, type TenantSummary } from "@campux/domain";
+import {
+  MAX_IMAGE_MAX_SIZE_MB,
+  MIN_IMAGE_MAX_SIZE_MB,
+  PRIVATE_POST_PROMPT_MAX_LENGTH,
+  normalizeImageMaxSizeMb,
+  type TenantSummary,
+} from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -1821,11 +1827,15 @@ function MetadataPanel({
               单张投稿图片上限 (MB)
               <Input
                 type="number"
+                step={1}
                 min={MIN_IMAGE_MAX_SIZE_MB}
                 max={MAX_IMAGE_MAX_SIZE_MB}
                 value={form.imageMaxSizeMb}
                 disabled={busy}
-                onChange={(event) => onFormChange({ ...form, imageMaxSizeMb: Number(event.target.value) })}
+                onChange={(event) => onFormChange({
+                  ...form,
+                  imageMaxSizeMb: normalizeImageMaxSizeMb(event.target.value),
+                })}
               />
               <span className="text-xs font-normal text-slate-500">允许 {MIN_IMAGE_MAX_SIZE_MB}-{MAX_IMAGE_MAX_SIZE_MB}MB；自动压缩后仍须小于该上限，默认 10MB。</span>
             </label>

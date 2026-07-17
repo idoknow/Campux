@@ -26,7 +26,11 @@ import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
-import { imageUploadSourceHardMaxSizeMb, resolveImageUploadLimits, validateProcessedImageSize } from "../lib/image-upload-policy";
+import {
+  buildImageSourceSizeErrorMessage,
+  resolveImageUploadLimits,
+  validateProcessedImageSize,
+} from "../lib/image-upload-policy";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
@@ -1875,10 +1879,13 @@ export class OneBotRuntime {
       for (const segment of imageSegments) {
         const source = await this.resolvePrivatePostImageSource(bot.qqUin.toString(), segment);
         if (source.bytes.length > imageUploadLimits.sourceMaxBytes) {
-          const message = compression.enabled
-            ? `图片原图不能超过 ${imageUploadSourceHardMaxSizeMb}MB，无法自动压缩`
-            : `图片不能超过 ${compression.maxSizeMb}MB`;
-          throw new BotWorkflowError(message, 413);
+          throw new BotWorkflowError(
+            buildImageSourceSizeErrorMessage({
+              compressionEnabled: compression.enabled,
+              maxSizeMb: compression.maxSizeMb,
+            }),
+            413,
+          );
         }
         const fileName = source.fileName || normalizeImageFileName(source.url) || "attachment.jpg";
         const compressed = await compressImageBuffer(source.bytes, source.contentType, compression);

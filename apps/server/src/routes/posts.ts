@@ -13,7 +13,11 @@ import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type
 import { serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
-import { imageUploadSourceHardMaxSizeMb, resolveImageUploadLimits, validateProcessedImageSize } from "../lib/image-upload-policy";
+import {
+  buildImageSourceSizeErrorMessage,
+  resolveImageUploadLimits,
+  validateProcessedImageSize,
+} from "../lib/image-upload-policy";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
@@ -334,9 +338,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         const cap = isVideo ? VIDEO_SIZE_CAP : imageUploadLimits.sourceMaxBytes;
         const sizeErrorMessage = isVideo
           ? "视频原文件不能超过 100MB"
-          : compression.enabled
-            ? `图片原图不能超过 ${imageUploadSourceHardMaxSizeMb}MB，无法自动压缩`
-            : `图片不能超过 ${compression.maxSizeMb}MB`;
+          : buildImageSourceSizeErrorMessage({
+              compressionEnabled: compression.enabled,
+              maxSizeMb: compression.maxSizeMb,
+            });
 
         // Read file with size cap using Transform
         const buf = await readPartCapped(part.file, cap, fileIndex, sizeErrorMessage);

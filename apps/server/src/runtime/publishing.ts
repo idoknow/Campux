@@ -12,8 +12,8 @@ import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { isQZoneProtocolAutoRefreshCooldownError } from "../lib/qzone-auto-refresh";
 import { joinBatchCaptions } from "./publish-batching";
 import { generatePublishSummary } from "./publish-summary";
-import { readTenantImageCompression, readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
-import { resolveImageUploadLimits } from "../lib/image-upload-policy";
+import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
+import { imageStorageHardMaxBytes } from "../lib/image-upload-policy";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { createOfficialQqForumThread } from "./official-qq";
 import { buildPublicForumMediaUrl } from "../lib/public-forum-media";
@@ -1558,11 +1558,8 @@ async function loadPostImages(config: CampuxConfig, tenantId: string, attachment
     throw new Error("稿件图片数据格式错误：attachments 不是数组");
   }
   const storage = getStorageDriver(config);
-  const imageSettings = await readTenantImageCompression(prisma, tenantId);
-  const { processedMaxBytes } = resolveImageUploadLimits({
-    maxSizeMb: imageSettings.maxSizeMb,
-    compressionEnabled: imageSettings.enabled,
-  });
+  // Existing attachments keep the policy that accepted them. The global hard cap
+  // prevents unbounded reads without retroactively applying a newly lowered tenant limit.
   const result = [];
   for (const attachment of attachments) {
     const candidate = attachment as any;
@@ -1572,8 +1569,8 @@ async function loadPostImages(config: CampuxConfig, tenantId: string, attachment
     assertValidImageKey(candidate.key, tenantId);
 
     const head = await storage.head(candidate.key);
-    if (head && head.size > processedMaxBytes) {
-      throw new Error(`图片 ${candidate.key} 超过租户 ${imageSettings.maxSizeMb}MB 限制（${Math.round(head.size / 1024 / 1024)}MB）`);
+    if (head && head.size > imageStorageHardMaxBytes) {
+      throw new Error(`图片 ${candidate.key} 超过 50MB 存储安全限制`);
     }
 
     const object = await storage.getBytes(candidate.key);
@@ -1585,8 +1582,8 @@ async function loadPostImages(config: CampuxConfig, tenantId: string, attachment
     if (bytes.byteLength === 0) {
       throw new Error(`图片 ${candidate.key} 读取结果为空`);
     }
-    if (bytes.byteLength > processedMaxBytes) {
-      throw new Error(`图片 ${candidate.key} 超过租户 ${imageSettings.maxSizeMb}MB 限制（${Math.round(bytes.byteLength / 1024 / 1024)}MB）`);
+    if (bytes.byteLength > imageStorageHardMaxBytes) {
+      throw new Error(`图片 ${candidate.key} 超过 50MB 存储安全限制`);
     }
 
     result.push({

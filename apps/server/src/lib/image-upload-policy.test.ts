@@ -4,6 +4,8 @@ import {
   imageUploadSourceHardMaxSizeMb,
   maxImageMaxSizeMb,
   minImageMaxSizeMb,
+  buildImageSourceSizeErrorMessage,
+  imageStorageHardMaxBytes,
   normalizeImageMaxSizeMb,
   resolveImageUploadLimits,
   validateProcessedImageSize,
@@ -27,6 +29,14 @@ describe("tenant image upload policy", () => {
       sourceMaxBytes: imageUploadSourceHardMaxSizeMb * 1024 * 1024,
       processedMaxBytes: 8 * 1024 * 1024,
     });
+  });
+
+  test("keeps source errors and publisher safety limits aligned with the shared policy", () => {
+    expect(buildImageSourceSizeErrorMessage({ compressionEnabled: true, maxSizeMb: 5 }))
+      .toBe("图片原图不能超过 50MB，无法自动压缩");
+    expect(buildImageSourceSizeErrorMessage({ compressionEnabled: false, maxSizeMb: 5.9 }))
+      .toBe("图片不能超过 5MB");
+    expect(imageStorageHardMaxBytes).toBe(50 * 1024 * 1024);
   });
 
   test("rejects an image that is still over the tenant limit after compression", () => {
