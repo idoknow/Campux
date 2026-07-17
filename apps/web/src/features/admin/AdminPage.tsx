@@ -3,7 +3,6 @@ import {
   MAX_IMAGE_MAX_SIZE_MB,
   MIN_IMAGE_MAX_SIZE_MB,
   PRIVATE_POST_PROMPT_MAX_LENGTH,
-  normalizeImageMaxSizeMb,
   type TenantSummary,
 } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
@@ -31,6 +30,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { normalizeImageMaxSizeDraft } from "@/lib/image-upload-policy";
 import { roleLabels, statusLabels } from "@/lib/app-model";
 import {
   buildMembershipRoleChangeConfirmation,
@@ -323,6 +323,7 @@ export function AdminPage({
   onSaved: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TenantSettingsForm>(() => toForm(selectedTenant, metadata));
+  const [imageMaxSizeDraft, setImageMaxSizeDraft] = useState(() => String(metadata.imageMaxSizeMb));
   const [aiSettings, setAiSettings] = useState<TenantAiSettings | null>(null);
   const [aiForm, setAiForm] = useState<AiSettingsForm | null>(null);
   const [aiTesting, setAiTesting] = useState(false);
@@ -370,7 +371,9 @@ export function AdminPage({
   const [memberDetailLoading, setMemberDetailLoading] = useState(false);
 
   useEffect(() => {
-    setForm(toForm(selectedTenant, metadata));
+    const nextForm = toForm(selectedTenant, metadata);
+    setForm(nextForm);
+    setImageMaxSizeDraft(String(nextForm.imageMaxSizeMb));
   }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection]);
 
   useEffect(() => {
@@ -529,6 +532,8 @@ export function AdminPage({
   }
 
   async function saveSettings() {
+    const imageMaxSizeMb = normalizeImageMaxSizeDraft(imageMaxSizeDraft, form.imageMaxSizeMb);
+    setImageMaxSizeDraft(String(imageMaxSizeMb));
     setBusy(true);
     try {
       await api("/api/admin/tenant/metadata", {
@@ -545,7 +550,7 @@ export function AdminPage({
           imageCompressionEnabled: form.imageCompressionEnabled,
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
-          imageMaxSizeMb: form.imageMaxSizeMb,
+          imageMaxSizeMb,
           botStylishMessagesEnabled: form.botStylishMessagesEnabled,
           botPrivatePostStylishEnabled: form.botStylishMessagesEnabled,
           publishMode: form.publishMode,
@@ -1159,7 +1164,20 @@ export function AdminPage({
 
             <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <div className="flex flex-col gap-4">
-                <MetadataPanel form={form} busy={busy} onFormChange={setForm} onSave={() => void saveSettings()} onUploaded={onSaved} />
+                <MetadataPanel
+                  form={form}
+                  imageMaxSizeDraft={imageMaxSizeDraft}
+                  busy={busy}
+                  onFormChange={setForm}
+                  onImageMaxSizeDraftChange={setImageMaxSizeDraft}
+                  onImageMaxSizeDraftCommit={() => {
+                    const normalized = normalizeImageMaxSizeDraft(imageMaxSizeDraft, form.imageMaxSizeMb);
+                    setImageMaxSizeDraft(String(normalized));
+                    setForm((current) => ({ ...current, imageMaxSizeMb: normalized }));
+                  }}
+                  onSave={() => void saveSettings()}
+                  onUploaded={onSaved}
+                />
                 {aiSettings && aiForm ? (
                   <div className="product-surface overflow-hidden">
                     <button
@@ -1713,14 +1731,20 @@ function BansPanel({
 
 function MetadataPanel({
   form,
+  imageMaxSizeDraft,
   busy,
   onFormChange,
+  onImageMaxSizeDraftChange,
+  onImageMaxSizeDraftCommit,
   onSave,
   onUploaded,
 }: {
   form: TenantSettingsForm;
+  imageMaxSizeDraft: string;
   busy: boolean;
   onFormChange: (form: TenantSettingsForm) => void;
+  onImageMaxSizeDraftChange: (value: string) => void;
+  onImageMaxSizeDraftCommit: () => void;
   onSave: () => void;
   onUploaded: () => Promise<void>;
 }) {
@@ -1830,12 +1854,10 @@ function MetadataPanel({
                 step={1}
                 min={MIN_IMAGE_MAX_SIZE_MB}
                 max={MAX_IMAGE_MAX_SIZE_MB}
-                value={form.imageMaxSizeMb}
+                value={imageMaxSizeDraft}
                 disabled={busy}
-                onChange={(event) => onFormChange({
-                  ...form,
-                  imageMaxSizeMb: normalizeImageMaxSizeMb(event.target.value),
-                })}
+                onChange={(event) => onImageMaxSizeDraftChange(event.target.value)}
+                onBlur={onImageMaxSizeDraftCommit}
               />
               <span className="text-xs font-normal text-slate-500">允许 {MIN_IMAGE_MAX_SIZE_MB}-{MAX_IMAGE_MAX_SIZE_MB}MB；自动压缩后仍须小于该上限，默认 10MB。</span>
             </label>

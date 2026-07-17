@@ -7,7 +7,10 @@ import {
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
   normalizeImageMaxSizeMb,
+  readResponseBufferWithLimit,
   resolveImageUploadLimits,
+  ResponseBodyTooLargeError,
+  validateConvertedVideoGifSize,
   validateProcessedImageSize,
 } from "./image-upload-policy";
 
@@ -46,5 +49,45 @@ describe("tenant image upload policy", () => {
       status: 413,
       message: "图片处理后仍超过 8MB 限制",
     });
+  });
+
+  test("keeps converted video GIFs on the stable storage cap instead of the tenant image limit", () => {
+    expect(validateConvertedVideoGifSize(12 * 1024 * 1024)).toEqual({ ok: true });
+    expect(validateConvertedVideoGifSize(imageStorageHardMaxBytes + 1)).toEqual({
+      ok: false,
+      status: 413,
+      message: "视频转换后的 GIF 不能超过 50MB",
+    });
+  });
+
+  test("reads remote bodies without crossing the configured memory cap", async () => {
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3, 4]));
+        controller.close();
+      },
+    }));
+    expect([...await readResponseBufferWithLimit(response, 4)]).toEqual([1, 2, 3, 4]);
+  });
+
+  test("rejects remote bodies from content-length or streamed bytes before full buffering", async () => {
+    let declaredBodyCancelled = false;
+    const declared = new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        declaredBodyCancelled = true;
+      },
+    }), { headers: { "content-length": "6" } });
+    await expect(readResponseBufferWithLimit(declared, 5)).rejects.toBeInstanceOf(ResponseBodyTooLargeError);
+    expect(declaredBodyCancelled).toBe(true);
+
+    const streamed = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.enqueue(new Uint8Array([4, 5, 6]));
+        controller.close();
+      },
+    }));
+    await expect(readResponseBufferWithLimit(streamed, 5)).rejects.toBeInstanceOf(ResponseBodyTooLargeError);
   });
 });

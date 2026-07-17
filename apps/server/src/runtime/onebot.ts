@@ -28,7 +28,11 @@ import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import {
   buildImageSourceSizeErrorMessage,
+  imageStorageHardMaxBytes,
+  imageUploadSourceHardMaxSizeMb,
+  readResponseBufferWithLimit,
   resolveImageUploadLimits,
+  ResponseBodyTooLargeError,
   validateProcessedImageSize,
 } from "../lib/image-upload-policy";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
@@ -1872,12 +1876,23 @@ export class OneBotRuntime {
       maxSizeMb: compression.maxSizeMb,
       compressionEnabled: compression.enabled,
     });
+    const sourceFetchLimits = {
+      maxBytes: imageUploadLimits.sourceMaxBytes,
+      sizeErrorMessage: buildImageSourceSizeErrorMessage({
+        compressionEnabled: compression.enabled,
+        maxSizeMb: compression.maxSizeMb,
+      }),
+    };
     const attachments: PostAttachment[] = [];
     const uploadedKeys: string[] = [];
 
     try {
       for (const segment of imageSegments) {
-        const source = await this.resolvePrivatePostImageSource(bot.qqUin.toString(), segment);
+        const source = await this.resolvePrivatePostImageSource(
+          bot.qqUin.toString(),
+          segment,
+          sourceFetchLimits,
+        );
         if (source.bytes.length > imageUploadLimits.sourceMaxBytes) {
           throw new BotWorkflowError(
             buildImageSourceSizeErrorMessage({
@@ -1915,17 +1930,21 @@ export class OneBotRuntime {
     }
   }
 
-  private async resolvePrivatePostImageSource(botQqUin: string, segment: { data?: Record<string, unknown> }) {
+  private async resolvePrivatePostImageSource(
+    botQqUin: string,
+    segment: { data?: Record<string, unknown> },
+    limits: PrivatePostImageFetchLimits,
+  ) {
     const data = segment.data ?? {};
     const fileName = normalizeImageFileName(data.file_name ?? data.filename ?? data.name ?? data.file ?? data.url);
     const directSource = typeof (data.url ?? data.file) === "string" ? String(data.url ?? data.file).trim() : null;
     if (directSource?.startsWith("base64://")) {
-      return await fetchPrivatePostImage(directSource, fileName);
+      return await fetchPrivatePostImage(directSource, fileName, limits);
     }
 
     const directUrl = readImageUrlCandidate(data.url ?? data.file);
     if (directUrl) {
-      return await fetchPrivatePostImage(directUrl, fileName);
+      return await fetchPrivatePostImage(directUrl, fileName, limits);
     }
 
     const fileToken = readImageTokenCandidate(data.file);
@@ -1934,9 +1953,12 @@ export class OneBotRuntime {
         const response = await this.callAction(botQqUin, "get_image", { file: fileToken });
         const resolvedUrl = extractImageUrlFromOneBotResponse(response);
         if (resolvedUrl) {
-          return await fetchPrivatePostImage(resolvedUrl, fileName);
+          return await fetchPrivatePostImage(resolvedUrl, fileName, limits);
         }
       } catch (error) {
+        if (error instanceof BotWorkflowError && error.statusCode === 413) {
+          throw error;
+        }
         this.logger.debug({ error, botQqUin }, "onebot get_image fallback failed");
       }
     }
@@ -3874,9 +3896,32 @@ function extractImageUrlFromOneBotResponse(data: unknown) {
   return null;
 }
 
-async function fetchPrivatePostImage(source: string, fileName?: string) {
+type PrivatePostImageFetchLimits = {
+  maxBytes: number;
+  sizeErrorMessage: string;
+};
+
+const defaultPrivatePostImageFetchLimits: PrivatePostImageFetchLimits = {
+  maxBytes: imageStorageHardMaxBytes,
+  sizeErrorMessage: `图片不能超过 ${imageUploadSourceHardMaxSizeMb}MB`,
+};
+
+async function fetchPrivatePostImage(
+  source: string,
+  fileName?: string,
+  limits: PrivatePostImageFetchLimits = defaultPrivatePostImageFetchLimits,
+) {
   if (source.startsWith("base64://")) {
-    const bytes = Buffer.from(source.slice("base64://".length), "base64");
+    const encoded = source.slice("base64://".length);
+    const paddingBytes = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+    const estimatedBytes = Math.max(0, Math.floor(encoded.length * 3 / 4) - paddingBytes);
+    if (estimatedBytes > limits.maxBytes) {
+      throw new BotWorkflowError(limits.sizeErrorMessage, 413);
+    }
+    const bytes = Buffer.from(encoded, "base64");
+    if (bytes.byteLength > limits.maxBytes) {
+      throw new BotWorkflowError(limits.sizeErrorMessage, 413);
+    }
     return {
       bytes,
       contentType: inferImageContentType(fileName || "attachment.jpg"),
@@ -3890,8 +3935,15 @@ async function fetchPrivatePostImage(source: string, fileName?: string) {
     throw new BotWorkflowError(`图片下载失败：${response.status}`, 502);
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  const bytes = Buffer.from(arrayBuffer);
+  let bytes: Buffer;
+  try {
+    bytes = await readResponseBufferWithLimit(response, limits.maxBytes);
+  } catch (error) {
+    if (error instanceof ResponseBodyTooLargeError) {
+      throw new BotWorkflowError(limits.sizeErrorMessage, 413);
+    }
+    throw error;
+  }
   const headerContentType = response.headers.get("content-type")?.split(";")[0]?.trim() || null;
   const contentType = headerContentType && headerContentType.startsWith("image/")
     ? headerContentType

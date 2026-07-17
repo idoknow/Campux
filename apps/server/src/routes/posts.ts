@@ -15,7 +15,12 @@ import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import {
   buildImageSourceSizeErrorMessage,
+  convertedVideoGifSizeErrorMessage,
+  imageStorageHardMaxBytes,
+  readResponseBufferWithLimit,
   resolveImageUploadLimits,
+  ResponseBodyTooLargeError,
+  validateConvertedVideoGifSize,
   validateProcessedImageSize,
 } from "../lib/image-upload-policy";
 import { writeAuditLog } from "../lib/audit";
@@ -370,7 +375,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           finalFileName = part.filename || "attachment.jpg";
         }
 
-        const sizeValidation = validateProcessedImageSize(finalBuf.byteLength, compression.maxSizeMb);
+        const sizeValidation = isVideo
+          ? validateConvertedVideoGifSize(finalBuf.byteLength)
+          : validateProcessedImageSize(finalBuf.byteLength, compression.maxSizeMb);
         if (!sizeValidation.ok) {
           throw {
             status: sizeValidation.status,
@@ -413,9 +420,20 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
             app.log.warn({ url: gifUrl, status: response.status }, "failed to fetch remote GIF");
             continue;
           }
-          const arrayBuffer = await response.arrayBuffer();
-          const buf = Buffer.from(arrayBuffer);
-          const sizeValidation = validateProcessedImageSize(buf.byteLength, compression.maxSizeMb);
+          let buf: Buffer;
+          try {
+            buf = await readResponseBufferWithLimit(response, imageStorageHardMaxBytes);
+          } catch (error) {
+            if (error instanceof ResponseBodyTooLargeError) {
+              throw {
+                status: 413,
+                message: convertedVideoGifSizeErrorMessage,
+                fileIndex: staged.length,
+              };
+            }
+            throw error;
+          }
+          const sizeValidation = validateConvertedVideoGifSize(buf.byteLength);
           if (!sizeValidation.ok) {
             throw {
               status: sizeValidation.status,

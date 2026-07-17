@@ -1,7 +1,14 @@
-import { IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB } from "@campux/domain";
+import { IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB, normalizeImageMaxSizeMb } from "@campux/domain";
 
 const bytesPerMegabyte = 1024 * 1024;
 export const imageUploadSourceHardMaxSizeMb = IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB;
+
+export function normalizeImageMaxSizeDraft(draft: string, fallback: number): number {
+  const parsed = Number(draft);
+  return draft.trim() === "" || !Number.isFinite(parsed)
+    ? normalizeImageMaxSizeMb(fallback)
+    : normalizeImageMaxSizeMb(parsed);
+}
 
 export function getSelectedImageRejection({
   fileName,

@@ -197,6 +197,37 @@ export function usePendingAttachments({
     );
   }, []);
 
+  const validateBeforeUpload = useCallback(() => {
+    const rejected = pending.find((item) => {
+      if (item.status !== "ready" || item.originalVideo || item.remoteGifUrl) {
+        return false;
+      }
+      return Boolean(getSelectedImageRejection({
+        fileName: item.file.name,
+        sizeBytes: item.file.size,
+        maxSizeMb,
+        compressionEnabled,
+      }));
+    });
+    if (!rejected) {
+      return true;
+    }
+
+    const message = getSelectedImageRejection({
+      fileName: rejected.file.name,
+      sizeBytes: rejected.file.size,
+      maxSizeMb,
+      compressionEnabled,
+    })!;
+    setPending((current) => current.map((item) =>
+      item.id === rejected.id
+        ? { ...item, status: "failed" as const, errorMessage: message, progress: 0 }
+        : item,
+    ));
+    toast.error(message);
+    return false;
+  }, [compressionEnabled, maxSizeMb, pending]);
+
   const markUploading = useCallback(() => {
     setPending((current) =>
       current.map((p) => ({
@@ -247,6 +278,7 @@ export function usePendingAttachments({
     pending,
     add,
     remove,
+    validateBeforeUpload,
     markUploading,
     setProgress,
     markFailed,

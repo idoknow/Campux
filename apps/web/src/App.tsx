@@ -99,7 +99,7 @@ export function App() {
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments({
+  const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, validateBeforeUpload, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments({
     maxSizeMb: metadata.imageMaxSizeMb,
     compressionEnabled: metadata.imageCompression.enabled,
   });
@@ -454,6 +454,9 @@ export function App() {
     }
     if (postText.trim().length === 0) {
       toast.error("正文不能为空");
+      return;
+    }
+    if (!validateBeforeUpload()) {
       return;
     }
     setBusy(true);
