@@ -2,6 +2,23 @@ import { z } from "zod";
 
 export * from "./fonts";
 
+export const DEFAULT_IMAGE_MAX_SIZE_MB = 10;
+export const MIN_IMAGE_MAX_SIZE_MB = 1;
+export const MAX_IMAGE_MAX_SIZE_MB = 50;
+export const IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB = 50;
+
+export function normalizeImageMaxSizeMb(value: unknown): number {
+  const numeric = typeof value === "number"
+    ? value
+    : typeof value === "string"
+      ? Number(value)
+      : DEFAULT_IMAGE_MAX_SIZE_MB;
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_IMAGE_MAX_SIZE_MB;
+  }
+  return Math.max(MIN_IMAGE_MAX_SIZE_MB, Math.min(MAX_IMAGE_MAX_SIZE_MB, Math.floor(numeric)));
+}
+
 export const PRIVATE_POST_PROMPT_MAX_LENGTH = 4_000;
 export const DEFAULT_PRIVATE_POST_PROMPT = [
   "你是校园墙 QQ 私聊投稿语义解析器。只返回 JSON，不要 Markdown。",

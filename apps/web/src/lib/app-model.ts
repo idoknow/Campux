@@ -1,3 +1,4 @@
+import { DEFAULT_IMAGE_MAX_SIZE_MB } from "@campux/domain";
 import type { LucideIcon } from "lucide-react";
 import { BarChart3Icon, ClipboardListIcon, HomeIcon, ShieldCheckIcon, WrenchIcon } from "lucide-react";
 import type { MainTab, TenantMetadata, TenantRole } from "@/types/app";
@@ -18,7 +19,7 @@ export const defaultMetadata: TenantMetadata = {
   postRules: [
     "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
     "寻物招领请写清地点、时间和联系方式。",
-    "图片最多 9 张，单张 ≤ 10MB；审核通过后会同步到本校启用的墙号。",
+    "图片最多 9 张，单张大小以当前墙面设置为准；审核通过后会同步到本校启用的墙号。",
   ],
   pendingPostLimit: 1,
   services: [
@@ -32,6 +33,7 @@ export const defaultMetadata: TenantMetadata = {
     quality: 80,
     maxDimension: 2048,
   },
+  imageMaxSizeMb: DEFAULT_IMAGE_MAX_SIZE_MB,
   botStylishMessagesEnabled: false,
   botPrivatePostStylishEnabled: false,
   publishMode: "single",

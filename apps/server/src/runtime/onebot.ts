@@ -26,6 +26,11 @@ import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
+import {
+  buildImageSourceSizeErrorMessage,
+  resolveImageUploadLimits,
+  validateProcessedImageSize,
+} from "../lib/image-upload-policy";
 import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
@@ -1863,17 +1868,31 @@ export class OneBotRuntime {
     }
 
     const compression = await readTenantImageCompression(prisma, bot.tenantId);
+    const imageUploadLimits = resolveImageUploadLimits({
+      maxSizeMb: compression.maxSizeMb,
+      compressionEnabled: compression.enabled,
+    });
     const attachments: PostAttachment[] = [];
     const uploadedKeys: string[] = [];
 
     try {
       for (const segment of imageSegments) {
         const source = await this.resolvePrivatePostImageSource(bot.qqUin.toString(), segment);
-        if (source.bytes.length > 10 * 1024 * 1024) {
-          throw new BotWorkflowError("图片最大 10MB，请重新发送更小的图片", 400);
+        if (source.bytes.length > imageUploadLimits.sourceMaxBytes) {
+          throw new BotWorkflowError(
+            buildImageSourceSizeErrorMessage({
+              compressionEnabled: compression.enabled,
+              maxSizeMb: compression.maxSizeMb,
+            }),
+            413,
+          );
         }
         const fileName = source.fileName || normalizeImageFileName(source.url) || "attachment.jpg";
         const compressed = await compressImageBuffer(source.bytes, source.contentType, compression);
+        const sizeValidation = validateProcessedImageSize(compressed.byteLength, compression.maxSizeMb);
+        if (!sizeValidation.ok) {
+          throw new BotWorkflowError(sizeValidation.message, sizeValidation.status);
+        }
         const attachment = await uploadAttachmentBytes({
           config: this.config,
           tenantId: bot.tenantId,

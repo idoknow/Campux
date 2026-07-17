@@ -13,6 +13,11 @@ import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type
 import { serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
+import {
+  buildImageSourceSizeErrorMessage,
+  resolveImageUploadLimits,
+  validateProcessedImageSize,
+} from "../lib/image-upload-policy";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
@@ -96,7 +101,6 @@ function isConvertibleVideoType(contentType: string): boolean {
   return VIDEO_CONVERT_MIME_TYPES.has(contentType);
 }
 
-const IMAGE_SIZE_CAP = 10 * 1024 * 1024; // 10MB
 const VIDEO_SIZE_CAP = 100 * 1024 * 1024; // 100MB
 const MAX_VIDEO_DURATION_SEC = 60;
 
@@ -242,6 +246,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
   app.post("/api/posts", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
     const compression = await readTenantImageCompression(prisma, context.selectedTenant.id);
+    const imageUploadLimits = resolveImageUploadLimits({
+      maxSizeMb: compression.maxSizeMb,
+      compressionEnabled: compression.enabled,
+    });
 
     // Check ban first
     const activeBan = await prisma.banRecord.findFirst({
@@ -327,10 +335,16 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         }
 
         const isVideo = isConvertibleVideoType(mime);
-        const cap = isVideo ? VIDEO_SIZE_CAP : IMAGE_SIZE_CAP;
+        const cap = isVideo ? VIDEO_SIZE_CAP : imageUploadLimits.sourceMaxBytes;
+        const sizeErrorMessage = isVideo
+          ? "视频原文件不能超过 100MB"
+          : buildImageSourceSizeErrorMessage({
+              compressionEnabled: compression.enabled,
+              maxSizeMb: compression.maxSizeMb,
+            });
 
         // Read file with size cap using Transform
-        const buf = await readPartCapped(part.file, cap, fileIndex);
+        const buf = await readPartCapped(part.file, cap, fileIndex, sizeErrorMessage);
 
         let finalBuf: Buffer;
         let finalMime: string;
@@ -354,6 +368,15 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           finalBuf = await compressImageBuffer(buf, mime, compression);
           finalMime = mime;
           finalFileName = part.filename || "attachment.jpg";
+        }
+
+        const sizeValidation = validateProcessedImageSize(finalBuf.byteLength, compression.maxSizeMb);
+        if (!sizeValidation.ok) {
+          throw {
+            status: sizeValidation.status,
+            message: sizeValidation.message,
+            fileIndex,
+          };
         }
 
         // Upload to S3
@@ -392,6 +415,14 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           }
           const arrayBuffer = await response.arrayBuffer();
           const buf = Buffer.from(arrayBuffer);
+          const sizeValidation = validateProcessedImageSize(buf.byteLength, compression.maxSizeMb);
+          if (!sizeValidation.ok) {
+            throw {
+              status: sizeValidation.status,
+              message: sizeValidation.message,
+              fileIndex: staged.length,
+            };
+          }
 
           const att = await uploadAttachmentBytes({
             config,
@@ -404,6 +435,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           uploadedKeys.push(att.key);
           staged.push(att);
         } catch (fetchErr) {
+          if (fetchErr && typeof fetchErr === "object" && "status" in fetchErr && "message" in fetchErr) {
+            throw fetchErr;
+          }
           app.log.warn({ error: fetchErr, url: gifUrl }, "failed to process remote GIF");
           // Skip failed URLs rather than failing the entire post
         }
@@ -592,6 +626,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     sourceStream: NodeJS.ReadableStream,
     cap: number,
     fileIndex: number,
+    sizeErrorMessage: string,
   ): Promise<Buffer> {
     let transferredBytes = 0;
     const chunks: Buffer[] = [];
@@ -618,7 +653,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       if (error instanceof Error && (error.message === "size limit exceeded" || error.message.includes("size limit exceeded"))) {
         throw {
           status: 413,
-          message: "文件过大，请检查文件大小限制",
+          message: sizeErrorMessage,
           fileIndex,
         };
       }
