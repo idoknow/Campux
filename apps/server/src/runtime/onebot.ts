@@ -1893,15 +1893,6 @@ export class OneBotRuntime {
           segment,
           sourceFetchLimits,
         );
-        if (source.bytes.length > imageUploadLimits.sourceMaxBytes) {
-          throw new BotWorkflowError(
-            buildImageSourceSizeErrorMessage({
-              compressionEnabled: compression.enabled,
-              maxSizeMb: compression.maxSizeMb,
-            }),
-            413,
-          );
-        }
         const fileName = source.fileName || normalizeImageFileName(source.url) || "attachment.jpg";
         const compressed = await compressImageBuffer(source.bytes, source.contentType, compression);
         const sizeValidation = validateProcessedImageSize(compressed.byteLength, compression.maxSizeMb);
