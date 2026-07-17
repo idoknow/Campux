@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   createOfficialQqForumThread,
   deleteOfficialQqForumThread,
+  findOfficialQqForumThreadIdByDisplayIds,
   listOfficialQqChannels,
+  readOfficialQqForumThreadId,
   serializeOfficialQqForumRichText,
 } from "./official-qq";
 
@@ -87,6 +89,146 @@ describe("QQ 官方机器人论坛子频道", () => {
       create: { thread_id: "thread-1" },
     });
     expect((result.verbose as { publishedAt?: string }).publishedAt).toBeString();
+  });
+
+  it("兼容 QQ 发帖接口将帖子 ID 放在嵌套 thread_info 中返回", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "nested-thread-token", expires_in: 7200 });
+      }
+      return Response.json({
+        task_id: "task-1",
+        thread_info: {
+          thread_id: "thread-nested-1",
+          title: "#6962",
+        },
+      });
+    }) as typeof fetch;
+
+    const result = await createOfficialQqForumThread({
+      id: "bot-nested-thread",
+      officialAppId: "10005",
+      officialAppSecret: "nested-thread-secret",
+    }, "forum-channel", {
+      title: "#6962",
+      content: "稿件正文",
+    });
+
+    expect(requests).toContain("https://api.sgroup.qq.com/channels/forum-channel/threads");
+    expect(result.externalId).toBe("thread-nested-1");
+    expect(result.threadId).toBe("thread-nested-1");
+    expect(result.taskId).toBe("task-1");
+    expect(result.verbose.threadId).toBe("thread-nested-1");
+    expect(result.verbose.taskId).toBe("task-1");
+    expect(result.verbose.create).toMatchObject({
+      task_id: "task-1",
+      thread_info: { thread_id: "thread-nested-1" },
+    });
+  });
+
+  it("从常见 QQ 论坛返回结构中提取可删除的帖子 ID，避免误用任务 ID", () => {
+    expect(readOfficialQqForumThreadId({ thread_id: "thread-direct" })).toBe("thread-direct");
+    expect(readOfficialQqForumThreadId({ threadId: "thread-camel" })).toBe("thread-camel");
+    expect(readOfficialQqForumThreadId({ id: "task-not-thread" })).toBeNull();
+    expect(readOfficialQqForumThreadId({
+      task_id: "task-1",
+      data: {
+        thread_info: {
+          thread_id: "thread-nested-2",
+        },
+      },
+    })).toBe("thread-nested-2");
+  });
+
+  it("通过帖子列表用稿件 ID 匹配 task_id-only 发帖响应对应的帖子 ID", async () => {
+    const requests: Array<{ url: string; init: RequestInit | BunFetchRequestInit | undefined }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "task-only-token", expires_in: 7200 });
+      }
+      if (init?.method === "PUT") {
+        return Response.json({ task_id: "1645413752912602306", create_time: "1645503180" });
+      }
+      return Response.json({
+        threads: [
+          {
+            thread_info: {
+              thread_id: "thread-other",
+              title: "#6961",
+              content: serializeOfficialQqForumRichText("其他稿件"),
+            },
+          },
+          {
+            thread_info: {
+              thread_id: "thread-6962",
+              title: "沙塘大道第一墙 #6962",
+              content: serializeOfficialQqForumRichText("只通过标题里的稿件号匹配"),
+            },
+          },
+        ],
+        is_finish: 1,
+      });
+    }) as typeof fetch;
+
+    const result = await createOfficialQqForumThread({
+      id: "bot-task-only",
+      officialAppId: "10006",
+      officialAppSecret: "task-only-secret",
+    }, "forum-channel", {
+      title: "#6962",
+      content: "稿件正文",
+      matchDisplayIds: [6962],
+    });
+
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://bots.qq.com/app/getAppAccessToken",
+      "https://api.sgroup.qq.com/channels/forum-channel/threads",
+      "https://api.sgroup.qq.com/channels/forum-channel/threads",
+    ]);
+    expect(requests[1]?.init?.method).toBe("PUT");
+    expect(requests[2]?.init?.method).toBe("GET");
+    expect(result.externalId).toBe("thread-6962");
+    expect(result.threadId).toBe("thread-6962");
+    expect(result.taskId).toBe("1645413752912602306");
+    expect(result.verbose.create).toEqual({ task_id: "1645413752912602306", create_time: "1645503180" });
+  });
+
+  it("撤回补偿查询也能只按稿件 ID 从帖子列表找到帖子 ID", async () => {
+    const requests: Array<{ url: string; init: RequestInit | BunFetchRequestInit | undefined }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "recall-list-token", expires_in: 7200 });
+      }
+      return Response.json({
+        threads: [{
+          thread_info: {
+            thread_id: "thread-6962-recall",
+            title: "#6962",
+            content: serializeOfficialQqForumRichText("历史帖子"),
+          },
+        }],
+        is_finish: 1,
+      });
+    }) as typeof fetch;
+
+    await expect(findOfficialQqForumThreadIdByDisplayIds({
+      id: "bot-recall-list",
+      officialAppId: "10007",
+      officialAppSecret: "recall-list-secret",
+    }, "forum-channel", [6962])).resolves.toBe("thread-6962-recall");
+
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://bots.qq.com/app/getAppAccessToken",
+      "https://api.sgroup.qq.com/channels/forum-channel/threads",
+    ]);
+    expect(requests[1]?.init?.method).toBe("GET");
   });
 
   it("将每一行转换成独立富文本段落以保留换行", () => {

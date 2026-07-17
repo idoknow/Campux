@@ -877,6 +877,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           title: renderOfficialQqForumThreadTitle(forumTitles),
           content: forumContent,
           imageUrls: forumImageUrls,
+          matchDisplayIds: forumTitles.map((item) => item.postId),
         },
       );
 

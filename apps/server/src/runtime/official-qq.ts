@@ -91,7 +91,7 @@ export async function listOfficialQqChannels(bot: OfficialQqBotAccount, guildId:
   });
 }
 
-export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, options: { title: string; content: string; imageUrls?: string[] }): Promise<OfficialQqForumThreadResult> {
+export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, channelId: string, options: { title: string; content: string; imageUrls?: string[]; matchDisplayIds?: number[] }): Promise<OfficialQqForumThreadResult> {
   const title = options.title.trim();
   const content = options.content.trim();
   if (!title || !content) {
@@ -114,8 +114,12 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
   }) as Record<string, unknown> | null;
 
   const taskId = readStringField(payload, ["task_id", "taskId"]);
-  const directThreadId = readStringField(payload, ["thread_id", "threadId", "id"]);
-  const discoveredThreadId = directThreadId ?? await findRecentlyCreatedThreadId(bot, normalizedChannelId, { title, content });
+  const directThreadId = readOfficialQqForumThreadId(payload);
+  const discoveredThreadId = directThreadId ?? await findRecentlyCreatedThreadId(bot, normalizedChannelId, {
+    title,
+    content,
+    ...(options.matchDisplayIds ? { displayIds: options.matchDisplayIds } : {}),
+  });
   const externalId = discoveredThreadId ?? taskId;
   if (!externalId) {
     throw new BotWorkflowError("QQ 频道帖子发表成功但未返回帖子 ID 或任务 ID", 502);
@@ -169,6 +173,37 @@ export async function deleteOfficialQqForumThread(bot: OfficialQqBotAccount, cha
     method: "DELETE",
     errorPrefix: "QQ 频道帖子删除失败",
   });
+}
+
+export async function findOfficialQqForumThreadIdByDisplayIds(bot: OfficialQqBotAccount, channelId: string, displayIds: number[]) {
+  const normalizedChannelId = channelId.trim();
+  if (!normalizedChannelId) {
+    throw new BotWorkflowError("QQ 频道 ID 为空", 400);
+  }
+  return findRecentlyCreatedThreadId(bot, normalizedChannelId, {
+    title: "",
+    content: "",
+    displayIds,
+  });
+}
+
+export function readOfficialQqForumThreadId(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const direct = readStringField(value, ["thread_id", "threadId"]);
+  if (direct) {
+    return direct;
+  }
+  const record = value as Record<string, unknown>;
+  for (const fieldName of ["thread_info", "threadInfo", "thread", "data", "result", "create"]) {
+    const nested = record[fieldName];
+    const nestedThreadId = readOfficialQqForumThreadId(nested);
+    if (nestedThreadId) {
+      return nestedThreadId;
+    }
+  }
+  return null;
 }
 
 async function callOfficialQqOpenApi(bot: OfficialQqBotAccount, path: string, options: { method: "GET" | "PUT" | "DELETE" | "POST"; body?: unknown; errorPrefix: string }) {
@@ -238,7 +273,7 @@ function readOfficialQqAppSecret(value: Prisma.JsonValue) {
   throw new BotWorkflowError("QQ 官方机器人 AppSecret 无法解析", 500);
 }
 
-async function findRecentlyCreatedThreadId(bot: OfficialQqBotAccount, channelId: string, expected: { title: string; content: string }) {
+async function findRecentlyCreatedThreadId(bot: OfficialQqBotAccount, channelId: string, expected: { title: string; content: string; displayIds?: number[] }) {
   const payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/threads`, {
     method: "GET",
     errorPrefix: "QQ 频道帖子列表获取失败",
@@ -250,14 +285,27 @@ async function findRecentlyCreatedThreadId(bot: OfficialQqBotAccount, channelId:
   if (!Array.isArray(threads)) {
     return null;
   }
+  const expectedDisplayIds = new Set((expected.displayIds ?? []).map((displayId) => `#${displayId}`));
   for (const thread of threads) {
     const info = readThreadInfo(thread);
     if (!info) continue;
-    if (info.title === expected.title && threadContentIncludes(info.content, expected.content)) {
+    if (expected.title && info.title === expected.title) {
+      return info.threadId;
+    }
+    for (const displayId of expectedDisplayIds) {
+      if (threadMatchesDisplayId(info, displayId)) {
+        return info.threadId;
+      }
+    }
+    if (expected.content && threadContentIncludes(info.content, expected.content)) {
       return info.threadId;
     }
   }
   return null;
+}
+
+function threadMatchesDisplayId(info: { title: string; content: string }, displayId: string) {
+  return info.title.includes(displayId) || threadContentIncludes(info.content, displayId);
 }
 
 function readThreadInfo(value: unknown) {

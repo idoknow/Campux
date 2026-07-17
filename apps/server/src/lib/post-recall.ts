@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { Prisma } from "@campux/db";
 import { QZoneRecallError, setQZoneEmotionPrivate } from "@campux/integrations";
-import { deleteOfficialQqForumThread } from "../runtime/official-qq";
+import { deleteOfficialQqForumThread, findOfficialQqForumThreadIdByDisplayIds, readOfficialQqForumThreadId } from "../runtime/official-qq";
 import { qzoneCookieDomain } from "./bot-workflows";
 import { checkAndUpdateQZoneSession } from "./qzone-cookies";
 import { prisma } from "./prisma";
@@ -131,14 +131,26 @@ export async function executePostRecall({
 
   const results: RecallTargetResult[] = [];
   for (const attempt of attempts) {
-    const qzoneTid = attempt.qzoneTid ?? attempt.externalId;
+    const qzoneTid = resolveRecallExternalId(attempt.qzoneTid, attempt.externalId, attempt.verbose);
     const targetName = attempt.publishTarget.displayName;
     try {
       if (!qzoneTid) {
         throw new Error("缺少 QZone TID");
       }
       if (attempt.publishTarget.botAccount.platform === "official_qq") {
-        if (!attempt.qzoneTid) {
+        let threadId = resolveOfficialQqRecallThreadId(attempt.qzoneTid, attempt.verbose);
+        if (!threadId) {
+          threadId = await findOfficialQqForumThreadIdByDisplayIds(
+            {
+              id: attempt.publishTarget.botAccount.id,
+              officialAppId: attempt.publishTarget.botAccount.officialAppId,
+              officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
+            },
+            attempt.publishTarget.botAccount.reviewGroupId ?? "",
+            [post.displayId],
+          );
+        }
+        if (!threadId) {
           throw new Error("缺少 QQ 频道帖子 ID，无法调用删除帖子 API");
         }
         const recall = await deleteOfficialQqForumThread(
@@ -148,7 +160,7 @@ export async function executePostRecall({
             officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
           },
           attempt.publishTarget.botAccount.reviewGroupId ?? "",
-          attempt.qzoneTid,
+          threadId,
         );
         await prisma.publishAttempt.update({
           where: {
@@ -311,6 +323,14 @@ export async function executePostRecall({
     post: updated,
     results,
   };
+}
+
+function resolveRecallExternalId(qzoneTid: string | null, externalId: string | null, verbose: Prisma.JsonValue) {
+  return qzoneTid ?? externalId ?? readOfficialQqForumThreadId(verbose);
+}
+
+function resolveOfficialQqRecallThreadId(qzoneTid: string | null, verbose: Prisma.JsonValue) {
+  return qzoneTid ?? readOfficialQqForumThreadId(verbose);
 }
 
 function toCookieRecord(value: Prisma.JsonValue) {
