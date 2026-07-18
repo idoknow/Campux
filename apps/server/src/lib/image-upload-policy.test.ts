@@ -127,11 +127,10 @@ describe("tenant image upload policy", () => {
     )).toBeNull();
   });
 
-  test("keeps permanent converted-GIF errors attachment-specific after claim rollback", () => {
-    expect(shouldExposeRemoteGifIndexes(false, undefined)).toBe(true);
-    expect(shouldExposeRemoteGifIndexes(true, undefined)).toBe(false);
-    expect(shouldExposeRemoteGifIndexes(true, false)).toBe(false);
-    expect(shouldExposeRemoteGifIndexes(true, true)).toBe(true);
+  test("exposes converted-GIF indexes only for permanent failures", () => {
+    expect(shouldExposeRemoteGifIndexes(undefined)).toBe(false);
+    expect(shouldExposeRemoteGifIndexes(false)).toBe(false);
+    expect(shouldExposeRemoteGifIndexes(true)).toBe(true);
   });
 
   test("reads remote bodies without crossing the configured memory cap", async () => {

@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
@@ -46,8 +47,12 @@ import {
   ConvertedGifClaimStore,
   ConvertedGifClaimUnavailableError,
   convertedGifClaimSettingPrefix,
-  type ConvertedGifClaimSetting,
 } from "../lib/converted-gif-claim-store";
+import {
+  reconcilePostCreateTransactionOutcome,
+  shouldCompensatePostAttachments,
+  type PostPersistenceState,
+} from "../lib/post-create-transaction-outcome";
 import { readSingleVideoUpload, SingleVideoUploadError } from "../lib/single-video-upload";
 
 const fileQuerySchema = z.object({
@@ -90,6 +95,16 @@ class ConvertedVideoGifSizeError extends Error {
   constructor() {
     super(convertedVideoGifSizeErrorMessage);
     this.name = "ConvertedVideoGifSizeError";
+  }
+}
+
+class PostCreateTransactionOutcomeUnknownError extends Error {
+  constructor(
+    readonly postCandidateId: string,
+    readonly reconciliationError: unknown,
+  ) {
+    super("post creation transaction outcome is unknown");
+    this.name = "PostCreateTransactionOutcomeUnknownError";
   }
 }
 
@@ -140,6 +155,13 @@ const VIDEO_UPLOAD_DEADLINE_MS = 30_000;
 const activeVideoGifConversions = new Set<string>();
 const convertedGifClaimStore = new ConvertedGifClaimStore({
   transaction: (callback) => prisma.$transaction(async (tx) => callback({
+    findExistingKeys: async (keys) => {
+      const records = await tx.systemSetting.findMany({
+        where: { key: { in: keys } },
+        select: { key: true },
+      });
+      return records.map((record) => record.key);
+    },
     deleteByKeys: async (keys) => {
       const deleted = await tx.systemSetting.deleteMany({
         where: { key: { in: keys } },
@@ -157,9 +179,6 @@ const convertedGifClaimStore = new ConvertedGifClaimStore({
       }),
       prisma.systemSetting.create({ data: setting }),
     ]);
-  },
-  restore: async (settings) => {
-    await prisma.systemSetting.createMany({ data: settings });
   },
 });
 
@@ -542,7 +561,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     const staged: PostAttachment[] = [];
     const remoteGifClaims: Array<{ url: string; proof: string }> = [];
     let attachmentOrder: AttachmentOrderKind[] | null = null;
-    let consumedConvertedGifClaimSettings: ConvertedGifClaimSetting[] = [];
+    let postPersistenceState: PostPersistenceState = "not-started";
 
     try {
       let fileIndex = 0;
@@ -820,6 +839,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           status: 400,
           message: "视频转换结果来源不受信任",
           remoteGifIndexes: invalidRemoteGifUrlIndexes,
+          permanentRemoteGifFailure: true,
         };
       }
       const invalidRemoteGifIndexes = remoteGifClaims.flatMap((claim, remoteGifIndex) => (
@@ -837,7 +857,26 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           status: 403,
           message: "视频转换凭证无效或已过期，请重新转换",
           remoteGifIndexes: invalidRemoteGifIndexes,
+          permanentRemoteGifFailure: true,
         };
+      }
+
+      try {
+        await convertedGifClaimStore.assertAvailable(
+          remoteGifClaims.map(({ proof }) => proof),
+        );
+      } catch (caught) {
+        if (caught instanceof ConvertedGifClaimUnavailableError) {
+          throw {
+            status: 403,
+            message: "视频转换凭证已使用、重复或已失效，请重新转换",
+            remoteGifIndexes: caught.unavailableIndexes.length > 0
+              ? caught.unavailableIndexes
+              : remoteGifClaims.map((_, index) => index),
+            permanentRemoteGifFailure: true,
+          };
+        }
+        throw caught;
       }
 
       const releaseRemoteGifIngestion = remoteGifClaims.length > 0
@@ -854,23 +893,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         : null;
 
       try {
-        if (remoteGifClaims.length > 0) {
-          try {
-            consumedConvertedGifClaimSettings = await convertedGifClaimStore.consume(
-              remoteGifClaims.map((claim) => claim.proof),
-            );
-          } catch (error) {
-            if (error instanceof ConvertedGifClaimUnavailableError) {
-              throw {
-                status: 403,
-                message: "视频转换凭证已使用、重复或已失效，请重新转换",
-                remoteGifIndexes: remoteGifClaims.map((_, index) => index),
-              };
-            }
-            throw error;
-          }
-        }
-
         // Only server-issued converted-video claims receive the stable 50MB cap.
         for (const [remoteGifIndex, { url: gifUrl }] of remoteGifClaims.entries()) {
         try {
@@ -979,12 +1001,33 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       const initialStatus: "pending_approval" = "pending_approval";
       const logComment = "投稿创建";
 
-      // Create post in transaction with retry logic
+      // Create post and consume converted-GIF claims in one transaction with retry logic.
+      // A stable candidate ID lets us reconcile a lost commit acknowledgement safely.
+      const postCandidateId = randomUUID();
       let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           post = await prisma.$transaction(
             async (tx) => {
+              await convertedGifClaimStore.consumeUsing(
+                remoteGifClaims.map((claim) => claim.proof),
+                {
+                  findExistingKeys: async (keys) => {
+                    const records = await tx.systemSetting.findMany({
+                      where: { key: { in: keys } },
+                      select: { key: true },
+                    });
+                    return records.map((record) => record.key);
+                  },
+                  deleteByKeys: async (keys) => {
+                    const deleted = await tx.systemSetting.deleteMany({
+                      where: { key: { in: keys } },
+                    });
+                    return deleted.count;
+                  },
+                },
+              );
+
               // 只有待审核状态才受待审核数量限制
               if (initialStatus === "pending_approval") {
                 const pendingPostLimit = await readTenantPendingPostLimit(tx, context.selectedTenant.id);
@@ -1019,6 +1062,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
 
               const created = await tx.post.create({
                 data: {
+                  id: postCandidateId,
                   tenantId: context.selectedTenant.id,
                   authorId: context.user.id,
                   displayId,
@@ -1054,11 +1098,51 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           );
           break;
         } catch (caught) {
+          if (isTransactionSerializationFailure(caught)) {
+            if (attempt < 2) {
+              continue;
+            }
+            postPersistenceState = "rolled-back";
+            throw caught;
+          }
+
+          // Reconcile by the stable candidate ID before mapping any domain error.
+          // This closes the lost-acknowledgement path without restoring claims or
+          // deleting objects that may already be referenced by a committed post.
+          const outcome = await reconcilePostCreateTransactionOutcome(() => (
+            prisma.post.findUnique({
+              where: { id: postCandidateId },
+              include: {
+                tagAssignments: {
+                  include: { tag: true },
+                  orderBy: { createdAt: "asc" },
+                },
+              },
+            })
+          ));
+          if (outcome.kind === "committed") {
+            postPersistenceState = "committed";
+            post = outcome.post;
+            break;
+          }
+          if (outcome.kind === "unknown") {
+            postPersistenceState = "unknown";
+            throw new PostCreateTransactionOutcomeUnknownError(postCandidateId, outcome.error);
+          }
+
+          postPersistenceState = "rolled-back";
           if (caught instanceof PendingPostLimitError) {
             throw caught;
           }
-          if (isTransactionSerializationFailure(caught) && attempt < 2) {
-            continue;
+          if (caught instanceof ConvertedGifClaimUnavailableError) {
+            throw {
+              status: 403,
+              message: "视频转换凭证已使用、重复或已失效，请重新转换",
+              remoteGifIndexes: caught.unavailableIndexes.length > 0
+                ? caught.unavailableIndexes
+                : remoteGifClaims.map((_, index) => index),
+              permanentRemoteGifFailure: true,
+            };
           }
           throw caught;
         }
@@ -1070,9 +1154,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           message: "投稿人数较多，请稍后再试",
         };
       }
-
-      // Post creation commits one-time converted-GIF claim consumption.
-      consumedConvertedGifClaimSettings = [];
+      postPersistenceState = "committed";
 
       oneBot?.notifyNewPost(post.id).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to notify review group");
@@ -1089,28 +1171,20 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         post: toPostListItem(post),
       };
     } catch (err) {
-      let convertedGifClaimRestoreFailed = false;
-      let convertedGifClaimsRestored = false;
-      if (consumedConvertedGifClaimSettings.length > 0) {
-        try {
-          await convertedGifClaimStore.restore(consumedConvertedGifClaimSettings);
-          consumedConvertedGifClaimSettings = [];
-          convertedGifClaimsRestored = true;
-        } catch (restoreErr) {
-          convertedGifClaimRestoreFailed = true;
-          app.log.error({ error: restoreErr }, "failed to restore converted GIF claims");
-        }
+      if (err instanceof PostCreateTransactionOutcomeUnknownError) {
+        app.log.error({
+          error: err.reconciliationError,
+          postCandidateId: err.postCandidateId,
+        }, "post transaction outcome is unknown; skipped attachment compensation");
+        return reply.code(503).send({
+          message: "投稿结果暂时无法确认，请勿重复提交，稍后刷新稿件列表确认",
+        });
       }
 
-      // Cleanup uploaded files on error
-      await deleteAttachmentObjects(config, uploadedKeys).catch((cleanupErr) => {
-        app.log.warn({ error: cleanupErr }, "failed to cleanup uploaded attachments");
-      });
-
-      if (convertedGifClaimRestoreFailed) {
-        return reply.code(503).send({
-          message: "视频处理失败且转换凭证无法恢复，请移除视频后重新添加",
-          remoteGifIndexes: remoteGifClaims.map((_, index) => index),
+      // Cleanup is safe only before persistence or after a successful read proved rollback.
+      if (shouldCompensatePostAttachments(postPersistenceState)) {
+        await deleteAttachmentObjects(config, uploadedKeys).catch((cleanupErr) => {
+          app.log.warn({ error: cleanupErr }, "failed to cleanup uploaded attachments");
         });
       }
 
@@ -1137,10 +1211,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
           message: errorObj.message,
           ...(errorObj.fileIndex !== undefined ? { fileIndex: errorObj.fileIndex } : {}),
           ...(errorObj.remoteGifIndexes
-            && shouldExposeRemoteGifIndexes(
-              convertedGifClaimsRestored,
-              errorObj.permanentRemoteGifFailure,
-            )
+            && shouldExposeRemoteGifIndexes(errorObj.permanentRemoteGifFailure)
             ? { remoteGifIndexes: errorObj.remoteGifIndexes }
             : {}),
         });

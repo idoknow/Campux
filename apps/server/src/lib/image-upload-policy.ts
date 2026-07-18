@@ -145,10 +145,9 @@ export function validateConvertedGifClaim({
 }
 
 export function shouldExposeRemoteGifIndexes(
-  convertedGifClaimsRestored: boolean,
   permanentRemoteGifFailure: boolean | undefined,
 ): boolean {
-  return !convertedGifClaimsRestored || permanentRemoteGifFailure === true;
+  return permanentRemoteGifFailure === true;
 }
 
 export function isTrustedConvertedGifUrl(rawUrl: string): boolean {

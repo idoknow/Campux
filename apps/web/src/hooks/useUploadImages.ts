@@ -3,7 +3,12 @@ import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
 import { uploadVideoToGif, ScdnApiError, SCDN_MAX_VIDEO_SIZE } from "@/lib/scdn-api";
 import { getSelectedImageRejection, getSelectedImageRejections } from "@/lib/image-upload-policy";
-import { applyAttachmentUploadFailure } from "@/lib/attachment-upload-state";
+import {
+  applyAttachmentUploadFailure,
+  cleanupAttachmentLifecycle,
+  markAttachmentsUploading,
+  removeAttachmentsById,
+} from "@/lib/attachment-upload-state";
 
 type ConversionJob = {
   attachmentId: string;
@@ -255,14 +260,8 @@ export function usePendingAttachments({
     return false;
   }, [compressionEnabled, maxSizeMb, pending]);
 
-  const markUploading = useCallback(() => {
-    setPending((current) =>
-      current.map((p) => ({
-        ...p,
-        status: "uploading" as const,
-        progress: 0,
-      })),
-    );
+  const markUploading = useCallback((attachmentIds: ReadonlySet<string>) => {
+    setPending((current) => markAttachmentsUploading(current, attachmentIds));
   }, []);
 
   const setProgress = useCallback((totalPercent: number) => {
@@ -274,26 +273,36 @@ export function usePendingAttachments({
   }, []);
 
   const markFailed = useCallback(
-    (fileIndex: number | undefined, remoteGifIndexes: number[] | undefined, message: string) => {
+    (
+      fileIndex: number | undefined,
+      remoteGifIndexes: number[] | undefined,
+      message: string,
+      submissionAttachments: PendingAttachment[],
+    ) => {
       setPending((current) => applyAttachmentUploadFailure(
         current,
         fileIndex,
         remoteGifIndexes,
         message,
+        submissionAttachments,
       ));
     },
     [],
   );
 
-  const clearAll = useCallback(() => {
-    activeConversionRef.current?.controller.abort();
-    activeConversionRef.current = null;
-    conversionQueueRef.current = [];
-    for (const url of ownedBlobUrlsRef.current.values()) {
-      URL.revokeObjectURL(url);
-    }
-    ownedBlobUrlsRef.current.clear();
-    setPending([]);
+  const clearAll = useCallback((attachmentIds?: ReadonlySet<string>) => {
+    const nextLifecycle = cleanupAttachmentLifecycle({
+      activeConversion: activeConversionRef.current,
+      conversionQueue: conversionQueueRef.current,
+      ownedBlobUrls: ownedBlobUrlsRef.current,
+      attachmentIds,
+      revokeObjectUrl: (url) => URL.revokeObjectURL(url),
+    });
+    activeConversionRef.current = nextLifecycle.activeConversion;
+    conversionQueueRef.current = nextLifecycle.conversionQueue;
+    setPending((current) => attachmentIds
+      ? removeAttachmentsById(current, attachmentIds)
+      : []);
   }, []);
 
   return {
