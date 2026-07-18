@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
 import { api, createPostWithAttachments, CreatePostError } from "@/lib/api";
 import { canAccess, defaultMetadata, navItems } from "@/lib/app-model";
+import {
+  canAcceptAttachmentSelection,
+  runWhenSubmissionIdle,
+} from "@/lib/attachment-upload-state";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
 import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import { usePendingAttachments } from "@/hooks/useUploadImages";
@@ -99,6 +103,7 @@ export function App() {
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const submissionBusyRef = useRef(false);
   const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, validateBeforeUpload, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments({
     maxSizeMb: metadata.imageMaxSizeMb,
     compressionEnabled: metadata.imageCompression.enabled,
@@ -440,35 +445,56 @@ export function App() {
     await loadTenantData(1);
   }
 
+  function mutateSubmissionForm(mutation: () => void): boolean {
+    return runWhenSubmissionIdle(submissionBusyRef.current, mutation);
+  }
+
   async function handleUploadFiles(files: ArrayLike<File> | null) {
-    if (!files?.length) {
+    if (!canAcceptAttachmentSelection(submissionBusyRef.current, files?.length ?? 0)) {
       return;
     }
     addAttachments(files);
   }
 
+  function handleRemoveAttachment(attachmentId: string) {
+    mutateSubmissionForm(() => removeAttachment(attachmentId));
+  }
+
   async function submitPost() {
+    if (submissionBusyRef.current) {
+      return;
+    }
+    if (pendingAttachments.some((p) => p.status === "converting")) {
+      toast.error("请等待视频转换完成后再投稿");
+      return;
+    }
+    if (!validateBeforeUpload()) {
+      return;
+    }
     if (pendingAttachments.some((p) => p.status === "failed")) {
-      toast.error("请移除上传失败的图片后再投稿");
+      toast.error("请移除上传失败的附件后再投稿");
       return;
     }
     if (postText.trim().length === 0) {
       toast.error("正文不能为空");
       return;
     }
-    if (!validateBeforeUpload()) {
-      return;
-    }
+    const submissionAttachments = [...pendingAttachments];
+    const submissionAttachmentIds = new Set(submissionAttachments.map((attachment) => attachment.id));
+    submissionBusyRef.current = true;
     setBusy(true);
-    markUploading();
+    markUploading(submissionAttachmentIds);
     try {
-      // Local image files only (remote GIF URLs are sent separately)
-      const files = pendingAttachments
+      // Local image files only; claimed remote GIFs are sent separately.
+      const files = submissionAttachments
         .filter((p) => !p.remoteGifUrl)
         .map((p) => p.file);
-      const remoteGifUrls = pendingAttachments
-        .map((p) => p.remoteGifUrl)
-        .filter((url): url is string => Boolean(url));
+      const remoteGifClaims = submissionAttachments
+        .filter((p) => p.remoteGifUrl)
+        .map((p) => ({ url: p.remoteGifUrl!, proof: p.remoteGifProof ?? "" }));
+      const attachmentOrder = submissionAttachments.map((p) => (
+        p.remoteGifUrl ? "remote" as const : "local" as const
+      ));
       await createPostWithAttachments(
         postText,
         anonymous,
@@ -476,13 +502,14 @@ export function App() {
         (totalPercent) => {
           setProgress(totalPercent);
         },
-        remoteGifUrls.length > 0 ? remoteGifUrls : undefined,
+        remoteGifClaims.length > 0 ? remoteGifClaims : undefined,
+        attachmentOrder,
         postBgColor || undefined,
         postTextColor || undefined,
         postFont || undefined,
         anonymousAvatar || undefined,
       );
-      clearAttachments();
+      clearAttachments(submissionAttachmentIds);
       setPostText("");
       setAnonymous(false);
       setAnonymousAvatar("");
@@ -498,12 +525,18 @@ export function App() {
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "投稿失败";
       if (caught instanceof CreatePostError) {
-        markFailed(caught.fileIndex, message);
+        markFailed(
+          caught.fileIndex,
+          caught.remoteGifIndexes,
+          message,
+          submissionAttachments,
+        );
       } else {
-        markFailed(undefined, message);
+        markFailed(undefined, undefined, message, submissionAttachments);
       }
       toast.error(message);
     } finally {
+      submissionBusyRef.current = false;
       setBusy(false);
     }
   }
@@ -640,16 +673,16 @@ export function App() {
       pendingAttachments={pendingAttachments}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
-      onAnonymousChange={setAnonymous}
-      onAnonymousAvatarChange={setAnonymousAvatar}
-      onBgColorChange={setPostBgColor}
-      onTextColorChange={setPostTextColor}
-      onFontChange={setPostFont}
+      onAnonymousChange={(value) => mutateSubmissionForm(() => setAnonymous(value))}
+      onAnonymousAvatarChange={(value) => mutateSubmissionForm(() => setAnonymousAvatar(value))}
+      onBgColorChange={(value) => mutateSubmissionForm(() => setPostBgColor(value))}
+      onTextColorChange={(value) => mutateSubmissionForm(() => setPostTextColor(value))}
+      onFontChange={(value) => mutateSubmissionForm(() => setPostFont(value))}
       onFilesSelected={handleUploadFiles}
       onLogout={logout}
       onOpenOps={showOpsUi && canOpenOps(me) ? () => navigate({ kind: "ops" }) : undefined}
       onSelectTenant={selectTenant}
-      onPostTextChange={setPostText}
+      onPostTextChange={(value) => mutateSubmissionForm(() => setPostText(value))}
       onPostsTabChange={setPostsSubTab}
       onRefreshMe={refreshMe}
       adminUserDetailTarget={adminUserDetailTarget}
@@ -658,7 +691,7 @@ export function App() {
       onOpenPostDetailFromAdmin={openPostDetailFromAdmin}
       onPostsPageChange={setPostsPage}
       onRefreshTenantData={() => refreshTenantData(postsPage)}
-      onRemoveAttachment={removeAttachment}
+      onRemoveAttachment={handleRemoveAttachment}
       onSubmitPost={submitPost}
     />
   );

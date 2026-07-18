@@ -32,7 +32,7 @@ RUN bun run build
 FROM oven/bun:${BUN_VERSION}-alpine AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates chromium font-noto-cjk font-noto-emoji openssl tzdata
+RUN apk add --no-cache ca-certificates chromium ffmpeg font-noto-cjk font-noto-emoji openssl tzdata
 
 # Release identifier baked in by CI (branch-shortsha); surfaces in /api/health
 # style diagnostics and the anonymous telemetry version distribution.

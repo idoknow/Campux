@@ -4,6 +4,7 @@ import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS, IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB, isDefaultFont } from "@campux/domain";
 import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
 import { defaultMetadata } from "@/lib/app-model";
+import { canAcceptAttachmentSelection } from "@/lib/attachment-upload-state";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +93,9 @@ export function PostPage({
   }, [anonymous]);
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!canAcceptAttachmentSelection(busy, event.clipboardData.items.length)) {
+      return;
+    }
     const files = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
@@ -104,7 +108,7 @@ export function PostPage({
   }
 
   function confirmRemoveAttachment() {
-    if (!attachmentToRemove) {
+    if (busy || !attachmentToRemove) {
       return;
     }
     onRemoveAttachment(attachmentToRemove.id);
@@ -140,6 +144,7 @@ export function PostPage({
           className="min-h-36 w-full resize-none rounded-none border-0 bg-white px-0 py-1 text-base leading-7 text-slate-900 shadow-none placeholder:text-slate-400 focus-visible:ring-0"
           onChange={(event) => onPostTextChange(event.target.value)}
           onPaste={pasteImages}
+          disabled={busy}
         />
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -147,7 +152,7 @@ export function PostPage({
             <button
               key={item.id}
               className="relative h-[70px] w-[70px] overflow-hidden rounded-md border border-slate-200 bg-slate-100"
-              disabled={item.status === "uploading" || item.status === "converting"}
+              disabled={busy || item.status === "uploading" || item.status === "converting"}
               onClick={() => setAttachmentToRemove(item)}
             >
               {item.originalVideo && item.status === "converting" ? (
@@ -178,7 +183,7 @@ export function PostPage({
               ) : null}
               {item.status === "failed" ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-500/35 px-1 text-center text-[11px] font-medium leading-tight text-red-900">
-                  <span>转换失败</span>
+                  <span>无法上传</span>
                   <span className="line-clamp-2 max-w-full break-words font-normal">{item.errorMessage || "请重试"}</span>
                 </div>
               ) : null}
@@ -242,6 +247,7 @@ export function PostPage({
                               ? "border-slate-700 bg-slate-700 text-white shadow-sm"
                               : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                           }`}
+                          disabled={busy}
                           onClick={() => onBgColorChange(postBgColor === opt.value ? "" : opt.value)}
                         >
                           <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
@@ -265,6 +271,7 @@ export function PostPage({
                               ? "border-slate-700 bg-slate-700 text-white shadow-sm"
                               : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                           }`}
+                          disabled={busy}
                           onClick={() => onTextColorChange(postTextColor === opt.value ? "" : opt.value)}
                         >
                           <span className="inline-block size-3.5 rounded-full border border-slate-200/50" style={{ backgroundColor: opt.hex }} />
@@ -292,6 +299,7 @@ export function PostPage({
                             ? "border-green-500 ring-2 ring-green-200"
                             : "border-slate-200 hover:border-slate-300"
                         }`}
+                        disabled={busy}
                         onClick={() => onAnonymousAvatarChange(anonymousAvatar === filename ? "" : filename)}
                         title={filename.replace(".svg", "")}
                       >
@@ -322,6 +330,7 @@ export function PostPage({
                             ? "border-slate-700 bg-slate-700 text-white shadow-sm"
                             : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                         }`}
+                        disabled={busy}
                         onClick={() => onFontChange(postFont === opt.value ? "" : opt.value)}
                         title={opt.label}
                       >
@@ -386,7 +395,7 @@ export function PostPage({
             <Button variant="outline" onClick={() => setAttachmentToRemove(null)}>
               取消
             </Button>
-            <Button variant="destructive" onClick={confirmRemoveAttachment}>
+            <Button variant="destructive" disabled={busy} onClick={confirmRemoveAttachment}>
               {attachmentToRemove?.status === "failed" ? "移除" : "删除"}
             </Button>
           </DialogFooter>

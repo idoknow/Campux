@@ -1,15 +1,12 @@
 /**
- * 失控图床 API 客户端
+ * Campux video-to-GIF upload client.
  *
- * API 端点: https://img.scdn.io/api/v1.php
- *
- * 将视频上传至失控图床，服务端自动转码为 GIF 并返回外链。
- * 前端下载 GIF 后作为普通附件参与投稿流程。
+ * The browser uploads the source video to Campux. The server validates the
+ * media, calls the external converter, and returns a short-lived claim bound
+ * to the current session, user, and tenant.
  */
 
-const API_BASE = "https://img.scdn.io/api/v1.php";
-
-/** 失控图床对视频文件的尺寸限制 */
+/** External converter source-video limit, also enforced by Campux. */
 export const SCDN_MAX_VIDEO_SIZE = 15 * 1024 * 1024; // 15MB
 
 export class ScdnApiError extends Error {
@@ -19,97 +16,98 @@ export class ScdnApiError extends Error {
   }
 }
 
-/** 上传成功响应的 data 部分 */
 export interface ScdnUploadData {
   url: string;
-  filename: string;
-  storage_backend: "local" | "telegram" | "r2";
-  original_size?: number;
-  compressed_size?: number;
-  compression_ratio?: number;
+  proof: string;
+}
+
+type VideoGifUploadResponse = {
+  url?: string;
+  proof?: string;
   message?: string;
-}
+};
 
-/** 上传成功响应 */
-export interface ScdnUploadResponse {
-  success: true;
-  url: string;
-  data: ScdnUploadData;
-  message?: string;
-}
-
-/** 上传失败响应 */
-export interface ScdnErrorResponse {
-  success: false;
-  error: string;
-  message: string;
-}
-
-export type ScdnResponse = ScdnUploadResponse | ScdnErrorResponse;
-
-/**
- * 将视频文件上传至失控图床，服务端自动转为 GIF。
- *
- * @param file - 视频文件（≤ 15MB）
- * @param onProgress - 上传进度回调（0-100）
- * @returns 上传成功后的 data 对象（含 GIF 外链 url）
- */
+/** Upload a video to Campux for validated server-side GIF conversion. */
 export async function uploadVideoToGif(
   file: File,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ): Promise<ScdnUploadData> {
   if (file.size > SCDN_MAX_VIDEO_SIZE) {
     throw new ScdnApiError(
-      `视频超过 ${SCDN_MAX_VIDEO_SIZE / 1024 / 1024}MB 限制（失控图床限制）`,
+      `视频超过 ${SCDN_MAX_VIDEO_SIZE / 1024 / 1024}MB 限制（转换服务限制）`,
     );
   }
 
   const formData = new FormData();
-  formData.append("image", file);
-  formData.append("outputFormat", "gif");
-  formData.append("cdn_domain", "cloudflarecnimg.scdn.io");
-  formData.append("storage_destination", "telegram");
+  formData.append("video", file, file.name);
 
-  const data = await new Promise<ScdnResponse>((resolve, reject) => {
+  return new Promise<ScdnUploadData>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", API_BASE);
+    let settled = false;
+    const handleSignalAbort = () => xhr.abort();
+    const cleanup = () => signal?.removeEventListener("abort", handleSignalAbort);
+    const resolveOnce = (data: ScdnUploadData) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(data);
+    };
+    const rejectOnce = (error: ScdnApiError) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    if (signal?.aborted) {
+      rejectOnce(new ScdnApiError("上传已取消"));
+      return;
+    }
+    signal?.addEventListener("abort", handleSignalAbort, { once: true });
+
+    xhr.open("POST", "/api/uploads/video-gif");
+    xhr.withCredentials = true;
+    xhr.timeout = 120_000;
 
     xhr.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable && onProgress) {
+      if (!signal?.aborted && event.lengthComputable && onProgress) {
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     });
 
     xhr.addEventListener("load", () => {
+      let parsed: VideoGifUploadResponse;
       try {
-        const parsed = JSON.parse(xhr.responseText) as ScdnResponse;
-        resolve(parsed);
+        parsed = JSON.parse(xhr.responseText) as VideoGifUploadResponse;
       } catch {
-        reject(new ScdnApiError(`解析响应失败：${xhr.statusText || xhr.status}`));
+        rejectOnce(new ScdnApiError(`解析响应失败：${xhr.statusText || xhr.status}`));
+        return;
       }
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        rejectOnce(new ScdnApiError(parsed.message || `视频转换失败：${xhr.status}`));
+        return;
+      }
+      if (typeof parsed.url !== "string" || typeof parsed.proof !== "string") {
+        rejectOnce(new ScdnApiError("视频转换服务未返回有效凭证"));
+        return;
+      }
+      resolveOnce({ url: parsed.url, proof: parsed.proof });
     });
 
     xhr.addEventListener("error", () => {
-      reject(new ScdnApiError("网络错误，上传至图床失败"));
+      rejectOnce(new ScdnApiError("网络错误，视频转换失败"));
+    });
+
+    xhr.addEventListener("timeout", () => {
+      rejectOnce(new ScdnApiError("视频转换超时，请重试"));
     });
 
     xhr.addEventListener("abort", () => {
-      reject(new ScdnApiError("上传已取消"));
+      rejectOnce(new ScdnApiError("上传已取消"));
     });
 
     xhr.send(formData);
   });
-
-  if (!data.success) {
-    throw new ScdnApiError(data.message || data.error || "图床上传失败");
-  }
-
-  return data.data;
 }
-
-/**
- * GIF 下载由后端服务器完成（避免浏览器 CDN CORS 限制），
- * 前端仅需将图床返回的 GIF URL 通过投稿接口传给后端。
- *
- * @see POST /api/posts — 使用 remoteGifUrls 字段
- */

@@ -1979,6 +1979,9 @@ export class OneBotRuntime {
           return await fetchPrivatePostImage(resolvedUrl, fileName);
         }
       } catch (error) {
+        if (error instanceof BotWorkflowError && error.statusCode === 413) {
+          throw error;
+        }
         this.logger.debug({ error, botQqUin }, "onebot get_image fallback failed");
       }
     }

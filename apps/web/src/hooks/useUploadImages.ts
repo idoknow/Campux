@@ -2,11 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { PendingAttachment } from "@/types/app";
 import { uploadVideoToGif, ScdnApiError, SCDN_MAX_VIDEO_SIZE } from "@/lib/scdn-api";
-import { getSelectedImageRejection } from "@/lib/image-upload-policy";
+import { getSelectedImageRejection, getSelectedImageRejections } from "@/lib/image-upload-policy";
+import {
+  applyAttachmentUploadFailure,
+  cleanupAttachmentLifecycle,
+  markAttachmentsUploading,
+  removeAttachmentsById,
+} from "@/lib/attachment-upload-state";
 
 type ConversionJob = {
   attachmentId: string;
   file: File;
+};
+
+type ActiveConversion = {
+  attachmentId: string;
+  controller: AbortController;
 };
 
 export function usePendingAttachments({
@@ -17,78 +28,87 @@ export function usePendingAttachments({
   compressionEnabled: boolean;
 }) {
   const [pending, setPending] = useState<PendingAttachment[]>([]);
-  const blobUrlsRef = useRef<string[]>([]);
+  const ownedBlobUrlsRef = useRef(new Map<string, string>());
   const conversionQueueRef = useRef<ConversionJob[]>([]);
+  const activeConversionRef = useRef<ActiveConversion | null>(null);
   const convertingRef = useRef(false);
+  const unmountedRef = useRef(false);
 
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
-      for (const url of blobUrlsRef.current) {
+      unmountedRef.current = true;
+      activeConversionRef.current?.controller.abort();
+      activeConversionRef.current = null;
+      conversionQueueRef.current = [];
+      for (const url of ownedBlobUrlsRef.current.values()) {
         URL.revokeObjectURL(url);
       }
-      blobUrlsRef.current = [];
+      ownedBlobUrlsRef.current.clear();
     };
   }, []);
 
   /** Process the next video conversion job in the queue */
   const processNextConversion = useCallback(async () => {
-    if (convertingRef.current || conversionQueueRef.current.length === 0) {
+    if (unmountedRef.current
+      || convertingRef.current
+      || conversionQueueRef.current.length === 0) {
       return;
     }
     convertingRef.current = true;
 
     const job = conversionQueueRef.current.shift()!;
     const { attachmentId, file } = job;
+    const controller = new AbortController();
+    activeConversionRef.current = { attachmentId, controller };
 
     try {
-      // Update status to "converting"
       setPending((current) =>
         current.map((p) =>
           p.id === attachmentId ? { ...p, status: "converting" as const, progress: 0 } : p,
         ),
       );
 
-      // Step 1: Upload video to API → get GIF URL
       const uploadData = await uploadVideoToGif(file, (percent) => {
+        if (controller.signal.aborted || unmountedRef.current) return;
         setPending((current) =>
           current.map((p) =>
             p.id === attachmentId ? { ...p, progress: percent } : p,
           ),
         );
-      });
+      }, controller.signal);
 
-      // Step 2: Keep the GIF URL — the backend will download it from the CDN
-      // (browser fetch is blocked by CORS on the CloudFlare CN CDN domain)
-      const gifBlobUrl = uploadData.url;
+      if (controller.signal.aborted || unmountedRef.current) return;
 
-      // Create a placeholder file so the attachment is trackable
       const gifFile = new File([""], file.name.replace(/\.[^.]+$/, ".gif"), {
         type: "image/gif",
       });
+      const ownedBlobUrl = ownedBlobUrlsRef.current.get(attachmentId);
+      if (ownedBlobUrl) {
+        URL.revokeObjectURL(ownedBlobUrl);
+        ownedBlobUrlsRef.current.delete(attachmentId);
+      }
 
-      // Replace the attachment with the GIF version (remote URL based)
       setPending((current) =>
         current.map((p) =>
           p.id === attachmentId
             ? {
                 ...p,
                 file: gifFile,
-                blobUrl: gifBlobUrl,
+                blobUrl: uploadData.url,
                 status: "ready" as const,
                 progress: 100,
                 originalVideo: file,
                 remoteGifUrl: uploadData.url,
+                remoteGifProof: uploadData.proof,
               }
             : p,
         ),
       );
     } catch (error) {
-      const message =
-        error instanceof ScdnApiError
-          ? error.message
-          : "视频转换失败";
+      if (controller.signal.aborted || unmountedRef.current) return;
+      const message = error instanceof ScdnApiError ? error.message : "视频转换失败";
       toast.error(`视频转换失败：${message}`);
-      // Mark as failed so user can remove it
       setPending((current) =>
         current.map((p) =>
           p.id === attachmentId
@@ -97,9 +117,13 @@ export function usePendingAttachments({
         ),
       );
     } finally {
+      if (activeConversionRef.current?.attachmentId === attachmentId) {
+        activeConversionRef.current = null;
+      }
       convertingRef.current = false;
-      // Process next job in queue
-      processNextConversion();
+      if (!unmountedRef.current) {
+        processNextConversion();
+      }
     }
   }, []);
 
@@ -147,7 +171,7 @@ export function usePendingAttachments({
 
           const id = crypto.randomUUID();
           const blobUrl = URL.createObjectURL(file);
-          blobUrlsRef.current.push(blobUrl);
+          ownedBlobUrlsRef.current.set(id, blobUrl);
 
           accepted.push({
             id,
@@ -181,61 +205,63 @@ export function usePendingAttachments({
   );
 
   const remove = useCallback((id: string) => {
-    setPending((current) => {
-      const item = current.find((p) => p.id === id);
-      if (item) {
-        URL.revokeObjectURL(item.blobUrl);
-        blobUrlsRef.current = blobUrlsRef.current.filter(
-          (url) => url !== item.blobUrl,
-        );
-      }
-      return current.filter((p) => p.id !== id);
-    });
-    // Also remove from conversion queue if pending
+    if (activeConversionRef.current?.attachmentId === id) {
+      activeConversionRef.current.controller.abort();
+    }
+    const ownedBlobUrl = ownedBlobUrlsRef.current.get(id);
+    if (ownedBlobUrl) {
+      URL.revokeObjectURL(ownedBlobUrl);
+      ownedBlobUrlsRef.current.delete(id);
+    }
     conversionQueueRef.current = conversionQueueRef.current.filter(
       (job) => job.attachmentId !== id,
     );
+    setPending((current) => current.filter((p) => p.id !== id));
   }, []);
 
   const validateBeforeUpload = useCallback(() => {
-    let rejected: { item: PendingAttachment; message: string } | null = null;
-    for (const item of pending) {
-      if (item.status !== "ready" || item.originalVideo || item.remoteGifUrl) {
-        continue;
-      }
-      const message = getSelectedImageRejection({
-        fileName: item.file.name,
-        sizeBytes: item.file.size,
-        maxSizeMb,
-        compressionEnabled,
-      });
-      if (message) {
-        rejected = { item, message };
-        break;
-      }
+    const missingClaims = pending.filter((item) =>
+      item.status === "ready" && item.remoteGifUrl && !item.remoteGifProof);
+    if (missingClaims.length > 0) {
+      const missingIds = new Set(missingClaims.map((item) => item.id));
+      const message = "视频转换凭证缺失，请移除后重新添加";
+      setPending((current) => current.map((item) => missingIds.has(item.id)
+        ? { ...item, status: "failed" as const, errorMessage: message, progress: 0 }
+        : item));
+      toast.error(message);
+      return false;
     }
-    if (!rejected) {
+
+    const rejected = getSelectedImageRejections({
+      images: pending
+        .filter((item) => item.status === "ready" && !item.originalVideo && !item.remoteGifUrl)
+        .map((item) => ({
+          id: item.id,
+          fileName: item.file.name,
+          sizeBytes: item.file.size,
+        })),
+      maxSizeMb,
+      compressionEnabled,
+    });
+    if (rejected.length === 0) {
       return true;
     }
 
-    const { item: rejectedItem, message } = rejected;
-    setPending((current) => current.map((item) =>
-      item.id === rejectedItem.id
+    const errorsById = new Map(rejected.map((item) => [item.id, item.message]));
+    setPending((current) => current.map((item) => {
+      const message = errorsById.get(item.id);
+      return message
         ? { ...item, status: "failed" as const, errorMessage: message, progress: 0 }
-        : item,
-    ));
-    toast.error(message);
+        : item;
+    }));
+    toast.error(rejected.length === 1
+      ? rejected[0]!.message
+      : `${rejected.length} 张图片不符合当前上传限制`);
     return false;
   }, [compressionEnabled, maxSizeMb, pending]);
 
-  const markUploading = useCallback(() => {
-    setPending((current) =>
-      current.map((p) => ({
-        ...p,
-        status: "uploading" as const,
-        progress: 0,
-      })),
-    );
+  const markUploading = useCallback((attachmentIds: ReadonlySet<string>) => {
+    setPending((current) => markAttachmentsUploading(current, attachmentIds));
   }, []);
 
   const setProgress = useCallback((totalPercent: number) => {
@@ -247,31 +273,36 @@ export function usePendingAttachments({
   }, []);
 
   const markFailed = useCallback(
-    (fileIndex: number | undefined, message: string) => {
-      setPending((current) =>
-        current.map((p, index) => {
-          if (fileIndex !== undefined && index === fileIndex) {
-            return { ...p, status: "failed" as const, errorMessage: message };
-          }
-          if (p.status === "uploading") {
-            return { ...p, status: "ready" as const, progress: 0 };
-          }
-          return p;
-        }),
-      );
+    (
+      fileIndex: number | undefined,
+      remoteGifIndexes: number[] | undefined,
+      message: string,
+      submissionAttachments: PendingAttachment[],
+    ) => {
+      setPending((current) => applyAttachmentUploadFailure(
+        current,
+        fileIndex,
+        remoteGifIndexes,
+        message,
+        submissionAttachments,
+      ));
     },
     [],
   );
 
-  const clearAll = useCallback(() => {
-    setPending((current) => {
-      for (const item of current) {
-        URL.revokeObjectURL(item.blobUrl);
-      }
-      blobUrlsRef.current = [];
-      return [];
+  const clearAll = useCallback((attachmentIds?: ReadonlySet<string>) => {
+    const nextLifecycle = cleanupAttachmentLifecycle({
+      activeConversion: activeConversionRef.current,
+      conversionQueue: conversionQueueRef.current,
+      ownedBlobUrls: ownedBlobUrlsRef.current,
+      attachmentIds,
+      revokeObjectUrl: (url) => URL.revokeObjectURL(url),
     });
-    conversionQueueRef.current = [];
+    activeConversionRef.current = nextLifecycle.activeConversion;
+    conversionQueueRef.current = nextLifecycle.conversionQueue;
+    setPending((current) => attachmentIds
+      ? removeAttachmentsById(current, attachmentIds)
+      : []);
   }, []);
 
   return {

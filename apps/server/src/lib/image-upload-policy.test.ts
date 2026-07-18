@@ -1,16 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildVideoGifFfmpegArgs,
+  createConvertedGifClaim,
   defaultImageMaxSizeMb,
+  hasGifSignature,
   imageUploadSourceHardMaxSizeMb,
   maxImageMaxSizeMb,
   minImageMaxSizeMb,
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
+  isTrustedConvertedGifUrl,
   normalizeImageMaxSizeMb,
   readResponseBufferWithLimit,
+  restoreAttachmentOrder,
   resolveImageUploadLimits,
   ResponseBodyTooLargeError,
+  shouldExposeRemoteGifIndexes,
   validateConvertedVideoGifSize,
+  validateConvertedGifClaim,
   validateProcessedImageSize,
 } from "./image-upload-policy";
 
@@ -58,6 +65,72 @@ describe("tenant image upload policy", () => {
       status: 413,
       message: "视频转换后的 GIF 不能超过 50MB",
     });
+  });
+
+  test("only grants converted-video semantics to the trusted HTTPS converter origin", () => {
+    expect(isTrustedConvertedGifUrl("https://cloudflarecnimg.scdn.io/path/video.gif")).toBe(true);
+    expect(isTrustedConvertedGifUrl("http://cloudflarecnimg.scdn.io/path/video.gif")).toBe(false);
+    expect(isTrustedConvertedGifUrl("https://cloudflarecnimg.scdn.io.evil.example/video.gif")).toBe(false);
+    expect(isTrustedConvertedGifUrl("https://user:pass@cloudflarecnimg.scdn.io/video.gif")).toBe(false);
+    expect(isTrustedConvertedGifUrl("https://example.com/video.gif")).toBe(false);
+  });
+
+  test("binds converted GIF claims to server secret, URL, tenant, user, session, and expiry", () => {
+    const now = new Date("2026-07-17T12:00:00.000Z").getTime();
+    const input = {
+      url: "https://cloudflarecnimg.scdn.io/i/video.gif",
+      tenantId: "tenant-a",
+      userId: "user-a",
+      sessionTokenHash: "session-hash-a",
+      signingSecret: "server-only-signing-secret",
+    };
+    const proof = createConvertedGifClaim({ ...input, now, nonce: "deterministic_nonce_123" });
+
+    expect(validateConvertedGifClaim({ ...input, proof, now: now + 1 })).toBe(true);
+    expect(createConvertedGifClaim({ ...input, now })).not.toBe(createConvertedGifClaim({ ...input, now }));
+    expect(validateConvertedGifClaim({
+      ...input,
+      proof: proof.replace("deterministic_nonce_123", "tampered_nonce_value_12"),
+      now: now + 1,
+    })).toBe(false);
+    expect(validateConvertedGifClaim({ ...input, signingSecret: "attacker-derived-session-hash", proof, now: now + 1 })).toBe(false);
+    expect(validateConvertedGifClaim({ ...input, url: `${input.url}?other=1`, proof, now: now + 1 })).toBe(false);
+    expect(validateConvertedGifClaim({ ...input, tenantId: "tenant-b", proof, now: now + 1 })).toBe(false);
+    expect(validateConvertedGifClaim({ ...input, userId: "user-b", proof, now: now + 1 })).toBe(false);
+    expect(validateConvertedGifClaim({ ...input, sessionTokenHash: "session-hash-b", proof, now: now + 1 })).toBe(false);
+    expect(validateConvertedGifClaim({ ...input, proof, now: now + 15 * 60 * 1000 + 1 })).toBe(false);
+  });
+
+  test("requires downloaded converter output to have a GIF signature", () => {
+    expect(hasGifSignature(Buffer.from("GIF87a payload"))).toBe(true);
+    expect(hasGifSignature(Buffer.from("GIF89a payload"))).toBe(true);
+    expect(hasGifSignature(Buffer.from("not-a-gif"))).toBe(false);
+  });
+
+  test("caps server-side GIF conversion before ffmpeg writes the output", () => {
+    const args = buildVideoGifFfmpegArgs("input.mp4", "output.gif");
+    expect(args[args.indexOf("-fs") + 1]).toBe(String(imageStorageHardMaxBytes));
+    expect(args.join(" ")).toContain("min(30");
+    expect(args.join(" ")).toContain("1920");
+  });
+
+  test("restores interleaved local and remote attachment order", () => {
+    expect(restoreAttachmentOrder(
+      ["image-second", "image-fourth"],
+      ["video-first", "video-third"],
+      ["remote", "local", "remote", "local"],
+    )).toEqual(["video-first", "image-second", "video-third", "image-fourth"]);
+    expect(restoreAttachmentOrder(
+      ["only-local"],
+      ["only-remote"],
+      ["local"],
+    )).toBeNull();
+  });
+
+  test("exposes converted-GIF indexes only for permanent failures", () => {
+    expect(shouldExposeRemoteGifIndexes(undefined)).toBe(false);
+    expect(shouldExposeRemoteGifIndexes(false)).toBe(false);
+    expect(shouldExposeRemoteGifIndexes(true)).toBe(true);
   });
 
   test("reads remote bodies without crossing the configured memory cap", async () => {

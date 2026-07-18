@@ -153,8 +153,10 @@ export type PendingAttachment = {
   errorMessage?: string;
   /** Original video file before GIF conversion (if attachment started as video) */
   originalVideo: File | undefined;
-  /** Remote GIF URL from 失控图床 API (if converted via external API) */
+  /** Remote GIF URL returned by the validated server-side converter. */
   remoteGifUrl?: string;
+  /** Short-lived server claim authorizing the converted GIF URL. */
+  remoteGifProof?: string;
 };
 
 export type PostItem = {

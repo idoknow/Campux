@@ -34,3 +34,23 @@ export function getSelectedImageRejection({
   }
   return null;
 }
+
+export function getSelectedImageRejections({
+  images,
+  maxSizeMb,
+  compressionEnabled,
+}: {
+  images: Array<{ id: string; fileName: string; sizeBytes: number }>;
+  maxSizeMb: number;
+  compressionEnabled: boolean;
+}): Array<{ id: string; message: string }> {
+  return images.flatMap((image) => {
+    const message = getSelectedImageRejection({
+      fileName: image.fileName,
+      sizeBytes: image.sizeBytes,
+      maxSizeMb,
+      compressionEnabled,
+    });
+    return message ? [{ id: image.id, message }] : [];
+  });
+}

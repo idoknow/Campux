@@ -20,13 +20,17 @@ export async function api<T>(path: string, options: RequestInit = {}) {
 
 export class CreatePostError extends Error {
   fileIndex?: number;
+  remoteGifIndexes?: number[];
   status: number;
-  constructor(message: string, status: number, fileIndex?: number) {
+  constructor(message: string, status: number, fileIndex?: number, remoteGifIndexes?: number[]) {
     super(message);
     this.name = "CreatePostError";
     this.status = status;
     if (fileIndex !== undefined) {
       this.fileIndex = fileIndex;
+    }
+    if (remoteGifIndexes) {
+      this.remoteGifIndexes = remoteGifIndexes;
     }
   }
 }
@@ -39,12 +43,18 @@ export function normalizePostFont(font: string | null | undefined): string | und
   return font && !isDefaultFont(font) ? font : undefined;
 }
 
+export type RemoteGifClaim = {
+  url: string;
+  proof: string;
+};
+
 export function createPostWithAttachments(
   text: string,
   anonymous: boolean,
   files: File[],
   onProgress?: (totalPercent: number) => void,
-  remoteGifUrls?: string[],
+  remoteGifClaims?: RemoteGifClaim[],
+  attachmentOrder?: Array<"local" | "remote">,
   bgColor?: string,
   textColor?: string,
   font?: string,
@@ -62,9 +72,13 @@ export function createPostWithAttachments(
     });
 
     xhr.addEventListener("load", () => {
-      let parsed: CreatePostResponse | { message?: string; fileIndex?: number };
+      let parsed: CreatePostResponse | { message?: string; fileIndex?: number; remoteGifIndexes?: number[] };
       try {
-        parsed = JSON.parse(xhr.responseText) as CreatePostResponse | { message?: string; fileIndex?: number };
+        parsed = JSON.parse(xhr.responseText) as CreatePostResponse | {
+          message?: string;
+          fileIndex?: number;
+          remoteGifIndexes?: number[];
+        };
       } catch {
         reject(new CreatePostError(xhr.statusText || `投稿失败：${xhr.status}`, xhr.status));
         return;
@@ -75,8 +89,21 @@ export function createPostWithAttachments(
         return;
       }
 
-      const errorBody = parsed as { message?: string; fileIndex?: number };
-      reject(new CreatePostError(errorBody.message || `投稿失败：${xhr.status}`, xhr.status, errorBody.fileIndex));
+      const errorBody = parsed as { message?: string; fileIndex?: number; remoteGifIndexes?: number[] };
+      const fileIndex = typeof errorBody.fileIndex === "number"
+        && Number.isInteger(errorBody.fileIndex)
+        && errorBody.fileIndex >= 0
+        ? errorBody.fileIndex
+        : undefined;
+      const remoteGifIndexes = Array.isArray(errorBody.remoteGifIndexes)
+        ? errorBody.remoteGifIndexes.filter((value) => Number.isInteger(value) && value >= 0)
+        : undefined;
+      reject(new CreatePostError(
+        errorBody.message || `投稿失败：${xhr.status}`,
+        xhr.status,
+        fileIndex,
+        remoteGifIndexes,
+      ));
     });
 
     xhr.addEventListener("error", () => {
@@ -103,11 +130,14 @@ export function createPostWithAttachments(
     if (normalizedFont) {
       formData.append("font", normalizedFont);
     }
+    if (attachmentOrder) {
+      formData.append("attachmentOrder", JSON.stringify(attachmentOrder));
+    }
     for (const file of files) {
       formData.append("images", file, file.name);
     }
-    if (remoteGifUrls && remoteGifUrls.length > 0) {
-      formData.append("remoteGifUrls", JSON.stringify(remoteGifUrls));
+    if (remoteGifClaims && remoteGifClaims.length > 0) {
+      formData.append("remoteGifClaims", JSON.stringify(remoteGifClaims));
     }
     xhr.send(formData);
   });

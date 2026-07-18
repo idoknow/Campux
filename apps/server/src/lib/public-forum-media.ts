@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { CampuxConfig } from "@campux/config";
+import { getServerSigningSecret } from "./server-signing-secret";
 
 const forumMediaLifetimeSeconds = 48 * 60 * 60;
 
@@ -28,16 +29,7 @@ export function verifyPublicForumMediaSignature(key: string, expires: number, si
 }
 
 function signForumMedia(key: string, expires: number) {
-  return createHmac("sha256", getSigningSecret())
+  return createHmac("sha256", getServerSigningSecret())
     .update(`${expires}\n${key}`)
     .digest("base64url");
-}
-
-function getSigningSecret() {
-  const secret = process.env.CAMPUX_BOT_SESSION_SECRET
-    ?? (process.env.NODE_ENV === "production" ? null : process.env.DATABASE_URL);
-  if (!secret) {
-    throw new Error("CAMPUX_BOT_SESSION_SECRET is required to sign QQ forum media URLs");
-  }
-  return secret;
 }
