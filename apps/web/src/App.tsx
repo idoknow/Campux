@@ -8,6 +8,7 @@ import {
   runWhenSubmissionIdle,
 } from "@/lib/attachment-upload-state";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
+import { buildLoginPathWithReturnTo, readLoginReturnTo, readOAuthAuthorizeSearchFromReturnTo } from "@/lib/oauth-login-return";
 import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import { usePendingAttachments } from "@/hooks/useUploadImages";
 import { LoadingScreen } from "@/features/auth/LoadingScreen";
@@ -24,7 +25,8 @@ import { AppShell } from "@/features/shell/AppShell";
 
 type AppRoute =
   | { kind: "tenant"; tab: MainTab; subTab?: AdminTab | PostsTab }
-  | { kind: "login" | "tenants" | "ops" }
+  | { kind: "login"; returnTo?: string }
+  | { kind: "tenants" | "ops" }
   | { kind: "oauth"; search: string };
 
 type SelectTenantResponse = {
@@ -326,14 +328,24 @@ export function App() {
     }
 
     if (!me.authenticated) {
-      if (route.kind !== "login" && route.kind !== "oauth") {
+      if (route.kind === "oauth") {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
+        const path = buildLoginPathWithReturnTo(returnTo);
+        window.history.replaceState(null, "", path);
+        setRoute({ kind: "login", returnTo });
+      } else if (route.kind !== "login") {
         navigate({ kind: "login" }, "replace");
       }
       return;
     }
 
     if (route.kind === "login") {
-      navigate(me.needsTenantSelection || !me.currentTenant ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
+      const oauthSearch = readOAuthAuthorizeSearchFromRoute(route);
+      if (oauthSearch !== null) {
+        navigate({ kind: "oauth", search: oauthSearch }, "replace");
+      } else {
+        navigate(me.needsTenantSelection || !me.currentTenant ? { kind: "tenants" } : { kind: "tenant", tab: activeTab }, "replace");
+      }
       return;
     }
 
@@ -350,7 +362,7 @@ export function App() {
     if (route.kind === "tenant" && window.location.pathname !== pathFromRoute(route)) {
       navigate(route, "replace");
     }
-  }, [me, route.kind, route.kind === "tenant" ? route.tab : undefined, route.kind === "tenant" ? route.subTab : undefined]);
+  }, [me, route.kind, route.kind === "login" ? route.returnTo : undefined, route.kind === "tenant" ? route.tab : undefined, route.kind === "tenant" ? route.subTab : undefined]);
 
   useEffect(() => {
     document.title = buildDocumentTitle(route, documentTenantName, me?.authenticated ? me.user.systemRole : null);
@@ -368,11 +380,15 @@ export function App() {
     });
     setMe(data);
     if (data.authenticated) {
-      if (route.kind === "oauth") {
+      if (data.user.passwordChangeRequired) {
+        if (route.kind !== "login") {
+          navigate({ kind: "login" }, "replace");
+        }
         return data;
       }
-      if (data.user.passwordChangeRequired) {
-        navigate({ kind: "login" }, "replace");
+      const oauthSearch = readOAuthAuthorizeSearchFromRoute(route);
+      if (oauthSearch !== null) {
+        navigate({ kind: "oauth", search: oauthSearch }, "replace");
         return data;
       }
       navigate(data.needsTenantSelection ? { kind: "tenants" } : { kind: "tenant", tab: activeTab });
@@ -697,6 +713,10 @@ export function App() {
   );
 }
 
+function readOAuthAuthorizeSearchFromRoute(route: AppRoute) {
+  return route.kind === "login" ? readOAuthAuthorizeSearchFromReturnTo(route.returnTo) : null;
+}
+
 function defaultPagination(): Pagination {
   return {
     page: 1,
@@ -713,7 +733,8 @@ function canOpenOps(me: AuthenticatedMe) {
 function routeFromPath(pathname: string): AppRoute {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/login") {
-    return { kind: "login" };
+    const returnTo = readLoginReturnTo(window.location.search);
+    return returnTo ? { kind: "login", returnTo } : { kind: "login" };
   }
   if (normalized === "/tenants") {
     return { kind: "tenants" };
@@ -767,6 +788,9 @@ function pathFromRoute(route: AppRoute) {
   }
   if (route.kind === "oauth") {
     return `/oauth/authorize${route.search}`;
+  }
+  if (route.kind === "login") {
+    return route.returnTo ? buildLoginPathWithReturnTo(route.returnTo) : "/login";
   }
   return `/${route.kind}`;
 }
