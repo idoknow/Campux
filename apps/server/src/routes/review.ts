@@ -10,6 +10,7 @@ import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedErro
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
 import { readTenantPublishMode } from "../lib/tenant-metadata";
+import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 
@@ -32,7 +33,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   app.get("/api/review/posts", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
     const query = reviewQuerySchema.parse(request.query);
-    const displayId = query.q && !Number.isNaN(Number(query.q)) ? Number(query.q) : null;
+    const displayId = parsePostDisplayIdFilter(query.q);
     const qqUin = query.q && /^\d+$/.test(query.q) ? BigInt(query.q) : null;
     const concreteStatus = query.status === "pending_recall_ignored" ? "pending_recall" : query.status;
     const statusWhere: Prisma.PostWhereInput =

@@ -12,6 +12,7 @@ import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/
 import { toPostListItem } from "../lib/posts";
 import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
 import { serializeAssignedPostTags } from "../lib/post-tags";
+import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
 import {
@@ -1273,7 +1274,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     };
     const keyword = query.q?.trim();
     if (keyword) {
-      const displayId = /^\d+$/.test(keyword) ? Number.parseInt(keyword, 10) : null;
+      const displayId = parsePostDisplayIdFilter(keyword);
       where.OR = [
         { text: { contains: keyword } },
         ...(displayId !== null ? [{ displayId }] : []),
@@ -1397,7 +1398,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     let keywordSingleFilter: Record<string, unknown> = {};
     let keywordBatchFilter: Record<string, unknown> = {};
     if (keyword) {
-      const displayIdFilter = /^\d+$/.test(keyword) ? Number.parseInt(keyword, 10) : null;
+      const displayIdFilter = parsePostDisplayIdFilter(keyword);
       const orClauses: Record<string, unknown>[] = [{ text: { contains: keyword } }];
       if (displayIdFilter !== null) {
         orClauses.push({ displayId: displayIdFilter });
@@ -1513,7 +1514,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     // 按关键词过滤已发布稿件（匹配正文内容或稿件编号）
     if (keyword) {
       const keywordLower = keyword.toLowerCase();
-      const displayIdFilter = /^\d+$/.test(keyword) ? Number.parseInt(keyword, 10) : null;
+      const displayIdFilter = parsePostDisplayIdFilter(keyword);
       allItems = allItems.filter((item) => {
         for (const post of item.posts) {
           if (displayIdFilter !== null && post.displayId === displayIdFilter) {
