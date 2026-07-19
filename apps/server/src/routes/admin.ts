@@ -744,7 +744,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
               displayName: `${body.displayName} QQ 频道`,
               enabled: true,
               required: false,
-              publishDelaySeconds: 0,
+              publishDelaySeconds: defaultPublishIntervalSeconds,
             },
           },
         },

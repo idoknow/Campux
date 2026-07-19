@@ -3597,9 +3597,9 @@ function PublishPanel({
                     <>
                       <InfoPill label="发布方式" value="QQ 频道论坛" />
                       <InfoPill label="登录态" value="无需登录" />
-                      <InfoPill label="风控间隔" value="无需排队" />
+                      <InfoPill label="风控间隔" value={`${target.publishDelaySeconds}s`} />
                       <InfoPill label="认证方式" value="AppID / AppSecret" />
-                      <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1.5 text-sky-700 md:col-span-4">官方机器人发布走 QQ OpenAPI，不使用 QZone cookies，也不需要扫码或协议登录。</p>
+                      <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1.5 text-sky-700 md:col-span-4">官方机器人发布走 QQ OpenAPI，不使用 QZone cookies，也不需要扫码或协议登录；发帖任务仍会按风控间隔排队。</p>
                     </>
                   ) : (
                     <>
@@ -3780,12 +3780,12 @@ function PublishTargetConfigEditor({
   }, [target.displayName, target.enabled, target.required, target.publishDelaySeconds, target.qzoneRefreshMode]);
 
   const isOfficialQqTarget = target.botAccount.platform === "official_qq" || target.type === "qq_channel_forum";
-  const normalizedDelay = isOfficialQqTarget ? 0 : Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), 0);
+  const normalizedDelay = Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), 0);
   const normalizedName = displayName.trim();
   const changed = normalizedName !== target.displayName
     || enabled !== target.enabled
     || required !== target.required
-    || (!isOfficialQqTarget && normalizedDelay !== target.publishDelaySeconds)
+    || normalizedDelay !== target.publishDelaySeconds
     || (!isOfficialQqTarget && qzoneRefreshMode !== target.qzoneRefreshMode);
 
   function saveConfig() {
@@ -3793,7 +3793,8 @@ function PublishTargetConfigEditor({
       displayName: normalizedName,
       enabled,
       required,
-      ...(isOfficialQqTarget ? {} : { publishDelaySeconds: normalizedDelay, qzoneRefreshMode }),
+      publishDelaySeconds: normalizedDelay,
+      ...(isOfficialQqTarget ? {} : { qzoneRefreshMode }),
     });
   }
 
@@ -3802,7 +3803,7 @@ function PublishTargetConfigEditor({
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
           <p className="text-sm font-semibold text-slate-800">目标设置</p>
-          <p className="mt-0.5 text-xs font-semibold text-slate-500">{isOfficialQqTarget ? "名称、启用状态和必发策略。官方机器人发布无需登录态。" : "名称、启用状态、风控间隔、登录方式。"}</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">{isOfficialQqTarget ? "名称、启用状态、风控间隔和必发策略。官方机器人发布无需登录态。" : "名称、启用状态、风控间隔、登录方式。"}</p>
         </div>
         <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
       </summary>
@@ -3819,25 +3820,23 @@ function PublishTargetConfigEditor({
             保存目标设置
           </Button>
         </div>
-        <div className={`mt-3 grid gap-2 ${isOfficialQqTarget ? "md:grid-cols-[minmax(180px,1fr)]" : "md:grid-cols-[minmax(180px,1fr)_150px_180px]"}`}>
+        <div className={`mt-3 grid gap-2 ${isOfficialQqTarget ? "md:grid-cols-[minmax(180px,1fr)_150px]" : "md:grid-cols-[minmax(180px,1fr)_150px_180px]"}`}>
           <Input className="bg-white" placeholder="发布目标名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <Input
+            className="bg-white"
+            inputMode="numeric"
+            placeholder="风控间隔秒"
+            value={publishDelaySeconds}
+            onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
+          />
           {isOfficialQqTarget ? null : (
-            <>
-              <Input
-                className="bg-white"
-                inputMode="numeric"
-                placeholder="风控间隔秒"
-                value={publishDelaySeconds}
-                onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
-              />
-              <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
-                <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="protocol">协议自动获取登录态</SelectItem>
-                  <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
+            <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
+              <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="protocol">协议自动获取登录态</SelectItem>
+                <SelectItem value="qr">扫码登录刷新登录态</SelectItem>
+              </SelectContent>
+            </Select>
           )}
         </div>
         <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-600">

@@ -3,12 +3,23 @@ import {
   buildQZonePostUrl,
   deriveAggregateStatus,
   getOfficialQqForumQZoneLinkBotAccountId,
+  publishTargetIntervalSeconds,
   renderOfficialQqForumCaption,
   renderOfficialQqForumThreadTitle,
   republishFailureRetryDelayMs,
   shouldAppendOfficialQqForumQZoneLink,
   shouldWaitForQZoneAttempt,
 } from "./publishing";
+
+describe("publishTargetIntervalSeconds", () => {
+  it("QQ 官方机器人发布目标也使用配置的风控间隔", () => {
+    expect(publishTargetIntervalSeconds({ publishDelaySeconds: 30 })).toBe(30);
+  });
+
+  it("未配置时交给调度器使用默认风控间隔", () => {
+    expect(publishTargetIntervalSeconds({ publishDelaySeconds: null })).toBeNull();
+  });
+});
 
 describe("republish failure timeout", () => {
   it("uses a 12 hour retry delay", () => {

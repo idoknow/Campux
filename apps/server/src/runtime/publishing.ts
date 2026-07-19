@@ -218,6 +218,10 @@ export function registerFailedPublishAttemptRepublisher(queue: RuntimeQueue, log
   return () => clearInterval(timer);
 }
 
+export function publishTargetIntervalSeconds(target: { publishDelaySeconds: number | null | undefined }) {
+  return target.publishDelaySeconds ?? null;
+}
+
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
   const post = await prisma.post.findUnique({
     where: {
@@ -310,11 +314,11 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
       postId,
       publishTargetId: target.id,
       botAccountId: target.botAccountId,
-      intervalSeconds: target.botAccount.platform === "official_qq" ? 0 : target.publishDelaySeconds,
+      intervalSeconds: publishTargetIntervalSeconds(target),
     });
     attempts.push({ attempt, nextRunAt });
   }
-  // 先持久化全部目标，再开始消费，避免零延迟的 QQ 频道任务在 QZone attempt 尚未创建时抢跑。
+  // 先持久化全部目标，再开始消费，避免需要附带 QZone 链接的 QQ 频道任务在 QZone attempt 尚未创建时抢跑。
   for (const scheduled of attempts) {
     enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
   }
@@ -432,7 +436,7 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
       publishTargetId: target.id,
       botAccountId: target.botAccountId,
       batchId: batch.id,
-      intervalSeconds: target.botAccount.platform === "official_qq" ? 0 : target.publishDelaySeconds,
+      intervalSeconds: publishTargetIntervalSeconds(target),
     });
     attempts.push({ attempt, nextRunAt });
   }
