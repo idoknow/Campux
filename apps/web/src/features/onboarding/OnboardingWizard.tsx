@@ -157,6 +157,7 @@ export function OnboardingWizard({
       await api("/api/admin/bots", {
         method: "POST",
         body: JSON.stringify({
+          platform: "onebot",
           qqUin: botQq.trim(),
           displayName: botName.trim() || `${tenant.name} 墙号`,
           reviewGroupId: reviewGroup.trim() || undefined,
@@ -227,12 +228,12 @@ export function OnboardingWizard({
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-6">
+      <main className="mx-auto w-full max-w-3xl px-4 py-6">
         <StepRail steps={STEP_ORDER} current={step} botOnline={botOnline} />
 
-        <div className="mt-5 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <div className="mt-5 min-w-0 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           {step === "info" ? (
-            <section className="grid gap-4">
+            <section className="grid min-w-0 gap-4">
               <StepTitle index={1} title="校园墙信息" hint="给校园墙设置展示名称、主题色和顶部公告。" />
               <Field label="校园墙名称">
                 <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="例如：广州大学校园墙" />
@@ -261,7 +262,7 @@ export function OnboardingWizard({
               {loadingBots ? (
                 <p className="text-sm font-semibold text-slate-500">正在读取墙号状态…</p>
               ) : !primaryBot ? (
-                <div className="grid gap-3">
+                <div className="grid min-w-0 gap-3">
                   <Field label="墙号 QQ">
                     <Input value={botQq} onChange={(event) => setBotQq(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="负责发布的 QQ 号" />
                   </Field>
@@ -279,10 +280,10 @@ export function OnboardingWizard({
                   </div>
                 </div>
               ) : (
-                <div className="grid gap-4">
+                <div className="grid min-w-0 gap-4">
                   <ConnectionPanel bot={primaryBot} online={botOnline} />
                   <NapCatGuide url={buildOneBotUrl(primaryBot)} />
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
                     <Button variant="outline" size="sm" onClick={() => void refreshBots()}>
                       <RotateCcwIcon data-icon="inline-start" />
                       刷新状态
@@ -441,7 +442,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ConnectionPanel({ bot, online }: { bot: AdminBotAccount; online: boolean }) {
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${online ? "border-green-200 bg-green-50 dark:border-green-900/60 dark:bg-green-950/30" : "border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30"}`}>
+    <div className={`flex min-w-0 items-center justify-between gap-3 rounded-lg border p-3 ${online ? "border-green-200 bg-green-50 dark:border-green-900/60 dark:bg-green-950/30" : "border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30"}`}>
       <div className="min-w-0">
         <p className="text-sm font-bold text-slate-900 dark:text-slate-100">墙号 QQ {bot.qqUin}</p>
         <p className="text-xs font-semibold text-slate-500">{online ? "已连接 NapCat，墙号通过认证。" : "等待 NapCat 连接…保持这个页面打开。"}</p>
@@ -464,11 +465,11 @@ function NapCatGuide({ url }: { url: string }) {
     }
   }
   return (
-    <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+    <div className="grid min-w-0 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
       <p className="text-xs font-bold text-slate-600 dark:text-slate-300">在 NapCat 里添加「反向 WebSocket」客户端，把下面的地址粘贴进去：</p>
-      <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{url}</code>
-        <Button size="sm" variant="outline" onClick={() => void copy()}>
+      <div className="flex min-w-0 items-center gap-2">
+        <code className="block min-w-0 flex-1 truncate rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{url}</code>
+        <Button className="shrink-0" size="sm" variant="outline" onClick={() => void copy()}>
           <CopyIcon data-icon="inline-start" />
           复制
         </Button>
