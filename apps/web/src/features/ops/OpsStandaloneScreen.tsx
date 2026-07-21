@@ -22,27 +22,27 @@ export function OpsStandaloneScreen({
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background">
-      <header className="shrink-0 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-3 sm:px-4">
         <div className="min-w-0">
           <h1 className="inline-block pr-2 text-xl font-semibold leading-tight tracking-normal text-slate-950">Campux</h1>
-          <span className="align-baseline text-sm text-slate-600">{title}</span>
+          <span className="hidden align-baseline text-sm text-slate-600 sm:inline">{title}</span>
           <p className="mt-1 truncate text-xs text-slate-500">{me.user.displayName ?? me.user.qqUin}</p>
         </div>
         <div className="flex items-center gap-2">
           <ThemeModeButton />
           {onBackToTenants ? (
             <Button variant="outline" size="sm" onClick={onBackToTenants}>
-              选择校园墙
+              <span className="hidden sm:inline">选择</span>校园墙
             </Button>
           ) : null}
-          <Button variant="outline" size="sm" onClick={onLogout}>
-            <LogOutIcon data-icon="inline-start" />
-            退出
+          <Button variant="outline" size="sm" aria-label="退出登录" onClick={onLogout}>
+            <LogOutIcon />
+            <span className="hidden sm:inline">退出</span>
           </Button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mx-auto max-w-6xl">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+        <div className="mx-auto max-w-[1480px]">
           <OpsPanel currentUserId={me.user.id} mode={mode} onTenantCreated={onTenantCreated} onEnterTenant={onEnterTenant} />
         </div>
       </div>

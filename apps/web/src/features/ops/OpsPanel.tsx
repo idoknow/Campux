@@ -5,15 +5,18 @@ import {
   BotIcon,
   Building2Icon,
   CheckIcon,
+  ChevronRightIcon,
   ClipboardListIcon,
   ClockIcon,
   FilterIcon,
   Globe2Icon,
+  LayoutDashboardIcon,
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
+  Settings2Icon,
   ShieldPlusIcon,
   Trash2Icon,
   UsersRoundIcon,
@@ -33,7 +36,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const statusLabels: Record<TenantStatus, string> = {
   active: "运行中",
@@ -59,7 +61,7 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
   { status: "archived", label: "归档租户", icon: ArchiveIcon },
 ];
 
-type OpsTab = "users" | "audit";
+type OpsSection = "overview" | "tenants" | "users" | "audit" | "platform";
 type OpsPanelMode = "system" | "operations";
 type SystemUserRoleFilter = TenantRole | SystemRole;
 type OpsUserListPreferences = {
@@ -167,6 +169,7 @@ export function OpsPanel({
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
+  const [systemUserTotal, setSystemUserTotal] = useState<number | null>(null);
   const [operationsAdmins, setOperationsAdmins] = useState<SystemUser[]>([]);
   const [usersPagination, setUsersPagination] = useState<Pagination>(() => defaultPagination());
   const [userPage, setUserPage] = useState(1);
@@ -175,10 +178,11 @@ export function OpsPanel({
   const [userTenantFilterId, setUserTenantFilterId] = useState(() => readOpsUserListPreferences(mode).tenantFilterId);
   const [selectedUserRoleFilters, setSelectedUserRoleFilters] = useState<SystemUserRoleFilter[]>(() => readOpsUserListPreferences(mode).roleFilters);
   const [queue, setQueue] = useState<SystemQueueSnapshot | null>(null);
+  const [queueLoadState, setQueueLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
   const [auditPage, setAuditPage] = useState(1);
-  const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>("users");
+  const [activeSection, setActiveSection] = useState<OpsSection>("overview");
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -198,6 +202,8 @@ export function OpsPanel({
   const [managementHostDraft, setManagementHostDraft] = useState("");
   const [tenantDomainSuffix, setTenantDomainSuffix] = useState<string | null>(null);
   const [showArchivedTenants, setShowArchivedTenants] = useState(false);
+  const [tenantKeyword, setTenantKeyword] = useState("");
+  const [tenantCreateOpen, setTenantCreateOpen] = useState(false);
   const [tenantForm, setTenantForm] = useState(() => createTenantFormState());
 
   const visibleTenants = useMemo(
@@ -205,9 +211,16 @@ export function OpsPanel({
     [showArchivedTenants, tenants],
   );
 
+  const filteredVisibleTenants = useMemo(() => {
+    const keyword = tenantKeyword.trim().toLowerCase();
+    if (!keyword) return visibleTenants;
+    return visibleTenants.filter((tenant) => [tenant.name, tenant.slug, tenant.host ?? ""]
+      .some((value) => value.toLowerCase().includes(keyword)));
+  }, [tenantKeyword, visibleTenants]);
+
   const selectedTenant = useMemo(
-    () => visibleTenants.find((tenant) => tenant.id === selectedTenantId) ?? visibleTenants[0],
-    [selectedTenantId, visibleTenants],
+    () => filteredVisibleTenants.find((tenant) => tenant.id === selectedTenantId) ?? filteredVisibleTenants[0],
+    [filteredVisibleTenants, selectedTenantId],
   );
 
   const availableRoleFilters = useMemo(
@@ -245,18 +258,41 @@ export function OpsPanel({
 
   async function refreshOverview(nextSelectedId?: string) {
     setLoadingOverview(true);
+    setQueueLoadState("loading");
     try {
-      const [data, queueData] = await Promise.all([
+      const [data, queueResult, userResult] = await Promise.all([
         api<{ tenants: SystemTenant[]; tenantDomainSuffix?: string | null }>("/api/system/tenants"),
-        api<SystemQueueSnapshot>("/api/system/queue"),
+        api<SystemQueueSnapshot>("/api/system/queue")
+          .then((value) => ({ ok: true as const, value }))
+          .catch((error: unknown) => ({ ok: false as const, error })),
+        api<{ total: number }>("/api/system/users?page=1&limit=1")
+          .then((value) => ({ ok: true as const, value }))
+          .catch((error: unknown) => ({ ok: false as const, error })),
       ]);
       setTenants(data.tenants);
       setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
-      setQueue(queueData);
+      if (queueResult.ok) {
+        setQueue(queueResult.value);
+        setQueueLoadState("ready");
+      } else {
+        setQueue(null);
+        setQueueLoadState("error");
+        toast.error(queueResult.error instanceof Error ? `任务队列状态读取失败：${queueResult.error.message}` : "任务队列状态读取失败");
+      }
+      if (userResult.ok) {
+        setSystemUserTotal(userResult.value.total);
+      } else {
+        setSystemUserTotal(null);
+        toast.error(userResult.error instanceof Error ? `用户总数读取失败：${userResult.error.message}` : "用户总数读取失败");
+      }
       const candidateTenants = showArchivedTenants ? data.tenants : data.tenants.filter((tenant) => tenant.status !== "archived");
       const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
       setSelectedTenantId(nextTenant?.id ?? "");
       return data.tenants;
+    } catch (caught) {
+      setQueue(null);
+      setQueueLoadState("error");
+      throw caught;
     } finally {
       setLoadingOverview(false);
     }
@@ -333,11 +369,37 @@ export function OpsPanel({
     await Promise.all([refreshOverview(), refreshSettings(), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(auditPage)]);
   }
 
+  async function refreshCurrentSection() {
+    if (activeSection === "overview") {
+      await refreshOverview();
+      return;
+    }
+    if (activeSection === "tenants") {
+      await refreshOverview(selectedTenantId);
+      return;
+    }
+    if (activeSection === "users") {
+      await refreshUsers(userPage);
+      return;
+    }
+    if (activeSection === "audit") {
+      await refreshAudit(auditPage);
+      return;
+    }
+    await Promise.all([refreshSettings(), refreshOperationsAdmins()]);
+  }
+
   useEffect(() => {
     void refreshAll().catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取运维面板数据");
     });
   }, []);
+
+  useEffect(() => {
+    if (!isSystemMode && activeSection === "platform") {
+      setActiveSection("overview");
+    }
+  }, [activeSection, isSystemMode]);
 
   useEffect(() => {
     const preferences = readOpsUserListPreferences(mode);
@@ -401,8 +463,19 @@ export function OpsPanel({
   }
 
   async function updateStatus(status: TenantStatus) {
-    if (!selectedTenant || selectedTenant.status === status) {
+    if (!selectedTenant || selectedTenant.status === status || busyStatus) {
       return;
+    }
+
+    if (status === "paused" || status === "archived") {
+      const impact = status === "archived"
+        ? "归档后普通成员将无法继续操作，系统运维仍可恢复。"
+        : "暂停后校园墙将暂时停止对外服务，可随时恢复。";
+      if (!window.confirm(`确认将「${selectedTenant.name}」调整为${statusLabels[status]}？
+
+${impact}`)) {
+        return;
+      }
     }
 
     setBusyStatus(status);
@@ -445,6 +518,7 @@ export function OpsPanel({
 
     const slug = tenantFormSlug;
     let created: SystemTenant | undefined;
+    let createdTenants: SystemTenant[];
     setCreatingTenant(true);
     try {
       const data = await api<{ tenants: SystemTenant[] }>("/api/system/tenants", {
@@ -456,19 +530,39 @@ export function OpsPanel({
           themeColor: tenantForm.themeColor,
         }),
       });
+      createdTenants = data.tenants;
       setTenants(data.tenants);
       created = data.tenants.find((tenant) => tenant.slug === slug);
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
       setTenantForm(createTenantFormState(new Set(data.tenants.map((tenant) => tenant.slug))));
-      const [refreshedTenants] = await Promise.all([refreshOverview(created?.id), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(1)]);
-      created ??= refreshedTenants.find((tenant) => tenant.slug === slug);
-      if (created) {
-        setSelectedTenantId(created.id);
-      }
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建校园墙失败");
+      return;
     } finally {
       setCreatingTenant(false);
+    }
+
+    setTenantCreateOpen(false);
+    setActiveSection("tenants");
+
+    const refreshResults = await Promise.allSettled([
+      refreshOverview(created?.id),
+      refreshUsers(userPage),
+      refreshOperationsAdmins(),
+      refreshAudit(1),
+    ]);
+    const overviewResult = refreshResults[0];
+    if (overviewResult.status === "fulfilled") {
+      created ??= overviewResult.value.find((tenant) => tenant.slug === slug);
+    }
+    if (refreshResults.some((result) => result.status === "rejected")) {
+      toast.warning("校园墙已创建，但部分运维数据刷新失败；可稍后手动刷新。");
+    }
+    if (!created) {
+      created = createdTenants.find((tenant) => tenant.slug === slug);
+    }
+    if (created) {
+      setSelectedTenantId(created.id);
     }
 
     if (!created) {
@@ -707,397 +801,462 @@ export function OpsPanel({
     }
   }
 
+  const navigationItems: Array<{
+    value: OpsSection;
+    label: string;
+    description: string;
+    icon: typeof ActivityIcon;
+  }> = [
+    { value: "overview", label: "运行总览", description: "状态、队列与交付进度", icon: LayoutDashboardIcon },
+    { value: "tenants", label: isSystemMode ? "校园墙" : "我的校园墙", description: "租户配置与生命周期", icon: Building2Icon },
+    { value: "users", label: isSystemMode ? "全局用户" : "墙内用户", description: "账号、身份与权限", icon: UsersRoundIcon },
+    { value: "audit", label: "审计日志", description: "平台操作记录", icon: ClipboardListIcon },
+  ];
+  if (isSystemMode) {
+    navigationItems.push({ value: "platform", label: "平台设置", description: "域名与运营资源", icon: Settings2Icon });
+  }
+  const activeNavigationItem = navigationItems.find((item) => item.value === activeSection) ?? navigationItems[0]!;
+  const sectionRefreshing = activeSection === "overview" || activeSection === "tenants"
+    ? loadingOverview
+    : activeSection === "users"
+      ? loadingUsers
+      : activeSection === "audit"
+        ? loadingAudit
+        : loadingSettings || loadingOperationsAdmins;
+
   return (
-    <div className="px-4 pb-6">
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" disabled={loadingOverview || loadingUsers || loadingAudit} onClick={() => void refreshAll()}>
-          刷新
-        </Button>
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <StatusSummary title="运行中" value={summary.active} tone="green" />
-        <StatusSummary title="暂停" value={summary.paused} tone="amber" />
-        <StatusSummary title="归档" value={summary.archived} tone="slate" />
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <MetricCard title={isSystemMode ? "全局用户" : "可管理用户"} value={usersPagination.total} icon={UsersRoundIcon} accent="blue" />
-        <MetricCard title="Bot 账号" value={summary.bots} icon={BotIcon} accent="violet" />
-        <MetricCard title="队列中" value={queue?.runtime.queued ?? 0} icon={ActivityIcon} accent="amber" />
-        <MetricCard title="发布失败" value={queue?.publishAttempts.failed ?? 0} icon={ClipboardListIcon} accent="rose" />
-      </div>
-
-      <OnboardingGuide mode={mode} hasTenants={visibleTenants.length > 0} selectedTenant={selectedTenant} tenantDomainSuffix={tenantDomainSuffix} />
-
-      {isSystemMode ? (
-        <>
-          <Card className="mt-4 rounded-md">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 font-bold">
-                <Globe2Icon className="size-4" />
-                管理端 host
-                {loadingSettings ? <span className="ml-auto size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
-              </div>
-              <p className="mt-1 text-sm text-slate-500">
-                用户从这个域名访问时，登录页会开放邮箱注册入口。注册成功后自动获得运营管理员身份。
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <Input placeholder="app.campux.top 或 localhost:5180" value={managementHostDraft} onChange={(event) => setManagementHostDraft(event.target.value)} />
-                <Button className="shrink-0 font-medium" disabled={savingManagementHost} onClick={() => void saveManagementHost()}>
-                  保存 host
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          <OperationsAdminAccessPanel
-            users={operationsAdmins}
-            tenants={visibleTenants}
-            loading={loadingOperationsAdmins}
-            busyKey={accessBusyKey}
-            grantTenantByUserId={grantTenantByUserId}
-            onGrantTenantChange={(userId, tenantId) => setGrantTenantByUserId((current) => ({ ...current, [userId]: tenantId }))}
-            onGrant={grantOperationsAdminTenant}
-            onRevoke={revokeOperationsAdminTenant}
-          />
-        </>
-      ) : null}
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-        <Card className="rounded-md">
-          <CardContent className="p-3">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                <Building2Icon className="size-4" />
-                {isSystemMode ? "租户生命周期" : "我的校园墙"}
-              </div>
-              <div className="flex items-center gap-2">
-                {summary.archived > 0 ? (
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setShowArchivedTenants((current) => !current)}>
-                    {showArchivedTenants ? "隐藏归档" : `显示归档 ${summary.archived}`}
-                  </Button>
-                ) : null}
-                {loadingOverview ? <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
-              </div>
-            </div>
-            <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
-                <PlusIcon className="size-4" />
-                添加校园墙
-              </div>
-              <div className="grid gap-2">
-                <Input placeholder="校园墙名称" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
-                <div className="grid gap-1">
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="网址标识，例如 gzhu-wall"
-                      value={tenantForm.slug}
-                      maxLength={tenantSlugMaxLength}
-                      aria-invalid={slugLengthInvalid || slugFormatInvalid || slugAlreadyUsed}
-                      onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      title="重新生成网址标识"
-                      className="shrink-0"
-                      onClick={() => setTenantForm({ ...tenantForm, slug: generateWallSlug(existingTenantSlugs) })}
-                    >
-                      <RefreshCwIcon className="size-4" />
-                    </Button>
-                  </div>
-                  <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-900">
-                    <p>{tenantSlugHint}</p>
-                    {expectedTenantHost ? (
-                      <p className="mt-1 break-all">{expectedTenantHostLabel}：<span className="font-mono">{expectedTenantHost}</span></p>
-                    ) : (
-                      <p className="mt-1">配置自动域名后，这里会显示完整的预计访问域名。</p>
-                    )}
-                    <p className="mt-1 text-blue-700">规则：4-16 个字符，只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p>
-                    {slugLengthInvalid ? <p className="mt-1 text-red-700">访问标识需要 4 到 16 个字符。</p> : null}
-                    {slugFormatInvalid ? <p className="mt-1 text-red-700">访问标识只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p> : null}
-                    {slugAlreadyUsed ? <p className="mt-1 text-red-700">这个访问标识已经被其他校园墙使用，请换一个。</p> : null}
-                    {expectedHostAlreadyUsed ? <p className="mt-1 text-red-700">这个访问域名已经绑定到其他校园墙，请换一个。</p> : null}
-                  </div>
-                </div>
-                <Input placeholder="专属域名（可选，留空由平台自动分配）" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
-                <div className="grid grid-cols-[42px_minmax(0,1fr)] gap-2">
-                  <span className="h-9 rounded-md border border-slate-200" style={{ backgroundColor: tenantForm.themeColor }} />
-                  <Input value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
-                </div>
-                <p className="text-xs font-semibold text-slate-500">创建后会自动打开接入引导，一步步带你完成墙号机器人和发布配置；官方部署会自动分配专属域名。</p>
-                <Button className="font-medium" disabled={creatingTenant || enteringTenantId.length > 0 || tenantForm.name.trim().length === 0 || tenantFormSlug.length === 0 || tenantFormInvalid} onClick={() => void createTenant()}>
-                  <PlusIcon data-icon="inline-start" />
-                  创建
-                </Button>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              {visibleTenants.map((tenant) => (
+    <div className="pb-8">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="min-w-0 lg:sticky lg:top-0 lg:self-start">
+          <nav aria-label="运维页面导航" className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-2 lg:grid lg:gap-1 lg:p-2">
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const active = activeSection === item.value;
+              return (
                 <button
-                  key={tenant.id}
-                  className={`rounded-md border px-3 py-2 text-left transition ${selectedTenant?.id === tenant.id ? "border-slate-300 bg-slate-100" : "border-slate-100 bg-white hover:bg-slate-50"}`}
-                  onClick={() => setSelectedTenantId(tenant.id)}
+                  key={item.value}
+                  type="button"
+                  aria-current={active ? "page" : undefined}
+                  className={`group flex min-w-[132px] items-center gap-3 rounded-md px-3 py-2.5 text-left transition lg:min-w-0 ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"}`}
+                  onClick={() => setActiveSection(item.value)}
                 >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate font-semibold">{tenant.name}</span>
-                    <Badge variant={tenant.status === "active" ? "secondary" : "outline"}>{statusLabels[tenant.status]}</Badge>
+                  <span className={`grid size-8 shrink-0 place-items-center rounded-md ${active ? "bg-white/10 text-white" : "bg-slate-100 text-slate-500 group-hover:text-slate-900"}`}>
+                    <Icon className="size-4" />
                   </span>
-                  <span className="mt-1 flex flex-wrap items-center gap-1">
-                    <span className="truncate text-xs text-slate-500">{tenant.slug}</span>
-                    {tenant.status === "active" && !tenant.ready ? (
-                      <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[11px] text-amber-700">未就绪</Badge>
-                    ) : null}
-                    {tenant.status === "active" && tenant.archiveWarningAt ? (
-                      <Badge variant="outline" className="border-red-200 bg-red-50 text-[11px] text-red-700">待存档</Badge>
-                    ) : null}
-                  </span>
-                  <span className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold text-slate-500">
-                    <span>{tenant.memberCount} 用户</span>
-                    <span>{tenant.botAccountCount} 墙号</span>
-                    <span>{tenant.postCount} 稿件</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-bold">{item.label}</span>
+                    <span className={`mt-0.5 hidden truncate text-[11px] lg:block ${active ? "text-slate-300" : "text-slate-400"}`}>{item.description}</span>
                   </span>
                 </button>
-              ))}
-              {visibleTenants.length === 0 ? (
-                <p className="rounded-md border border-slate-100 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">
-                  {summary.archived > 0 ? "当前没有未归档的校园墙。" : "暂无校园墙。"}
-                </p>
-              ) : null}
+              );
+            })}
+          </nav>
+        </aside>
+
+        <section className="min-w-0">
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-950">{activeNavigationItem.label}</h2>
+              <p className="mt-1 text-sm text-slate-500">{activeNavigationItem.description}</p>
             </div>
-          </CardContent>
-        </Card>
-
-        {selectedTenant ? (
-          <Card className="rounded-md">
-            <CardContent className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-lg font-semibold">{selectedTenant.name}</p>
-                  <p className="mt-1 text-sm text-slate-500">{selectedTenant.slug}</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-500">{selectedTenant.host ?? "未绑定专属 host"}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {onEnterTenant ? (
-                    <Button size="sm" className="font-medium" disabled={enteringTenantId === selectedTenant.id} onClick={() => void enterTenantAsAdmin(selectedTenant)}>
-                      作为管理员进入
-                    </Button>
-                  ) : null}
-                  <Badge variant={selectedTenant.status === "active" ? "secondary" : "outline"}>{statusLabels[selectedTenant.status]}</Badge>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <Metric label="成员" value={selectedTenant.memberCount} />
-                <Metric label="墙号" value={selectedTenant.botAccountCount} />
-                <Metric label="稿件" value={selectedTenant.postCount} />
-              </div>
-
-              <details className="mt-4 rounded-md bg-slate-50">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-bold [&::-webkit-details-marker]:hidden">
-                  <span className="flex items-center gap-2">
-                    <ActivityIcon className="size-4" />
-                    生命周期状态
-                  </span>
-                  <span className="text-xs text-slate-400">展开</span>
-                </summary>
-                <div className="border-t border-slate-200 px-3 pb-3 pt-2">
-                <p className="mt-1 text-sm text-slate-500">{statusDescriptions[selectedTenant.status]}</p>
-                {selectedTenant.status === "active" && !selectedTenant.ready ? (
-                  <p className="mt-1 text-sm font-semibold text-amber-700">墙号机器人尚未接入，校园墙未就绪。创建满 30 天仍未接入且成员不超过 2 人会被自动存档。</p>
-                ) : null}
-                {selectedTenant.status === "active" && selectedTenant.archiveWarningAt ? (
-                  <p className="mt-1 text-sm font-semibold text-red-700">已发出自动存档预警，若仍未接入机器人将于预警 7 天后自动存档。</p>
-                ) : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {lifecycleActions.map((action) => {
-                    const Icon = action.icon;
-                    return (
-                      <Button
-                        key={action.status}
-                        variant={selectedTenant.status === action.status ? "secondary" : "outline"}
-                        disabled={selectedTenant.status === action.status || busyStatus === action.status}
-                        onClick={() => void updateStatus(action.status)}
-                      >
-                        <Icon data-icon="inline-start" />
-                        {action.label}
-                      </Button>
-                    );
-                  })}
-                </div>
-                </div>
-              </details>
-
-              <details className="mt-4 rounded-md bg-slate-50">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-bold [&::-webkit-details-marker]:hidden">
-                  <span className="flex items-center gap-2">
-                    <Building2Icon className="size-4" />
-                    专属访问域名
-                  </span>
-                  <span className="text-xs text-slate-400">展开</span>
-                </summary>
-                <div className="border-t border-slate-200 px-3 pb-3 pt-2">
-                <p className="mt-1 text-sm text-slate-500">
-                  设置后，从这个域名进入的用户会被固定到当前校园墙，不再展示租户选择。
-                </p>
-                {useSubdomainEditor ? (
-                  <>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <div className="flex flex-1 items-stretch">
-                        <Input
-                          className="rounded-r-none"
-                          placeholder="子域名前缀，例如 gzhu-wall"
-                          value={subdomainPrefix}
-                          aria-invalid={subdomainPrefixInvalid}
-                          onChange={(event) => setSubdomainPrefix(event.target.value)}
-                        />
-                        <span className="inline-flex select-none items-center rounded-r-md border border-l-0 border-slate-200 bg-slate-100 px-3 font-mono text-sm text-slate-600">
-                          .{normalizedDomainSuffix}
-                        </span>
-                      </div>
-                      <Button className="shrink-0 font-medium" disabled={savingHost || subdomainPrefixInvalid} onClick={() => void saveHost()}>
-                        保存子域名
-                      </Button>
-                    </div>
-                    <div className="mt-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-900">
-                      {subdomainPrefix ? (
-                        <p>访问域名：<span className="font-mono">{subdomainPrefix}.{normalizedDomainSuffix}</span>，保存后平台会自动同步 Cloudflare 解析。</p>
-                      ) : (
-                        <p>留空表示不绑定专属子域名。</p>
-                      )}
-                      {subdomainPrefixInvalid ? (
-                        <p className="mt-1 text-red-700">子域名前缀只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p>
-                      ) : null}
-                      <p className="mt-1 text-blue-700">
-                        需要完全自定义的域名？
-                        <button type="button" className="ml-1 underline" onClick={() => setHostDraft(selectedTenant?.host && !hostDraftIsUnderSuffix ? selectedTenant.host : `custom.example.com`)}>
-                          改用自定义域名
-                        </button>
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <Input placeholder="wall.example.com 或 localhost:5180" value={hostDraft} onChange={(event) => setHostDraft(event.target.value)} />
-                      <Button className="shrink-0 font-medium" disabled={savingHost} onClick={() => void saveHost()}>
-                        保存 host
-                      </Button>
-                    </div>
-                    {normalizedDomainSuffix ? (
-                      <p className="mt-2 text-xs font-semibold text-slate-500">
-                        想用平台子域名？
-                        <button type="button" className="ml-1 underline" onClick={() => setHostDraft("")}>
-                          改用 .{normalizedDomainSuffix} 子域名
-                        </button>
-                      </p>
-                    ) : null}
-                  </>
-                )}
-                </div>
-              </details>
-
-              <details className="mt-4 rounded-md border border-slate-200 bg-white">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-bold [&::-webkit-details-marker]:hidden">
-                  <span className="flex items-center gap-2">
-                    <BotIcon className="size-4" />
-                    机器人与发布目标
-                  </span>
-                  <span className="text-xs text-slate-400">{selectedTenant.bots.length} 个墙号</span>
-                </summary>
-                <div className="grid gap-2 border-t border-slate-100 p-3">
-                  {selectedTenant.bots.length > 0 ? (
-                    selectedTenant.bots.map((bot) => <TenantBotCard key={bot.id} bot={bot} />)
-                  ) : (
-                    <p className="rounded-md bg-slate-50 px-3 py-4 text-sm font-bold text-slate-500">当前校园墙还没有配置机器人。</p>
-                  )}
-                </div>
-              </details>
-
-              <p className="mt-4 text-sm text-slate-500">
-                校园墙名称、slug、主题色、前台品牌名和公告由该租户的管理员在租户管理页维护；专属 host 在这里维护。
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card className="rounded-md">
-            <CardContent className="p-4 text-sm text-slate-500">暂无租户。</CardContent>
-          </Card>
-        )}
-      </div>
-
-      <Card className="mt-4 rounded-md">
-        <CardContent className="p-4">
-          <Tabs value={activeOpsTab} onValueChange={(value) => setActiveOpsTab(value as OpsTab)}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <TabsList className="h-10">
-                <TabsTrigger value="users" className="h-8 px-3">
-                  <UsersRoundIcon className="size-4" />
-                  {isSystemMode ? "全局用户" : "墙内用户"}
-                </TabsTrigger>
-                <TabsTrigger value="audit" className="h-8 px-3">
-                  <ClipboardListIcon className="size-4" />
-                  审计日志
-                </TabsTrigger>
-              </TabsList>
+            <div className="flex items-center gap-2">
+              {activeSection === "tenants" ? (
+                <Button size="sm" onClick={() => setTenantCreateOpen(true)}>
+                  <PlusIcon data-icon="inline-start" />
+                  新建校园墙
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
-                disabled={activeOpsTab === "users" ? loadingUsers : loadingAudit}
-                onClick={() => void (activeOpsTab === "users" ? refreshUsers(userPage) : refreshAudit(auditPage))}
+                disabled={sectionRefreshing}
+                onClick={() => void refreshCurrentSection().catch((caught) => toast.error(caught instanceof Error ? caught.message : "刷新失败"))}
               >
-                刷新当前页
+                <RefreshCwIcon className={sectionRefreshing ? "animate-spin" : ""} data-icon="inline-start" />
+                刷新数据
               </Button>
             </div>
+          </header>
 
-            <TabsContent value="users" className="mt-4">
-              <GlobalUsersTable
-                users={users}
-                loading={loadingUsers}
-                pagination={usersPagination}
-                keyword={userKeywordDraft}
-                selectedRoleFilters={selectedUserRoleFilters}
-                availableRoleFilters={availableRoleFilters}
-                mode={mode}
-                selectedTenantFilterId={userTenantFilterId}
+          {activeSection === "overview" ? (
+            <div className="grid gap-4">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+                <MetricCard title="运行中" value={summary.active} icon={ActivityIcon} accent="green" />
+                <MetricCard title="暂停" value={summary.paused} icon={PauseCircleIcon} accent="amber" />
+                <MetricCard title="归档" value={summary.archived} icon={ArchiveIcon} accent="slate" />
+                <MetricCard title={isSystemMode ? "全局用户" : "可管理用户"} value={systemUserTotal ?? "—"} icon={UsersRoundIcon} accent="blue" />
+                <MetricCard title="Bot 账号" value={summary.bots} icon={BotIcon} accent="violet" />
+                <MetricCard title="队列中" value={queueLoadState === "ready" ? queue?.runtime.queued ?? 0 : "—"} icon={ActivityIcon} accent="amber" />
+                <MetricCard title="发布失败" value={queueLoadState === "ready" ? queue?.publishAttempts.failed ?? 0 : "—"} icon={ClipboardListIcon} accent="rose" />
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+                <Card className="overflow-hidden rounded-lg">
+                  <CardContent className="p-0">
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                      <div>
+                        <p className="font-bold text-slate-950">校园墙概况</p>
+                        <p className="mt-0.5 text-xs text-slate-500">直接定位需要处理的校园墙</p>
+                      </div>
+                      <Button variant="ghost" size="sm" className="h-8" onClick={() => setActiveSection("tenants")}>查看全部</Button>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {visibleTenants.slice(0, 6).map((tenant) => (
+                        <button
+                          key={tenant.id}
+                          type="button"
+                          className="grid w-full gap-2 px-4 py-3 text-left transition hover:bg-slate-50 sm:grid-cols-[minmax(0,1.2fr)_110px_110px_24px] sm:items-center"
+                          onClick={() => {
+                            setSelectedTenantId(tenant.id);
+                            setActiveSection("tenants");
+                          }}
+                        >
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="truncate text-sm font-semibold text-slate-950">{tenant.name}</span>
+                              <Badge variant={tenant.status === "active" ? "secondary" : "outline"}>{statusLabels[tenant.status]}</Badge>
+                            </span>
+                            <span className="mt-1 block truncate font-mono text-xs text-slate-500">{tenant.host ?? tenant.slug}</span>
+                          </span>
+                          <span className="text-xs text-slate-500"><strong className="mr-1 text-sm text-slate-900">{tenant.memberCount}</strong>用户</span>
+                          <span className="text-xs text-slate-500"><strong className="mr-1 text-sm text-slate-900">{tenant.postCount}</strong>稿件</span>
+                          <ChevronRightIcon className="hidden size-4 text-slate-400 sm:block" />
+                        </button>
+                      ))}
+                      {visibleTenants.length === 0 ? <p className="px-4 py-10 text-center text-sm font-semibold text-slate-500">暂无校园墙。</p> : null}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-slate-950">任务队列</p>
+                        <p className="mt-0.5 text-xs text-slate-500">运行时与发布任务健康状态</p>
+                      </div>
+                      <Badge variant={queueLoadState === "ready" && queue?.runtime.running ? "secondary" : "outline"}>
+                        {queueLoadState === "loading" || queueLoadState === "idle" ? "读取中" : queueLoadState === "error" ? "读取失败" : queue?.runtime.running ? "运行中" : "已停止"}
+                      </Badge>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <Metric label="处理中" value={queueLoadState === "ready" ? queue?.runtime.processing ?? 0 : "—"} />
+                      <Metric label="运行失败" value={queueLoadState === "ready" ? queue?.runtime.failed ?? 0 : "—"} />
+                      <Metric label="发布中" value={queueLoadState === "ready" ? queue?.publishAttempts.running ?? 0 : "—"} />
+                      <Metric label="发布成功" value={queueLoadState === "ready" ? queue?.publishAttempts.succeeded ?? 0 : "—"} />
+                    </div>
+                    {queueLoadState === "error" ? (
+                      <p className="mt-3 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">无法读取任务队列状态，请稍后刷新。</p>
+                    ) : queueLoadState !== "ready" ? (
+                      <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">正在读取任务队列状态…</p>
+                    ) : queue?.runtime.lastError ? (
+                      <div className="mt-3 rounded-md border border-red-100 bg-red-50 px-3 py-2">
+                        <p className="text-xs font-bold text-red-700">最近错误</p>
+                        <p className="mt-1 line-clamp-3 break-all text-xs leading-5 text-red-700">{queue.runtime.lastError}</p>
+                      </div>
+                    ) : (
+                      <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">当前没有运行时错误。</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <OnboardingGuide mode={mode} hasTenants={visibleTenants.length > 0} selectedTenant={selectedTenant} tenantDomainSuffix={tenantDomainSuffix} />
+            </div>
+          ) : null}
+
+          {activeSection === "tenants" ? (
+            <div className="grid min-w-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <Card className="min-w-0 rounded-lg xl:sticky xl:top-0 xl:self-start">
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2">
+                    <SearchIcon className="size-4 shrink-0 text-slate-400" />
+                    <Input
+                      aria-label="搜索校园墙"
+                      className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                      placeholder="搜索名称、标识或域名"
+                      value={tenantKeyword}
+                      onChange={(event) => setTenantKeyword(event.target.value)}
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2 px-1">
+                    <p className="text-xs font-bold text-slate-500">{filteredVisibleTenants.length} 个校园墙</p>
+                    {summary.archived > 0 ? (
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setShowArchivedTenants((current) => !current)}>
+                        {showArchivedTenants ? "隐藏归档" : `显示归档 ${summary.archived}`}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 flex max-h-[360px] flex-col gap-1.5 overflow-y-auto pr-1 xl:max-h-[calc(100dvh-245px)]">
+                    {filteredVisibleTenants.map((tenant) => (
+                      <button
+                        key={tenant.id}
+                        type="button"
+                        aria-current={selectedTenant?.id === tenant.id ? "true" : undefined}
+                        className={`rounded-md border px-3 py-2.5 text-left transition ${selectedTenant?.id === tenant.id ? "border-blue-200 bg-blue-50 ring-1 ring-blue-100" : "border-transparent bg-slate-50 hover:border-slate-200 hover:bg-white"}`}
+                        onClick={() => setSelectedTenantId(tenant.id)}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm font-semibold">{tenant.name}</span>
+                          <Badge variant={tenant.status === "active" ? "secondary" : "outline"}>{statusLabels[tenant.status]}</Badge>
+                        </span>
+                        <span className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="truncate font-mono text-[11px] text-slate-500">{tenant.slug}</span>
+                          {tenant.status === "active" && !tenant.ready ? <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700">未就绪</Badge> : null}
+                          {tenant.status === "active" && tenant.archiveWarningAt ? <Badge variant="outline" className="border-red-200 bg-red-50 text-[10px] text-red-700">待存档</Badge> : null}
+                        </span>
+                        <span className="mt-2 flex gap-3 text-[11px] font-semibold text-slate-500">
+                          <span>{tenant.memberCount} 用户</span>
+                          <span>{tenant.botAccountCount} 墙号</span>
+                          <span>{tenant.postCount} 稿件</span>
+                        </span>
+                      </button>
+                    ))}
+                    {filteredVisibleTenants.length === 0 ? (
+                      <p className="rounded-md bg-slate-50 px-3 py-8 text-center text-sm font-semibold text-slate-500">{tenantKeyword ? "没有匹配的校园墙。" : summary.archived > 0 ? "当前没有未归档的校园墙。" : "暂无校园墙。"}</p>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {selectedTenant ? (
+                <Card className="min-w-0 overflow-hidden rounded-lg">
+                  <CardContent className="p-0">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate text-lg font-semibold text-slate-950">{selectedTenant.name}</h3>
+                          <Badge variant={selectedTenant.status === "active" ? "secondary" : "outline"}>{statusLabels[selectedTenant.status]}</Badge>
+                        </div>
+                        <p className="mt-1 truncate font-mono text-xs text-slate-500">{selectedTenant.slug} · {selectedTenant.host ?? "未绑定专属 host"}</p>
+                      </div>
+                      {onEnterTenant ? (
+                        <Button size="sm" className="font-medium" disabled={enteringTenantId === selectedTenant.id} onClick={() => void enterTenantAsAdmin(selectedTenant)}>
+                          作为管理员进入
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-px border-b border-slate-100 bg-slate-100">
+                      <TenantMetric label="成员" value={selectedTenant.memberCount} />
+                      <TenantMetric label="墙号" value={selectedTenant.botAccountCount} />
+                      <TenantMetric label="稿件" value={selectedTenant.postCount} />
+                    </div>
+
+                    <div className="grid gap-4 p-4 2xl:grid-cols-2">
+                      <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center gap-2 font-bold text-slate-950">
+                          <ActivityIcon className="size-4" />
+                          生命周期状态
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-500">{statusDescriptions[selectedTenant.status]}</p>
+                        {selectedTenant.status === "active" && !selectedTenant.ready ? <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">墙号机器人尚未接入。创建满 30 天仍未接入且成员不超过 2 人会被自动存档。</p> : null}
+                        {selectedTenant.status === "active" && selectedTenant.archiveWarningAt ? <p className="mt-2 text-xs font-semibold leading-5 text-red-700">已发出自动存档预警，若仍未接入机器人将于预警 7 天后自动存档。</p> : null}
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {lifecycleActions.map((action) => {
+                            const Icon = action.icon;
+                            return (
+                              <Button
+                                key={action.status}
+                                size="sm"
+                                variant={selectedTenant.status === action.status ? "secondary" : "outline"}
+                                disabled={selectedTenant.status === action.status || Boolean(busyStatus)}
+                                onClick={() => void updateStatus(action.status)}
+                              >
+                                <Icon data-icon="inline-start" />
+                                {action.label}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </section>
+
+                      <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center gap-2 font-bold text-slate-950">
+                          <Globe2Icon className="size-4" />
+                          专属访问域名
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-500">从专属域名进入的用户会直接固定到当前校园墙。</p>
+                        {useSubdomainEditor ? (
+                          <>
+                            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <div className="flex min-w-0 flex-1 items-stretch">
+                                <Input className="min-w-0 rounded-r-none" placeholder="子域名前缀" value={subdomainPrefix} aria-invalid={subdomainPrefixInvalid} onChange={(event) => setSubdomainPrefix(event.target.value)} />
+                                <span className="inline-flex max-w-[48%] select-none items-center truncate rounded-r-md border border-l-0 border-slate-200 bg-white px-3 font-mono text-sm text-slate-600">.{normalizedDomainSuffix}</span>
+                              </div>
+                              <Button size="sm" className="shrink-0 font-medium" disabled={savingHost || subdomainPrefixInvalid} onClick={() => void saveHost()}>保存</Button>
+                            </div>
+                            <p className="mt-2 break-all text-xs font-semibold leading-5 text-slate-500">{subdomainPrefix ? `${subdomainPrefix}.${normalizedDomainSuffix}` : "留空表示不绑定专属子域名。"}</p>
+                            {subdomainPrefixInvalid ? <p className="mt-1 text-xs font-semibold text-red-700">子域名前缀格式不正确。</p> : null}
+                            <button type="button" className="mt-2 text-xs font-semibold text-blue-700 underline" onClick={() => setHostDraft(selectedTenant.host && !hostDraftIsUnderSuffix ? selectedTenant.host : "custom.example.com")}>改用自定义域名</button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                              <Input placeholder="wall.example.com 或 localhost:5180" value={hostDraft} onChange={(event) => setHostDraft(event.target.value)} />
+                              <Button size="sm" className="shrink-0 font-medium" disabled={savingHost} onClick={() => void saveHost()}>保存</Button>
+                            </div>
+                            {normalizedDomainSuffix ? <button type="button" className="mt-2 text-xs font-semibold text-blue-700 underline" onClick={() => setHostDraft("")}>改用 .{normalizedDomainSuffix} 子域名</button> : null}
+                          </>
+                        )}
+                      </section>
+
+                      <section className="rounded-md border border-slate-200 bg-white p-4 2xl:col-span-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 font-bold text-slate-950">
+                            <BotIcon className="size-4" />
+                            机器人与发布目标
+                          </div>
+                          <Badge variant="outline">{selectedTenant.bots.length} 个墙号</Badge>
+                        </div>
+                        <div className="mt-3 grid gap-2 xl:grid-cols-2">
+                          {selectedTenant.bots.length > 0 ? selectedTenant.bots.map((bot) => <TenantBotCard key={bot.id} bot={bot} />) : <p className="rounded-md bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-500 xl:col-span-2">当前校园墙还没有配置机器人。</p>}
+                        </div>
+                      </section>
+                    </div>
+                    <p className="border-t border-slate-100 px-4 py-3 text-xs leading-5 text-slate-500">校园墙名称、访问标识、主题色、品牌名和公告由租户管理员维护；生命周期和专属域名由这里统一管理。</p>
+                  </CardContent>
+                </Card>
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeSection === "users" ? (
+            <Card className="rounded-lg">
+              <CardContent className="p-4">
+                <GlobalUsersTable
+                  users={users}
+                  loading={loadingUsers}
+                  pagination={usersPagination}
+                  keyword={userKeywordDraft}
+                  selectedRoleFilters={selectedUserRoleFilters}
+                  availableRoleFilters={availableRoleFilters}
+                  mode={mode}
+                  selectedTenantFilterId={userTenantFilterId}
+                  tenants={visibleTenants}
+                  onKeywordChange={(keyword) => {
+                    setUserKeywordDraft(keyword);
+                    setUserKeyword(keyword);
+                    writeOpsUserListPreferences(mode, { keyword, tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
+                    setUserPage(1);
+                  }}
+                  onKeywordSearch={() => {
+                    setUserKeyword(userKeywordDraft);
+                    writeOpsUserListPreferences(mode, { keyword: userKeywordDraft, tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
+                    setUserPage(1);
+                  }}
+                  onKeywordClear={() => {
+                    setUserKeywordDraft("");
+                    setUserKeyword("");
+                    writeOpsUserListPreferences(mode, { keyword: "", tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
+                    setUserPage(1);
+                  }}
+                  onClearRoleFilters={() => {
+                    setSelectedUserRoleFilters([]);
+                    writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: userTenantFilterId, roleFilters: [] });
+                    setUserPage(1);
+                  }}
+                  onTenantFilterChange={changeUserTenantFilter}
+                  onOpenAssignMembership={openMembershipDialog}
+                  onRevokeMembership={revokeUserTenantMembership}
+                  onPageChange={setUserPage}
+                  onToggleRoleFilter={toggleUserRoleFilter}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeSection === "audit" ? (
+            <Card className="rounded-lg">
+              <CardContent className="p-4">
+                <AuditLogTable logs={auditLogs} loading={loadingAudit} pagination={auditPagination} onPageChange={setAuditPage} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeSection === "platform" && isSystemMode ? (
+            <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(300px,0.65fr)_minmax(0,1.35fr)]">
+              <Card className="h-fit rounded-lg">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 font-bold text-slate-950">
+                    <Globe2Icon className="size-4" />
+                    管理端 host
+                    {loadingSettings ? <span className="ml-auto size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" /> : null}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">用户从这个域名访问时，登录页会开放邮箱注册入口，注册后自动获得运营管理员身份。</p>
+                  <div className="mt-4 grid gap-2">
+                    <Input placeholder="app.campux.top 或 localhost:5180" value={managementHostDraft} onChange={(event) => setManagementHostDraft(event.target.value)} />
+                    <Button className="font-medium" disabled={savingManagementHost} onClick={() => void saveManagementHost()}>保存管理端 host</Button>
+                  </div>
+                </CardContent>
+              </Card>
+              <OperationsAdminAccessPanel
+                users={operationsAdmins}
                 tenants={visibleTenants}
-                onKeywordChange={(keyword) => {
-                  setUserKeywordDraft(keyword);
-                  setUserKeyword(keyword);
-                  writeOpsUserListPreferences(mode, { keyword, tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
-                  setUserPage(1);
-                }}
-                onKeywordSearch={() => {
-                  setUserKeyword(userKeywordDraft);
-                  writeOpsUserListPreferences(mode, { keyword: userKeywordDraft, tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
-                  setUserPage(1);
-                }}
-                onKeywordClear={() => {
-                  setUserKeywordDraft("");
-                  setUserKeyword("");
-                  writeOpsUserListPreferences(mode, { keyword: "", tenantFilterId: userTenantFilterId, roleFilters: selectedUserRoleFilters });
-                  setUserPage(1);
-                }}
-                onClearRoleFilters={() => {
-                  setSelectedUserRoleFilters([]);
-                  writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: userTenantFilterId, roleFilters: [] });
-                  setUserPage(1);
-                }}
-                onTenantFilterChange={changeUserTenantFilter}
-                onOpenAssignMembership={openMembershipDialog}
-                onRevokeMembership={revokeUserTenantMembership}
-                onPageChange={setUserPage}
-                onToggleRoleFilter={toggleUserRoleFilter}
+                loading={loadingOperationsAdmins}
+                busyKey={accessBusyKey}
+                grantTenantByUserId={grantTenantByUserId}
+                onGrantTenantChange={(userId, tenantId) => setGrantTenantByUserId((current) => ({ ...current, [userId]: tenantId }))}
+                onGrant={grantOperationsAdminTenant}
+                onRevoke={revokeOperationsAdminTenant}
               />
-            </TabsContent>
+            </div>
+          ) : null}
+        </section>
+      </div>
 
-            <TabsContent value="audit" className="mt-4">
-              <AuditLogTable logs={auditLogs} loading={loadingAudit} pagination={auditPagination} onPageChange={setAuditPage} />
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+      <Dialog open={tenantCreateOpen} onOpenChange={(open) => !creatingTenant && setTenantCreateOpen(open)}>
+        <DialogContent
+          className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
+          onEscapeKeyDown={(event) => creatingTenant && event.preventDefault()}
+          onInteractOutside={(event) => creatingTenant && event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>新建校园墙</DialogTitle>
+            <DialogDescription>创建后会自动打开接入引导；访问标识创建后不可修改。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 px-5">
+            <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
+              校园墙名称
+              <Input placeholder="例如：广府校园墙" value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} />
+            </label>
+            <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
+              访问标识
+              <div className="flex gap-2">
+                <Input placeholder="例如 gzhu-wall" value={tenantForm.slug} maxLength={tenantSlugMaxLength} aria-invalid={slugLengthInvalid || slugFormatInvalid || slugAlreadyUsed} onChange={(event) => setTenantForm({ ...tenantForm, slug: event.target.value })} />
+                <Button type="button" variant="outline" size="icon" title="重新生成访问标识" className="shrink-0" onClick={() => setTenantForm({ ...tenantForm, slug: generateWallSlug(existingTenantSlugs) })}><RefreshCwIcon className="size-4" /></Button>
+              </div>
+            </label>
+            <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-900">
+              <p>{tenantSlugHint}</p>
+              {expectedTenantHost ? <p className="mt-1 break-all">{expectedTenantHostLabel}：<span className="font-mono">{expectedTenantHost}</span></p> : <p className="mt-1">配置自动域名后，这里会显示完整的预计访问域名。</p>}
+              <p className="mt-1 text-blue-700">规则：4-16 个字符，只能使用小写字母、数字和连字符，且不能以连字符开头或结尾。</p>
+              {slugLengthInvalid ? <p className="mt-1 text-red-700">访问标识需要 4 到 16 个字符。</p> : null}
+              {slugFormatInvalid ? <p className="mt-1 text-red-700">访问标识格式不正确。</p> : null}
+              {slugAlreadyUsed ? <p className="mt-1 text-red-700">这个访问标识已经被使用。</p> : null}
+              {expectedHostAlreadyUsed ? <p className="mt-1 text-red-700">这个访问域名已经被使用。</p> : null}
+            </div>
+            <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
+              专属域名 <span className="font-normal text-slate-400">可选</span>
+              <Input placeholder="留空由平台自动分配" value={tenantForm.host} onChange={(event) => setTenantForm({ ...tenantForm, host: event.target.value })} />
+            </label>
+            <div className="grid gap-1.5 text-sm font-semibold text-slate-700">
+              <label htmlFor="ops-tenant-theme-color">主题色</label>
+              <div className="grid grid-cols-[48px_minmax(0,1fr)] gap-2">
+                <input aria-label="选择主题色" type="color" className="h-9 w-12 cursor-pointer rounded-md border border-slate-200 bg-white p-1" value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
+                <Input id="ops-tenant-theme-color" aria-label="主题色十六进制值" value={tenantForm.themeColor} onChange={(event) => setTenantForm({ ...tenantForm, themeColor: event.target.value })} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={creatingTenant} onClick={() => setTenantCreateOpen(false)}>取消</Button>
+            <Button disabled={creatingTenant || enteringTenantId.length > 0 || tenantForm.name.trim().length === 0 || tenantFormSlug.length === 0 || tenantFormInvalid} onClick={() => void createTenant()}>
+              <PlusIcon data-icon="inline-start" />
+              {creatingTenant ? "创建中..." : "创建并继续接入"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(membershipDialogUser)} onOpenChange={(open) => !open && setMembershipDialogUser(null)}>
         <DialogContent>
@@ -1118,9 +1277,7 @@ export function OpsPanel({
                 </SelectTrigger>
                 <SelectContent>
                   {visibleTenants.map((tenant) => (
-                    <SelectItem key={tenant.id} value={tenant.id}>
-                      {tenant.name} · {statusLabels[tenant.status]}
-                    </SelectItem>
+                    <SelectItem key={tenant.id} value={tenant.id}>{tenant.name} · {statusLabels[tenant.status]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1128,15 +1285,11 @@ export function OpsPanel({
             <label className="text-sm font-semibold text-slate-700">
               身份
               <Select value={membershipForm.role} onValueChange={(role) => setMembershipForm({ ...membershipForm, role: role as TenantRole | SystemRole })}>
-                <SelectTrigger className="mt-1 w-full bg-white">
-                  <SelectValue placeholder="选择身份" />
-                </SelectTrigger>
+                <SelectTrigger className="mt-1 w-full bg-white"><SelectValue placeholder="选择身份" /></SelectTrigger>
                 <SelectContent>
                   {isSystemMode ? (
                     <>
-                      <SelectItem value="operations_admin" disabled={membershipDialogUser?.systemRole === "system_operator"}>
-                        运营管理员（平台）
-                      </SelectItem>
+                      <SelectItem value="operations_admin" disabled={membershipDialogUser?.systemRole === "system_operator"}>运营管理员（平台）</SelectItem>
                       <SelectItem value="system_operator">系统运维（全局）</SelectItem>
                     </>
                   ) : null}
@@ -1155,15 +1308,9 @@ export function OpsPanel({
             </p>
           </div>
           <DialogFooter>
-            <Button variant="outline" disabled={assigningMembership} onClick={() => setMembershipDialogUser(null)}>
-              取消
-            </Button>
+            <Button variant="outline" disabled={assigningMembership} onClick={() => setMembershipDialogUser(null)}>取消</Button>
             <Button
-              disabled={
-                assigningMembership ||
-                (membershipForm.role === "operations_admin" && membershipDialogUser?.systemRole === "system_operator") ||
-                ((membershipForm.role !== "system_operator" && membershipForm.role !== "operations_admin") && !membershipForm.tenantId)
-              }
+              disabled={assigningMembership || (membershipForm.role === "operations_admin" && membershipDialogUser?.systemRole === "system_operator") || ((membershipForm.role !== "system_operator" && membershipForm.role !== "operations_admin") && !membershipForm.tenantId)}
               onClick={() => void assignMembership()}
             >
               <ShieldPlusIcon data-icon="inline-start" />
@@ -1224,7 +1371,7 @@ function OnboardingGuide({
   ];
 
   return (
-    <details className="mt-4 rounded-md border border-slate-200 bg-white">
+    <details className="rounded-lg border border-slate-200 bg-white">
       <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-sm font-bold text-slate-950">{isSystemMode ? "平台交付流程" : "自助开墙流程"}</p>
@@ -1305,7 +1452,7 @@ function OperationsAdminAccessPanel({
   const visibleTenantIds = useMemo(() => new Set(tenants.map((tenant) => tenant.id)), [tenants]);
 
   return (
-    <Card className="mt-4 rounded-md">
+    <Card className="rounded-lg">
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 font-bold text-slate-900">
@@ -1317,7 +1464,7 @@ function OperationsAdminAccessPanel({
         <p className="mt-1 text-sm text-slate-500">
           系统运维在这里查看运营管理员身份，并配置他们可以管理哪些校园墙资源。
         </p>
-        <div className="mt-4 grid gap-3">
+        <div className="mt-4 grid max-h-[calc(100dvh-260px)] gap-3 overflow-y-auto pr-1 2xl:grid-cols-2">
           {users.map((user) => {
             const adminMemberships = user.memberships.filter((membership) => membership.role === "admin" && visibleTenantIds.has(membership.tenant.id));
             const assignedTenantIds = new Set(adminMemberships.map((membership) => membership.tenant.id));
@@ -1628,22 +1775,7 @@ function InlineLoading({ title }: { title: string }) {
   );
 }
 
-function StatusSummary({ title, value, tone }: { title: string; value: number; tone: "green" | "amber" | "slate" }) {
-  const toneClass = {
-    green: "bg-green-50 text-green-800",
-    amber: "bg-amber-50 text-amber-800",
-    slate: "bg-slate-100 text-slate-700",
-  }[tone];
-
-  return (
-    <div className={`rounded-md px-4 py-3 ${toneClass}`}>
-      <p className="text-sm font-bold">{title}</p>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-md border border-slate-100 bg-white px-3 py-2">
       <p className="text-xs text-slate-500">{label}</p>
@@ -1652,21 +1784,32 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function MetricCard({ title, value, icon: Icon, accent }: { title: string; value: number; icon: typeof ActivityIcon; accent: "blue" | "violet" | "amber" | "rose" }) {
+function TenantMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-white px-4 py-3">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <p className="mt-0.5 text-lg font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function MetricCard({ title, value, icon: Icon, accent }: { title: string; value: number | string; icon: typeof ActivityIcon; accent: "blue" | "green" | "violet" | "amber" | "rose" | "slate" }) {
   const accentClass = {
     blue: "product-accent-blue",
+    green: "product-accent-green",
     violet: "product-accent-violet",
     amber: "product-accent-amber",
     rose: "product-accent-rose",
+    slate: "border-slate-200 bg-slate-100 text-slate-700",
   }[accent];
 
   return (
-    <div className={`rounded-md border px-4 py-3 ${accentClass}`}>
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Icon className="size-4" />
-        {title}
+    <div className={`min-w-0 rounded-lg border px-3 py-3 ${accentClass}`}>
+      <div className="flex items-center gap-1.5 text-xs font-semibold">
+        <Icon className="size-3.5 shrink-0" />
+        <span className="truncate">{title}</span>
       </div>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
+      <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
