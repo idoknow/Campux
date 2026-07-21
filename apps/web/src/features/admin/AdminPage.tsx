@@ -283,9 +283,9 @@ function isBanListPreferences(value: unknown): value is BanListPreferences {
 }
 
 function readMemberListPreferences(tenantId: string): MemberListPreferences {
-  if (hasAnyQueryParam(["q", "role", "sort", "page", "user"])) {
+  if (hasAnyQueryParam(["member_q", "role", "sort", "member_page", "user"])) {
     return {
-      keyword: readQueryParam("q"),
+      keyword: readQueryParam("member_q"),
       roleFilter: readMemberRoleQuery(),
       sort: readMemberSortQuery(),
     };
@@ -294,9 +294,9 @@ function readMemberListPreferences(tenantId: string): MemberListPreferences {
 }
 
 function readBanListPreferences(tenantId: string): BanListPreferences {
-  if (hasAnyQueryParam(["q", "active", "page"])) {
+  if (hasAnyQueryParam(["ban_q", "active", "ban_page"])) {
     return {
-      keyword: readQueryParam("q"),
+      keyword: readQueryParam("ban_q"),
       onlyActive: readQueryParam("active", "1") !== "0",
     };
   }
@@ -351,12 +351,12 @@ export function AdminPage({
   const [memberKeyword, setMemberKeyword] = useState(() => readMemberListPreferences(selectedTenant.id).keyword);
   const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | TenantRole>(() => readMemberListPreferences(selectedTenant.id).roleFilter);
   const [memberSort, setMemberSort] = useState<MemberSort>(() => readMemberListPreferences(selectedTenant.id).sort);
-  const [memberPage, setMemberPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
+  const [memberPage, setMemberPage] = useState(() => readQueryInt("member_page", 1, { min: 1 }));
   const [memberPagination, setMemberPagination] = useState<Pagination>(() => defaultPagination());
   const [tenantMemberTotal, setTenantMemberTotal] = useState(0);
   const [membersLoading, setMembersLoading] = useState(false);
   const [banKeyword, setBanKeyword] = useState(() => readBanListPreferences(selectedTenant.id).keyword);
-  const [banPage, setBanPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
+  const [banPage, setBanPage] = useState(() => readQueryInt("ban_page", 1, { min: 1 }));
   const [banPagination, setBanPagination] = useState<Pagination>(() => defaultPagination());
   const [bansLoading, setBansLoading] = useState(false);
   const [onlyActiveBans, setOnlyActiveBans] = useState(() => readBanListPreferences(selectedTenant.id).onlyActive);
@@ -392,14 +392,14 @@ export function AdminPage({
       setMemberKeyword(preferences.keyword);
       setMemberRoleFilter(preferences.roleFilter);
       setMemberSort(preferences.sort);
-      setMemberPage(readQueryInt("page", 1, { min: 1 }));
+      setMemberPage(readQueryInt("member_page", 1, { min: 1 }));
       return;
     }
     if (activeTab === "bans") {
       const preferences = readBanListPreferences(selectedTenant.id);
       setBanKeyword(preferences.keyword);
       setOnlyActiveBans(preferences.onlyActive);
-      setBanPage(readQueryInt("page", 1, { min: 1 }));
+      setBanPage(readQueryInt("ban_page", 1, { min: 1 }));
     }
   }, [activeTab, selectedTenant.id]);
 
@@ -1111,23 +1111,23 @@ export function AdminPage({
                   setMemberKeyword(value);
                   setMemberPage(1);
                   writeMemberListPreferences(selectedTenant.id, { keyword: value, roleFilter: memberRoleFilter, sort: memberSort });
-                  writeQueryParams({ q: value.trim() || null, page: null });
+                  writeQueryParams({ member_q: value.trim() || null, member_page: null, q: null, page: null });
                 }}
                 onRoleFilterChange={(value) => {
                   setMemberRoleFilter(value);
                   setMemberPage(1);
                   writeMemberListPreferences(selectedTenant.id, { keyword: memberKeyword, roleFilter: value, sort: memberSort });
-                  writeQueryParams({ role: value === "all" ? null : value, page: null });
+                  writeQueryParams({ role: value === "all" ? null : value, member_page: null, page: null });
                 }}
                 onSortChange={(value) => {
                   setMemberSort(value);
                   setMemberPage(1);
                   writeMemberListPreferences(selectedTenant.id, { keyword: memberKeyword, roleFilter: memberRoleFilter, sort: value });
-                  writeQueryParams({ sort: value === "joined_asc" ? null : value, page: null });
+                  writeQueryParams({ sort: value === "joined_asc" ? null : value, member_page: null, page: null });
                 }}
                 onPageChange={(page) => {
                   setMemberPage(page);
-                  writeQueryParams({ page: page > 1 ? page : null });
+                  writeQueryParams({ member_page: page > 1 ? page : null, page: null });
                 }}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
@@ -1154,17 +1154,17 @@ export function AdminPage({
                   setBanKeyword(value);
                   setBanPage(1);
                   writeBanListPreferences(selectedTenant.id, { keyword: value, onlyActive: onlyActiveBans });
-                  writeQueryParams({ q: value.trim() || null, page: null });
+                  writeQueryParams({ ban_q: value.trim() || null, ban_page: null, q: null, page: null });
                 }}
                 onOnlyActiveChange={(value) => {
                   setOnlyActiveBans(value);
                   setBanPage(1);
                   writeBanListPreferences(selectedTenant.id, { keyword: banKeyword, onlyActive: value });
-                  writeQueryParams({ active: value ? null : "0", page: null });
+                  writeQueryParams({ active: value ? null : "0", ban_page: null, page: null });
                 }}
                 onPageChange={(page) => {
                   setBanPage(page);
-                  writeQueryParams({ page: page > 1 ? page : null });
+                  writeQueryParams({ ban_page: page > 1 ? page : null, page: null });
                 }}
                 onRefresh={() => void refreshBans()}
                 onSubmit={() => void banUser()}

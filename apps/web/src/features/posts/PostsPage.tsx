@@ -237,10 +237,10 @@ function isReviewListPreferences(value: unknown): value is ReviewListPreferences
 }
 
 function readReviewListPreferences(tenantId: string): ReviewListPreferences {
-  if (hasAnyQueryParam(["status", "q", "page", "post"])) {
+  if (hasAnyQueryParam(["status", "review_q", "review_page", "post"])) {
     return {
       status: readReviewStatusQuery(),
-      keyword: readQueryParam("q"),
+      keyword: readQueryParam("review_q"),
     };
   }
   return readListPreferences(reviewPreferencesKey(tenantId), defaultReviewListPreferences, isReviewListPreferences);
@@ -286,7 +286,7 @@ export function PostsPage({
   const [pendingRecallLoading, setPendingRecallLoading] = useState(false);
   const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewListPreferences(tenantId).status);
   const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
-  const [reviewPage, setReviewPage] = useState(() => readQueryInt("page", 1, { min: 1 }));
+  const [reviewPage, setReviewPage] = useState(() => readQueryInt("review_page", 1, { min: 1 }));
   const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
   const [publishedTags, setPublishedTags] = useState<PostTag[]>([]);
   const [publishedTagFilter, setPublishedTagFilter] = useState("all");
@@ -356,7 +356,7 @@ export function PostsPage({
     const preferences = readReviewListPreferences(tenantId);
     setReviewStatus(preferences.status);
     setReviewKeyword(preferences.keyword);
-    setReviewPage(readQueryInt("page", 1, { min: 1 }));
+    setReviewPage(readQueryInt("review_page", 1, { min: 1 }));
     setDetailPostId(readQueryParam("post"));
   }, [activeTab, tenantId]);
 
@@ -768,14 +768,14 @@ export function PostsPage({
 
   function setReviewPageWithQuery(page: number) {
     setReviewPage(page);
-    writeQueryParams({ page: page > 1 ? page : null });
+    writeQueryParams({ review_page: page > 1 ? page : null, page: null });
   }
 
   function setReviewStatusWithQuery(value: ReviewStatusFilter) {
     setReviewStatus(value);
     setReviewPage(1);
     writeReviewListPreferences(tenantId, { status: value, keyword: reviewKeyword });
-    writeQueryParams({ status: value === "pending_approval" ? null : value, page: null, post: null });
+    writeQueryParams({ status: value === "pending_approval" ? null : value, review_page: null, page: null, post: null });
     setDetailPostId("");
   }
 
@@ -784,7 +784,7 @@ export function PostsPage({
     setReviewPage(1);
     setDetailPostId("");
     writeReviewListPreferences(tenantId, { status: reviewStatus, keyword });
-    writeQueryParams({ q: keyword || null, status: reviewStatus === "pending_approval" ? null : reviewStatus, page: null, post: null });
+    writeQueryParams({ review_q: keyword || null, q: null, status: reviewStatus === "pending_approval" ? null : reviewStatus, review_page: null, page: null, post: null });
     void refreshReviewPosts(1);
   }
 

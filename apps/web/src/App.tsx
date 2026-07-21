@@ -174,7 +174,7 @@ export function App() {
   function openPostDetailFromAdmin(post: { id: string; displayId: number; status: string }) {
     const params = new URLSearchParams({
       status: "all",
-      q: String(post.displayId),
+      review_q: String(post.displayId),
       post: post.id,
     });
     const path = `/posts/review?${params}`;
