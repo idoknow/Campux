@@ -28,6 +28,7 @@ import {
   buildMembershipRemovalConfirmation,
   buildMembershipRoleChangeConfirmation,
 } from "./membership-removal-confirmation";
+import { buildOverviewTenantNavigation } from "./overview-tenant-navigation";
 import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -205,6 +206,17 @@ export function OpsPanel({
   const [tenantKeyword, setTenantKeyword] = useState("");
   const [tenantCreateOpen, setTenantCreateOpen] = useState(false);
   const [tenantForm, setTenantForm] = useState(() => createTenantFormState());
+
+  function navigateToTenantSection(tenantId: string) {
+    const navigation = buildOverviewTenantNavigation({
+      activeSection,
+      selectedTenantId,
+      tenantKeyword,
+    }, tenantId);
+    setTenantKeyword(navigation.tenantKeyword);
+    setSelectedTenantId(navigation.selectedTenantId);
+    setActiveSection(navigation.activeSection);
+  }
 
   const visibleTenants = useMemo(
     () => showArchivedTenants ? tenants : tenants.filter((tenant) => tenant.status !== "archived"),
@@ -543,7 +555,7 @@ ${impact}`)) {
     }
 
     setTenantCreateOpen(false);
-    setActiveSection("tenants");
+    navigateToTenantSection(created?.id ?? createdTenants[0]?.id ?? "");
 
     const refreshResults = await Promise.allSettled([
       refreshOverview(created?.id),
@@ -906,10 +918,7 @@ ${impact}`)) {
                           key={tenant.id}
                           type="button"
                           className="grid w-full gap-2 px-4 py-3 text-left transition hover:bg-slate-50 sm:grid-cols-[minmax(0,1.2fr)_110px_110px_24px] sm:items-center"
-                          onClick={() => {
-                            setSelectedTenantId(tenant.id);
-                            setActiveSection("tenants");
-                          }}
+                          onClick={() => navigateToTenantSection(tenant.id)}
                         >
                           <span className="min-w-0">
                             <span className="flex items-center gap-2">
