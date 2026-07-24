@@ -51,11 +51,17 @@ export function readExpectedBatchFanoutCount(comments: string[]) {
 }
 
 export function isIncompleteBatchFanout(input: {
+  ownerStatus: string;
   flushedAt: Date | null;
   expectedCount: number | null;
   actualCount: number;
+  hasIncompleteRecoveryAudit?: boolean;
 }) {
-  return input.flushedAt !== null
+  const eligibleOwner = input.ownerStatus === "publishing"
+    || (input.hasIncompleteRecoveryAudit === true
+      && (input.ownerStatus === "partially_failed" || input.ownerStatus === "failed"));
+  return eligibleOwner
+    && input.flushedAt !== null
     && input.expectedCount !== null
     && input.actualCount < input.expectedCount;
 }
@@ -246,10 +252,14 @@ export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBas
 
 async function reconcileIncompleteLegacyBatchFanouts(logger: FastifyBaseLogger) {
   const candidates = await prisma.publishBatch.findMany({
-    where: { flushedAt: { not: null } },
+    where: {
+      status: "publishing",
+      flushedAt: { not: null },
+    },
     select: {
       id: true,
       tenantId: true,
+      status: true,
       flushedAt: true,
       attempts: { select: { id: true, status: true, lastError: true } },
       items: {
@@ -280,6 +290,7 @@ async function reconcileIncompleteLegacyBatchFanouts(logger: FastifyBaseLogger) 
     const comments = candidate.items.flatMap((item) => item.post.logs.map((log) => log.comment));
     const expectedCount = readExpectedBatchFanoutCount(comments);
     if (!isIncompleteBatchFanout({
+      ownerStatus: candidate.status,
       flushedAt: candidate.flushedAt,
       expectedCount,
       actualCount: candidate.attempts.length,
@@ -326,6 +337,7 @@ async function reconcileIncompleteLegacyBatchFanouts(logger: FastifyBaseLogger) 
       const freshComments = batch.items.flatMap((item) => item.post.logs.map((log) => log.comment));
       const freshExpectedCount = readExpectedBatchFanoutCount(freshComments);
       if (!isIncompleteBatchFanout({
+        ownerStatus: batch.status,
         flushedAt: batch.flushedAt,
         expectedCount: freshExpectedCount,
         actualCount: batch.attempts.length,
@@ -2049,13 +2061,14 @@ async function refreshBatchPostStatuses(batchId: string) {
     return;
   }
 
-  const expectedFanoutCount = readExpectedBatchFanoutCount(
-    batch.items.flatMap((item) => item.post.logs.map((log) => log.comment)),
-  );
+  const fanoutAuditComments = batch.items.flatMap((item) => item.post.logs.map((log) => log.comment));
+  const expectedFanoutCount = readExpectedBatchFanoutCount(fanoutAuditComments);
   const incompleteFanout = isIncompleteBatchFanout({
+    ownerStatus: batch.status,
     flushedAt: batch.flushedAt,
     expectedCount: expectedFanoutCount,
     actualCount: batch.attempts.length,
+    hasIncompleteRecoveryAudit: fanoutAuditComments.includes(incompleteBatchFanoutAuditComment),
   });
   const derived = incompleteFanout
     ? {

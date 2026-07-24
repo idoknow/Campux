@@ -53,10 +53,15 @@ describe("publishing recovery and error logging", () => {
       "批量发布：已生成 2 个发布任务（与其他 2 条稿件合并为一条说说）",
       "其他日志",
     ])).toBe(2);
-    expect(isIncompleteBatchFanout({ flushedAt: new Date(now), expectedCount: 2, actualCount: 1 })).toBe(true);
-    expect(isIncompleteBatchFanout({ flushedAt: new Date(now), expectedCount: 1, actualCount: 1 })).toBe(false);
-    expect(isIncompleteBatchFanout({ flushedAt: new Date(now), expectedCount: null, actualCount: 0 })).toBe(false);
-    expect(isIncompleteBatchFanout({ flushedAt: null, expectedCount: 2, actualCount: 1 })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "publishing", flushedAt: new Date(now), expectedCount: 2, actualCount: 1 })).toBe(true);
+    expect(isIncompleteBatchFanout({ ownerStatus: "publishing", flushedAt: new Date(now), expectedCount: 1, actualCount: 1 })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "publishing", flushedAt: new Date(now), expectedCount: null, actualCount: 0 })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "publishing", flushedAt: null, expectedCount: 2, actualCount: 1 })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "published", flushedAt: new Date(now), expectedCount: 2, actualCount: 1 })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "published", flushedAt: new Date(now), expectedCount: 2, actualCount: 1, hasIncompleteRecoveryAudit: true })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "failed", flushedAt: new Date(now), expectedCount: 2, actualCount: 1 })).toBe(false);
+    expect(isIncompleteBatchFanout({ ownerStatus: "partially_failed", flushedAt: new Date(now), expectedCount: 2, actualCount: 1, hasIncompleteRecoveryAudit: true })).toBe(true);
+    expect(isIncompleteBatchFanout({ ownerStatus: "failed", flushedAt: new Date(now), expectedCount: 2, actualCount: 0, hasIncompleteRecoveryAudit: true })).toBe(true);
   });
 
   it("recovers only stale publishing posts with neither attempts nor a batch", () => {
