@@ -3,13 +3,111 @@ import {
   buildQZonePostUrl,
   deriveAggregateStatus,
   getOfficialQqForumQZoneLinkBotAccountId,
+  isRecoverableOrphanPublishingPost,
+  interruptedPublishAttemptRecoveryData,
   publishTargetIntervalSeconds,
+  resolveEarliestPublishDispatchAt,
+  shouldSkipBatchPublishFanout,
   renderOfficialQqForumCaption,
   renderOfficialQqForumThreadTitle,
   republishFailureRetryDelayMs,
+  serializePublishErrorForLog,
+  shouldAutomaticallyRequeueFailedAttempt,
   shouldAppendOfficialQqForumQZoneLink,
   shouldWaitForQZoneAttempt,
 } from "./publishing";
+
+describe("publishing recovery and error logging", () => {
+  const now = new Date("2026-07-24T00:00:00.000Z").getTime();
+
+  it("fails interrupted attempts without scheduling an ambiguous retry", () => {
+    expect(interruptedPublishAttemptRecoveryData()).toEqual({
+      status: "failed",
+      lastError: "发布进程中断，远端结果不确定；为避免重复发布，系统未自动重试",
+      nextRunAt: null,
+    });
+  });
+
+  it("replays only batch fanouts whose durable completion marker is missing", () => {
+    expect(shouldSkipBatchPublishFanout({
+      ownerStatus: "publishing",
+      flushedAt: null,
+      attempts: [{ status: "queued" }],
+    })).toBe(false);
+    expect(shouldSkipBatchPublishFanout({
+      ownerStatus: "publishing",
+      flushedAt: new Date(now),
+      attempts: [{ status: "queued" }],
+    })).toBe(true);
+    expect(shouldSkipBatchPublishFanout({
+      ownerStatus: "published",
+      flushedAt: null,
+      attempts: [],
+    })).toBe(true);
+  });
+
+  it("recovers only stale publishing posts with neither attempts nor a batch", () => {
+    const stale = new Date(now - 10 * 60_000);
+    expect(isRecoverableOrphanPublishingPost({ updatedAt: stale, publishAttemptCount: 0, batchItemId: null }, now)).toBe(true);
+    expect(isRecoverableOrphanPublishingPost({ updatedAt: new Date(now - 60_000), publishAttemptCount: 0, batchItemId: null }, now)).toBe(false);
+    expect(isRecoverableOrphanPublishingPost({ updatedAt: stale, publishAttemptCount: 1, batchItemId: null }, now)).toBe(false);
+    expect(isRecoverableOrphanPublishingPost({ updatedAt: stale, publishAttemptCount: 0, batchItemId: "batch-item" }, now)).toBe(false);
+  });
+
+  it("keeps publish error logs useful while redacting credential-like values", () => {
+    const cause = new Error("upstream authorization: Bearer cause-secret");
+    cause.stack = "Error: upstream cookie=cause-cookie\n    at upstream";
+    const error = new Error("upload failed p_skey=secret-value token: bearer-value", { cause });
+    error.stack = "Error: upload failed p_skey=stack-secret\n    at publish";
+
+    const serialized = serializePublishErrorForLog(error);
+    expect(serialized.errorName).toBe("Error");
+    expect(serialized.errorMessage).toBe("upload failed p_skey=[REDACTED] token: [REDACTED]");
+    expect(serialized.errorStack).toBe("Error: upload failed p_skey=[REDACTED]\n    at publish");
+    expect(serialized.errorCause).toContain("authorization: [REDACTED]");
+    expect(serialized.errorCause).toContain("cookie=[REDACTED]");
+    expect(JSON.stringify(serialized)).not.toContain("secret");
+
+    const structured = serializePublishErrorForLog(new Error(
+      '{"access_token":"access-secret","client_secret":"client-secret","authorization":"Basic dXNlcjpwYXNz"}',
+    ));
+    expect(structured.errorMessage).toContain('\"access_token\":\"[REDACTED]\"');
+    expect(structured.errorMessage).toContain('\"client_secret\":\"[REDACTED]\"');
+    expect(structured.errorMessage).toContain('\"authorization\":\"[REDACTED]\"');
+    expect(structured.errorMessage).not.toContain("access-secret");
+    expect(structured.errorMessage).not.toContain("client-secret");
+    expect(structured.errorMessage).not.toContain("dXNlcjpwYXNz");
+  });
+
+  it("redacts cookie lines, custom error names, and encoded credential payloads", () => {
+    const cookieError = new Error("Cookie: session=opaque-value; p_skey=cookie-value");
+    cookieError.name = "Auth access_token=name-value";
+    const cookieLog = serializePublishErrorForLog(cookieError);
+    expect(cookieLog.errorName).toBe("Auth access_token=[REDACTED]");
+    expect(cookieLog.errorMessage).toBe("Cookie: [REDACTED]");
+    expect(JSON.stringify(cookieLog)).not.toContain("opaque-value");
+    expect(JSON.stringify(cookieLog)).not.toContain("cookie-value");
+    expect(JSON.stringify(cookieLog)).not.toContain("name-value");
+
+    const encodedLog = serializePublishErrorForLog(new Error(
+      "payload %7B%22access_token%22%3A%22encoded-value%22%7D",
+    ));
+    expect(encodedLog.errorMessage).toBe("[REDACTED encoded credential diagnostic]");
+    expect(JSON.stringify(encodedLog)).not.toContain("encoded-value");
+
+    const escapedJsonLog = serializePublishErrorForLog(new Error(
+      String.raw`upstream {\"access_token\":\"escaped-secret\"}`,
+    ));
+    expect(escapedJsonLog.errorMessage).toBe("[REDACTED encoded credential diagnostic]");
+    expect(JSON.stringify(escapedJsonLog)).not.toContain("escaped-secret");
+
+    const malformedEncodedLog = serializePublishErrorForLog(new Error(
+      "payload %70_skey%3Dencoded-secret%ZZ",
+    ));
+    expect(malformedEncodedLog.errorMessage).toBe("[REDACTED encoded credential diagnostic]");
+    expect(JSON.stringify(malformedEncodedLog)).not.toContain("encoded-secret");
+  });
+});
 
 describe("publishTargetIntervalSeconds", () => {
   it("QQ 官方机器人发布目标也使用配置的风控间隔", () => {
@@ -21,9 +119,43 @@ describe("publishTargetIntervalSeconds", () => {
   });
 });
 
+describe("resolveEarliestPublishDispatchAt", () => {
+  const now = new Date("2026-07-24T00:00:00.000Z");
+
+  it("allows an already-scheduled attempt immediately when the bot has no recent activity", () => {
+    expect(resolveEarliestPublishDispatchAt({ now, intervalSeconds: 30 })).toEqual(now);
+  });
+
+  it("defers from persisted bot activity so an overdue backlog cannot burst", () => {
+    expect(resolveEarliestPublishDispatchAt({
+      now,
+      intervalSeconds: 30,
+      latestActivityAt: new Date(now.getTime() - 5_000),
+    })).toEqual(new Date(now.getTime() + 25_000));
+  });
+
+  it("does not add delay when the configured interval is zero", () => {
+    expect(resolveEarliestPublishDispatchAt({
+      now,
+      intervalSeconds: 0,
+      latestActivityAt: new Date(now.getTime() - 1_000),
+    })).toEqual(now);
+  });
+});
+
 describe("republish failure timeout", () => {
   it("uses a 12 hour retry delay", () => {
     expect(republishFailureRetryDelayMs).toBe(12 * 60 * 60 * 1000);
+  });
+
+  it("never automatically requeues ambiguous or interrupted non-idempotent failures", () => {
+    expect(shouldAutomaticallyRequeueFailedAttempt(
+      "QZone 发布请求超时（远端可能已接收，为避免重复发布未自动重试）",
+    )).toBe(false);
+    expect(shouldAutomaticallyRequeueFailedAttempt(
+      interruptedPublishAttemptRecoveryData().lastError,
+    )).toBe(false);
+    expect(shouldAutomaticallyRequeueFailedAttempt("普通可重试发布失败")).toBe(true);
   });
 });
 

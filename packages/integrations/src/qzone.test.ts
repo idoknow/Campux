@@ -1,5 +1,107 @@
 import { describe, expect, test } from "bun:test";
-import { buildPublishImageList, buildPublishImageListFromGroups, parseQZoneCommentList, parseQZoneEmotionMetricsPayload } from "./qzone";
+import {
+  buildPublishImageList,
+  buildPublishImageListFromGroups,
+  isAmbiguousQZonePublishTimeout,
+  parseQZoneCommentList,
+  parseQZoneEmotionMetricsPayload,
+  qzoneFetchWithTimeout,
+  qzonePublishRequestTimeoutMs,
+  redactQZoneRequestBodyForLog,
+} from "./qzone";
+
+describe("qzone publish request timeout", () => {
+  test("redacts upload form credentials before verbose persistence", () => {
+    const body = new URLSearchParams({
+      filename: "image.jpg",
+      skey: "live-skey",
+      p_skey: "live-p-skey",
+      picfile: "base64-payload",
+    });
+    expect(redactQZoneRequestBodyForLog(body, { picfile: "<base64 14 bytes>" })).toEqual({
+      filename: "image.jpg",
+      skey: "[REDACTED]",
+      p_skey: "[REDACTED]",
+      picfile: "<base64 14 bytes>",
+    });
+  });
+
+  test("uses a bounded production timeout", () => {
+    expect(qzonePublishRequestTimeoutMs).toBe(30_000);
+  });
+
+  test("aborts a fetch that never settles", async () => {
+    let observedSignal: AbortSignal | null = null;
+    const fetcher = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        reject(new Error("missing abort signal"));
+        return;
+      }
+      observedSignal = signal;
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })) as typeof fetch;
+
+    await expect(qzoneFetchWithTimeout("https://example.invalid/hung", {}, 10, fetcher)).rejects.toThrow();
+    expect(observedSignal).not.toBeNull();
+    expect((observedSignal as unknown as AbortSignal).aborted).toBe(true);
+  });
+
+  test("keeps the timeout active while the response body is consumed", async () => {
+    const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("missing abort signal");
+      }
+      return {
+        text: () => new Promise<string>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const response = await qzoneFetchWithTimeout("https://example.invalid/slow-body", {}, 10, fetcher);
+    await expect(response.text()).rejects.toThrow();
+  });
+
+  test("preserves caller cancellation while also enforcing the timeout", async () => {
+    const caller = new AbortController();
+    let observedSignal: AbortSignal | null = null;
+    const fetcher = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        reject(new Error("missing abort signal"));
+        return;
+      }
+      observedSignal = signal;
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })) as typeof fetch;
+
+    const request = qzoneFetchWithTimeout("https://example.invalid/cancelled", { signal: caller.signal }, 1_000, fetcher);
+    caller.abort(new Error("caller cancelled"));
+    await expect(request).rejects.toThrow("caller cancelled");
+    expect(observedSignal).not.toBeNull();
+    expect((observedSignal as unknown as AbortSignal).aborted).toBe(true);
+  });
+
+  test("treats only a response-less final publish timeout as ambiguous", () => {
+    const request = { method: "POST", url: "https://example.invalid", headers: {} };
+    expect(isAmbiguousQZonePublishTimeout([
+      { label: "publish_emotion", request, error: "TimeoutError: timed out" },
+    ])).toBe(true);
+    expect(isAmbiguousQZonePublishTimeout([
+      { label: "upload:image.jpg", request, error: "TimeoutError" },
+    ])).toBe(false);
+    expect(isAmbiguousQZonePublishTimeout([
+      {
+        label: "publish_emotion",
+        request,
+        error: "TimeoutError",
+        response: { status: 500, statusText: "error", headers: {}, body: "failed" },
+      },
+    ])).toBe(false);
+  });
+});
 
 describe("buildPublishImageList (batch multi-card ordering)", () => {
   const card1 = new Uint8Array([1]);

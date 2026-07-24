@@ -353,6 +353,7 @@ model BotAccount {
   privateMessagesReceived Int    @default(0)
   adminRepliesSent        Int    @default(0)
   lastSeenAt     DateTime?
+  lastPublishStartedAt DateTime?
   createdAt      DateTime        @default(now())
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   publishTargets PublishTarget[]

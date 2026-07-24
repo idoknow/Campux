@@ -93,8 +93,11 @@ describe("applySqliteBaseline", () => {
     const dbPath = join(dir, "upgrade.db");
     const url = `file:${dbPath}`;
     const currentBaseline = readFileSync(join(import.meta.dir, "../prisma/sqlite-baseline.sql"), "utf8");
-    const oldBaseline = currentBaseline.replace(NEW_PRIVATE_REPLY, OLD_PRIVATE_REPLY);
+    const oldBaseline = currentBaseline
+      .replace(NEW_PRIVATE_REPLY, OLD_PRIVATE_REPLY)
+      .replace('    "lastPublishStartedAt" DATETIME,\n', "");
     expect(oldBaseline).not.toBe(currentBaseline);
+    expect(oldBaseline).not.toContain('"lastPublishStartedAt"');
 
     try {
       const before = new Database(dbPath);
@@ -131,6 +134,7 @@ describe("applySqliteBaseline", () => {
 
       const result = applySqliteBaseline(currentBaseline, url, silentLogger);
       expect(result.applied).toContain("20260713120000_auto_register_on_first_private_message");
+      expect(result.applied).toContain("20260724090000_add_bot_last_publish_started_at");
       expect(result.skipped).toContain("0_sqlite_baseline");
 
       const after = new Database(dbPath);
@@ -145,16 +149,25 @@ describe("applySqliteBaseline", () => {
         .query(`SELECT "dflt_value" FROM pragma_table_info('BotAccount') WHERE "name" = 'userMessageReply'`)
         .get() as { dflt_value: string };
       expect(column.dflt_value).toContain("首次私聊会自动注册 Campux 账号");
+      const publishStartedColumn = after
+        .query(`SELECT "name" FROM pragma_table_info('BotAccount') WHERE "name" = 'lastPublishStartedAt'`)
+        .get();
+      expect(publishStartedColumn).not.toBeNull();
       const migration = after
         .query(`SELECT "migration_name" FROM "_prisma_migrations" WHERE "migration_name" = ?`)
         .get("20260713120000_auto_register_on_first_private_message");
       expect(migration).not.toBeNull();
+      const publishStartedMigration = after
+        .query(`SELECT "migration_name" FROM "_prisma_migrations" WHERE "migration_name" = ?`)
+        .get("20260724090000_add_bot_last_publish_started_at");
+      expect(publishStartedMigration).not.toBeNull();
       expect(after.query("PRAGMA foreign_key_check").all()).toEqual([]);
       after.close();
 
       const repeated = applySqliteBaseline(currentBaseline, url, silentLogger);
       expect(repeated.applied).toEqual([]);
       expect(repeated.skipped).toContain("20260713120000_auto_register_on_first_private_message");
+      expect(repeated.skipped).toContain("20260724090000_add_bot_last_publish_started_at");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

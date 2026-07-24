@@ -36,6 +36,28 @@ export type QZoneHttpLog = {
   error?: string;
 };
 
+const qzoneRequestCredentialKeys = new Set([
+  "skey",
+  "p_skey",
+  "cookie",
+  "authorization",
+  "access_token",
+  "refresh_token",
+]);
+
+export function redactQZoneRequestBodyForLog(
+  body: URLSearchParams,
+  overrides: Record<string, string> = {},
+) {
+  const entries = Object.fromEntries(body.entries());
+  for (const key of Object.keys(entries)) {
+    if (qzoneRequestCredentialKeys.has(key.toLowerCase())) {
+      entries[key] = "[REDACTED]";
+    }
+  }
+  return { ...entries, ...overrides };
+}
+
 export type QZonePublishVerbose = {
   mode: "real-qzone";
   targetName: string;
@@ -145,6 +167,20 @@ export class QZonePublishError extends Error {
   }
 }
 
+export function isAmbiguousQZonePublishTimeout(http: QZoneHttpLog[]) {
+  for (let index = http.length - 1; index >= 0; index -= 1) {
+    const exchange = http[index];
+    if (!exchange) {
+      continue;
+    }
+    if (exchange.label !== "publish_emotion") {
+      continue;
+    }
+    return !exchange.response && /(?:timeout|timed out|abort)/i.test(exchange.error ?? "");
+  }
+  return false;
+}
+
 export class QZoneRecallError extends Error {
   verbose: QZoneRecallVerbose;
 
@@ -171,6 +207,46 @@ const emotionUpdateEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qzo
 const emotionMetricsEndpoint = "https://user.qzone.qq.com/proxy/domain/r.qzone.qq.com/cgi-bin/user/qz_opcnt2";
 const uploadImageEndpoint = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image";
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+export const qzonePublishRequestTimeoutMs = 30_000;
+
+function combineQZoneAbortSignals(signals: AbortSignal[]) {
+  const controller = new AbortController();
+  const listeners = new Map<AbortSignal, () => void>();
+
+  const abortFrom = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+    for (const [source, listener] of listeners) {
+      source.removeEventListener("abort", listener);
+    }
+    listeners.clear();
+  };
+  for (const signal of signals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      break;
+    }
+    const listener = () => abortFrom(signal);
+    listeners.set(signal, listener);
+    signal.addEventListener("abort", listener, { once: true });
+  }
+  return controller.signal;
+}
+
+export function qzoneFetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = qzonePublishRequestTimeoutMs,
+  fetcher: typeof fetch = globalThis.fetch,
+) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = init.signal
+    ? combineQZoneAbortSignals([init.signal, timeoutSignal])
+    : timeoutSignal;
+  return fetcher(input, { ...init, signal });
+}
 
 export async function getQZoneEmotionMetrics(input: QZoneEmotionMetricsInput): Promise<QZoneEmotionMetricsResult> {
   const cookieNames = input.cookies ? Object.keys(input.cookies).sort() : [];
@@ -429,7 +505,7 @@ export async function publishToQZone(input: QZonePublishInput): Promise<QZonePub
 
   const startedAt = Date.now();
   try {
-    const response = await fetch(url, {
+    const response = await qzoneFetchWithTimeout(url, {
       method: "POST",
       headers: {
         ...requestHeaders,
@@ -581,17 +657,16 @@ async function uploadQZoneImage({
       method: "POST",
       url: uploadImageEndpoint,
       headers,
-      body: {
-        ...Object.fromEntries(body.entries()),
+      body: redactQZoneRequestBodyForLog(body, {
         picfile: `<base64 ${image.bytes.byteLength} bytes>`,
-      },
+      }),
     },
   };
   verbose.http.push(log);
 
   const startedAt = Date.now();
   try {
-    const response = await fetch(uploadImageEndpoint, {
+    const response = await qzoneFetchWithTimeout(uploadImageEndpoint, {
       method: "POST",
       headers: {
         ...headers,

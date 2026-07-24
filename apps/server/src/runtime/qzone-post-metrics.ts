@@ -11,10 +11,18 @@ const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 const refreshIntervalMs = 60 * 60 * 1000;
 const refreshFreshnessMs = 55 * 60 * 1000;
 const perBotRequestSpacingMs = 45 * 1000;
+const metricRequestReservationPayloadKey = "qzoneMetricRequestReservedAt";
+
+type BotMetricDispatchState = {
+  lastStartedAt: number | null;
+  nextReservationAt: number;
+  nextReflowAt: number;
+};
 
 export function registerQZonePostMetricWorker(queue: RuntimeQueue, logger: FastifyBaseLogger) {
+  const dispatchStateByBot = new Map<string, BotMetricDispatchState>();
   queue.registerHandler("refreshQZonePostMetric", async (job) => {
-    await handleQZonePostMetricRefresh(job, logger);
+    await handleQZonePostMetricRefresh(job, queue, dispatchStateByBot, logger);
   });
 }
 
@@ -79,22 +87,32 @@ async function enqueueRecentQZonePostMetricRefreshes(queue: RuntimeQueue, logger
   for (const attempt of dueAttempts) {
     const botAccountId = attempt.publishTarget.botAccountId;
     const nextRun = Math.max(nextRunByBot.get(botAccountId) ?? now.getTime(), now.getTime());
-    nextRunByBot.set(botAccountId, nextRun + perBotRequestSpacingMs);
-    queue.enqueue({
+    const queuedJob = queue.enqueueUnique({
       name: "refreshQZonePostMetric",
       tenantId: attempt.tenantId,
       payload: {
         attemptId: attempt.id,
       },
       runAt: new Date(nextRun),
-    });
-    enqueued += 1;
+    }, `refreshQZonePostMetric:${attempt.id}`);
+    if (queuedJob) {
+      nextRunByBot.set(botAccountId, nextRun + perBotRequestSpacingMs);
+      enqueued += 1;
+    }
   }
-  logger.info({ candidates: attempts.length, due: dueAttempts.length, enqueued }, "qzone post metric refresh jobs enqueued");
+  logger.info(
+    { candidates: attempts.length, due: dueAttempts.length, enqueued, deduplicated: dueAttempts.length - enqueued },
+    "qzone post metric refresh jobs enqueued",
+  );
   return enqueued;
 }
 
-async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBaseLogger) {
+async function handleQZonePostMetricRefresh(
+  job: RuntimeJob,
+  queue: RuntimeQueue,
+  dispatchStateByBot: Map<string, BotMetricDispatchState>,
+  logger: FastifyBaseLogger,
+) {
   const attemptId = typeof job.payload.attemptId === "string" ? job.payload.attemptId : "";
   if (!attemptId) {
     throw new Error("qzone metric refresh attempt id missing");
@@ -105,6 +123,10 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
       id: attemptId,
     },
     include: {
+      qzonePostMetrics: {
+        select: { id: true, checkedAt: true },
+        take: 1,
+      },
       publishTarget: {
         include: {
           botAccount: {
@@ -132,16 +154,58 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
   }
 
   const qzoneTid = attempt.qzoneTid;
+  const botAccountId = attempt.publishTarget.botAccountId;
   const botQqUin = attempt.publishTarget.botAccount.qqUin.toString();
   const session = attempt.publishTarget.botAccount.sessions[0] ?? null;
   if (!session) {
     await upsertMetricFailure(attempt, qzoneTid, "没有可用的 QZone 登录态，无法获取单条数据");
-    logger.warn({ attemptId, botAccountId: attempt.publishTarget.botAccountId }, "qzone post metric refresh missing session");
+    logger.warn({ attemptId, botAccountId }, "qzone post metric refresh missing session");
     return;
   }
 
-  const cookies = toCookieRecord(decryptJson(session.cookies));
+  const now = Date.now();
+  const dispatchState = dispatchStateByBot.get(botAccountId) ?? {
+    lastStartedAt: null,
+    nextReservationAt: now,
+    nextReflowAt: now,
+  };
+  dispatchStateByBot.set(botAccountId, dispatchState);
+  const payloadReservation = job.payload[metricRequestReservationPayloadKey];
+  const reservedAt = typeof payloadReservation === "number" && Number.isFinite(payloadReservation)
+    ? payloadReservation
+    : null;
+  const earliestFromLastRequest = dispatchState.lastStartedAt === null
+    ? now
+    : dispatchState.lastStartedAt + perBotRequestSpacingMs;
+
+  let nextRequestAt: number | null = null;
+  if (reservedAt === null) {
+    nextRequestAt = Math.max(now, earliestFromLastRequest, dispatchState.nextReservationAt, dispatchState.nextReflowAt);
+    dispatchState.nextReservationAt = nextRequestAt + perBotRequestSpacingMs;
+  } else if (reservedAt > now) {
+    nextRequestAt = reservedAt;
+  } else if (earliestFromLastRequest > now) {
+    nextRequestAt = Math.max(earliestFromLastRequest, dispatchState.nextReflowAt);
+    dispatchState.nextReflowAt = nextRequestAt + perBotRequestSpacingMs;
+    dispatchState.nextReservationAt = Math.max(dispatchState.nextReservationAt, dispatchState.nextReflowAt);
+  }
+
+  if (nextRequestAt !== null && nextRequestAt > now) {
+    job.payload[metricRequestReservationPayloadKey] = nextRequestAt;
+    queue.rescheduleCurrent(job, new Date(nextRequestAt));
+    logger.debug({ attemptId, botAccountId, nextRequestAt: new Date(nextRequestAt) }, "qzone post metric refresh deferred for per-bot spacing");
+    return;
+  }
+  delete job.payload[metricRequestReservationPayloadKey];
+  if (!await claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now))) {
+    logger.info({ attemptId, botAccountId }, "qzone post metric refresh skipped after freshness claim lost");
+    return;
+  }
+  dispatchState.lastStartedAt = now;
+  dispatchState.nextReservationAt = Math.max(dispatchState.nextReservationAt, now + perBotRequestSpacingMs);
+
   try {
+    const cookies = toCookieRecord(decryptJson(session.cookies));
     const result = await getQZoneEmotionMetrics({
       uin: botQqUin,
       tid: qzoneTid,
@@ -212,6 +276,55 @@ async function handleQZonePostMetricRefresh(job: RuntimeJob, logger: FastifyBase
       error instanceof QZoneEmotionMetricsError ? toInputJson(error.verbose) : undefined,
     );
     logger.warn({ error, attemptId, qzoneTid }, "qzone post metric refresh failed");
+  }
+}
+
+async function claimQZonePostMetricRefresh(
+  attempt: {
+    id: string;
+    tenantId: string;
+    postId: string;
+    publishTargetId: string;
+    publishTarget: { botAccountId: string };
+    qzonePostMetrics: Array<{ id: string; checkedAt: Date | null }>;
+  },
+  qzoneTid: string,
+  claimedAt: Date,
+) {
+  const staleBefore = new Date(claimedAt.getTime() - refreshFreshnessMs);
+  const existing = attempt.qzonePostMetrics[0] ?? null;
+  if (existing) {
+    const claimed = await prisma.qZonePostMetric.updateMany({
+      where: {
+        id: existing.id,
+        OR: [
+          { checkedAt: null },
+          { checkedAt: { lt: staleBefore } },
+        ],
+      },
+      data: { checkedAt: claimedAt },
+    });
+    return claimed.count === 1;
+  }
+
+  try {
+    await prisma.qZonePostMetric.create({
+      data: {
+        tenantId: attempt.tenantId,
+        postId: attempt.postId,
+        publishAttemptId: attempt.id,
+        publishTargetId: attempt.publishTargetId,
+        botAccountId: attempt.publishTarget.botAccountId,
+        qzoneTid,
+        checkedAt: claimedAt,
+      },
+    });
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+      return false;
+    }
+    throw error;
   }
 }
 

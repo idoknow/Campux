@@ -10,6 +10,7 @@
 
 import type { FastifyBaseLogger } from "fastify";
 import { supportsAdvisoryLock } from "@campux/db";
+import type { Prisma } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { readTenantPublishMode } from "../lib/tenant-metadata";
 import { enqueueBatchPublishFanout } from "./publishing";
@@ -89,38 +90,65 @@ export function decideFlush(prevTotal: number, postImages: number, min: number, 
   return { action: "flush" };
 }
 
+export type CollectingBatchSweepDecision = "wait" | "flush_stale" | "flush_mode_changed";
+
+export function decideCollectingBatchSweep(input: {
+  mode: string;
+  imageCount: number;
+  lastItemAt: Date | null;
+  staleMinutes: number;
+  now?: number;
+}): CollectingBatchSweepDecision {
+  if (input.imageCount <= 0) {
+    return "wait";
+  }
+  if (input.mode !== "accumulate") {
+    return "flush_mode_changed";
+  }
+  if (!input.lastItemAt) {
+    return "wait";
+  }
+  const now = input.now ?? Date.now();
+  return now - input.lastItemAt.getTime() >= input.staleMinutes * 60 * 1000 ? "flush_stale" : "wait";
+}
+
 // ── 以下是有状态部分：操作数据库、调度发布 ──────────────────────────────
 
 /** 每租户的批量操作用 advisory lock 串行化，避免并发审核把同一条稿件塞进两个批次。 */
-async function lockTenantBatch<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    // PG 用会话级建议锁串行化；SQLite 单写者天然串行，无需（也不支持）建议锁。
+async function lockTenantBatch<T>(tenantId: string, fn: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (transaction) => {
+    // PG 用事务级建议锁串行化；SQLite 单写者天然串行，无需（也不支持）建议锁。
     if (supportsAdvisoryLock) {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
     }
-    return fn();
+    return fn(transaction);
   });
 }
 
-async function getOrCreateCollectingBatch(tenantId: string) {
-  const existing = await prisma.publishBatch.findFirst({
+async function getOrCreateCollectingBatch(transaction: Prisma.TransactionClient, tenantId: string) {
+  const existing = await transaction.publishBatch.findFirst({
     where: { tenantId, status: "collecting" },
     orderBy: { createdAt: "asc" },
   });
   if (existing) {
     return existing;
   }
-  return prisma.publishBatch.create({
+  return transaction.publishBatch.create({
     data: { tenantId, status: "collecting", imageCount: 0 },
   });
 }
 
-async function appendItemToBatch(batchId: string, postId: string, postImages: number) {
-  const count = await prisma.publishBatchItem.count({ where: { batchId } });
-  await prisma.publishBatchItem.create({
+async function appendItemToBatch(
+  transaction: Prisma.TransactionClient,
+  batchId: string,
+  postId: string,
+  postImages: number,
+) {
+  const count = await transaction.publishBatchItem.count({ where: { batchId } });
+  await transaction.publishBatchItem.create({
     data: { batchId, postId, position: count, imageCount: postImages },
   });
-  await prisma.publishBatch.update({
+  await transaction.publishBatch.update({
     where: { id: batchId },
     data: {
       imageCount: { increment: postImages },
@@ -140,71 +168,67 @@ export async function addApprovedPostToBatch(
   actorId: string | null,
   logger?: FastifyBaseLogger,
 ): Promise<void> {
-  const post = await prisma.post.findUnique({
-    where: { id: postId },
-    select: { id: true, status: true, attachments: true, batchItem: { select: { id: true } } },
-  });
-  if (!post || post.batchItem) {
-    // 已在某个批次里，幂等返回。
-    return;
-  }
+  // The advisory lock and all guarded reads/writes share one transaction. This
+  // prevents a committed batch item without its image-count update and avoids
+  // deciding from a stale tenant mode or stale batch snapshot.
+  const toFlush = await lockTenantBatch(tenantId, async (transaction) => {
+    const post = await transaction.post.findUnique({
+      where: { id: postId },
+      select: { id: true, status: true, attachments: true, batchItem: { select: { id: true } } },
+    });
+    if (!post || post.batchItem) {
+      return [] as string[];
+    }
 
-  const { minImages, maxImages } = await readTenantPublishMode(prisma, tenantId);
-  const postImages = postImageCount(post.attachments);
-
-  // 把 post 标记为"已进入批量队列"（复用 publishing 态，避免新增 PostStatus）。
-  await prisma.post.update({
-    where: { id: postId },
-    data: {
-      status: "publishing",
-      logs: {
-        create: {
-          tenantId,
-          actorId,
-          oldStatus: post.status,
-          newStatus: "publishing",
-          comment: "已进入批量发布队列，等待与其他稿件合并为一条说说发布",
+    const { minImages, maxImages } = await readTenantPublishMode(transaction, tenantId);
+    const postImages = postImageCount(post.attachments);
+    await transaction.post.update({
+      where: { id: postId },
+      data: {
+        status: "publishing",
+        logs: {
+          create: {
+            tenantId,
+            actorId,
+            oldStatus: post.status,
+            newStatus: "publishing",
+            comment: "已进入批量发布队列，等待与其他稿件合并为一条说说发布",
+          },
         },
       },
-    },
-  });
+    });
 
-  // 在锁内决定归批 / flush。
-  const toFlush: string[] = [];
-  await lockTenantBatch(tenantId, async () => {
-    let batch = await getOrCreateCollectingBatch(tenantId);
+    const flushBatchIds: string[] = [];
+    const batch = await getOrCreateCollectingBatch(transaction, tenantId);
     const decision = decideFlush(batch.imageCount, postImages, minImages, maxImages);
 
     switch (decision.action) {
       case "wait": {
-        await appendItemToBatch(batch.id, postId, postImages);
+        await appendItemToBatch(transaction, batch.id, postId, postImages);
         break;
       }
       case "flush": {
-        await appendItemToBatch(batch.id, postId, postImages);
-        await prisma.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
-        toFlush.push(batch.id);
+        await appendItemToBatch(transaction, batch.id, postId, postImages);
+        await transaction.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
+        flushBatchIds.push(batch.id);
         break;
       }
       case "flush_then_start_new": {
-        // 先发掉不含这条的旧批，再用这条另起新批。
-        await prisma.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
-        toFlush.push(batch.id);
-        const fresh = await prisma.publishBatch.create({ data: { tenantId, status: "collecting", imageCount: 0 } });
-        await appendItemToBatch(fresh.id, postId, postImages);
-        // 这条单独成新批后，判断它自己是否也需要立刻 flush。
+        await transaction.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
+        flushBatchIds.push(batch.id);
+        const fresh = await transaction.publishBatch.create({ data: { tenantId, status: "collecting", imageCount: 0 } });
+        await appendItemToBatch(transaction, fresh.id, postId, postImages);
         const selfDecision = decideFlush(0, postImages, minImages, maxImages);
         if (selfDecision.action === "flush" || selfDecision.action === "flush_single_oversize") {
-          await prisma.publishBatch.update({ where: { id: fresh.id }, data: { status: "publishing" } });
-          toFlush.push(fresh.id);
+          await transaction.publishBatch.update({ where: { id: fresh.id }, data: { status: "publishing" } });
+          flushBatchIds.push(fresh.id);
         }
         break;
       }
       case "flush_single_oversize": {
-        // 单条稿件图片数已超上限，单独成批发出，告警。
-        await appendItemToBatch(batch.id, postId, postImages);
-        await prisma.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
-        toFlush.push(batch.id);
+        await appendItemToBatch(transaction, batch.id, postId, postImages);
+        await transaction.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
+        flushBatchIds.push(batch.id);
         logger?.warn(
           { tenantId, postId, postImages, maxImages },
           "single post image count exceeds accumulate max; publishing it as its own oversize batch",
@@ -212,6 +236,7 @@ export async function addApprovedPostToBatch(
         break;
       }
     }
+    return flushBatchIds;
   });
 
   for (const batchId of toFlush) {
@@ -220,6 +245,7 @@ export async function addApprovedPostToBatch(
 }
 
 let sweeperTimer: ReturnType<typeof setInterval> | undefined;
+const incompletePublishingBatchRecoveryAgeMs = 10 * 60 * 1000;
 
 /**
  * 兜底定时器：周期扫描“停滞过久”的 collecting 批次，直接 flush，避免低投稿量墙号的
@@ -235,40 +261,99 @@ export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBa
     try {
       const batches = await prisma.publishBatch.findMany({
         where: { status: "collecting" },
-        select: { id: true, tenantId: true, imageCount: true, lastItemAt: true },
+        select: { id: true, tenantId: true },
       });
-      const now = Date.now();
       for (const batch of batches) {
-        if (batch.imageCount <= 0 || !batch.lastItemAt) {
-          continue;
-        }
-        const { mode, staleMinutes } = await readTenantPublishMode(prisma, batch.tenantId);
-        if (mode !== "accumulate") {
-          continue;
-        }
-        // 停滞超过阈值即冲刷，不论是否达到 min：宁可发一条不足下限的说说，
-        // 也不能让稿件无限期卡在「发布中」。达到 min 的批次早已在审核时即时发出。
-        if (now - batch.lastItemAt.getTime() < staleMinutes * 60 * 1000) {
-          continue;
-        }
-        // 在锁内确认仍是 collecting 再切 publishing，避免与并发审核竞争。
-        let shouldFlush = false;
-        await lockTenantBatch(batch.tenantId, async () => {
-          const fresh = await prisma.publishBatch.findUnique({ where: { id: batch.id }, select: { status: true } });
-          if (fresh?.status === "collecting") {
-            await prisma.publishBatch.update({ where: { id: batch.id }, data: { status: "publishing" } });
-            shouldFlush = true;
+        // Re-read every mutable input under the tenant lock before deciding.
+        const flushResult = await lockTenantBatch(batch.tenantId, async (transaction): Promise<{
+          decision: Exclude<CollectingBatchSweepDecision, "wait">;
+          imageCount: number;
+        } | null> => {
+          const fresh = await transaction.publishBatch.findUnique({
+            where: { id: batch.id },
+            select: { status: true, imageCount: true, lastItemAt: true },
+          });
+          if (fresh?.status !== "collecting") {
+            return null;
           }
+          const { mode, staleMinutes } = await readTenantPublishMode(transaction, batch.tenantId);
+          const decision = decideCollectingBatchSweep({
+            mode,
+            imageCount: fresh.imageCount,
+            lastItemAt: fresh.lastItemAt,
+            staleMinutes,
+            now: Date.now(),
+          });
+          if (decision === "wait") {
+            return null;
+          }
+          const updated = await transaction.publishBatch.updateMany({
+            where: { id: batch.id, status: "collecting" },
+            data: { status: "publishing" },
+          });
+          if (updated.count === 1) {
+            return { decision, imageCount: fresh.imageCount };
+          }
+          return null;
         });
-        if (shouldFlush) {
-          logger.info({ batchId: batch.id, tenantId: batch.tenantId, imageCount: batch.imageCount }, "stale accumulate batch flushed by sweeper");
+        if (flushResult) {
+          logger.info(
+            { batchId: batch.id, tenantId: batch.tenantId, ...flushResult },
+            flushResult.decision === "flush_mode_changed"
+              ? "collecting batch flushed after publish mode changed"
+              : "stale accumulate batch flushed by sweeper",
+          );
           await enqueueBatchPublishFanout(queue, batch.tenantId, batch.id, null);
+        }
+      }
+
+      const incompletePublishingBatches = await prisma.publishBatch.findMany({
+        where: {
+          status: "publishing",
+          flushedAt: null,
+          updatedAt: { lte: new Date(Date.now() - incompletePublishingBatchRecoveryAgeMs) },
+          items: { some: {} },
+        },
+        select: { id: true, tenantId: true },
+      });
+      for (const batch of incompletePublishingBatches) {
+        const recoveryClaimedAt = new Date();
+        const claimed = await lockTenantBatch(batch.tenantId, async (transaction): Promise<boolean> => {
+          const fresh = await transaction.publishBatch.findUnique({
+            where: { id: batch.id },
+            select: { status: true, flushedAt: true, updatedAt: true },
+          });
+          if (
+            fresh?.status !== "publishing"
+            || fresh.flushedAt !== null
+            || fresh.updatedAt.getTime() > recoveryClaimedAt.getTime() - incompletePublishingBatchRecoveryAgeMs
+          ) {
+            return false;
+          }
+          const result = await transaction.publishBatch.updateMany({
+            where: {
+              id: batch.id,
+              status: "publishing",
+              flushedAt: null,
+              updatedAt: fresh.updatedAt,
+            },
+            data: { updatedAt: recoveryClaimedAt },
+          });
+          return result.count === 1;
+        });
+        if (claimed) {
+          const recoveredAttempts = await enqueueBatchPublishFanout(queue, batch.tenantId, batch.id, null);
+          logger.warn(
+            { batchId: batch.id, tenantId: batch.tenantId, recoveredAttemptCount: recoveredAttempts.length },
+            "incomplete publishing batch fanout recovered",
+          );
         }
       }
     } catch (error) {
       logger.error({ error }, "batch flush sweeper run failed");
     }
   };
+  void run();
   sweeperTimer = setInterval(() => void run(), intervalMs);
   logger.info("batch flush sweeper registered");
 }

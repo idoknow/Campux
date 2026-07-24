@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../routes/posts.ts", import.meta.url), "utf8");
+const publishingSource = readFileSync(new URL("../runtime/publishing.ts", import.meta.url), "utf8");
 
 describe("post transaction compensation wiring", () => {
   test("rejects unavailable converted-GIF claims before remote ingestion", () => {
@@ -33,5 +34,39 @@ describe("post transaction compensation wiring", () => {
 
     expect(routeCatch).toBeGreaterThan(-1);
     expect(attachmentCleanup).toBeGreaterThan(routeCatch);
+  });
+});
+
+describe("publish fanout transaction wiring", () => {
+  test("persists every single-post target atomically before enqueueing any attempt", () => {
+    const fanoutStart = publishingSource.indexOf("export async function enqueuePublishFanout");
+    const fanoutEnd = publishingSource.indexOf("export async function enqueueBatchPublishFanout", fanoutStart);
+    const fanoutSource = publishingSource.slice(fanoutStart, fanoutEnd);
+    const transactionStart = fanoutSource.indexOf("const attempts = await prisma.$transaction(async (tx)");
+    const transactionalSchedule = fanoutSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
+    const enqueue = fanoutSource.indexOf("enqueueAttempt(queue", transactionStart);
+
+    expect(fanoutStart).toBeGreaterThan(-1);
+    expect(fanoutEnd).toBeGreaterThan(fanoutStart);
+    expect(transactionStart).toBeGreaterThan(-1);
+    expect(transactionalSchedule).toBeGreaterThan(transactionStart);
+    expect(enqueue).toBeGreaterThan(transactionalSchedule);
+  });
+
+  test("commits every batch target and its durable marker before enqueueing", () => {
+    const fanoutStart = publishingSource.indexOf("export async function enqueueBatchPublishFanout");
+    const fanoutEnd = publishingSource.indexOf("async function ensurePostPublishSummary", fanoutStart);
+    const fanoutSource = publishingSource.slice(fanoutStart, fanoutEnd);
+    const transactionStart = fanoutSource.indexOf("const attempts = await prisma.$transaction(async (tx)");
+    const transactionalSchedule = fanoutSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
+    const durableMarker = fanoutSource.indexOf("data: { flushedAt: new Date() }", transactionalSchedule);
+    const enqueue = fanoutSource.indexOf("enqueueAttempt(queue", durableMarker);
+
+    expect(fanoutStart).toBeGreaterThan(-1);
+    expect(fanoutEnd).toBeGreaterThan(fanoutStart);
+    expect(transactionStart).toBeGreaterThan(-1);
+    expect(transactionalSchedule).toBeGreaterThan(transactionStart);
+    expect(durableMarker).toBeGreaterThan(transactionalSchedule);
+    expect(enqueue).toBeGreaterThan(durableMarker);
   });
 });

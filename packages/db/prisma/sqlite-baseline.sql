@@ -250,6 +250,7 @@ CREATE TABLE "BotAccount" (
     "privateMessagesReceived" INTEGER NOT NULL DEFAULT 0,
     "adminRepliesSent" INTEGER NOT NULL DEFAULT 0,
     "lastSeenAt" DATETIME,
+    "lastPublishStartedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "BotAccount_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -541,7 +542,6 @@ CREATE INDEX "PostLog_tenantId_postId_createdAt_idx" ON "PostLog"("tenantId", "p
 -- CreateIndex
 CREATE UNIQUE INDEX "BotAccount_tenantId_qqUin_key" ON "BotAccount"("tenantId", "qqUin");
 
--- CreateIndex
 -- CreateIndex
 CREATE UNIQUE INDEX "BotAccount_connectionToken_key" ON "BotAccount"("connectionToken");
 

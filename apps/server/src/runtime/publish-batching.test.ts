@@ -1,5 +1,53 @@
 import { describe, expect, test } from "bun:test";
-import { decideFlush, joinBatchCaptions, postImageCount } from "./publish-batching";
+import { decideCollectingBatchSweep, decideFlush, joinBatchCaptions, postImageCount } from "./publish-batching";
+
+describe("decideCollectingBatchSweep", () => {
+  const now = new Date("2026-07-24T00:00:00.000Z").getTime();
+
+  test("flushes a non-empty collecting batch immediately after mode changes away from accumulate", () => {
+    expect(decideCollectingBatchSweep({
+      mode: "single",
+      imageCount: 2,
+      lastItemAt: new Date(now - 1_000),
+      staleMinutes: 60,
+      now,
+    })).toBe("flush_mode_changed");
+    expect(decideCollectingBatchSweep({
+      mode: "single",
+      imageCount: 2,
+      lastItemAt: null,
+      staleMinutes: 60,
+      now,
+    })).toBe("flush_mode_changed");
+  });
+
+  test("waits for a fresh accumulate batch and flushes it after the stale threshold", () => {
+    expect(decideCollectingBatchSweep({
+      mode: "accumulate",
+      imageCount: 2,
+      lastItemAt: new Date(now - 59 * 60_000),
+      staleMinutes: 60,
+      now,
+    })).toBe("wait");
+    expect(decideCollectingBatchSweep({
+      mode: "accumulate",
+      imageCount: 2,
+      lastItemAt: new Date(now - 60 * 60_000),
+      staleMinutes: 60,
+      now,
+    })).toBe("flush_stale");
+  });
+
+  test("does not flush empty batches", () => {
+    expect(decideCollectingBatchSweep({
+      mode: "single",
+      imageCount: 0,
+      lastItemAt: new Date(now - 24 * 60 * 60_000),
+      staleMinutes: 60,
+      now,
+    })).toBe("wait");
+  });
+});
 
 describe("joinBatchCaptions", () => {
   test("joins multiple captions with separator", () => {

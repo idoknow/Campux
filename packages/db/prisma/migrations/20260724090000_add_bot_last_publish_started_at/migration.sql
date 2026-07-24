@@ -1,0 +1,2 @@
+ALTER TABLE "BotAccount"
+ADD COLUMN IF NOT EXISTS "lastPublishStartedAt" TIMESTAMP(3);
