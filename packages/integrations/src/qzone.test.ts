@@ -84,10 +84,16 @@ describe("qzone publish request timeout", () => {
     expect((observedSignal as unknown as AbortSignal).aborted).toBe(true);
   });
 
-  test("treats only a response-less final publish timeout as ambiguous", () => {
+  test("treats every response-less final publish transport failure as ambiguous", () => {
     const request = { method: "POST", url: "https://example.invalid", headers: {} };
     expect(isAmbiguousQZonePublishTimeout([
       { label: "publish_emotion", request, error: "TimeoutError: timed out" },
+    ])).toBe(true);
+    expect(isAmbiguousQZonePublishTimeout([
+      { label: "publish_emotion", request, error: "TypeError: fetch failed" },
+    ])).toBe(true);
+    expect(isAmbiguousQZonePublishTimeout([
+      { label: "publish_emotion", request, error: "terminated while reading response body" },
     ])).toBe(true);
     expect(isAmbiguousQZonePublishTimeout([
       { label: "upload:image.jpg", request, error: "TimeoutError" },

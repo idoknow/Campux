@@ -43,6 +43,13 @@ export type OfficialQqForumThreadVerbose = {
   create: Record<string, unknown> | null;
 };
 
+export class OfficialQqPublishOutcomeUnknownError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "OfficialQqPublishOutcomeUnknownError";
+  }
+}
+
 
 export type OfficialQqGuild = {
   id: string;
@@ -103,42 +110,115 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
     throw new BotWorkflowError("QQ 频道 ID 为空", 400);
   }
 
-  const payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(normalizedChannelId)}/threads`, {
-    method: "PUT",
-    body: {
-      title,
-      content: serializeOfficialQqForumRichText(content, options.imageUrls),
-      format: qqForumRichTextFormat,
-    },
-    errorPrefix: "QQ 频道帖子发表失败",
-  }) as Record<string, unknown> | null;
-
-  const taskId = readStringField(payload, ["task_id", "taskId"]);
-  const directThreadId = readOfficialQqForumThreadId(payload);
-  const discoveredThreadId = directThreadId ?? await findRecentlyCreatedThreadId(bot, normalizedChannelId, {
+  const officialAppId = bot.officialAppId;
+  const officialAppSecret = bot.officialAppSecret;
+  if (!officialAppId || !officialAppSecret) {
+    throw new BotWorkflowError("QQ 官方机器人 AppID 或 AppSecret 未配置", 400);
+  }
+  const accessToken = await getOfficialQqAccessToken(officialAppId, officialAppSecret);
+  const findExistingThread = (matchMode: "exact-title" | "any-display-id") => findRecentlyCreatedThreadId(bot, normalizedChannelId, {
     title,
     content,
     ...(options.matchDisplayIds ? { displayIds: options.matchDisplayIds } : {}),
-  });
-  const externalId = discoveredThreadId ?? taskId;
-  if (!externalId) {
-    throw new BotWorkflowError("QQ 频道帖子发表成功但未返回帖子 ID 或任务 ID", 502);
+    matchMode,
+  }, accessToken);
+  if (options.matchDisplayIds?.length) {
+    const existingThreadId = await findExistingThread("exact-title");
+    if (existingThreadId) {
+      return buildOfficialQqForumThreadResult(
+        bot,
+        normalizedChannelId,
+        title,
+        content,
+        options.imageUrls,
+        null,
+        existingThreadId,
+        null,
+      );
+    }
   }
 
+  let payload: Record<string, unknown> | null;
+  try {
+    payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(normalizedChannelId)}/threads`, {
+      method: "PUT",
+      body: {
+        title,
+        content: serializeOfficialQqForumRichText(content, options.imageUrls),
+        format: qqForumRichTextFormat,
+      },
+      errorPrefix: "QQ 频道帖子发表失败",
+      accessToken,
+    }) as Record<string, unknown> | null;
+  } catch (error) {
+    if (error instanceof BotWorkflowError) {
+      throw error;
+    }
+    const discoveredThreadId = await findExistingThread("exact-title");
+    if (discoveredThreadId) {
+      return buildOfficialQqForumThreadResult(
+        bot,
+        normalizedChannelId,
+        title,
+        content,
+        options.imageUrls,
+        null,
+        discoveredThreadId,
+        null,
+      );
+    }
+    throw new OfficialQqPublishOutcomeUnknownError("QQ 频道帖子创建请求结果不确定；为避免重复发布未自动重试", error);
+  }
+
+  const taskId = readStringField(payload, ["task_id", "taskId"]);
+  const directThreadId = readOfficialQqForumThreadId(payload);
+  const discoveredThreadId = directThreadId ?? await findExistingThread(
+    options.matchDisplayIds?.length === 1 ? "any-display-id" : "exact-title",
+  );
+  if (!discoveredThreadId && !taskId) {
+    throw new OfficialQqPublishOutcomeUnknownError("QQ 频道帖子发表后未能确认帖子 ID；为避免重复发布未自动重试");
+  }
+
+  return buildOfficialQqForumThreadResult(
+    bot,
+    normalizedChannelId,
+    title,
+    content,
+    options.imageUrls,
+    payload,
+    discoveredThreadId,
+    taskId,
+  );
+}
+
+function buildOfficialQqForumThreadResult(
+  bot: OfficialQqBotAccount,
+  channelId: string,
+  title: string,
+  content: string,
+  imageUrls: string[] | undefined,
+  payload: Record<string, unknown> | null,
+  threadId: string | null,
+  taskId: string | null,
+): OfficialQqForumThreadResult {
+  const externalId = threadId ?? taskId;
+  if (!externalId) {
+    throw new OfficialQqPublishOutcomeUnknownError("QQ 频道帖子发表后未能确认帖子 ID；为避免重复发布未自动重试");
+  }
   return {
     externalId,
-    threadId: discoveredThreadId,
+    threadId,
     taskId,
     verbose: {
       mode: "official-qq-forum",
       appId: bot.officialAppId,
-      channelId: normalizedChannelId,
+      channelId,
       title,
       contentLength: content.length,
-      imageCount: options.imageUrls?.length ?? 0,
+      imageCount: imageUrls?.length ?? 0,
       externalId,
       create: payload,
-      threadId: discoveredThreadId,
+      threadId,
       taskId,
       publishedAt: new Date().toISOString(),
     },
@@ -206,12 +286,17 @@ export function readOfficialQqForumThreadId(value: unknown): string | null {
   return null;
 }
 
-async function callOfficialQqOpenApi(bot: OfficialQqBotAccount, path: string, options: { method: "GET" | "PUT" | "DELETE" | "POST"; body?: unknown; errorPrefix: string }) {
-  if (!bot.officialAppId || !bot.officialAppSecret) {
-    throw new BotWorkflowError("QQ 官方机器人 AppID 或 AppSecret 未配置", 400);
+async function callOfficialQqOpenApi(bot: OfficialQqBotAccount, path: string, options: { method: "GET" | "PUT" | "DELETE" | "POST"; body?: unknown; errorPrefix: string; accessToken?: string }) {
+  let accessToken = options.accessToken;
+  if (!accessToken) {
+    const officialAppId = bot.officialAppId;
+    const officialAppSecret = bot.officialAppSecret;
+    if (!officialAppId || !officialAppSecret) {
+      throw new BotWorkflowError("QQ 官方机器人 AppID 或 AppSecret 未配置", 400);
+    }
+    accessToken = await getOfficialQqAccessToken(officialAppId, officialAppSecret);
   }
 
-  const accessToken = await getOfficialQqAccessToken(bot.officialAppId, bot.officialAppSecret);
   const response = await fetch(`${qqBotOpenApiBaseUrl}${path}`, {
     method: options.method,
     headers: {
@@ -273,10 +358,21 @@ function readOfficialQqAppSecret(value: Prisma.JsonValue) {
   throw new BotWorkflowError("QQ 官方机器人 AppSecret 无法解析", 500);
 }
 
-async function findRecentlyCreatedThreadId(bot: OfficialQqBotAccount, channelId: string, expected: { title: string; content: string; displayIds?: number[] }) {
+async function findRecentlyCreatedThreadId(
+  bot: OfficialQqBotAccount,
+  channelId: string,
+  expected: {
+    title: string;
+    content: string;
+    displayIds?: number[];
+    matchMode?: "exact-title" | "any-display-id";
+  },
+  accessToken?: string,
+) {
   const payload = await callOfficialQqOpenApi(bot, `/channels/${encodeURIComponent(channelId)}/threads`, {
     method: "GET",
     errorPrefix: "QQ 频道帖子列表获取失败",
+    ...(accessToken ? { accessToken } : {}),
   }).catch(() => null);
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
@@ -291,6 +387,9 @@ async function findRecentlyCreatedThreadId(bot: OfficialQqBotAccount, channelId:
     if (!info) continue;
     if (expected.title && info.title === expected.title) {
       return info.threadId;
+    }
+    if (expected.matchMode === "exact-title") {
+      continue;
     }
     for (const displayId of expectedDisplayIds) {
       if (threadMatchesDisplayId(info, displayId)) {

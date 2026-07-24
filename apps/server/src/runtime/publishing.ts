@@ -9,7 +9,7 @@ import {
   QZonePublishError,
 } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
-import { qzoneCookieDomain } from "../lib/bot-workflows";
+import { BotWorkflowError, qzoneCookieDomain } from "../lib/bot-workflows";
 import { serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
@@ -20,7 +20,7 @@ import { generatePublishSummary } from "./publish-summary";
 import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
 import { imageStorageHardMaxBytes } from "../lib/image-upload-policy";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
-import { createOfficialQqForumThread } from "./official-qq";
+import { createOfficialQqForumThread, OfficialQqPublishOutcomeUnknownError } from "./official-qq";
 import { buildPublicForumMediaUrl } from "../lib/public-forum-media";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 
@@ -31,6 +31,34 @@ export const republishFailureSweepIntervalMs = 15 * 60 * 1000;
 export const orphanPublishingPostRecoveryAgeMs = 10 * 60 * 1000;
 export const interruptedPublishAttemptMessage = "发布进程中断，远端结果不确定；为避免重复发布，系统未自动重试";
 const ambiguousPublishNoRetryMarker = "远端可能已接收，为避免重复发布未自动重试";
+const batchFanoutAuditPrefix = "批量发布：已生成 ";
+const incompleteBatchFanoutAuditComment = "历史批量发布任务落库不完整，系统已安全终止剩余任务；请人工核对后再决定是否重发";
+const incompleteBatchFanoutAttemptMessage = `历史批量发布任务落库不完整；${ambiguousPublishNoRetryMarker}`;
+
+export function readExpectedBatchFanoutCount(comments: string[]) {
+  let expectedCount: number | null = null;
+  for (const comment of comments) {
+    const matched = comment.match(/批量发布：已生成\s+(\d+)\s+个发布任务/);
+    if (!matched?.[1]) {
+      continue;
+    }
+    const parsed = Number.parseInt(matched[1], 10);
+    if (Number.isSafeInteger(parsed) && parsed >= 0) {
+      expectedCount = Math.max(expectedCount ?? 0, parsed);
+    }
+  }
+  return expectedCount;
+}
+
+export function isIncompleteBatchFanout(input: {
+  flushedAt: Date | null;
+  expectedCount: number | null;
+  actualCount: number;
+}) {
+  return input.flushedAt !== null
+    && input.expectedCount !== null
+    && input.actualCount < input.expectedCount;
+}
 
 export function shouldAutomaticallyRequeueFailedAttempt(lastError: string | null) {
   return lastError !== interruptedPublishAttemptMessage
@@ -216,7 +244,164 @@ export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBas
   });
 }
 
+async function reconcileIncompleteLegacyBatchFanouts(logger: FastifyBaseLogger) {
+  const candidates = await prisma.publishBatch.findMany({
+    where: { flushedAt: { not: null } },
+    select: {
+      id: true,
+      tenantId: true,
+      flushedAt: true,
+      attempts: { select: { id: true, status: true, lastError: true } },
+      items: {
+        select: {
+          post: {
+            select: {
+              id: true,
+              status: true,
+              tenantId: true,
+              logs: {
+                where: {
+                  OR: [
+                    { comment: { startsWith: batchFanoutAuditPrefix } },
+                    { comment: incompleteBatchFanoutAuditComment },
+                  ],
+                },
+                select: { comment: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  let reconciledCount = 0;
+  for (const candidate of candidates) {
+    const comments = candidate.items.flatMap((item) => item.post.logs.map((log) => log.comment));
+    const expectedCount = readExpectedBatchFanoutCount(comments);
+    if (!isIncompleteBatchFanout({
+      flushedAt: candidate.flushedAt,
+      expectedCount,
+      actualCount: candidate.attempts.length,
+    })) {
+      continue;
+    }
+
+    const reconciled = await prisma.$transaction(async (transaction) => {
+      await lockPublishFanout(transaction, candidate.tenantId, `batch:${candidate.id}`);
+      const batch = await transaction.publishBatch.findUnique({
+        where: { id: candidate.id },
+        select: {
+          id: true,
+          tenantId: true,
+          status: true,
+          flushedAt: true,
+          attempts: { select: { id: true, status: true, lastError: true } },
+          items: {
+            select: {
+              post: {
+                select: {
+                  id: true,
+                  status: true,
+                  tenantId: true,
+                  logs: {
+                    where: {
+                      OR: [
+                        { comment: { startsWith: batchFanoutAuditPrefix } },
+                        { comment: incompleteBatchFanoutAuditComment },
+                      ],
+                    },
+                    select: { comment: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (!batch) {
+        return false;
+      }
+
+      const freshComments = batch.items.flatMap((item) => item.post.logs.map((log) => log.comment));
+      const freshExpectedCount = readExpectedBatchFanoutCount(freshComments);
+      if (!isIncompleteBatchFanout({
+        flushedAt: batch.flushedAt,
+        expectedCount: freshExpectedCount,
+        actualCount: batch.attempts.length,
+      })) {
+        return false;
+      }
+
+      for (const attempt of batch.attempts) {
+        if (attempt.status === "succeeded" || attempt.status === "skipped") {
+          continue;
+        }
+        const lastError = attempt.lastError?.includes(incompleteBatchFanoutAttemptMessage)
+          ? attempt.lastError
+          : [attempt.lastError, incompleteBatchFanoutAttemptMessage].filter(Boolean).join("\n");
+        await transaction.publishAttempt.update({
+          where: { id: attempt.id },
+          data: { status: "failed", nextRunAt: null, lastError },
+        });
+      }
+
+      const nextStatus = batch.attempts.some((attempt) => attempt.status === "succeeded")
+        ? "partially_failed" as const
+        : "failed" as const;
+      if (batch.status !== nextStatus) {
+        await transaction.publishBatch.update({
+          where: { id: batch.id },
+          data: { status: nextStatus },
+        });
+      }
+
+      for (const item of batch.items) {
+        const alreadyAudited = item.post.logs.some((log) => log.comment === incompleteBatchFanoutAuditComment);
+        if (item.post.status === nextStatus && alreadyAudited) {
+          continue;
+        }
+        await transaction.post.update({
+          where: { id: item.post.id },
+          data: {
+            status: nextStatus,
+            ...(alreadyAudited ? {} : {
+              logs: {
+                create: {
+                  tenantId: item.post.tenantId,
+                  oldStatus: item.post.status,
+                  newStatus: nextStatus,
+                  comment: incompleteBatchFanoutAuditComment,
+                },
+              },
+            }),
+          },
+        });
+      }
+      return true;
+    }, {
+      maxWait: 5_000,
+      timeout: 30_000,
+    });
+
+    if (reconciled) {
+      reconciledCount += 1;
+      logger.warn(
+        {
+          batchId: candidate.id,
+          tenantId: candidate.tenantId,
+          expectedCount,
+          actualCount: candidate.attempts.length,
+        },
+        "incomplete legacy batch fanout safely reconciled",
+      );
+    }
+  }
+  return reconciledCount;
+}
+
 export async function recoverPublishAttempts(queue: RuntimeQueue, logger: FastifyBaseLogger) {
+  const incompleteLegacyBatchesRecovered = await reconcileIncompleteLegacyBatchFanouts(logger);
   const interruptedAttempts = await prisma.publishAttempt.findMany({
     where: {
       OR: [
@@ -372,6 +557,7 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
     {
       count: attempts.length,
       interruptedAttemptsRecovered,
+      incompleteLegacyBatchesRecovered,
       postsChecked: posts.length,
       batchesChecked: batches.length,
       orphanPostsRecovered,
@@ -1449,8 +1635,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     const qzoneError = caught && typeof caught === "object" && "verbose" in caught
       ? caught as QZonePublishError
       : null;
-    const ambiguousPublishTimeout = isAmbiguousQZonePublishTimeout(qzoneError?.verbose.http ?? []);
-    const operatorMessage = ambiguousPublishTimeout
+    const ambiguousPublishOutcome = caught instanceof OfficialQqPublishOutcomeUnknownError
+      || isAmbiguousQZonePublishTimeout(qzoneError?.verbose.http ?? []);
+    const nonRetryableClientError = caught instanceof BotWorkflowError && caught.statusCode < 500;
+    const operatorMessage = ambiguousPublishOutcome
       ? `${message}（远端可能已接收，为避免重复发布未自动重试）`
       : message;
     logger.error(
@@ -1458,7 +1646,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         ...attemptLogContext,
         ...serializedError,
         platformResponse: summarizeQZonePlatformResponseForLog(qzoneError),
-        ambiguousPublishTimeout,
+        ambiguousPublishOutcome,
+        nonRetryableClientError,
         durationMs: Date.now() - attemptStartedAt,
         attemptNumber: currentAttempt.attempt,
       },
@@ -1522,7 +1711,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         }
       }
     }
-    const shouldRetry = !needsLogin && !ambiguousPublishTimeout && currentAttempt.attempt < maxPublishAttempts;
+    const shouldRetry = !needsLogin
+      && !ambiguousPublishOutcome
+      && !nonRetryableClientError
+      && currentAttempt.attempt < maxPublishAttempts;
     const nextRunAt = shouldRetry
       ? await resolveNextPublishRunAt({
           tenantId: attempt.tenantId,
@@ -1832,7 +2024,17 @@ async function refreshBatchPostStatuses(batchId: string) {
     include: {
       items: {
         include: {
-          post: { select: { id: true, status: true, tenantId: true } },
+          post: {
+            select: {
+              id: true,
+              status: true,
+              tenantId: true,
+              logs: {
+                where: { comment: { startsWith: batchFanoutAuditPrefix } },
+                select: { comment: true },
+              },
+            },
+          },
         },
       },
       attempts: {
@@ -1847,7 +2049,22 @@ async function refreshBatchPostStatuses(batchId: string) {
     return;
   }
 
-  const derived = deriveAggregateStatus(batch.attempts);
+  const expectedFanoutCount = readExpectedBatchFanoutCount(
+    batch.items.flatMap((item) => item.post.logs.map((log) => log.comment)),
+  );
+  const incompleteFanout = isIncompleteBatchFanout({
+    flushedAt: batch.flushedAt,
+    expectedCount: expectedFanoutCount,
+    actualCount: batch.attempts.length,
+  });
+  const derived = incompleteFanout
+    ? {
+        status: batch.attempts.some((attempt) => attempt.status === "succeeded")
+          ? "partially_failed" as const
+          : "failed" as const,
+        comment: incompleteBatchFanoutAuditComment,
+      }
+    : deriveAggregateStatus(batch.attempts);
   if (!derived) {
     return;
   }

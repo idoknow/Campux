@@ -97,6 +97,28 @@ describe("RuntimeQueue", () => {
     }
   });
 
+  it("does not carry fairness debt across an idle queue", async () => {
+    const events: string[] = [];
+    const queue = createRuntimeQueue({ logger, tickIntervalMs: 5, maxConsecutivePriorityJobs: 2 });
+    queue.registerHandler("publishPost", async () => { events.push("publish"); });
+    queue.registerHandler("refreshQZonePostMetric", async () => { events.push("metric"); });
+
+    queue.enqueue(job("publishPost"));
+    queue.enqueue(job("publishPost"));
+    await queue.start();
+    try {
+      await waitUntil(() => events.length === 2 && queue.snapshot().processing === 0);
+
+      queue.enqueue(job("refreshQZonePostMetric", new Date(Date.now() - 60_000)));
+      queue.enqueue(job("publishPost"));
+      await waitUntil(() => events.length === 4);
+
+      expect(events).toEqual(["publish", "publish", "publish", "metric"]);
+    } finally {
+      await queue.stop();
+    }
+  });
+
   it("can defer the running unique job without releasing its dedupe key", async () => {
     const events: string[] = [];
     const queue = createRuntimeQueue({ logger, tickIntervalMs: 5 });

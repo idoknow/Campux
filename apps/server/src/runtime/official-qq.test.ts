@@ -4,6 +4,7 @@ import {
   deleteOfficialQqForumThread,
   findOfficialQqForumThreadIdByDisplayIds,
   listOfficialQqChannels,
+  OfficialQqPublishOutcomeUnknownError,
   readOfficialQqForumThreadId,
   serializeOfficialQqForumRichText,
 } from "./official-qq";
@@ -145,6 +146,7 @@ describe("QQ 官方机器人论坛子频道", () => {
 
   it("通过帖子列表用稿件 ID 匹配 task_id-only 发帖响应对应的帖子 ID", async () => {
     const requests: Array<{ url: string; init: RequestInit | BunFetchRequestInit | undefined }> = [];
+    let listCalls = 0;
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
       requests.push({ url, init });
@@ -153,6 +155,10 @@ describe("QQ 官方机器人论坛子频道", () => {
       }
       if (init?.method === "PUT") {
         return Response.json({ task_id: "1645413752912602306", create_time: "1645503180" });
+      }
+      listCalls += 1;
+      if (listCalls === 1) {
+        return Response.json({ threads: [], is_finish: 1 });
       }
       return Response.json({
         threads: [
@@ -189,13 +195,122 @@ describe("QQ 官方机器人论坛子频道", () => {
       "https://bots.qq.com/app/getAppAccessToken",
       "https://api.sgroup.qq.com/channels/forum-channel/threads",
       "https://api.sgroup.qq.com/channels/forum-channel/threads",
+      "https://api.sgroup.qq.com/channels/forum-channel/threads",
     ]);
-    expect(requests[1]?.init?.method).toBe("PUT");
-    expect(requests[2]?.init?.method).toBe("GET");
+    expect(requests[1]?.init?.method).toBe("GET");
+    expect(requests[2]?.init?.method).toBe("PUT");
+    expect(requests[3]?.init?.method).toBe("GET");
     expect(result.externalId).toBe("thread-6962");
     expect(result.threadId).toBe("thread-6962");
     expect(result.taskId).toBe("1645413752912602306");
     expect(result.verbose.create).toEqual({ task_id: "1645413752912602306", create_time: "1645503180" });
+  });
+
+  it("在创建请求传输结果不明时通过帖子列表收敛成功，避免自动重发", async () => {
+    const requests: Array<{ url: string; method: string }> = [];
+    let listCalls = 0;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push({ url, method });
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "ambiguous-create-token", expires_in: 7200 });
+      }
+      if (method === "PUT") {
+        throw new TypeError("fetch failed");
+      }
+      listCalls += 1;
+      return Response.json({
+        threads: listCalls === 1 ? [] : [{
+          thread_info: {
+            thread_id: "thread-777",
+            title: "#777",
+            content: serializeOfficialQqForumRichText("稿件正文"),
+          },
+        }],
+      });
+    }) as typeof fetch;
+
+    await expect(createOfficialQqForumThread({
+      id: "bot-ambiguous-create",
+      officialAppId: "10008",
+      officialAppSecret: "ambiguous-create-secret",
+    }, "forum-channel", {
+      title: "#777",
+      content: "稿件正文",
+      matchDisplayIds: [777],
+    })).resolves.toMatchObject({
+      externalId: "thread-777",
+      threadId: "thread-777",
+      taskId: null,
+    });
+
+    expect(requests.filter((request) => request.method === "PUT")).toHaveLength(1);
+    expect(requests.filter((request) => request.method === "GET" && request.url.includes("/threads"))).toHaveLength(2);
+  });
+
+  it("令牌请求失败发生在 create 之前时保留可重试错误，不误标为远端结果未知", async () => {
+    const tokenError = new TypeError("token transport failed");
+    const requests: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      throw tokenError;
+    }) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await createOfficialQqForumThread({
+        id: "bot-token-failure",
+        officialAppId: "10009",
+        officialAppSecret: "token-failure-secret",
+      }, "forum-channel", {
+        title: "#778",
+        content: "稿件正文",
+        matchDisplayIds: [778],
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(tokenError);
+    expect(caught).not.toBeInstanceOf(OfficialQqPublishOutcomeUnknownError);
+    expect(requests).toEqual(["https://bots.qq.com/app/getAppAccessToken"]);
+  });
+
+  it("批量发前查重不会因只命中一个稿件号而跳过整批 create", async () => {
+    const methods: string[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "strict-batch-token", expires_in: 7200 });
+      }
+      methods.push(init?.method ?? "GET");
+      if (init?.method === "PUT") {
+        return Response.json({ thread_id: "thread-new-batch" });
+      }
+      return Response.json({
+        threads: [{
+          thread_info: {
+            thread_id: "thread-unrelated",
+            title: "历史单稿 #800",
+            content: serializeOfficialQqForumRichText("只提到 #800"),
+          },
+        }],
+      });
+    }) as typeof fetch;
+
+    const result = await createOfficialQqForumThread({
+      id: "bot-strict-batch",
+      officialAppId: "10010",
+      officialAppSecret: "strict-batch-secret",
+    }, "forum-channel", {
+      title: "#800 等 2 条稿件",
+      content: "批量正文",
+      matchDisplayIds: [800, 801],
+    });
+
+    expect(methods).toEqual(["GET", "PUT"]);
+    expect(result.threadId).toBe("thread-new-batch");
   });
 
   it("撤回补偿查询也能只按稿件 ID 从帖子列表找到帖子 ID", async () => {

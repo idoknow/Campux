@@ -176,7 +176,10 @@ export function isAmbiguousQZonePublishTimeout(http: QZoneHttpLog[]) {
     if (exchange.label !== "publish_emotion") {
       continue;
     }
-    return !exchange.response && /(?:timeout|timed out|abort)/i.test(exchange.error ?? "");
+    // Once the non-idempotent final POST has been issued, every transport/body
+    // failure without a parsed HTTP response is ambiguous. Retrying may duplicate
+    // a post that the upstream accepted before the connection failed locally.
+    return !exchange.response;
   }
   return false;
 }

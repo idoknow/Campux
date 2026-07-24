@@ -87,11 +87,19 @@ export function createRuntimeQueue(options: RuntimeQueueOptions): RuntimeQueue {
           .sort(compareRuntimeJobs);
         const bestJob = readyJobs[0];
         const bestPriority = bestJob ? runtimeJobPriorities[bestJob.name] : -1;
-        const lowerPriorityJob = consecutiveBestPriority === bestPriority
+        const competingLowerPriorityJob = readyJobs
+          .filter((candidate) => runtimeJobPriorities[candidate.name] > bestPriority)
+          .sort((left, right) => left.runAt.getTime() - right.runAt.getTime())[0];
+        if (!competingLowerPriorityJob) {
+          // Fairness debt only exists while lower-priority work is actually
+          // waiting. Do not carry a completed burst across an idle queue.
+          consecutiveBestPriority = -1;
+          consecutiveBestPriorityCount = 0;
+        }
+        const lowerPriorityJob = competingLowerPriorityJob
+          && consecutiveBestPriority === bestPriority
           && consecutiveBestPriorityCount >= maxConsecutivePriorityJobs
-          ? readyJobs
-              .filter((candidate) => runtimeJobPriorities[candidate.name] > bestPriority)
-              .sort((left, right) => left.runAt.getTime() - right.runAt.getTime())[0]
+          ? competingLowerPriorityJob
           : undefined;
         const job = lowerPriorityJob ?? bestJob;
         if (!job) {
@@ -99,7 +107,10 @@ export function createRuntimeQueue(options: RuntimeQueueOptions): RuntimeQueue {
         }
 
         if (job === bestJob) {
-          if (consecutiveBestPriority === bestPriority) {
+          if (!competingLowerPriorityJob) {
+            consecutiveBestPriority = -1;
+            consecutiveBestPriorityCount = 0;
+          } else if (consecutiveBestPriority === bestPriority) {
             consecutiveBestPriorityCount += 1;
           } else {
             consecutiveBestPriority = bestPriority;

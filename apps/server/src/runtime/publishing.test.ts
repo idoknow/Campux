@@ -5,7 +5,9 @@ import {
   getOfficialQqForumQZoneLinkBotAccountId,
   isRecoverableOrphanPublishingPost,
   interruptedPublishAttemptRecoveryData,
+  isIncompleteBatchFanout,
   publishTargetIntervalSeconds,
+  readExpectedBatchFanoutCount,
   resolveEarliestPublishDispatchAt,
   shouldSkipBatchPublishFanout,
   renderOfficialQqForumCaption,
@@ -44,6 +46,17 @@ describe("publishing recovery and error logging", () => {
       flushedAt: null,
       attempts: [],
     })).toBe(true);
+  });
+
+  it("detects legacy batches whose audit promised more attempts than were persisted", () => {
+    expect(readExpectedBatchFanoutCount([
+      "批量发布：已生成 2 个发布任务（与其他 2 条稿件合并为一条说说）",
+      "其他日志",
+    ])).toBe(2);
+    expect(isIncompleteBatchFanout({ flushedAt: new Date(now), expectedCount: 2, actualCount: 1 })).toBe(true);
+    expect(isIncompleteBatchFanout({ flushedAt: new Date(now), expectedCount: 1, actualCount: 1 })).toBe(false);
+    expect(isIncompleteBatchFanout({ flushedAt: new Date(now), expectedCount: null, actualCount: 0 })).toBe(false);
+    expect(isIncompleteBatchFanout({ flushedAt: null, expectedCount: 2, actualCount: 1 })).toBe(false);
   });
 
   it("recovers only stale publishing posts with neither attempts nor a batch", () => {
