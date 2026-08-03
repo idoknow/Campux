@@ -157,8 +157,9 @@ jobs:
           : "${PORTAINER_REPOSITORY_USERNAME:?PORTAINER_REPOSITORY_USERNAME secret is required}"
           : "${PORTAINER_REPOSITORY_PASSWORD:?PORTAINER_REPOSITORY_PASSWORD secret is required}"
 
-          stack_id="${PORTAINER_STACK_ID:-96}"
-          endpoint_id="${PORTAINER_ENDPOINT_ID:-10}"
+          # jp09 runs admin + dash + landing as one atomic production stack.
+          stack_id="${PORTAINER_STACK_ID:-238}"
+          endpoint_id="${PORTAINER_ENDPOINT_ID:-22}"
           portainer_url="${PORTAINER_URL%/}"
 
           # 认证
@@ -240,6 +241,10 @@ jobs:
         run: |
           curl -fsS --retry 30 --retry-delay 10 --retry-all-errors \
             https://admin.campux.top/api/health
+          curl -fsS --retry 30 --retry-delay 10 --retry-all-errors \
+            https://dash.campux.top/api/health
+          curl -fsS --retry 30 --retry-delay 10 --retry-all-errors \
+            https://campux.top/ > /dev/null
 
   deploy-docs:
     name: Deploy Docs
