@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
+import type { EventBus } from "@campux/plugin";
 import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
 import { Prisma, TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
 import {
@@ -278,6 +279,7 @@ export class OneBotRuntime {
     private readonly queue: RuntimeQueue,
     private readonly logger: FastifyBaseLogger,
     private readonly config?: CampuxConfig,
+    private readonly pluginEvents?: EventBus,
   ) {
     this.reviewQueueReminderTimer = process.env.NODE_ENV === "test" || this.config?.nodeEnv === "production"
       ? null
@@ -1164,6 +1166,15 @@ export class OneBotRuntime {
 
     try {
       const bot = await findEnabledBot(botQqUin);
+
+      // 触发插件事件：Bot 收到私聊消息
+      this.pluginEvents?.emit({
+        type: "bot:message_received",
+        tenantId: bot.tenantId,
+        botAccountId: bot.id,
+        rawMessage: event,
+      });
+
       const plainText = extractOneBotPlainText(event.message, event.raw_message).trim();
       if (this.isSkippablePrivateMessage(plainText || event.raw_message || "")) {
         return;

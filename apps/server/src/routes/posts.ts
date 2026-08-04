@@ -38,7 +38,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
-import { formatBanNotify } from "../lib/bot-messages";
+import type { EventBus } from "@campux/plugin";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 import { autoTagPost } from "../runtime/post-tagging";
@@ -1168,6 +1168,14 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         app.log.warn({ error, postId: post.id }, "failed to auto-tag post");
       });
 
+      // 触发插件事件：稿件创建
+      const events = app.pluginEvents as EventBus | undefined;
+      events?.emit({
+        type: "post:created",
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+      });
+
       return {
         post: toPostListItem(post),
       };
@@ -1768,6 +1776,14 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     });
     oneBot?.notifyPostRecallRequested(updated.id).catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify post recall request");
+    });
+
+    // 触发插件事件：稿件撤回申请
+    const events = app.pluginEvents as EventBus | undefined;
+    events?.emit({
+      type: "post:recalled",
+      tenantId: context.selectedTenant.id,
+      postId: post.id,
     });
 
     return {

@@ -30,6 +30,7 @@ import {
 } from "../lib/tenant-domain";
 import { buildUserContainsSearch } from "../lib/user-search";
 import type { RuntimeQueue } from "../runtime/queue";
+import type { EventBus, PluginEvent } from "@campux/plugin";
 
 const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
 
@@ -458,6 +459,13 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       },
     });
 
+    // 触发插件事件：租户创建
+    const events = app.pluginEvents as EventBus | undefined;
+    events?.emit({
+      type: "tenant:created",
+      tenantId: tenant.id,
+    });
+
     return {
       tenants: await listSystemTenants(context),
       tenantDomainSuffix: tenantDomainSuffixForResponse(config),
@@ -625,6 +633,23 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         return reply.code(response.statusCode).send({ code: response.code, message: response.message });
       }
       throw error;
+    }
+
+    // 触发插件事件：租户状态变更
+    if (body.status !== undefined) {
+      const events = app.pluginEvents as EventBus | undefined;
+      const eventMap: Record<string, PluginEvent["type"]> = {
+        active: "tenant:activated",
+        paused: "tenant:paused",
+        archived: "tenant:archived",
+      };
+      const eventType = eventMap[body.status];
+      if (eventType) {
+        events?.emit({
+          type: eventType,
+          tenantId: params.tenantId,
+        });
+      }
     }
 
     return {

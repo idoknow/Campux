@@ -19,6 +19,7 @@ import {
   MegaphoneIcon,
   MessageSquareTextIcon,
   PlusIcon,
+  PuzzleIcon,
   QrCodeIcon,
   RadioTowerIcon,
   RotateCcwIcon,
@@ -50,6 +51,7 @@ import { readListPreferences, writeListPreferences } from "@/lib/list-preference
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
+import { PluginsPanel } from "./PluginPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1088,6 +1090,9 @@ export function AdminPage({
           <TabsTrigger value="publish" className={managementTabsTriggerClassName}>
             发布
           </TabsTrigger>
+          <TabsTrigger value="plugins" className={managementTabsTriggerClassName}>
+            插件
+          </TabsTrigger>
         </TabsList>
         {adminLoading ? (
           <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">
@@ -1294,6 +1299,9 @@ export function AdminPage({
                 onRefreshLogs={() => void refreshPublishLogs()}
                 onSaveTemplate={(botId, template) => void saveBotPublishTemplate(botId, template)}
               />
+            </TabsContent>
+            <TabsContent value="plugins" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+              <PluginsPanel />
             </TabsContent>
       </Tabs>
       <MemberDetailDialog

@@ -13,6 +13,7 @@ import { readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
+import type { EventBus } from "@campux/plugin";
 
 const postParamsSchema = z.object({
   id: z.string().min(1),
@@ -197,6 +198,15 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
     }
 
+    // 触发插件事件
+    const events = app.pluginEvents as EventBus | undefined;
+    events?.emit({
+      type: "review:approved",
+      tenantId: context.selectedTenant.id,
+      postId: post.id,
+      reviewerId: context.user.id,
+    });
+
     return {
       ok: true,
     };
@@ -314,6 +324,16 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     });
     oneBot?.notifyReviewResult(updated.id, "rejected", body.comment?.trim() || "审核拒绝").catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify review rejection");
+    });
+
+    // 触发插件事件
+    const events = app.pluginEvents as EventBus | undefined;
+    events?.emit({
+      type: "review:rejected",
+      tenantId: context.selectedTenant.id,
+      postId: post.id,
+      reviewerId: context.user.id,
+      reason: body.comment?.trim(),
     });
 
     return {

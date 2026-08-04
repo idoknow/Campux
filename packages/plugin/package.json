@@ -1,0 +1,14 @@
+{
+  "name": "@campux/plugin",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@campux/config": "workspace:*",
+    "@campux/domain": "workspace:*",
+    "@campux/db": "workspace:*",
+    "fastify": "^5.3.2"
+  }
+}
