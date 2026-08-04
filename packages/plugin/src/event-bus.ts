@@ -42,7 +42,7 @@ export function createEventBus(): EventBus {
   }
 
   return {
-    on(eventType: PluginEvent["type"] | "*", handler: EventHandler): () => void {
+    on(eventType: string, handler: EventHandler): () => void {
       const set = getHandlers(eventType);
       set.add(handler);
       return () => {

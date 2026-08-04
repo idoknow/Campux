@@ -110,12 +110,17 @@ export type PluginEvent =
   // 允许插件自定义事件
   | { type: string; [key: string]: unknown };
 
-export type EventHandler = (event: PluginEvent) => void | Promise<void>;
+export type EventHandler<T extends PluginEvent = PluginEvent> = (event: T) => void | Promise<void>;
 
 /** 事件总线：发布/订阅模式 */
 export interface EventBus {
-  /** 订阅事件。返回取消订阅函数。 */
-  on(eventType: PluginEvent["type"] | "*", handler: EventHandler): () => void;
+  /** 订阅事件。返回取消订阅函数。当 eventType 为具体事件类型时，handler 参数类型会自动收窄。 */
+  on<T extends PluginEvent["type"]>(
+    eventType: T,
+    handler: EventHandler<Extract<PluginEvent, { type: T }>>
+  ): () => void;
+  /** 订阅所有事件（通配符） */
+  on(eventType: "*", handler: EventHandler): () => void;
   /** 发布事件 */
   emit(event: PluginEvent): void;
   /** 异步发布事件（等待所有 handler 完成） */
