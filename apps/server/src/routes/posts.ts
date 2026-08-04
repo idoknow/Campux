@@ -37,6 +37,7 @@ import {
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
+import { formatBanNotify } from "../lib/bot-messages";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import type { EventBus } from "@campux/plugin";
 import type { RuntimeQueue } from "../runtime/queue";
