@@ -108,8 +108,14 @@ function applyFirstPrivateMessageSqliteMigration(
   db.exec("PRAGMA foreign_keys=OFF");
   db.exec("BEGIN");
   try {
-    if (botTable.sql.includes(oldDefault)) {
-      const temporaryTable = "BotAccount__first_private_message_migration";
+    // The DDL stored in sqlite_master may use ' literals or '' escaped form; we check by SQL content.
+    const currentDefault = (
+      db.query(`SELECT "dflt_value" FROM pragma_table_info('BotAccount') WHERE name = 'userMessageReply'`).get() as { dflt_value: string | null } | null
+    )?.dflt_value ?? null;
+    if (currentDefault === newDefault || currentDefault === sqlStringLiteral(newDefault)) {
+      // Already on the new default — nothing to do.
+    } else if (botTable.sql.includes(oldDefault)) {
+      const temporaryTable = botTable__first_private_message_migration;
       const createSql = botTable.sql
         .replace(/^CREATE TABLE\s+"?BotAccount"?/i, `CREATE TABLE ${quoteIdentifier(temporaryTable)}`)
         .replace(oldDefault, newDefault);
@@ -130,7 +136,7 @@ function applyFirstPrivateMessageSqliteMigration(
       for (const schemaObject of schemaObjects) {
         db.exec(schemaObject.sql);
       }
-    } else if (!botTable.sql.includes(newDefault)) {
+    } else {
       throw new Error("BotAccount userMessageReply has an unrecognized default; refusing unsafe schema rewrite");
     }
 
@@ -233,6 +239,7 @@ export function applySqliteBaseline(
   const db = new Database(filePath);
   const applied: string[] = [];
   const skipped: string[] = [];
+  const doneNames = new Set<string>();
   try {
     db.exec("PRAGMA foreign_keys=ON;");
     // SQLite 默认 journal；WAL 对单文件服务的并发读更友好。
@@ -242,7 +249,9 @@ export function applySqliteBaseline(
     const done = db
       .query(`SELECT migration_name FROM "_prisma_migrations" WHERE rolled_back_at IS NULL`)
       .all() as Array<{ migration_name: string }>;
-    const doneNames = new Set(done.map((r) => r.migration_name));
+    for (const row of done) {
+      doneNames.add(row.migration_name);
+    }
 
     if (doneNames.has(SQLITE_BASELINE_NAME)) {
       skipped.push(SQLITE_BASELINE_NAME);
@@ -271,6 +280,21 @@ export function applySqliteBaseline(
 
       doneNames.add(SQLITE_BASELINE_NAME);
       applied.push(SQLITE_BASELINE_NAME);
+      // When the baseline was just applied fresh, the incremental migrations
+      // are already embedded in the baseline schema. Record them as done so
+      // they are skipped below.
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME]) {
+        if (!doneNames.has(name)) {
+          doneNames.add(name);
+          skipped.push(name);
+          db.run(
+            `INSERT INTO "_prisma_migrations"
+               ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+             VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+            [randomUUID(), checksumOf(`baseline-includes-${name}`), name],
+          );
+        }
+      }
       logger.info({ applied }, "sqlite baseline applied");
     }
 

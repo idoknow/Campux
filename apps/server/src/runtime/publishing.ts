@@ -796,6 +796,78 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
   return attempts.map(({ attempt }) => attempt);
 }
 
+export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
+  const post = await prisma.post.findFirst({
+    where: {
+      id: postId,
+      tenantId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!post) {
+    return [];
+  }
+
+  const targets = await prisma.publishTarget.findMany({
+    where: {
+      tenantId,
+      enabled: true,
+      botAccount: {
+        enabled: true,
+      },
+    },
+    include: {
+      botAccount: true,
+    },
+    orderBy: {
+      displayName: "asc",
+    },
+  });
+
+  if (targets.length === 0) {
+    return [];
+  }
+
+  await prisma.post.update({
+    where: {
+      id: postId,
+    },
+    data: {
+      status: "publishing",
+      logs: {
+        create: {
+          tenantId,
+          actorId: actorId ?? null,
+          newStatus: "publishing",
+          comment: `手动重发，已重置 ${targets.length} 个发布任务并重新排队`,
+        },
+      },
+    },
+  });
+
+  const attempts = [];
+  for (const target of targets) {
+    const { attempt, nextRunAt } = await schedulePublishAttempt({
+      tenantId,
+      postId,
+      publishTargetId: target.id,
+      botAccountId: target.botAccountId,
+      intervalSeconds: publishTargetIntervalSeconds(target),
+      resetAttempt: true,
+    });
+    attempts.push({ attempt, nextRunAt });
+  }
+
+  for (const scheduled of attempts) {
+    enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
+  }
+
+  return attempts.map(({ attempt }) => attempt);
+}
+
 /**
  * 批量模式：把一个已凑齐的批次 fan out 到每个启用的发布目标。
  * 每个 target 一个 batch attempt（渲染批次内全部稿件的卡片，合成一条说说）。
