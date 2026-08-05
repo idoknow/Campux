@@ -115,7 +115,7 @@ function applyFirstPrivateMessageSqliteMigration(
     if (currentDefault === newDefault || currentDefault === sqlStringLiteral(newDefault)) {
       // Already on the new default — nothing to do.
     } else if (botTable.sql.includes(oldDefault)) {
-      const temporaryTable = botTable__first_private_message_migration;
+      const temporaryTable = "BotAccount__first_private_message_migration";
       const createSql = botTable.sql
         .replace(/^CREATE TABLE\s+"?BotAccount"?/i, `CREATE TABLE ${quoteIdentifier(temporaryTable)}`)
         .replace(oldDefault, newDefault);

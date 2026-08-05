@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import type { FastifyBaseLogger } from "fastify";
 import { resolveDbProvider } from "@campux/db";
 import { applySqliteBaseline } from "@campux/db/src/migrate-sqlite";
-import { sqliteBaselineSql } from "./sqlite-baseline";
+import { getSqliteBaselineSql } from "./sqlite-baseline";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const dbPackageDir = resolve(repoRoot, "packages/db");
@@ -23,7 +23,7 @@ function resolveBunBinary(): string {
   return "bun";
 }
 
-export async function runDatabaseMigrations(logger: Pick<FastifyBaseLogger, "info" | "error"> = console) {
+export async function runDatabaseMigrations(logger: Pick<FastifyBaseLogger, "info" | "warn" | "error"> = console) {
   if (process.env.CAMPUX_SKIP_AUTO_MIGRATE === "1" || process.env.CAMPUX_SKIP_AUTO_MIGRATE === "true") {
     logger.info("database migration skipped by CAMPUX_SKIP_AUTO_MIGRATE");
     return;
@@ -35,7 +35,7 @@ export async function runDatabaseMigrations(logger: Pick<FastifyBaseLogger, "inf
   const provider = resolveDbProvider(databaseUrl, process.env.CAMPUX_DB_PROVIDER);
 
   if (provider === "sqlite") {
-    const results = applySqliteBaseline(sqliteBaselineSql, databaseUrl, {
+    const results = applySqliteBaseline(getSqliteBaselineSql(), databaseUrl, {
       info: (_obj, msg) => logger.info(msg),
       warn: (_obj, msg) => logger.warn(msg),
       error: (_obj, msg) => logger.error(msg),

@@ -2493,7 +2493,7 @@ export class OneBotRuntime {
         await this.sendGroupMessage(
           botQqUin,
           groupId,
-          queuedAttempts > 0 ? formatRequeue(displayId, stylishEnabled) : `#${displayId} 没有可用的发布目标，未加入发布队列`,
+          queuedAttempts.length > 0 ? formatRequeue(displayId, stylishEnabled) : `#${displayId} 没有可用的发布目标，未加入发布队列`,
         );
         return;
       }
