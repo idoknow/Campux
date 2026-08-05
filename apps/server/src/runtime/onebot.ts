@@ -42,7 +42,7 @@ import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
-import { resumePublishAttemptsWaitingForCookies } from "./publishing";
+import { requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { selectReviewNotificationBot } from "./notification-routing";
 import {
   formatNewPostReviewNotification,
@@ -2489,8 +2489,12 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
           return;
         }
-        await enqueuePublishFanoutByDisplayId(this.queue, bot.tenantId, displayId, operatorQqUin);
-        await this.sendGroupMessage(botQqUin, groupId, formatRequeue(displayId, stylishEnabled));
+        const queuedAttempts = await enqueuePublishFanoutByDisplayId(this.queue, bot.tenantId, displayId, operatorQqUin);
+        await this.sendGroupMessage(
+          botQqUin,
+          groupId,
+          queuedAttempts.length > 0 ? formatRequeue(displayId, stylishEnabled) : `#${displayId} 没有可用的发布目标，未加入发布队列`,
+        );
         return;
       }
 
@@ -3448,7 +3452,6 @@ export class OneBotRuntime {
 }
 
 async function enqueuePublishFanoutByDisplayId(queue: RuntimeQueue, tenantId: string, displayId: number, operatorQqUin: string) {
-  const { enqueuePublishFanout } = await import("./publishing");
   const { operator } = await requireBotTenantRole(tenantId, operatorQqUin, "reviewer");
   const post = await prisma.post.findFirst({
     where: {
@@ -3459,7 +3462,7 @@ async function enqueuePublishFanoutByDisplayId(queue: RuntimeQueue, tenantId: st
   if (!post) {
     throw new BotWorkflowError(`稿件 #${displayId} 不存在`, 404);
   }
-  await enqueuePublishFanout(queue, tenantId, post.id, operator.id);
+  return requeuePublishFanout(queue, tenantId, post.id, operator.id);
 }
 
 function formatDateTime(date: Date) {
