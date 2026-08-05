@@ -46,6 +46,7 @@ export type {
 } from "@prisma/client";
 
 export { resolveDbProvider, dbProvider, type DbProvider } from "./provider";
+export { applySqliteBaseline, type SqliteMigrateResult, type SqliteMigrateLogger } from "./migrate-sqlite";
 export {
   insensitiveContains,
   supportsSkipDuplicates,
