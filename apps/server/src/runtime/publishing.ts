@@ -671,7 +671,6 @@ interface ScheduleAndEnqueueFanoutOptions {
   tenantId: string;
   postId: string;
   batchId?: string | null;
-  actorId?: string | null;
   targets: Array<{ id: string; botAccountId: string; publishDelaySeconds: number | null }>;
   resetAttempt?: boolean;
 }
@@ -681,7 +680,7 @@ interface ScheduleAndEnqueueFanoutOptions {
  * Used by both enqueuePublishFanout and requeuePublishFanout to keep behavior aligned.
  */
 async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanoutOptions) {
-  const { queue, tenantId, postId, batchId, actorId, targets, resetAttempt } = options;
+  const { queue, tenantId, postId, batchId, targets, resetAttempt } = options;
 
   const scheduledAttempts = [];
   for (const target of targets) {
@@ -811,16 +810,16 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     maxWait: 5_000,
     timeout: 30_000,
   });
-  // targets is returned from transaction (either [] if skipped/no targets, or the targets array)
+  // Transaction only updates post status to "publishing" and returns targets.
+  // Actual attempt scheduling (which creates PublishAttempt records) happens
+  // in scheduleAndEnqueueFanoutAttempts via schedulePublishAttempt, each in its own transaction.
   if (!targets || targets.length === 0) {
     return [];
   }
-  // Schedule and enqueue attempts using shared helper
   return scheduleAndEnqueueFanoutAttempts({
     queue,
     tenantId,
     postId,
-    actorId,
     targets,
     resetAttempt: false,
   });
@@ -882,7 +881,6 @@ export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string
     queue,
     tenantId,
     postId,
-    actorId,
     targets,
     resetAttempt: true,
   });
