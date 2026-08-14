@@ -281,7 +281,7 @@ export class OneBotRuntime {
     private readonly config?: CampuxConfig,
     private readonly pluginEvents?: EventBus,
   ) {
-    this.reviewQueueReminderTimer = process.env.NODE_ENV === "test" || this.config?.nodeEnv === "production"
+    this.reviewQueueReminderTimer = process.env.NODE_ENV === "test"
       ? null
       : setInterval(() => {
           this.runReviewQueueReminderScan().catch((error) => {
