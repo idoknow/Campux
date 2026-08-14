@@ -681,6 +681,9 @@ interface ScheduleAndEnqueueFanoutOptions {
  *
  * All scheduling happens in a single transaction so that either all targets succeed
  * or none do, preventing orphaned PublishAttempt records without queue jobs.
+ *
+ * Enqueueing uses enqueueUnique with a stable dedupe key (postId:publishTargetId or
+ * batchId:publishTargetId) to ensure each attempt produces at most one publishPost job.
  */
 async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanoutOptions) {
   const { queue, tenantId, postId, batchId, targets, resetAttempt } = options;
@@ -697,7 +700,7 @@ async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanou
         intervalSeconds: publishTargetIntervalSeconds(target),
         resetAttempt,
       });
-      results.push(scheduled);
+      results.push({ scheduled, targetId: target.id });
     }
     return results;
   }, {
@@ -705,12 +708,16 @@ async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanou
     timeout: 30_000,
   });
 
-  // Enqueue all attempts after successful transaction commit
-  for (const scheduled of scheduledAttempts) {
-    enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
+  // Enqueue all attempts after successful transaction commit using unique keys
+  // to prevent duplicate jobs for the same (postId, publishTargetId) or (batchId, publishTargetId)
+  for (const { scheduled, targetId } of scheduledAttempts) {
+    const dedupeKey = batchId
+      ? `publish:${batchId}:${targetId}`
+      : `publish:${postId}:${targetId}`;
+    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
   }
 
-  return scheduledAttempts.map(({ attempt }) => attempt);
+  return scheduledAttempts.map(({ scheduled }) => scheduled.attempt);
 }
 
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
@@ -819,9 +826,8 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     maxWait: 5_000,
     timeout: 30_000,
   });
-  // Transaction only updates post status to "publishing" and returns targets.
-  // Actual attempt scheduling (which creates PublishAttempt records) happens
-  // in scheduleAndEnqueueFanoutAttempts via schedulePublishAttempt, each in its own transaction.
+  // Use the transaction's returned result as the sole gate: it returns [] when
+  // fanout is skipped or no targets exist, and the targets array otherwise.
   if (!targets || targets.length === 0) {
     return [];
   }
@@ -868,6 +874,14 @@ export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string
   if (targets.length === 0) {
     return [];
   }
+
+  // Serialize concurrent requeue scheduling for the same post
+  await prisma.$transaction(async (tx) => {
+    await lockPublishFanout(tx, tenantId, `requeue:${postId}`);
+  }, {
+    maxWait: 5_000,
+    timeout: 30_000,
+  });
 
   await prisma.post.update({
     where: {
@@ -1049,8 +1063,10 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
     return [];
   }
   // 全部目标 attempt 与 durable marker 同事务提交后才开始消费。
+  // 使用 enqueueUnique ��止同一 (batchId, publishTargetId) 产生重复作业。
   for (const scheduled of attempts) {
-    enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
+    const dedupeKey = `publish:${batch.id}:${scheduled.attempt.publishTargetId}`;
+    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
   }
 
   return attempts.map(({ attempt }) => attempt);
@@ -1227,6 +1243,24 @@ export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId:
     },
     runAt,
   });
+}
+
+export function enqueueAttemptUnique(
+  queue: RuntimeQueue,
+  tenantId: string,
+  attemptId: string,
+  dedupeKey: string,
+  runAt = new Date(),
+): RuntimeJob | null {
+  return queue.enqueueUnique(
+    {
+      name: "publishPost",
+      tenantId,
+      payload: { attemptId },
+      runAt,
+    },
+    dedupeKey,
+  );
 }
 
 export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue, botAccountId: string, logger?: FastifyBaseLogger) {
