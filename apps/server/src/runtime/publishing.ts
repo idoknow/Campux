@@ -678,25 +678,34 @@ interface ScheduleAndEnqueueFanoutOptions {
 /**
  * Shared helper: schedule publish attempts for each target and enqueue them.
  * Used by both enqueuePublishFanout and requeuePublishFanout to keep behavior aligned.
+ *
+ * All scheduling happens in a single transaction so that either all targets succeed
+ * or none do, preventing orphaned PublishAttempt records without queue jobs.
  */
 async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanoutOptions) {
   const { queue, tenantId, postId, batchId, targets, resetAttempt } = options;
 
-  const scheduledAttempts = [];
-  for (const target of targets) {
-    const scheduled = await schedulePublishAttempt({
-      tenantId,
-      postId,
-      batchId,
-      publishTargetId: target.id,
-      botAccountId: target.botAccountId,
-      intervalSeconds: publishTargetIntervalSeconds(target),
-      resetAttempt,
-    });
-    scheduledAttempts.push(scheduled);
-  }
+  const scheduledAttempts = await prisma.$transaction(async (tx) => {
+    const results = [];
+    for (const target of targets) {
+      const scheduled = await schedulePublishAttemptInTransaction(tx, {
+        tenantId,
+        postId,
+        batchId,
+        publishTargetId: target.id,
+        botAccountId: target.botAccountId,
+        intervalSeconds: publishTargetIntervalSeconds(target),
+        resetAttempt,
+      });
+      results.push(scheduled);
+    }
+    return results;
+  }, {
+    maxWait: 5_000,
+    timeout: 30_000,
+  });
 
-  // Enqueue all attempts after scheduling (persisted atomically by schedulePublishAttempt)
+  // Enqueue all attempts after successful transaction commit
   for (const scheduled of scheduledAttempts) {
     enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
   }
