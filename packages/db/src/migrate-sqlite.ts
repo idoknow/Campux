@@ -19,6 +19,7 @@ import { mkdirSync } from "node:fs";
 const SQLITE_BASELINE_NAME = "0_sqlite_baseline";
 const FIRST_PRIVATE_MESSAGE_MIGRATION_NAME = "20260713120000_auto_register_on_first_private_message";
 const LAST_PUBLISH_STARTED_AT_MIGRATION_NAME = "20260724090000_add_bot_last_publish_started_at";
+const REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME = "20260815120000_add_bot_review_queue_reminder_at_all";
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
 const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
@@ -220,6 +221,55 @@ function applyLastPublishStartedAtSqliteMigration(
   logger.info({ migration: LAST_PUBLISH_STARTED_AT_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
+function applyReviewQueueReminderAtAllSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const botTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'BotAccount'`)
+    .get() as { present: number } | null;
+  if (!botTable) return;
+
+  if (doneNames.has(REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME)) {
+    skipped.push(REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME);
+    return;
+  }
+
+  const reminderAtAllColumn = db
+    .query(`SELECT 1 AS present FROM pragma_table_info('BotAccount') WHERE name = 'reviewQueueReminderAtAll'`)
+    .get() as { present: number } | null;
+  const hasColumn = reminderAtAllColumn !== null;
+
+  logger.info({ migration: REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasColumn) {
+      db.exec(`ALTER TABLE "BotAccount" ADD COLUMN "reviewQueueReminderAtAll" BOOLEAN NOT NULL DEFAULT false`);
+    }
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`ALTER TABLE "BotAccount" ADD COLUMN "reviewQueueReminderAtAll" BOOLEAN NOT NULL DEFAULT false`),
+        REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME,
+      ],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME);
+  applied.push(REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME);
+  logger.info({ migration: REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 /**
  * 应用 SQLite baseline 建库脚本及后续增量迁移（幂等）。
  *
@@ -300,6 +350,7 @@ export function applySqliteBaseline(
 
     applyFirstPrivateMessageSqliteMigration(db, doneNames, applied, skipped, logger);
     applyLastPublishStartedAtSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyReviewQueueReminderAtAllSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

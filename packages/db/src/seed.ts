@@ -1,4 +1,5 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@campux/db";
+import { loadConfig } from "@campux/config";
 import { hashPassword } from "./password";
 import { resolveMembershipRoleForSeed } from "./seed-membership";
 import { runSeedInTransaction } from "./seed-transaction";
@@ -14,6 +15,12 @@ if (process.env.NODE_ENV === "production" && process.env.CAMPUX_ALLOW_SEED !== "
   );
   process.exit(1);
 }
+
+// loadConfig() resolves the correct DATABASE_URL (incl. SQLite file: URLs) and
+// honors CAMPUX_DB_PROVIDER so the runtime-selected PrismaClient connects to
+// the right database. Without this, `new PrismaClient()` falls back to the
+// postgres datasource in schema.prisma and fails on SQLite-only dev setups.
+process.env.DATABASE_URL ??= loadConfig().databaseUrl;
 
 const prisma = new PrismaClient();
 

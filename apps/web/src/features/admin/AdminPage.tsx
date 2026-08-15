@@ -3063,7 +3063,7 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderAtAll" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
@@ -3075,6 +3075,7 @@ function BotConfigEditor({
   const [reviewNotificationEnabled, setReviewNotificationEnabled] = useState(bot.reviewNotificationEnabled);
   const [reviewQueueAutoReminderEnabled, setReviewQueueAutoReminderEnabled] = useState(bot.reviewQueueAutoReminderEnabled);
   const [reviewQueueReminderThresholdHours, setReviewQueueReminderThresholdHours] = useState(String(bot.reviewQueueReminderThresholdHours));
+  const [reviewQueueReminderAtAll, setReviewQueueReminderAtAll] = useState(bot.reviewQueueReminderAtAll);
   const [autoFriendRequestApprovalEnabled, setAutoFriendRequestApprovalEnabled] = useState(bot.autoFriendRequestApprovalEnabled);
   const [enabled, setEnabled] = useState(bot.enabled);
   const [officialGuilds, setOfficialGuilds] = useState<OfficialQqGuildOption[]>([]);
@@ -3093,9 +3094,10 @@ function BotConfigEditor({
     setReviewNotificationEnabled(bot.reviewNotificationEnabled);
     setReviewQueueAutoReminderEnabled(bot.reviewQueueAutoReminderEnabled);
     setReviewQueueReminderThresholdHours(String(bot.reviewQueueReminderThresholdHours));
+    setReviewQueueReminderAtAll(bot.reviewQueueReminderAtAll);
     setAutoFriendRequestApprovalEnabled(bot.autoFriendRequestApprovalEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.officialAppId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.officialAppId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.reviewQueueReminderAtAll, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
@@ -3114,6 +3116,7 @@ function BotConfigEditor({
     || (bot.platform === "onebot" && trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply)
     || (bot.platform === "onebot" && reviewNotificationEnabled !== bot.reviewNotificationEnabled)
     || (bot.platform === "onebot" && reviewQueueAutoReminderEnabled !== bot.reviewQueueAutoReminderEnabled)
+    || (bot.platform === "onebot" && reviewQueueReminderAtAll !== bot.reviewQueueReminderAtAll)
     || (bot.platform === "onebot" && normalizedReviewQueueReminderThresholdHours !== bot.reviewQueueReminderThresholdHours)
     || (bot.platform === "onebot" && autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled)
     || enabled !== bot.enabled;
@@ -3138,6 +3141,7 @@ function BotConfigEditor({
       reviewGroupMessageReply: trimmedReviewGroupMessageReply,
       reviewNotificationEnabled,
       reviewQueueAutoReminderEnabled,
+      reviewQueueReminderAtAll,
       reviewQueueReminderThresholdHours: normalizedReviewQueueReminderThresholdHours,
       autoFriendRequestApprovalEnabled,
       enabled,
@@ -3255,11 +3259,18 @@ function BotConfigEditor({
                 <label className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                   <span>
                     超时自动催审
-                    <span className="block text-xs font-normal leading-5 text-slate-500">待审核稿件超过阈值后在审核群 @全体成员。</span>
+                    <span className="block text-xs font-normal leading-5 text-slate-500">待审核稿件超过阈值后在审核群发送提醒。</span>
                   </span>
                   <Switch checked={reviewQueueAutoReminderEnabled} onCheckedChange={setReviewQueueAutoReminderEnabled} aria-label="超时自动催审" />
                 </label>
-                <label className="grid gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+                <div className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" style={{ opacity: reviewQueueAutoReminderEnabled ? 1 : 0.5 }}>
+                  <span>
+                    催审 @全体成员
+                    <span className="block text-xs font-normal leading-5 text-slate-500">⚠️ 仅当机器人是审核群管理员时开启；非管理员发送 @all 可能导致封号。</span>
+                  </span>
+                  <Switch checked={reviewQueueReminderAtAll} onCheckedChange={setReviewQueueReminderAtAll} aria-label="催审 @全体成员" disabled={!reviewQueueAutoReminderEnabled} />
+                </div>
+                <div className="grid gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500" style={{ opacity: reviewQueueAutoReminderEnabled ? 1 : 0.5 }}>
                   催审阈值（小时）
                   <Input
                     className="bg-white"
@@ -3269,7 +3280,7 @@ function BotConfigEditor({
                     onChange={(event) => setReviewQueueReminderThresholdHours(event.target.value.replace(/\D/g, ""))}
                   />
                   <span className="text-[11px] font-normal text-slate-400">支持 1-168 小时；关闭自动催审后不会推送。</span>
-                </label>
+                </div>
               </>
             ) : null}
           </div>

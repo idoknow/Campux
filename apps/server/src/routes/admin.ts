@@ -73,6 +73,7 @@ const botCreateSchema = z.discriminatedUnion("platform", [
     reviewNotificationEnabled: z.boolean().default(false),
     reviewQueueAutoReminderEnabled: z.boolean().default(false),
     reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).default(6),
+    reviewQueueReminderAtAll: z.boolean().default(false),
     autoFriendRequestApprovalEnabled: z.boolean().default(false),
     enabled: z.boolean().default(true),
     createPublishTarget: z.boolean().default(true),
@@ -106,6 +107,7 @@ const botPatchSchema = z.object({
   reviewNotificationEnabled: z.boolean().optional(),
   reviewQueueAutoReminderEnabled: z.boolean().optional(),
   reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).optional(),
+  reviewQueueReminderAtAll: z.boolean().optional(),
   autoFriendRequestApprovalEnabled: z.boolean().optional(),
   userMessageReply: z.string().trim().min(1).max(1000).optional(),
   userMessageReplyCooldownSeconds: z.number().int().min(0).max(86_400).optional(),
@@ -806,6 +808,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           reviewNotificationEnabled: body.reviewNotificationEnabled,
           reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled,
           reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours,
+          reviewQueueReminderAtAll: body.reviewQueueReminderAtAll,
           autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled,
           enabled: body.enabled,
           ...(body.createPublishTarget
@@ -843,6 +846,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         reviewNotificationEnabled: body.reviewNotificationEnabled,
         reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled,
         reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours,
+        reviewQueueReminderAtAll: body.reviewQueueReminderAtAll,
         autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled,
       },
     });
@@ -896,6 +900,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(bot.platform === "onebot" && body.reviewNotificationEnabled !== undefined ? { reviewNotificationEnabled: body.reviewNotificationEnabled } : {}),
           ...(bot.platform === "onebot" && body.reviewQueueAutoReminderEnabled !== undefined ? { reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled } : {}),
           ...(bot.platform === "onebot" && body.reviewQueueReminderThresholdHours !== undefined ? { reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours } : {}),
+          ...(bot.platform === "onebot" && body.reviewQueueReminderAtAll !== undefined ? { reviewQueueReminderAtAll: body.reviewQueueReminderAtAll } : {}),
           ...(bot.platform === "onebot" && body.autoFriendRequestApprovalEnabled !== undefined ? { autoFriendRequestApprovalEnabled: body.autoFriendRequestApprovalEnabled } : {}),
           ...(bot.platform === "onebot" && body.userMessageReply !== undefined ? { userMessageReply: body.userMessageReply } : {}),
           ...(bot.platform === "onebot" && body.userMessageReplyCooldownSeconds !== undefined ? { userMessageReplyCooldownSeconds: body.userMessageReplyCooldownSeconds } : {}),
@@ -1502,6 +1507,7 @@ function toBotAccount(
     reviewNotificationEnabled: boolean;
     reviewQueueAutoReminderEnabled: boolean;
     reviewQueueReminderThresholdHours: number;
+    reviewQueueReminderAtAll: boolean;
     autoFriendRequestApprovalEnabled: boolean;
     connectionToken: string;
     publishTextTemplate: Prisma.JsonValue;
@@ -1542,6 +1548,7 @@ function toBotAccount(
     reviewNotificationEnabled: bot.reviewNotificationEnabled,
     reviewQueueAutoReminderEnabled: bot.reviewQueueAutoReminderEnabled,
     reviewQueueReminderThresholdHours: bot.reviewQueueReminderThresholdHours,
+    reviewQueueReminderAtAll: bot.reviewQueueReminderAtAll,
     autoFriendRequestApprovalEnabled: bot.autoFriendRequestApprovalEnabled,
     connectionToken: bot.connectionToken,
     publishTextTemplate: normalizePublishTextTemplate(bot.publishTextTemplate),

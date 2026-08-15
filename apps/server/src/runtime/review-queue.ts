@@ -10,6 +10,7 @@ export type ReviewQueueBot = {
   qqUin: bigint;
   reviewGroupId: string | null;
   reviewQueueReminderThresholdHours: number;
+  reviewQueueReminderAtAll: boolean;
 };
 
 export type ReviewQueueReminder = {
@@ -94,6 +95,14 @@ export async function collectOverdueReviewReminders(
     orderBy: {
       createdAt: "asc",
     },
+    select: {
+      id: true,
+      tenantId: true,
+      qqUin: true,
+      reviewGroupId: true,
+      reviewQueueReminderThresholdHours: true,
+      reviewQueueReminderAtAll: true,
+    },
   });
 
   const reminders: ReviewQueueReminder[] = [];
@@ -166,10 +175,11 @@ export async function collectOverdueReviewReminders(
         qqUin: bot.qqUin,
         reviewGroupId: bot.reviewGroupId,
         reviewQueueReminderThresholdHours: thresholdHours,
+        reviewQueueReminderAtAll: bot.reviewQueueReminderAtAll,
       },
       items,
       hiddenCount,
-      messageChunks: buildReviewQueueReminderMessages(items, thresholdHours, now, hiddenCount),
+      messageChunks: buildReviewQueueReminderMessages(items, thresholdHours, now, hiddenCount, bot.reviewQueueReminderAtAll),
     });
   }
   return reminders;
@@ -193,25 +203,27 @@ export async function markReviewQueueReminderSent(prisma: typeof prismaClient, p
   });
 }
 
-export function buildReviewQueueReminderMessages(items: ReviewQueueItem[], thresholdHours: number, now = new Date(), hiddenCount = 0, maxChars?: number) {
+export function buildReviewQueueReminderMessages(items: ReviewQueueItem[], thresholdHours: number, now = new Date(), hiddenCount = 0, atAll = false, maxChars?: number) {
   return formatReviewQueueReminderMessages(items, thresholdHours, now, hiddenCount, maxChars).map((text, index) => {
     if (index > 0) {
       return text;
     }
-    return [
-      {
+    const segments = [];
+    if (atAll) {
+      segments.push({
         type: "at",
         data: {
           qq: "all",
         },
+      });
+    }
+    segments.push({
+      type: "text",
+      data: {
+        text: `\n${text}`,
       },
-      {
-        type: "text",
-        data: {
-          text: `\n${text}`,
-        },
-      },
-    ];
+    });
+    return segments;
   });
 }
 
