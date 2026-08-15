@@ -179,7 +179,7 @@ export async function collectOverdueReviewReminders(
       },
       items,
       hiddenCount,
-      messageChunks: buildReviewQueueReminderMessages(items, thresholdHours, now, hiddenCount, bot.reviewQueueReminderAtAll),
+      messageChunks: buildReviewQueueReminderMessages(items, thresholdHours, now, hiddenCount, undefined, bot.reviewQueueReminderAtAll),
     });
   }
   return reminders;
@@ -203,7 +203,7 @@ export async function markReviewQueueReminderSent(prisma: typeof prismaClient, p
   });
 }
 
-export function buildReviewQueueReminderMessages(items: ReviewQueueItem[], thresholdHours: number, now = new Date(), hiddenCount = 0, atAll = false, maxChars?: number) {
+export function buildReviewQueueReminderMessages(items: ReviewQueueItem[], thresholdHours: number, now = new Date(), hiddenCount = 0, maxChars?: number, atAll = false) {
   return formatReviewQueueReminderMessages(items, thresholdHours, now, hiddenCount, maxChars).map((text, index) => {
     if (index > 0) {
       return text;
