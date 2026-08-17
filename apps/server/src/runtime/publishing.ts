@@ -691,15 +691,18 @@ async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanou
   const scheduledAttempts = await prisma.$transaction(async (tx) => {
     const results = [];
     for (const target of targets) {
-      const scheduled = await schedulePublishAttemptInTransaction(tx, {
+      const scheduleOptions: SchedulePublishAttemptOptions = {
         tenantId,
         postId,
-        batchId,
         publishTargetId: target.id,
         botAccountId: target.botAccountId,
         intervalSeconds: publishTargetIntervalSeconds(target),
-        resetAttempt,
-      });
+        resetAttempt: resetAttempt ?? false,
+      };
+      if (batchId !== undefined) {
+        scheduleOptions.batchId = batchId;
+      }
+      const scheduled = await schedulePublishAttemptInTransaction(tx, scheduleOptions);
       results.push({ scheduled, targetId: target.id });
     }
     return results;

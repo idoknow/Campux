@@ -15,6 +15,7 @@
     "@campux/domain": "workspace:*",
     "@campux/integrations": "workspace:*",
     "@campux/plugin": "workspace:*",
+    "@campux/plugin-review-notify": "workspace:*",
     "@campux/render": "workspace:*",
     "@campux/telemetry": "workspace:*",
     "@fastify/multipart": "^9.0.0",
