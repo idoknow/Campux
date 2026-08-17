@@ -234,6 +234,7 @@ describe("review queue messages", () => {
       now,
       2,
       100,
+      true,
     );
 
     expect(messages.length).toBeGreaterThan(1);

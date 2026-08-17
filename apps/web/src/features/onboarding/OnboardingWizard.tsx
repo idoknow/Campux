@@ -272,7 +272,8 @@ export function OnboardingWizard({
                   <Field label="审核群号（可选）">
                     <Input value={reviewGroup} onChange={(event) => setReviewGroup(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="接收新稿件和审核通知的 QQ 群" />
                   </Field>
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-between gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setStep("info")}>上一步</Button>
                     <Button disabled={creatingBot} onClick={() => void createBot()}>
                       {creatingBot ? <Loader2Icon className="animate-spin" data-icon="inline-start" /> : null}
                       创建墙号
@@ -284,11 +285,14 @@ export function OnboardingWizard({
                   <ConnectionPanel bot={primaryBot} online={botOnline} />
                   <NapCatGuide url={buildOneBotUrl(primaryBot)} />
                   <div className="flex min-w-0 items-center justify-between gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void refreshBots()}>
-                      <RotateCcwIcon data-icon="inline-start" />
-                      刷新状态
-                    </Button>
-                    <Button disabled={!botOnline} onClick={() => setStep("publish")}>下一步</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setStep("info")}>上一步</Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => void refreshBots()}>
+                        <RotateCcwIcon data-icon="inline-start" />
+                        刷新状态
+                      </Button>
+                      <Button disabled={!botOnline} onClick={() => setStep("publish")}>下一步</Button>
+                    </div>
                   </div>
                 </div>
               )}

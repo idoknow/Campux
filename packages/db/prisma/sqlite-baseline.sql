@@ -234,6 +234,7 @@ CREATE TABLE "BotAccount" (
     "reviewNotificationEnabled" BOOLEAN NOT NULL DEFAULT false,
     "reviewQueueAutoReminderEnabled" BOOLEAN NOT NULL DEFAULT false,
     "reviewQueueReminderThresholdHours" INTEGER NOT NULL DEFAULT 6,
+    "reviewQueueReminderAtAll" BOOLEAN NOT NULL DEFAULT false,
     "autoFriendRequestApprovalEnabled" BOOLEAN NOT NULL DEFAULT false,
     "connectionToken" TEXT NOT NULL,
     "publishTextTemplate" JSONB NOT NULL DEFAULT '{"includePostId":true,"includeAuthorMention":false,"includeLinks":false,"customText":""}',

@@ -666,6 +666,60 @@ export function publishTargetIntervalSeconds(target: { publishDelaySeconds: numb
   return target.publishDelaySeconds ?? null;
 }
 
+interface ScheduleAndEnqueueFanoutOptions {
+  queue: RuntimeQueue;
+  tenantId: string;
+  postId: string;
+  batchId?: string | null;
+  targets: Array<{ id: string; botAccountId: string; publishDelaySeconds: number | null }>;
+  resetAttempt?: boolean;
+}
+
+/**
+ * Shared helper: schedule publish attempts for each target and enqueue them.
+ * Used by both enqueuePublishFanout and requeuePublishFanout to keep behavior aligned.
+ *
+ * All scheduling happens in a single transaction so that either all targets succeed
+ * or none do, preventing orphaned PublishAttempt records without queue jobs.
+ *
+ * Enqueueing uses enqueueUnique with a stable dedupe key (postId:publishTargetId or
+ * batchId:publishTargetId) to ensure each attempt produces at most one publishPost job.
+ */
+async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanoutOptions) {
+  const { queue, tenantId, postId, batchId, targets, resetAttempt } = options;
+
+  const scheduledAttempts = await prisma.$transaction(async (tx) => {
+    const results = [];
+    for (const target of targets) {
+      const scheduled = await schedulePublishAttemptInTransaction(tx, {
+        tenantId,
+        postId,
+        batchId,
+        publishTargetId: target.id,
+        botAccountId: target.botAccountId,
+        intervalSeconds: publishTargetIntervalSeconds(target),
+        resetAttempt,
+      });
+      results.push({ scheduled, targetId: target.id });
+    }
+    return results;
+  }, {
+    maxWait: 5_000,
+    timeout: 30_000,
+  });
+
+  // Enqueue all attempts after successful transaction commit using unique keys
+  // to prevent duplicate jobs for the same (postId, publishTargetId) or (batchId, publishTargetId)
+  for (const { scheduled, targetId } of scheduledAttempts) {
+    const dedupeKey = batchId
+      ? `publish:${batchId}:${targetId}`
+      : `publish:${postId}:${targetId}`;
+    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
+  }
+
+  return scheduledAttempts.map(({ scheduled }) => scheduled.attempt);
+}
+
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
   const post = await prisma.post.findUnique({
     where: {
@@ -767,33 +821,92 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
         },
       },
     });
-
-    const scheduledAttempts = [];
-    for (const target of targets) {
-      const scheduled = await schedulePublishAttemptInTransaction(tx, {
-        tenantId,
-        postId,
-        publishTargetId: target.id,
-        botAccountId: target.botAccountId,
-        intervalSeconds: publishTargetIntervalSeconds(target),
-      });
-      scheduledAttempts.push(scheduled);
-    }
-    return scheduledAttempts;
+    return targets;
   }, {
     maxWait: 5_000,
     timeout: 30_000,
   });
-  if (attempts.length === 0) {
+  // Use the transaction's returned result as the sole gate: it returns [] when
+  // fanout is skipped or no targets exist, and the targets array otherwise.
+  if (!targets || targets.length === 0) {
     return [];
   }
-  // 先原子持久化全部目标，再开始消费，避免并发/崩溃留下部分目标或重置已运行 attempt，
-  // 也避免需要附带 QZone 链接的 QQ 频道任务在 QZone attempt 尚未创建时抢跑。
-  for (const scheduled of attempts) {
-    enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
+  return scheduleAndEnqueueFanoutAttempts({
+    queue,
+    tenantId,
+    postId,
+    targets,
+    resetAttempt: false,
+  });
+}
+
+export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
+  const post = await prisma.post.findFirst({
+    where: {
+      id: postId,
+      tenantId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!post) {
+    return [];
   }
 
-  return attempts.map(({ attempt }) => attempt);
+  const targets = await prisma.publishTarget.findMany({
+    where: {
+      tenantId,
+      enabled: true,
+      botAccount: {
+        enabled: true,
+      },
+    },
+    include: {
+      botAccount: true,
+    },
+    orderBy: {
+      displayName: "asc",
+    },
+  });
+
+  if (targets.length === 0) {
+    return [];
+  }
+
+  // Serialize concurrent requeue scheduling for the same post
+  await prisma.$transaction(async (tx) => {
+    await lockPublishFanout(tx, tenantId, `requeue:${postId}`);
+  }, {
+    maxWait: 5_000,
+    timeout: 30_000,
+  });
+
+  await prisma.post.update({
+    where: {
+      id: postId,
+    },
+    data: {
+      status: "publishing",
+      logs: {
+        create: {
+          tenantId,
+          actorId: actorId ?? null,
+          newStatus: "publishing",
+          comment: `手动重发，已重置 ${targets.length} 个发布任务并重新排队`,
+        },
+      },
+    },
+  });
+
+  return scheduleAndEnqueueFanoutAttempts({
+    queue,
+    tenantId,
+    postId,
+    targets,
+    resetAttempt: true,
+  });
 }
 
 /**
@@ -950,8 +1063,10 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
     return [];
   }
   // 全部目标 attempt 与 durable marker 同事务提交后才开始消费。
+  // 使用 enqueueUnique ��止同一 (batchId, publishTargetId) 产生重复作业。
   for (const scheduled of attempts) {
-    enqueueAttempt(queue, tenantId, scheduled.attempt.id, scheduled.nextRunAt);
+    const dedupeKey = `publish:${batch.id}:${scheduled.attempt.publishTargetId}`;
+    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
   }
 
   return attempts.map(({ attempt }) => attempt);
@@ -1128,6 +1243,24 @@ export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId:
     },
     runAt,
   });
+}
+
+export function enqueueAttemptUnique(
+  queue: RuntimeQueue,
+  tenantId: string,
+  attemptId: string,
+  dedupeKey: string,
+  runAt = new Date(),
+): RuntimeJob | null {
+  return queue.enqueueUnique(
+    {
+      name: "publishPost",
+      tenantId,
+      payload: { attemptId },
+      runAt,
+    },
+    dedupeKey,
+  );
 }
 
 export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue, botAccountId: string, logger?: FastifyBaseLogger) {

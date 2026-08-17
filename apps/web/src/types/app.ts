@@ -423,6 +423,7 @@ export type AdminBotAccount = {
   reviewNotificationEnabled: boolean;
   reviewQueueAutoReminderEnabled: boolean;
   reviewQueueReminderThresholdHours: number;
+  reviewQueueReminderAtAll: boolean;
   autoFriendRequestApprovalEnabled: boolean;
   connectionToken: string;
   publishTextTemplate: PublishTextTemplate;
