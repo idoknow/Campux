@@ -396,6 +396,15 @@
   background: oklch(0.215 0.018 255);
 }
 
+/* 投稿配色只用于亮色预览；暗色模式统一回到可读的主题表面与前景色。 */
+.dark .post-themed-surface {
+  background: var(--card) !important;
+}
+
+.dark .post-themed-text {
+  color: var(--card-foreground) !important;
+}
+
 .dark .product-subsection {
   border-color: oklch(0.34 0.018 255);
   background: oklch(0.245 0.018 255);
