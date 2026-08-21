@@ -172,6 +172,7 @@ export function OpsPanel({
 }) {
   const isSystemMode = mode === "system";
   const tenantRequestGate = useRef(createLatestRequestGate());
+  const overviewRequestGate = useRef(createLatestRequestGate());
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -275,6 +276,7 @@ export function OpsPanel({
 
   async function refreshOverview(nextSelectedId?: string) {
     const requestGeneration = tenantRequestGate.current.begin();
+    const overviewGeneration = overviewRequestGate.current.begin();
     setLoadingOverview(true);
     setQueueLoadState("loading");
     try {
@@ -294,27 +296,32 @@ export function OpsPanel({
         const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
         setSelectedTenantId(nextTenant?.id ?? "");
       }
-      if (queueResult.ok) {
-        setQueue(queueResult.value);
-        setQueueLoadState("ready");
-      } else {
-        setQueue(null);
-        setQueueLoadState("error");
-        toast.error(queueResult.error instanceof Error ? `任务队列状态读取失败：${queueResult.error.message}` : "任务队列状态读取失败");
-      }
-      if (userResult.ok) {
-        setSystemUserTotal(userResult.value.total);
-      } else {
-        setSystemUserTotal(null);
-        toast.error(userResult.error instanceof Error ? `用户总数读取失败：${userResult.error.message}` : "用户总数读取失败");
+      if (overviewRequestGate.current.isCurrent(overviewGeneration)) {
+        if (queueResult.ok) {
+          setQueue(queueResult.value);
+          setQueueLoadState("ready");
+        } else {
+          setQueue(null);
+          setQueueLoadState("error");
+          toast.error(queueResult.error instanceof Error ? `任务队列状态读取失败：${queueResult.error.message}` : "任务队列状态读取失败");
+        }
+        if (userResult.ok) {
+          setSystemUserTotal(userResult.value.total);
+        } else {
+          setSystemUserTotal(null);
+          toast.error(userResult.error instanceof Error ? `用户总数读取失败：${userResult.error.message}` : "用户总数读取失败");
+        }
       }
       return data.tenants;
     } catch (caught) {
+      if (!overviewRequestGate.current.isCurrent(overviewGeneration)) return [];
       setQueue(null);
       setQueueLoadState("error");
       throw caught;
     } finally {
-      setLoadingOverview(false);
+      if (overviewRequestGate.current.isCurrent(overviewGeneration)) {
+        setLoadingOverview(false);
+      }
     }
   }
 
