@@ -145,6 +145,7 @@ jobs:
           PORTAINER_PASSWORD: ${{ secrets.PORTAINER_PASSWORD }}
           PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
           PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
+          CAMPUX_DATABASE_URL: ${{ secrets.CAMPUX_DATABASE_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -152,6 +153,7 @@ jobs:
           : "${PORTAINER_URL:?PORTAINER_URL secret is required}"
           : "${PORTAINER_USERNAME:?PORTAINER_USERNAME secret is required}"
           : "${PORTAINER_PASSWORD:?PORTAINER_PASSWORD secret is required}"
+          : "${CAMPUX_DATABASE_URL:?CAMPUX_DATABASE_URL secret is required}"
 
           # jp09 runs admin + dash + landing as one atomic production stack.
           stack_id="${PORTAINER_STACK_ID:-238}"
@@ -214,11 +216,15 @@ jobs:
             jq -n \
               --arg stackFileContent "$stack_file_content" \
               --arg imageTag "${CAMPUX_IMAGE_TAG}" \
+              --arg databaseUrl "${CAMPUX_DATABASE_URL}" \
               --argjson existingEnv "$existing_env" \
               '{
                 env: (
-                  ($existingEnv | map(select(.name != "CAMPUX_IMAGE_TAG")))
-                  + [{"name": "CAMPUX_IMAGE_TAG", "value": $imageTag}]
+                  ($existingEnv | map(select(.name != "CAMPUX_IMAGE_TAG" and .name != "CAMPUX_DATABASE_URL")))
+                  + [
+                      {"name": "CAMPUX_IMAGE_TAG", "value": $imageTag},
+                      {"name": "CAMPUX_DATABASE_URL", "value": $databaseUrl}
+                    ]
                 ),
                 prune: false,
                 pullImage: true,
