@@ -1686,7 +1686,7 @@ function ReviewCard({
   const cardTextColor = postCardTextColor(post.textColor);
 
   return (
-    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`} style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
+    <Card className={`post-themed-surface overflow-hidden rounded-md border shadow-none ${palette}`} style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
       <CardContent className="grid gap-2 p-2.5 md:gap-3 md:p-3">
         <PostMetaHeader
           displayId={`稿件 ${post.displayId}`}
@@ -1848,7 +1848,7 @@ function PostCard({
   const cardTextColor = postCardTextColor(post.textColor);
 
   return (
-    <Card className={`overflow-hidden rounded-md border shadow-none ${palette}`} style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
+    <Card className={`post-themed-surface overflow-hidden rounded-md border shadow-none ${palette}`} style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
       <CardContent className="grid gap-2 p-2.5 md:gap-3 md:p-3">
         <PostMetaHeader
           displayId={post.displayId}
@@ -2128,7 +2128,7 @@ function PublishedFeedPostBlock({
   const cardBg = postCardBgStyle(post.bgColor);
   const cardTextColor = postCardTextColor(post.textColor);
   return (
-    <div className="grid gap-2" style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
+    <div className="post-themed-surface grid gap-2" style={cardBg ? { background: cardBg.replace("background: ", "") } : undefined}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center rounded bg-sky-50 px-1.5 py-0.5 text-xs font-bold text-sky-700">稿件 {post.displayId}</span>
       </div>
@@ -2189,7 +2189,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
   if (compact) {
     if (enableMarkdown) {
       return (
-        <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2" style={textColor ? { color: textColor } : undefined}>
+        <div className="post-themed-text rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2" style={textColor ? { color: textColor } : undefined}>
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
             <span className="inline-flex items-center gap-1">
               <FileTextIcon className="size-3" />
@@ -2201,12 +2201,12 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
             </span>
             {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
           </div>
-          <div className="markdown-content line-clamp-3 text-sm font-medium leading-5 md:line-clamp-4" style={textColor ? { color: textColor } : undefined} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+          <div className="post-themed-text markdown-content line-clamp-3 text-sm font-medium leading-5 md:line-clamp-4" style={textColor ? { color: textColor } : undefined} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
         </div>
       );
     }
     return (
-      <div className="rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2" style={textColor ? { color: textColor } : undefined}>
+      <div className="post-themed-text rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-2" style={textColor ? { color: textColor } : undefined}>
         <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
           <span className="inline-flex items-center gap-1">
             <FileTextIcon className="size-3" />
@@ -2218,7 +2218,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
           </span>
           {updatedAt && updatedAt !== createdAt ? <span className="hidden sm:inline">更新 {formatFullDateTime(updatedAt)}</span> : null}
         </div>
-        <p className="line-clamp-3 whitespace-pre-wrap text-sm font-medium leading-5 md:line-clamp-4" style={textColor ? { color: textColor } : undefined}>{text}</p>
+        <p className="post-themed-text line-clamp-3 whitespace-pre-wrap text-sm font-medium leading-5 md:line-clamp-4" style={textColor ? { color: textColor } : undefined}>{text}</p>
       </div>
     );
   }
@@ -2237,7 +2237,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
           </span>
           {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
         </div>
-        <div className="markdown-content text-[15px] font-medium leading-7" style={textColor ? { color: textColor } : undefined} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+        <div className="post-themed-text markdown-content text-[15px] font-medium leading-7" style={textColor ? { color: textColor } : undefined} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
       </div>
     );
   }
@@ -2255,7 +2255,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
         </span>
         {updatedAt && updatedAt !== createdAt ? <span>更新 {formatFullDateTime(updatedAt)}</span> : null}
       </div>
-      <p className="whitespace-pre-wrap text-[15px] font-medium leading-7" style={textColor ? { color: textColor } : undefined}>{text}</p>
+      <p className="post-themed-text whitespace-pre-wrap text-[15px] font-medium leading-7" style={textColor ? { color: textColor } : undefined}>{text}</p>
     </div>
   );
 }
