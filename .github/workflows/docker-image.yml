@@ -235,7 +235,12 @@ jobs:
           echo "--- Updating standalone stack via Portainer API ---" >&2
           redeploy_url="$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id"
           container_url="$portainer_url/api/endpoints/$endpoint_id/docker/containers/campux-admin/json"
-          previous_admin_id="$(curl -fsS "$container_url" -H "Authorization: Bearer $jwt" | jq -r '.Id')"
+          previous_admin_info="$(curl -fsS --connect-timeout 10 --max-time 30 "$container_url" -H "Authorization: Bearer $jwt" 2>/dev/null || true)"
+          previous_admin_id="$(printf '%s' "$previous_admin_info" | jq -r '.Id // empty' 2>/dev/null || true)"
+          if [ -z "$previous_admin_id" ]; then
+            echo "Unable to identify the current admin container; refusing an unverifiable deploy" >&2
+            exit 1
+          fi
           redeploy_response="$(curl -sS -w '\n%{http_code}' \
             -X PUT "$redeploy_url" \
             -H "Authorization: Bearer $jwt" \
@@ -252,7 +257,7 @@ jobs:
             echo "Portainer request timed out at the gateway; verifying the replacement container" >&2
             replacement_healthy=false
             for attempt in $(seq 1 30); do
-              container_info="$(curl -fsS "$container_url" -H "Authorization: Bearer $jwt" 2>/dev/null || true)"
+              container_info="$(curl -fsS --connect-timeout 10 --max-time 30 "$container_url" -H "Authorization: Bearer $jwt" 2>/dev/null || true)"
               current_admin_id="$(printf '%s' "$container_info" | jq -r '.Id // empty' 2>/dev/null || true)"
               current_admin_health="$(printf '%s' "$container_info" | jq -r '.State.Health.Status // empty' 2>/dev/null || true)"
               if [ -n "$current_admin_id" ] && [ "$current_admin_id" != "$previous_admin_id" ] && [ "$current_admin_health" = "healthy" ]; then
