@@ -145,8 +145,6 @@ jobs:
           PORTAINER_PASSWORD: ${{ secrets.PORTAINER_PASSWORD }}
           PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
           PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
-          PORTAINER_REPOSITORY_USERNAME: ${{ secrets.PORTAINER_REPOSITORY_USERNAME }}
-          PORTAINER_REPOSITORY_PASSWORD: ${{ secrets.PORTAINER_REPOSITORY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
@@ -154,8 +152,6 @@ jobs:
           : "${PORTAINER_URL:?PORTAINER_URL secret is required}"
           : "${PORTAINER_USERNAME:?PORTAINER_USERNAME secret is required}"
           : "${PORTAINER_PASSWORD:?PORTAINER_PASSWORD secret is required}"
-          : "${PORTAINER_REPOSITORY_USERNAME:?PORTAINER_REPOSITORY_USERNAME secret is required}"
-          : "${PORTAINER_REPOSITORY_PASSWORD:?PORTAINER_REPOSITORY_PASSWORD secret is required}"
 
           # jp09 runs admin + dash + landing as one atomic production stack.
           stack_id="${PORTAINER_STACK_ID:-238}"
@@ -198,11 +194,25 @@ jobs:
           # We merge CAMPUX_IMAGE_TAG on top of whatever is already stored.
           existing_env="$(printf '%s' "$stack_info" | jq -c '.Env // []')"
 
-          # 构造 redeploy payload
+          # This production stack is a Portainer file/upload stack, not a Git
+          # stack. Fetch its canonical compose file and update it via the
+          # standalone-stack API while preserving all existing environment
+          # variables.
+          echo "--- Fetching stack compose file ---" >&2
+          stack_file_response="$(curl -sS -w '\n%{http_code}' \
+            -X GET "$portainer_url/api/stacks/$stack_id/file" \
+            -H "Authorization: Bearer $jwt" 2>&1)"
+          stack_file_http_code="$(printf '%s' "$stack_file_response" | tail -1)"
+          stack_file_body="$(printf '%s' "$stack_file_response" | sed '$d')"
+          if [ "$stack_file_http_code" != "200" ]; then
+            echo "Failed to fetch stack compose file (HTTP $stack_file_http_code): $stack_file_body" >&2
+            exit 1
+          fi
+          stack_file_content="$(printf '%s' "$stack_file_body" | jq -er '.StackFileContent')"
+
           redeploy_payload="$(
             jq -n \
-              --arg repositoryUsername "$PORTAINER_REPOSITORY_USERNAME" \
-              --arg repositoryPassword "$PORTAINER_REPOSITORY_PASSWORD" \
+              --arg stackFileContent "$stack_file_content" \
               --arg imageTag "${CAMPUX_IMAGE_TAG}" \
               --argjson existingEnv "$existing_env" \
               '{
@@ -212,17 +222,12 @@ jobs:
                 ),
                 prune: false,
                 pullImage: true,
-                repositoryAuthentication: true,
-                repositoryUsername: $repositoryUsername,
-                repositoryPassword: $repositoryPassword,
-                repositoryReferenceName: "refs/heads/main"
+                stackFileContent: $stackFileContent
               }'
           )"
 
-          # 使用 Portainer 旧版 Git redeploy API
-          # PUT /api/stacks/{id}/git/redeploy?endpointId={endpoint_id}
-          echo "--- Redeploying stack via Portainer API ---" >&2
-          redeploy_url="$portainer_url/api/stacks/$stack_id/git/redeploy?endpointId=$endpoint_id"
+          echo "--- Updating standalone stack via Portainer API ---" >&2
+          redeploy_url="$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id"
           redeploy_response="$(curl -sS -w '\n%{http_code}' \
             -X PUT "$redeploy_url" \
             -H "Authorization: Bearer $jwt" \
