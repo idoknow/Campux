@@ -693,16 +693,22 @@ export type SystemTenant = {
   memberCount: number;
   bots: Array<{
     id: string;
+    platform: string;
     qqUin: string;
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
     lastSeenAt: string | null;
+    connection: {
+      online: boolean;
+      connectionCount: number;
+    };
     publishTargets: Array<{
       id: string;
       displayName: string;
       enabled: boolean;
       required: boolean;
+      status: "ready" | "unavailable" | "disabled";
     }>;
   }>;
 };
