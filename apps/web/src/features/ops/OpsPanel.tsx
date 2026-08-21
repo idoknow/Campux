@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIcon,
   ArchiveIcon,
@@ -20,6 +20,8 @@ import {
   ShieldPlusIcon,
   Trash2Icon,
   UsersRoundIcon,
+  WifiIcon,
+  WifiOffIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -29,6 +31,8 @@ import {
   buildMembershipRoleChangeConfirmation,
 } from "./membership-removal-confirmation";
 import { buildOverviewTenantNavigation } from "./overview-tenant-navigation";
+import { createLatestRequestGate } from "./latest-request-gate";
+import { summarizeTenantRuntime } from "./tenant-runtime-summary";
 import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
@@ -167,6 +171,8 @@ export function OpsPanel({
   onEnterTenant?: ((tenantId: string) => Promise<void>) | undefined;
 }) {
   const isSystemMode = mode === "system";
+  const tenantRequestGate = useRef(createLatestRequestGate());
+  const overviewRequestGate = useRef(createLatestRequestGate());
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -269,6 +275,8 @@ export function OpsPanel({
   const expectedTenantHostLabel = tenantFormHost ? "专属访问域名" : "预计访问域名";
 
   async function refreshOverview(nextSelectedId?: string) {
+    const requestGeneration = tenantRequestGate.current.begin();
+    const overviewGeneration = overviewRequestGate.current.begin();
     setLoadingOverview(true);
     setQueueLoadState("loading");
     try {
@@ -281,33 +289,48 @@ export function OpsPanel({
           .then((value) => ({ ok: true as const, value }))
           .catch((error: unknown) => ({ ok: false as const, error })),
       ]);
-      setTenants(data.tenants);
-      setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
-      if (queueResult.ok) {
-        setQueue(queueResult.value);
-        setQueueLoadState("ready");
-      } else {
-        setQueue(null);
-        setQueueLoadState("error");
-        toast.error(queueResult.error instanceof Error ? `任务队列状态读取失败：${queueResult.error.message}` : "任务队列状态读取失败");
+      if (tenantRequestGate.current.isCurrent(requestGeneration)) {
+        setTenants(data.tenants);
+        setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
+        const candidateTenants = showArchivedTenants ? data.tenants : data.tenants.filter((tenant) => tenant.status !== "archived");
+        const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
+        setSelectedTenantId(nextTenant?.id ?? "");
       }
-      if (userResult.ok) {
-        setSystemUserTotal(userResult.value.total);
-      } else {
-        setSystemUserTotal(null);
-        toast.error(userResult.error instanceof Error ? `用户总数读取失败：${userResult.error.message}` : "用户总数读取失败");
+      if (overviewRequestGate.current.isCurrent(overviewGeneration)) {
+        if (queueResult.ok) {
+          setQueue(queueResult.value);
+          setQueueLoadState("ready");
+        } else {
+          setQueue(null);
+          setQueueLoadState("error");
+          toast.error(queueResult.error instanceof Error ? `任务队列状态读取失败：${queueResult.error.message}` : "任务队列状态读取失败");
+        }
+        if (userResult.ok) {
+          setSystemUserTotal(userResult.value.total);
+        } else {
+          setSystemUserTotal(null);
+          toast.error(userResult.error instanceof Error ? `用户总数读取失败：${userResult.error.message}` : "用户总数读取失败");
+        }
       }
-      const candidateTenants = showArchivedTenants ? data.tenants : data.tenants.filter((tenant) => tenant.status !== "archived");
-      const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
-      setSelectedTenantId(nextTenant?.id ?? "");
       return data.tenants;
     } catch (caught) {
+      if (!overviewRequestGate.current.isCurrent(overviewGeneration)) return [];
       setQueue(null);
       setQueueLoadState("error");
       throw caught;
     } finally {
-      setLoadingOverview(false);
+      if (overviewRequestGate.current.isCurrent(overviewGeneration)) {
+        setLoadingOverview(false);
+      }
     }
+  }
+
+  async function refreshTenantRuntime() {
+    const requestGeneration = tenantRequestGate.current.begin();
+    const data = await api<{ tenants: SystemTenant[]; tenantDomainSuffix?: string | null }>("/api/system/tenants");
+    if (!tenantRequestGate.current.isCurrent(requestGeneration)) return;
+    setTenants(data.tenants);
+    setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
   }
 
   async function refreshSettings() {
@@ -406,6 +429,15 @@ export function OpsPanel({
       toast.error(caught instanceof Error ? caught.message : "无法读取运维面板数据");
     });
   }, []);
+
+  useEffect(() => {
+    if (activeSection !== "overview" && activeSection !== "tenants") return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshTenantRuntime().catch(() => undefined);
+    }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [activeSection]);
 
   useEffect(() => {
     if (!isSystemMode && activeSection === "platform") {
@@ -543,6 +575,7 @@ ${impact}`)) {
         }),
       });
       createdTenants = data.tenants;
+      tenantRequestGate.current.invalidate();
       setTenants(data.tenants);
       created = data.tenants.find((tenant) => tenant.slug === slug);
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
@@ -1019,6 +1052,7 @@ ${impact}`)) {
                           <span>{tenant.botAccountCount} 墙号</span>
                           <span>{tenant.postCount} 稿件</span>
                         </span>
+                        <TenantRuntimeStrip tenant={tenant} />
                       </button>
                     ))}
                     {filteredVisibleTenants.length === 0 ? (
@@ -1408,6 +1442,35 @@ function OnboardingGuide({
   );
 }
 
+function TenantRuntimeStrip({ tenant }: { tenant: SystemTenant }) {
+  const runtime = summarizeTenantRuntime(tenant);
+  const online = runtime.onlineBots > 0;
+  const targetTone = runtime.unavailableTargets > 0
+    ? "border-red-200 bg-red-50 text-red-700"
+    : runtime.readyTargets > 0
+      ? "border-green-200 bg-green-50 text-green-700"
+      : "border-slate-200 bg-white text-slate-500";
+
+  return (
+    <span className="mt-2 grid gap-1 border-t border-slate-200/70 pt-2 text-[10px] font-semibold text-slate-500">
+      <span className="flex flex-wrap items-center gap-1.5">
+        <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${online ? "bg-green-100 text-green-800" : "bg-slate-200 text-slate-600"}`}>
+          {online ? <WifiIcon className="size-3" /> : <WifiOffIcon className="size-3" />}
+          机器人 {runtime.onlineBots}/{runtime.totalBots} 在线
+        </span>
+        <span className={`rounded-full border px-1.5 py-0.5 ${targetTone}`}>
+          {runtime.totalTargets === 0
+            ? "发布目标未配置"
+            : runtime.unavailableTargets > 0
+              ? `发布目标 ${runtime.unavailableTargets} 异常`
+              : `发布目标 ${runtime.readyTargets}/${runtime.totalTargets} 正常`}
+        </span>
+      </span>
+      <span>最后连接：{formatDateTime(runtime.lastConnectedAt)}</span>
+    </span>
+  );
+}
+
 function TenantBotCard({ bot }: { bot: SystemTenant["bots"][number] }) {
   return (
     <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
@@ -1416,19 +1479,29 @@ function TenantBotCard({ bot }: { bot: SystemTenant["bots"][number] }) {
           <p className="truncate text-sm font-semibold">{bot.displayName}</p>
           <p className="mt-0.5 text-xs font-bold text-slate-500">QQ {bot.qqUin}</p>
         </div>
-        <Badge variant={bot.enabled ? "secondary" : "outline"}>{bot.enabled ? "启用" : "停用"}</Badge>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge className={`gap-1 rounded-full shadow-none ${bot.connection.online ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-200 text-slate-600"}`}>
+            {bot.connection.online ? <WifiIcon className="size-3" /> : <WifiOffIcon className="size-3" />}
+            {bot.connection.online ? "在线" : "离线"}
+          </Badge>
+          {!bot.enabled ? <Badge variant="outline">停用</Badge> : null}
+        </div>
       </div>
       <div className="mt-2 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
         <span>审核群：{bot.reviewGroupId ?? "未配置"}</span>
-        <span>最近连接：{formatDateTime(bot.lastSeenAt)}</span>
+        <span>最后连接：{formatDateTime(bot.lastSeenAt)}</span>
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {bot.publishTargets.length > 0 ? (
           bot.publishTargets.map((target) => (
-            <Badge key={target.id} variant={target.enabled ? "outline" : "secondary"} className="gap-1">
+            <Badge
+              key={target.id}
+              variant="outline"
+              className={`gap-1 ${target.status === "ready" ? "border-green-200 bg-green-50 text-green-700" : target.status === "unavailable" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-500"}`}
+            >
               {target.displayName}
+              {target.status === "ready" ? " · 正常" : target.status === "unavailable" ? " · 登录态异常" : " · 停用"}
               {target.required ? " · 必发" : ""}
-              {!target.enabled ? " · 停用" : ""}
             </Badge>
           ))
         ) : (

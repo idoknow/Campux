@@ -30,6 +30,7 @@ import {
 } from "../lib/tenant-domain";
 import { buildUserContainsSearch } from "../lib/user-search";
 import type { RuntimeQueue } from "../runtime/queue";
+import type { OneBotRuntime } from "../runtime/onebot";
 import type { EventBus, PluginEvent } from "@campux/plugin";
 
 const tenantStatusSchema = z.enum(["active", "paused", "archived"]);
@@ -96,15 +97,20 @@ type SystemTenantRecord = {
   archiveWarningAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  botAccounts?: Array<{
+  botAccounts: Array<{
     id: string;
+    platform: string;
     qqUin: bigint;
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
     lastSeenAt: Date | null;
+    sessions: Array<{
+      healthStatus: string;
+    }>;
     publishTargets: Array<{
       id: string;
+      type: string;
       displayName: string;
       enabled: boolean;
       required: boolean;
@@ -117,7 +123,9 @@ type SystemTenantRecord = {
   };
 };
 
-function toSystemTenant(tenant: SystemTenantRecord) {
+type BotConnectionStatusProvider = Pick<OneBotRuntime, "getBotConnectionStatus">;
+
+export function toSystemTenant(tenant: SystemTenantRecord, oneBot?: BotConnectionStatusProvider) {
   return {
     id: tenant.id,
     slug: tenant.slug,
@@ -132,18 +140,27 @@ function toSystemTenant(tenant: SystemTenantRecord) {
     botAccountCount: tenant._count.botAccounts,
     postCount: tenant._count.posts,
     memberCount: tenant._count.memberships,
-    bots: (tenant.botAccounts ?? []).map((bot) => ({
+    bots: tenant.botAccounts.map((bot) => ({
       id: bot.id,
+      platform: bot.platform,
       qqUin: bot.qqUin.toString(),
       displayName: bot.displayName,
       enabled: bot.enabled,
       reviewGroupId: bot.reviewGroupId,
       lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
+      connection: bot.platform === "official_qq"
+        ? { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 }
+        : oneBot?.getBotConnectionStatus(bot.qqUin.toString()) ?? { online: false, connectionCount: 0 },
       publishTargets: bot.publishTargets.map((target) => ({
         id: target.id,
         displayName: target.displayName,
         enabled: target.enabled,
         required: target.required,
+        status: !bot.enabled || !target.enabled
+          ? "disabled" as const
+          : target.type !== "qzone" || bot.sessions[0]?.healthStatus === "available"
+            ? "ready" as const
+            : "unavailable" as const,
       })),
     })),
   };
@@ -206,7 +223,7 @@ async function assertHostNotReserved(host: string | null, reply: FastifyReply, o
   }
 }
 
-async function listSystemTenants(context: PlatformContext) {
+async function listSystemTenants(context: PlatformContext, oneBot?: OneBotRuntime) {
   const tenantIds = manageableTenantIds(context);
   const tenants = await prisma.tenant.findMany({
     where: tenantIds === null ? {} : { id: { in: tenantIds } },
@@ -217,6 +234,12 @@ async function listSystemTenants(context: PlatformContext) {
             orderBy: {
               displayName: "asc",
             },
+          },
+          sessions: {
+            where: { type: "qzone" },
+            orderBy: { refreshedAt: "desc" },
+            take: 1,
+            select: { healthStatus: true },
           },
         },
         orderBy: {
@@ -234,7 +257,7 @@ async function listSystemTenants(context: PlatformContext) {
     orderBy: [{ status: "asc" }, { createdAt: "asc" }],
   });
 
-  return tenants.map(toSystemTenant);
+  return tenants.map((tenant) => toSystemTenant(tenant, oneBot));
 }
 
 function tenantDomainSuffixForResponse(config: CampuxConfig) {
@@ -248,7 +271,7 @@ function tenantDomainSuffixForResponse(config: CampuxConfig) {
   }
 }
 
-export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, config: CampuxConfig) {
+export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, config: CampuxConfig, oneBot?: OneBotRuntime) {
   app.get("/api/system/settings", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
     if (!isSystemOperator(context)) {
@@ -306,7 +329,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     const context = await requirePlatformAdmin(request, reply);
 
     return {
-      tenants: await listSystemTenants(context),
+      tenants: await listSystemTenants(context, oneBot),
       tenantDomainSuffix: tenantDomainSuffixForResponse(config),
     };
   });
@@ -467,7 +490,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     });
 
     return {
-      tenants: await listSystemTenants(context),
+      tenants: await listSystemTenants(context, oneBot),
       tenantDomainSuffix: tenantDomainSuffixForResponse(config),
     };
   });
@@ -653,7 +676,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     return {
-      tenants: await listSystemTenants(context),
+      tenants: await listSystemTenants(context, oneBot),
       tenantDomainSuffix: tenantDomainSuffixForResponse(config),
     };
   });

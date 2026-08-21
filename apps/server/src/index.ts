@@ -113,7 +113,7 @@ registerPostTagRoutes(app);
 registerReviewRoutes(app, queue, oneBot);
 registerSvgRoutes(app);
 registerStatsRoutes(app);
-registerSystemRoutes(app, queue, config);
+registerSystemRoutes(app, queue, config, oneBot);
 registerPluginRoutes(app, pluginRegistry);
 
 // 通知所有插件路由已注册完毕
