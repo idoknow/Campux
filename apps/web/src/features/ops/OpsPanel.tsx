@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIcon,
   ArchiveIcon,
@@ -31,6 +31,7 @@ import {
   buildMembershipRoleChangeConfirmation,
 } from "./membership-removal-confirmation";
 import { buildOverviewTenantNavigation } from "./overview-tenant-navigation";
+import { createLatestRequestGate } from "./latest-request-gate";
 import { summarizeTenantRuntime } from "./tenant-runtime-summary";
 import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
@@ -170,6 +171,7 @@ export function OpsPanel({
   onEnterTenant?: ((tenantId: string) => Promise<void>) | undefined;
 }) {
   const isSystemMode = mode === "system";
+  const tenantRequestGate = useRef(createLatestRequestGate());
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -272,6 +274,7 @@ export function OpsPanel({
   const expectedTenantHostLabel = tenantFormHost ? "专属访问域名" : "预计访问域名";
 
   async function refreshOverview(nextSelectedId?: string) {
+    const requestGeneration = tenantRequestGate.current.begin();
     setLoadingOverview(true);
     setQueueLoadState("loading");
     try {
@@ -284,8 +287,13 @@ export function OpsPanel({
           .then((value) => ({ ok: true as const, value }))
           .catch((error: unknown) => ({ ok: false as const, error })),
       ]);
-      setTenants(data.tenants);
-      setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
+      if (tenantRequestGate.current.isCurrent(requestGeneration)) {
+        setTenants(data.tenants);
+        setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
+        const candidateTenants = showArchivedTenants ? data.tenants : data.tenants.filter((tenant) => tenant.status !== "archived");
+        const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
+        setSelectedTenantId(nextTenant?.id ?? "");
+      }
       if (queueResult.ok) {
         setQueue(queueResult.value);
         setQueueLoadState("ready");
@@ -300,9 +308,6 @@ export function OpsPanel({
         setSystemUserTotal(null);
         toast.error(userResult.error instanceof Error ? `用户总数读取失败：${userResult.error.message}` : "用户总数读取失败");
       }
-      const candidateTenants = showArchivedTenants ? data.tenants : data.tenants.filter((tenant) => tenant.status !== "archived");
-      const nextTenant = candidateTenants.find((tenant) => tenant.id === nextSelectedId) ?? candidateTenants.find((tenant) => tenant.id === selectedTenantId) ?? candidateTenants[0];
-      setSelectedTenantId(nextTenant?.id ?? "");
       return data.tenants;
     } catch (caught) {
       setQueue(null);
@@ -314,7 +319,9 @@ export function OpsPanel({
   }
 
   async function refreshTenantRuntime() {
+    const requestGeneration = tenantRequestGate.current.begin();
     const data = await api<{ tenants: SystemTenant[]; tenantDomainSuffix?: string | null }>("/api/system/tenants");
+    if (!tenantRequestGate.current.isCurrent(requestGeneration)) return;
     setTenants(data.tenants);
     setTenantDomainSuffix(data.tenantDomainSuffix ?? null);
   }
@@ -561,6 +568,7 @@ ${impact}`)) {
         }),
       });
       createdTenants = data.tenants;
+      tenantRequestGate.current.invalidate();
       setTenants(data.tenants);
       created = data.tenants.find((tenant) => tenant.slug === slug);
       setSelectedTenantId(created?.id ?? data.tenants[0]?.id ?? "");
