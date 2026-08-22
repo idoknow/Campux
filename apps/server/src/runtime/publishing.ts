@@ -1981,7 +1981,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     }
   }
 
-  await refreshAttemptPostStatuses(attempt);
+  await runWithActiveTenantLease(prisma, attempt.tenantId, (transaction) => refreshAttemptPostStatuses(attempt, transaction));
 }
 
 async function resolveCookiesForPublish({
@@ -2205,8 +2205,8 @@ export function deriveAggregateStatus(attempts: AggregateAttempt[]): { status: P
   return null;
 }
 
-async function refreshAggregatePostStatus(postId: string) {
-  const post = await prisma.post.findUnique({
+async function refreshAggregatePostStatus(postId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const post = await client.post.findUnique({
     where: {
       id: postId,
     },
@@ -2231,7 +2231,7 @@ async function refreshAggregatePostStatus(postId: string) {
   if (!derived) {
     return;
   }
-  await updatePostAggregateStatus(post.id, post.tenantId, post.status, derived.status, derived.comment);
+  await updatePostAggregateStatus(post.id, post.tenantId, post.status, derived.status, derived.comment, client);
 }
 
 const batchStatusFromPostStatus: Record<string, "publishing" | "published" | "partially_failed" | "failed"> = {
@@ -2245,8 +2245,8 @@ const batchStatusFromPostStatus: Record<string, "publishing" | "published" | "pa
  * 批量模式：批次内每条稿件共享同一组 batch attempt 的结果。
  * 据 batch.attempts 推导聚合状态，应用到批次内每条 post，并同步推进 PublishBatch.status。
  */
-async function refreshBatchPostStatuses(batchId: string) {
-  const batch = await prisma.publishBatch.findUnique({
+async function refreshBatchPostStatuses(batchId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const batch = await client.publishBatch.findUnique({
     where: { id: batchId },
     include: {
       items: {
@@ -2298,12 +2298,12 @@ async function refreshBatchPostStatuses(batchId: string) {
   }
 
   for (const item of batch.items) {
-    await updatePostAggregateStatus(item.post.id, item.post.tenantId, item.post.status, derived.status, derived.comment);
+    await updatePostAggregateStatus(item.post.id, item.post.tenantId, item.post.status, derived.status, derived.comment, client);
   }
 
   const batchStatus = batchStatusFromPostStatus[derived.status];
   if (batchStatus && batchStatus !== batch.status) {
-    await prisma.publishBatch.updateMany({
+    await client.publishBatch.updateMany({
       where: { id: batch.id, status: batch.status },
       data: { status: batchStatus },
     });
@@ -2313,31 +2313,30 @@ async function refreshBatchPostStatuses(batchId: string) {
 /**
  * 刷新一个 attempt 影响到的所有稿件状态：批量 attempt 刷新整批，单稿 attempt 刷新单稿。
  */
-async function refreshAttemptPostStatuses(attempt: { postId: string; batchId: string | null }) {
+async function refreshAttemptPostStatuses(attempt: { postId: string; batchId: string | null }, client: Prisma.TransactionClient | typeof prisma = prisma) {
   if (attempt.batchId) {
-    await refreshBatchPostStatuses(attempt.batchId);
+    await refreshBatchPostStatuses(attempt.batchId, client);
     return;
   }
-  await refreshAggregatePostStatus(attempt.postId);
+  await refreshAggregatePostStatus(attempt.postId, client);
 }
 
-async function updatePostAggregateStatus(postId: string, tenantId: string, oldStatus: PostStatus, newStatus: PostStatus, comment: string) {
+async function updatePostAggregateStatus(postId: string, tenantId: string, oldStatus: PostStatus, newStatus: PostStatus, comment: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
   if (oldStatus === newStatus) {
     return;
   }
 
-  const updated = await prisma.$transaction(async (transaction) => {
-    const result = await transaction.post.updateMany({
+  const result = await client.post.updateMany({
       where: {
         id: postId,
         status: oldStatus,
       },
       data: { status: newStatus },
     });
-    if (result.count !== 1) {
-      return false;
-    }
-    await transaction.postLog.create({
+  if (result.count !== 1) {
+    return;
+  }
+  await client.postLog.create({
       data: {
         tenantId,
         postId,
@@ -2345,12 +2344,10 @@ async function updatePostAggregateStatus(postId: string, tenantId: string, oldSt
         newStatus,
         comment,
       },
-    });
-    return true;
   });
 
-  if (updated && newStatus === "published") {
-    await autoFollowOwnPostOnPublish(postId, tenantId).catch(() => undefined);
+  if (newStatus === "published") {
+    await autoFollowOwnPostOnPublish(postId, tenantId, client).catch(() => undefined);
   }
 }
 
@@ -2361,8 +2358,8 @@ async function updatePostAggregateStatus(postId: string, tenantId: string, oldSt
  * (postId, userId), seeding the baseline at the current comment count so the
  * first scheduled digest only reports comments arriving after publication.
  */
-async function autoFollowOwnPostOnPublish(postId: string, tenantId: string) {
-  const post = await prisma.post.findUnique({
+async function autoFollowOwnPostOnPublish(postId: string, tenantId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const post = await client.post.findUnique({
     where: { id: postId },
     select: {
       id: true,
@@ -2383,7 +2380,7 @@ async function autoFollowOwnPostOnPublish(postId: string, tenantId: string) {
     return;
   }
   const currentCommentCount = post.qzonePostMetrics.reduce((sum, metric) => sum + (metric.commentCount ?? 0), 0);
-  await prisma.postFollow.upsert({
+  await client.postFollow.upsert({
     where: {
       postId_userId: {
         postId: post.id,

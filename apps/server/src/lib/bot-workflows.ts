@@ -117,6 +117,16 @@ export async function registerUserViaBot({
           },
         });
 
+    await tx.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: user.id,
+      action: existingMembership ? "bot.membership.update" : "bot.register",
+      targetType: "membership",
+      targetId: membership.id,
+      detail: { botQqUin, userQqUin, requestedRole: role, role: membershipRole, resetExistingPassword },
+    }, tx);
+
     return {
       user: serializeUser(user),
       membership,
@@ -138,22 +148,6 @@ export async function registerUserViaBot({
       alreadyHadTenantAccess: registration.alreadyHadTenantAccess,
     };
   }
-
-  await markBotSeen(bot.id);
-  await writeAuditLog({
-    tenantId: bot.tenantId,
-    actorId: registration.user.id,
-    action: registration.alreadyHadTenantAccess ? "bot.membership.update" : "bot.register",
-    targetType: "membership",
-    targetId: registration.membership.id,
-    detail: {
-      botQqUin,
-      userQqUin,
-      requestedRole: role,
-      role: registration.membershipRole,
-      resetExistingPassword,
-    },
-  });
 
   return {
     bot,
@@ -203,20 +197,16 @@ export async function resetPasswordViaBot({
         passwordChangeRequired: true,
       },
     });
+    await tx.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: user.id,
+      action: "bot.password.reset",
+      targetType: "user",
+      targetId: user.id,
+      detail: { botQqUin, userQqUin },
+    }, tx);
   });
-  await markBotSeen(bot.id);
-  await writeAuditLog({
-    tenantId: bot.tenantId,
-    actorId: user.id,
-    action: "bot.password.reset",
-    targetType: "user",
-    targetId: user.id,
-    detail: {
-      botQqUin,
-      userQqUin,
-    },
-  });
-
   return {
     bot,
     user: serializeUser(user),

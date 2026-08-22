@@ -123,7 +123,9 @@ async function lockTenantBatch<T>(tenantId: string, fn: (transaction: Prisma.Tra
     if (supportsAdvisoryLock) {
       await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
     }
-    await lockActiveTenantRuntime(transaction, tenantId);
+    if (!await lockActiveTenantRuntime(transaction, tenantId)) {
+      throw new Error("校园墙已暂停或归档");
+    }
     return fn(transaction);
   });
 }

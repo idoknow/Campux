@@ -280,7 +280,7 @@ export class OneBotRuntime {
   private readonly privatePasswordResetCoordinator = new PrivateRegistrationCoordinator<Awaited<ReturnType<typeof resetPasswordViaBot>>>();
   private readonly pendingFriendRequestFlags = new Set<string>();
   private readonly pendingFriendRequestTimers = new Map<string, { tenantId: string; timer: Timer }>();
-  private readonly privateForwardMsgIdMap = new Map<string, { userQqUin: string; userNickname: string; botQqUin: string }>();
+  private readonly privateForwardMsgIdMap = new Map<string, { tenantId: string; userQqUin: string; userNickname: string; botQqUin: string }>();
   private static readonly MAX_FORWARD_MSG_ID_MAP_SIZE = 500;
   private readonly qzoneProtocolAutoRefreshFailures = new Map<string, QZoneProtocolAutoRefreshFailure>();
   private readonly qzoneProtocolAutoRefreshInFlight = new Map<string, Promise<{ cookieNames: string[]; session: { id: string } }>>();
@@ -329,6 +329,9 @@ export class OneBotRuntime {
         if (buffer.timer) clearTimeout(buffer.timer);
         this.privateForwardBuffers.delete(key);
       }
+    }
+    for (const [key, mapping] of this.privateForwardMsgIdMap) {
+      if (mapping.tenantId === tenantId) this.privateForwardMsgIdMap.delete(key);
     }
     for (const [key, buffer] of this.privatePostAggregateBuffers) {
       if (buffer.tenantId === tenantId) {
@@ -2768,30 +2771,23 @@ export class OneBotRuntime {
           return;
         }
         const endsAt = new Date(PERMANENT_BAN_ENDS_AT);
-        await prisma.banRecord.create({
-          data: {
+        const banned = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+          await transaction.banRecord.create({
+            data: { tenantId: bot.tenantId, userId: targetUser.id, operatorId: operator.id, comment: parsed.reason, endsAt },
+          });
+          await writeAuditLog({
             tenantId: bot.tenantId,
-            userId: targetUser.id,
-            operatorId: operator.id,
-            comment: parsed.reason,
-            endsAt,
-          },
+            actorId: operator.id,
+            action: "ban.create",
+            targetType: "user",
+            targetId: targetUser.id,
+            detail: { comment: parsed.reason, endsAt: endsAt.toISOString(), source: "review_group" },
+          }, transaction);
+          return transaction.tenant.findUnique({ where: { id: bot.tenantId }, select: { name: true } });
         });
-        await writeAuditLog({
-          tenantId: bot.tenantId,
-          actorId: operator.id,
-          action: "ban.create",
-          targetType: "user",
-          targetId: targetUser.id,
-          detail: {
-            comment: parsed.reason,
-            endsAt: endsAt.toISOString(),
-            source: "review_group",
-          },
-        });
+        if (!banned.active) throw new BotWorkflowError("校园墙已暂停或归档", 409);
         await this.sendGroupMessage(botQqUin, groupId, `已封禁 QQ ${parsed.qqUin}，理由：${parsed.reason}`);
-        const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId } });
-        const tenantName = tenant?.name ?? "校园墙";
+        const tenantName = banned.value?.name ?? "校园墙";
         await this.sendPrivateMessageViaTenantBots(bot.tenantId, parsed.qqUin, formatBanNotify(tenantName, parsed.reason, endsAt)).catch((error) => {
           this.logger.warn({ error, qqUin: parsed.qqUin }, "failed to send ban notification");
         });
@@ -2818,21 +2814,21 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, formatUnbanNotFound(qqUin, stylishEnabled));
           return;
         }
-        await prisma.banRecord.update({
-          where: { id: activeBan.id },
-          data: { endsAt: new Date() },
+        const unbanned = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+          await transaction.banRecord.update({ where: { id: activeBan.id }, data: { endsAt: new Date() } });
+          await writeAuditLog({
+            tenantId: bot.tenantId,
+            actorId: operator.id,
+            action: "ban.unban",
+            targetType: "user",
+            targetId: targetUser.id,
+          }, transaction);
+          return transaction.tenant.findUnique({ where: { id: bot.tenantId }, select: { name: true } });
         });
-        await writeAuditLog({
-          tenantId: bot.tenantId,
-          actorId: operator.id,
-          action: "ban.unban",
-          targetType: "user",
-          targetId: targetUser.id,
-        });
+        if (!unbanned.active) throw new BotWorkflowError("校园墙已暂停或归档", 409);
         await this.sendGroupMessage(botQqUin, groupId, formatUnbanSuccess(qqUin, stylishEnabled));
         // 发私信通知用户已解封
-        const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId } });
-        const tenantName = tenant?.name ?? "校园墙";
+        const tenantName = unbanned.value?.name ?? "校园墙";
         await this.sendPrivateMessageViaTenantBots(bot.tenantId, qqUin, formatUnbanNotify(tenantName)).catch((error) => {
           this.logger.warn({ error, qqUin }, "failed to send unban notification");
         });
@@ -3104,10 +3100,10 @@ export class OneBotRuntime {
     segments?: OneBotMessageSegment[];
   }) {
     // 异步递增私信接收计数
-    prisma.botAccount.update({
+    runWithActiveTenantLease(prisma, bot.tenantId, (transaction) => transaction.botAccount.update({
       where: { id: bot.id },
       data: { privateMessagesReceived: { increment: 1 } },
-    }).catch((error) => {
+    })).catch((error) => {
       this.logger.warn({ error, botId: bot.id }, "failed to increment private message counter");
     });
 
@@ -3156,6 +3152,7 @@ export class OneBotRuntime {
 
     // 提前从 Map 删除，防止重复触发
     this.privateForwardBuffers.delete(key);
+    const permit = this.interactionFence.snapshot(buffer.tenantId);
 
     try {
       // 重新获取 bot 信息以获取最新的 reviewGroupId
@@ -3217,8 +3214,8 @@ export class OneBotRuntime {
         msgId = this.extractMessageId(fallbackData);
       }
 
-      if (msgId) {
-        this.storePrivateForwardMapping(msgId, buffer.userQqUin, buffer.userNickname, buffer.botQqUin);
+      if (msgId && this.interactionFence.isCurrent(permit)) {
+        this.storePrivateForwardMapping(msgId, buffer.tenantId, buffer.userQqUin, buffer.userNickname, buffer.botQqUin);
       }
     } catch (error) {
       this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "转发私聊消息到审核群失败");
@@ -3525,15 +3522,15 @@ export class OneBotRuntime {
     await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(target.userNickname, target.userQqUin, stylishEnabled));
 
     // 异步递增管理员回复计数
-    prisma.botAccount.update({
+    runWithActiveTenantLease(prisma, bot.tenantId, (transaction) => transaction.botAccount.update({
       where: { id: bot.id },
       data: { adminRepliesSent: { increment: 1 } },
-    }).catch((error) => {
+    })).catch((error) => {
       this.logger.warn({ error, botId: bot.id }, "failed to increment admin reply counter");
     });
   }
 
-  private storePrivateForwardMapping(msgId: string, userQqUin: string, userNickname: string, botQqUin: string) {
+  private storePrivateForwardMapping(msgId: string, tenantId: string, userQqUin: string, userNickname: string, botQqUin: string) {
     if (this.privateForwardMsgIdMap.size >= OneBotRuntime.MAX_FORWARD_MSG_ID_MAP_SIZE) {
       // 删除最早的一条记录
       const firstKey = this.privateForwardMsgIdMap.keys().next().value;
@@ -3541,7 +3538,7 @@ export class OneBotRuntime {
         this.privateForwardMsgIdMap.delete(firstKey);
       }
     }
-    this.privateForwardMsgIdMap.set(msgId, { userQqUin, userNickname, botQqUin });
+    this.privateForwardMsgIdMap.set(msgId, { tenantId, userQqUin, userNickname, botQqUin });
   }
 
   private extractMessageId(data: unknown): string | null {
