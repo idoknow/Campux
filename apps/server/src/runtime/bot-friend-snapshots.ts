@@ -1,6 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
 import { prisma } from "../lib/prisma";
 import { botFriendSnapshotDate, parseFriendListCount } from "../lib/bot-friend-stats";
+import { tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 const collectIntervalMs = 15 * 60 * 1000; // re-scan every 15 min; one snapshot per bot per day
 const initialDelayMs = 75 * 1000; // wait for OneBot WS connections to come up after boot before the first scan
@@ -45,6 +47,7 @@ export async function collectBotFriendSnapshots(caller: FriendListCaller, logger
   const bots = await prisma.botAccount.findMany({
     where: {
       enabled: true,
+      tenant: tenantRuntimeRelationFilter,
     },
     select: {
       id: true,
@@ -93,7 +96,7 @@ export async function collectBotFriendSnapshots(caller: FriendListCaller, logger
         continue;
       }
       const checkedAt = new Date();
-      await prisma.botFriendSnapshot.upsert({
+      const leased = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => transaction.botFriendSnapshot.upsert({
         where: {
           botAccountId_date: {
             botAccountId: bot.id,
@@ -111,7 +114,10 @@ export async function collectBotFriendSnapshots(caller: FriendListCaller, logger
           friendCount,
           checkedAt,
         },
-      });
+      }));
+      if (!leased.active) {
+        continue;
+      }
       collected += 1;
       logger.info({ botAccountId: bot.id, botQqUin, friendCount }, "bot friend snapshot recorded");
     } catch (error) {

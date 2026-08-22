@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { prisma } from "../lib/prisma";
+import { tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 
 /**
  * Pushes an abbreviated "new comments" digest to users who followed their own
@@ -157,6 +158,7 @@ export async function pushFollowedPostCommentDigests(caller: CommentDigestSender
       OR: [{ lastPushedAt: null }, { lastPushedAt: { lt: slotStart } }],
       post: {
         status: "published",
+        tenant: tenantRuntimeRelationFilter,
       },
     },
     include: followDigestInclude,
@@ -191,6 +193,7 @@ export async function pushFollowedPostCommentDigestForPost(postId: string, calle
       postId,
       post: {
         status: "published",
+        tenant: tenantRuntimeRelationFilter,
       },
     },
     include: followDigestInclude,

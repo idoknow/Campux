@@ -1,7 +1,8 @@
 import { DEFAULT_PRIVATE_POST_PROMPT, PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
-import { DbNull } from "@campux/db";
+import { DbNull, type Prisma } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { decryptJson, encryptJson } from "../lib/secret-json";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 export type TenantAiSettingsPayload = {
   enabled: boolean;
@@ -72,8 +73,10 @@ const defaultAiSettings: TenantAiSettingsPayload = {
   },
 };
 
-export async function readTenantAiSettings(tenantId: string): Promise<TenantAiSettingsPayload> {
-  const settings = await prisma.tenantAiSettings.findUnique({
+type TenantAiSettingsClient = Pick<Prisma.TransactionClient, "tenantAiSettings">;
+
+export async function readTenantAiSettings(tenantId: string, client: TenantAiSettingsClient = prisma): Promise<TenantAiSettingsPayload> {
+  const settings = await client.tenantAiSettings.findUnique({
     where: { tenantId },
   });
   if (!settings) {
@@ -175,7 +178,8 @@ export async function testTenantAiSettings(
   const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1_000);
   const startedAt = Date.now();
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const leased = await runWithActiveTenantLease(prisma, tenantId, async () => {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -198,9 +202,15 @@ export async function testTenantAiSettings(
           },
         ],
       }),
+      });
+      const data = await response.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } } | null;
+      return { response, data };
     });
+    if (!leased.active) {
+      return { ok: false, mode, provider, model, baseUrl, latencyMs: null, message: "校园墙已暂停或归档。" };
+    }
+    const { response, data } = leased.value;
     const latencyMs = Date.now() - startedAt;
-    const data = await response.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } } | null;
     if (!response.ok) {
       return {
         ok: false,
@@ -248,14 +258,18 @@ export async function testTenantAiSettings(
   }
 }
 
-export async function resolveTenantAiApiKey(tenantId: string, input: Pick<TenantAiSettingsUpdate, "apiKey" | "clearApiKey">) {
+export async function resolveTenantAiApiKey(
+  tenantId: string,
+  input: Pick<TenantAiSettingsUpdate, "apiKey" | "clearApiKey">,
+  client: TenantAiSettingsClient = prisma,
+) {
   if (input.apiKey && input.apiKey.trim().length > 0) {
     return input.apiKey.trim();
   }
   if (input.clearApiKey) {
     return "";
   }
-  const settings = await prisma.tenantAiSettings.findUnique({ where: { tenantId } });
+  const settings = await client.tenantAiSettings.findUnique({ where: { tenantId } });
   const secret = settings?.apiKeySecret ? decryptJson(settings.apiKeySecret) : null;
   return secret && typeof secret === "object" && "apiKey" in secret ? String(secret.apiKey) : "";
 }

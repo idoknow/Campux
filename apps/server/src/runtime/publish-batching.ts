@@ -13,6 +13,8 @@ import { supportsAdvisoryLock } from "@campux/db";
 import type { Prisma } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { readTenantPublishMode } from "../lib/tenant-metadata";
+import { isTenantRuntimeActiveStatus, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import { lockActiveTenantRuntime } from "../lib/tenant-runtime-lease";
 import { enqueueBatchPublishFanout } from "./publishing";
 import type { RuntimeQueue } from "./queue";
 
@@ -121,6 +123,7 @@ async function lockTenantBatch<T>(tenantId: string, fn: (transaction: Prisma.Tra
     if (supportsAdvisoryLock) {
       await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:batch:${tenantId}`})::bigint)`;
     }
+    await lockActiveTenantRuntime(transaction, tenantId);
     return fn(transaction);
   });
 }
@@ -260,7 +263,7 @@ export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBa
   const run = async () => {
     try {
       const batches = await prisma.publishBatch.findMany({
-        where: { status: "collecting" },
+        where: { status: "collecting", tenant: tenantRuntimeRelationFilter },
         select: { id: true, tenantId: true },
       });
       for (const batch of batches) {
@@ -271,9 +274,9 @@ export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBa
         } | null> => {
           const fresh = await transaction.publishBatch.findUnique({
             where: { id: batch.id },
-            select: { status: true, imageCount: true, lastItemAt: true },
+            select: { status: true, imageCount: true, lastItemAt: true, tenant: { select: { status: true } } },
           });
-          if (fresh?.status !== "collecting") {
+          if (fresh?.status !== "collecting" || !isTenantRuntimeActiveStatus(fresh.tenant.status)) {
             return null;
           }
           const { mode, staleMinutes } = await readTenantPublishMode(transaction, batch.tenantId);
@@ -313,6 +316,7 @@ export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBa
           flushedAt: null,
           updatedAt: { lte: new Date(Date.now() - incompletePublishingBatchRecoveryAgeMs) },
           items: { some: {} },
+          tenant: tenantRuntimeRelationFilter,
         },
         select: { id: true, tenantId: true },
       });
@@ -321,10 +325,11 @@ export function registerBatchFlushSweeper(queue: RuntimeQueue, logger: FastifyBa
         const claimed = await lockTenantBatch(batch.tenantId, async (transaction): Promise<boolean> => {
           const fresh = await transaction.publishBatch.findUnique({
             where: { id: batch.id },
-            select: { status: true, flushedAt: true, updatedAt: true },
+            select: { status: true, flushedAt: true, updatedAt: true, tenant: { select: { status: true } } },
           });
           if (
             fresh?.status !== "publishing"
+            || !isTenantRuntimeActiveStatus(fresh.tenant.status)
             || fresh.flushedAt !== null
             || fresh.updatedAt.getTime() > recoveryClaimedAt.getTime() - incompletePublishingBatchRecoveryAgeMs
           ) {

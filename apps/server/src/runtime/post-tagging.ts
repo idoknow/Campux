@@ -1,7 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { Prisma } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
+import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 type ExistingTag = {
   id: string;
@@ -74,6 +77,9 @@ export async function autoTagPost(options: {
   postId: string;
   logger: FastifyBaseLogger;
 }) {
+  if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return;
+  }
   const post = await prisma.post.findFirst({
     where: {
       id: options.postId,
@@ -115,6 +121,9 @@ export async function autoTagPost(options: {
   if (!suggestion) {
     return;
   }
+  if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return;
+  }
 
   const selectedNames = normalizeSuggestedNames(suggestion.selected).slice(0, maxTagsPerPost);
   const tagsByName = new Map(existingTags.map((tag) => [tag.name, tag]));
@@ -132,13 +141,13 @@ export async function autoTagPost(options: {
   if (remainingSlots === 0) {
     return;
   }
-  await assignPostTags(prisma, {
+  await runWithActiveTenantLease(prisma, options.tenantId, (transaction) => assignPostTags(transaction, {
     tenantId: options.tenantId,
     postId: post.id,
     tags: tagsToAssign
       .filter((tag) => !alreadyAssigned.has(tag.tagId))
       .slice(0, remainingSlots),
-  });
+  }));
 }
 
 export async function generatePostTagSuggestion(options: {
@@ -159,52 +168,61 @@ export async function generatePostTagSuggestion(options: {
   if (!apiKey) {
     return null;
   }
+  if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return null;
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
   try {
-    const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        temperature: 0,
-        max_tokens: 500,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: [
-              "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
-              `目标：为一条校园墙稿件选择最多 ${maxTagsPerPost} 个主题标签。`,
-              "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
-              "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
-              "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
-              "不确定时少打标。",
-              "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              existingTags: options.existingTags.map((tag) => ({
-                name: tag.name,
-                description: tag.description,
-              })),
-              text: options.text.trim().slice(0, tagPromptMaxTextChars),
-            }),
-          },
-        ],
-      }),
+    const leased = await runWithActiveTenantLease(prisma, options.tenantId, async () => {
+      const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          temperature: 0,
+          max_tokens: 500,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: [
+                "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
+                `目标：为一条校园墙稿件选择最多 ${maxTagsPerPost} 个主题标签。`,
+                "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
+                "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
+                "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
+                "不确定时少打标。",
+                "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
+              ].join("\n"),
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                existingTags: options.existingTags.map((tag) => ({
+                  name: tag.name,
+                  description: tag.description,
+                })),
+                text: options.text.trim().slice(0, tagPromptMaxTextChars),
+              }),
+            },
+          ],
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+        | null;
+      return { response, data };
     });
-
-    const data = (await response.json().catch(() => null)) as
-      | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-      | null;
+    if (!leased.active) {
+      return null;
+    }
+    const { response, data } = leased.value;
     if (!response.ok) {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tags: LLM request failed");
       return null;
@@ -249,6 +267,9 @@ export async function maintainTenantPostTags(options: {
   logger: FastifyBaseLogger;
 }): Promise<PostTagMaintenanceResult> {
   const emptyResult = (): PostTagMaintenanceResult => ({ created: [], merged: [], archived: [], deleted: [], assigned: [] });
+  if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return emptyResult();
+  }
   const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag maintenance: failed to read AI settings");
     return null;
@@ -297,26 +318,37 @@ export async function maintainTenantPostTags(options: {
   let applied = emptyResult();
   const apiKey = settings.apiKeyConfigured ? await resolveTenantAiApiKey(options.tenantId, {}) : null;
   if (!apiKey || posts.length < minClusterSize) {
-    const archived = await archiveInactivePostTags(options.tenantId, archiveSince);
-    return { ...applied, archived };
+    if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+      return emptyResult();
+    }
+    const archived = await runWithActiveTenantLease(
+      prisma,
+      options.tenantId,
+      (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
+    );
+    return archived.active ? { ...applied, archived: archived.value } : applied;
+  }
+  if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return emptyResult();
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
   try {
-    const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        temperature: 0,
-        max_tokens: 2000,
-        response_format: { type: "json_object" },
-        messages: [
+    const leased = await runWithActiveTenantLease(prisma, options.tenantId, async () => {
+      const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          temperature: 0,
+          max_tokens: 2000,
+          response_format: { type: "json_object" },
+          messages: [
           {
             role: "system",
             content: [
@@ -354,17 +386,35 @@ export async function maintainTenantPostTags(options: {
           },
         ],
       }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+        | null;
+      return { response, data };
     });
-    const data = (await response.json().catch(() => null)) as
-      | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-      | null;
+    if (!leased.active) {
+      return applied;
+    }
+    const { response, data } = leased.value;
     if (!response.ok) {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
-      return { ...applied, archived: await archiveInactivePostTags(options.tenantId, archiveSince) };
+      const archived = await runWithActiveTenantLease(
+        prisma,
+        options.tenantId,
+        (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
+      );
+      return archived.active ? { ...applied, archived: archived.value } : applied;
     }
     const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
     if (plan) {
-      applied = await applyTagAgentPlan(options.tenantId, plan, posts.map((post) => post.id), options.logger);
+      const planned = await runWithActiveTenantLease(
+        prisma,
+        options.tenantId,
+        (transaction) => applyTagAgentPlan(options.tenantId, plan, posts.map((post) => post.id), options.logger, transaction),
+      );
+      if (planned.active) {
+        applied = planned.value;
+      }
     }
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
@@ -372,7 +422,15 @@ export async function maintainTenantPostTags(options: {
   } finally {
     clearTimeout(timeout);
   }
-  const archived = await archiveInactivePostTags(options.tenantId, archiveSince);
+  const archiveLease = await runWithActiveTenantLease(
+    prisma,
+    options.tenantId,
+    (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
+  );
+  if (!archiveLease.active) {
+    return applied;
+  }
+  const archived = archiveLease.value;
   return {
     ...applied,
     archived: uniqueStrings([...applied.archived, ...archived]),
@@ -452,6 +510,7 @@ export async function applyTagAgentPlan(
   plan: PostTagAgentPlan,
   knownPostIds: string[],
   logger: FastifyBaseLogger,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<PostTagMaintenanceResult> {
   const created: string[] = [];
   const merged: Array<{ from: string[]; into: string }> = [];
@@ -476,11 +535,11 @@ export async function applyTagAgentPlan(
       continue;
     }
     try {
-      const existing = await prisma.postTag.findUnique({
+      const existing = await client.postTag.findUnique({
         where: { tenantId_name: { tenantId, name: item.name } },
         select: { id: true },
       });
-      const tag = await prisma.postTag.upsert({
+      const tag = await client.postTag.upsert({
         where: { tenantId_name: { tenantId, name: item.name } },
         update: {
           status: "active",
@@ -500,7 +559,7 @@ export async function applyTagAgentPlan(
         created.push(tag.name);
       }
       for (const postId of postIds) {
-        await assignPostTags(prisma, {
+        await assignPostTags(client, {
           tenantId,
           postId,
           tags: [{ tagId: tag.id, source: "llm", confidence: item.confidence }],
@@ -517,7 +576,7 @@ export async function applyTagAgentPlan(
   // assignments are removed and the tag is archived (reversible, no post loses a tag).
   for (const item of plan.merge) {
     try {
-      const canonical = await prisma.postTag.upsert({
+      const canonical = await client.postTag.upsert({
         where: { tenantId_name: { tenantId, name: item.into } },
         update: { status: "active" },
         create: {
@@ -533,19 +592,19 @@ export async function applyTagAgentPlan(
         if (fromName === canonical.name) {
           continue;
         }
-        const fromTag = await prisma.postTag.findUnique({
+        const fromTag = await client.postTag.findUnique({
           where: { tenantId_name: { tenantId, name: fromName } },
           select: { id: true, name: true },
         });
         if (!fromTag || fromTag.id === canonical.id) {
           continue;
         }
-        const assignments = await prisma.postTagAssignment.findMany({
+        const assignments = await client.postTagAssignment.findMany({
           where: { tenantId, tagId: fromTag.id },
           select: { postId: true, confidence: true },
         });
         for (const assignment of assignments) {
-          await assignPostTags(prisma, {
+          await assignPostTags(client, {
             tenantId,
             postId: assignment.postId,
             tags: [{ tagId: canonical.id, source: "llm", confidence: assignment.confidence ?? null }],
@@ -553,8 +612,8 @@ export async function applyTagAgentPlan(
           recordAssignment(canonical.name, assignment.postId);
         }
         // Drop the source tag's now-redundant assignments and retire it.
-        await prisma.postTagAssignment.deleteMany({ where: { tenantId, tagId: fromTag.id } });
-        await prisma.postTag.update({ where: { id: fromTag.id }, data: { status: "archived" } });
+        await client.postTagAssignment.deleteMany({ where: { tenantId, tagId: fromTag.id } });
+        await client.postTag.update({ where: { id: fromTag.id }, data: { status: "archived" } });
         mergedFrom.push(fromTag.name);
       }
       if (mergedFrom.length > 0) {
@@ -567,7 +626,7 @@ export async function applyTagAgentPlan(
 
   // 3) ASSIGN — back-fill posts onto the (now-current) active taxonomy.
   if (plan.assign.length > 0) {
-    const activeTags = await prisma.postTag.findMany({
+    const activeTags = await client.postTag.findMany({
       where: { tenantId, status: "active" },
       select: { id: true, name: true },
     });
@@ -576,7 +635,7 @@ export async function applyTagAgentPlan(
       if (!knownIds.has(item.postId)) {
         continue;
       }
-      const existingAssignments = await prisma.postTagAssignment.findMany({
+      const existingAssignments = await client.postTagAssignment.findMany({
         where: { tenantId, postId: item.postId },
         select: { tagId: true },
       });
@@ -597,7 +656,7 @@ export async function applyTagAgentPlan(
         continue;
       }
       try {
-        await assignPostTags(prisma, {
+        await assignPostTags(client, {
           tenantId,
           postId: item.postId,
           tags: toAssign.map((entry) => ({ tagId: entry.tagId, source: "llm" as const, confidence: null })),
@@ -618,9 +677,13 @@ export async function applyTagAgentPlan(
   return { created: uniqueStrings(created), merged, archived: [], deleted: [], assigned };
 }
 
-async function archiveInactivePostTags(tenantId: string, recentSince: Date): Promise<string[]> {
+async function archiveInactivePostTags(
+  tenantId: string,
+  recentSince: Date,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string[]> {
   const [activeTags, recentAssignments] = await Promise.all([
-    prisma.postTag.findMany({
+    client.postTag.findMany({
       where: {
         tenantId,
         status: "active",
@@ -630,7 +693,7 @@ async function archiveInactivePostTags(tenantId: string, recentSince: Date): Pro
         name: true,
       },
     }),
-    prisma.postTagAssignment.findMany({
+    client.postTagAssignment.findMany({
       where: {
         tenantId,
         post: {
@@ -649,7 +712,7 @@ async function archiveInactivePostTags(tenantId: string, recentSince: Date): Pro
     return [];
   }
   const inactiveIds = inactiveTags.map((tag) => tag.id);
-  const result = await prisma.postTag.updateMany({
+  const result = await client.postTag.updateMany({
     where: {
       tenantId,
       id: { in: inactiveIds },
@@ -670,7 +733,7 @@ export function registerPostTagMaintenanceScheduler(options: { logger: FastifyBa
     }
     const tenants = await prisma.tenant.findMany({
       where: {
-        status: "active",
+        ...tenantRuntimeRelationFilter,
         aiSettings: {
           isNot: null,
         },

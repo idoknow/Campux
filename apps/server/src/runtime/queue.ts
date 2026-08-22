@@ -39,6 +39,8 @@ type RuntimeQueueOptions = {
   logger: FastifyBaseLogger;
   tickIntervalMs?: number;
   maxConsecutivePriorityJobs?: number;
+  canRunTenantJob?: (job: RuntimeJob) => Promise<boolean>;
+  inactiveTenantRetryMs?: number;
 };
 
 const runtimeJobPriorities: Record<RuntimeJobName, number> = {
@@ -124,6 +126,21 @@ export function createRuntimeQueue(options: RuntimeQueueOptions): RuntimeQueue {
         const index = jobs.findIndex((candidate) => candidate.id === job.id);
         if (index >= 0) {
           jobs.splice(index, 1);
+        }
+
+        if (options.canRunTenantJob) {
+          let canRun = false;
+          try {
+            canRun = await options.canRunTenantJob(job);
+          } catch (error) {
+            options.logger.warn({ error, jobId: job.id, jobName: job.name, tenantId: job.tenantId }, "runtime tenant gate failed closed");
+          }
+          if (!canRun) {
+            job.runAt = new Date(Date.now() + (options.inactiveTenantRetryMs ?? 60_000));
+            jobs.push(job);
+            options.logger.info({ jobId: job.id, jobName: job.name, tenantId: job.tenantId }, "runtime job dormant for inactive tenant");
+            continue;
+          }
         }
 
         options.logger.info(

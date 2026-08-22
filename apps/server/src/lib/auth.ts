@@ -5,6 +5,7 @@ import { prisma } from "./prisma";
 import { isSyntheticSystemOperatorMembership, resolveEffectiveTenantMembership } from "./tenant-access";
 import { findTenantByRequestHost } from "./tenant-host";
 import { resolveSingleModeTenantId } from "./deploy-mode";
+import { isTenantRuntimeActiveStatus } from "./tenant-runtime";
 
 export const sessionCookieName = "campux_session";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 7;
@@ -251,11 +252,11 @@ export async function requireTenantContext(request: FastifyRequest, reply: Fasti
     reply.code(400);
     throw new Error("请先选择校园墙");
   }
-  // Archived walls are dormant: members can no longer operate or configure them.
-  // System operators bypass this so they can inspect or restore the wall.
-  if (context.selectedTenant.status === "archived" && !isSystemOperatorContext(context)) {
+  // Paused and archived walls are fully dormant. Restoration uses the dedicated
+  // system route, so even system operators must not mutate them via tenant APIs.
+  if (!isTenantRuntimeActiveStatus(context.selectedTenant.status)) {
     reply.code(403);
-    throw new Error("校园墙已存档，请联系系统运维恢复后再操作");
+    throw new Error("校园墙已暂停或归档，请联系系统运维恢复后再操作");
   }
   if (context.activeBan) {
     reply.code(403);

@@ -3,6 +3,8 @@ import { prisma } from "./prisma";
 import { isQZoneProtocolAutoRefreshCooldownError } from "./qzone-auto-refresh";
 import { decryptJson } from "./secret-json";
 import { parseQZoneVisitorCounts, qzoneVisitorSnapshotDate } from "./qzone-visitor-stats";
+import { tenantRuntimeRelationFilter } from "./tenant-runtime";
+import { runWithActiveTenantLease } from "./tenant-runtime-lease";
 
 type QZoneCookieNotifier = {
   notifyQZoneCookiesInvalid(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }): Promise<void>;
@@ -83,16 +85,17 @@ export async function checkAndUpdateQZoneSession(sessionId: string) {
       id: sessionId,
     },
     include: {
-      botAccount: true,
+      botAccount: { include: { tenant: { select: { status: true } } } },
     },
   });
-  if (!session) {
+  if (!session || session.botAccount.tenant.status !== "active") {
     return null;
   }
 
   const cookies = toCookieRecord(decryptJson(session.cookies));
-  const result = await checkQZoneCookieHealth(cookies, session.botAccount.qqUin.toString());
-  const updated = await prisma.botSession.update({
+  const leased = await runWithActiveTenantLease(prisma, session.botAccount.tenantId, async (transaction) => {
+    const result = await checkQZoneCookieHealth(cookies, session.botAccount.qqUin.toString());
+    const updated = await transaction.botSession.update({
     where: {
       id: session.id,
     },
@@ -105,8 +108,8 @@ export async function checkAndUpdateQZoneSession(sessionId: string) {
     },
   });
 
-  if (result.status === "available" && result.visitorCounts) {
-    await prisma.qZoneVisitorSnapshot.upsert({
+    if (result.status === "available" && result.visitorCounts) {
+      await transaction.qZoneVisitorSnapshot.upsert({
       where: {
         botAccountId_date: {
           botAccountId: session.botAccountId,
@@ -128,10 +131,11 @@ export async function checkAndUpdateQZoneSession(sessionId: string) {
         totalCount: result.visitorCounts.totalCount,
         checkedAt: updated.healthCheckedAt ?? new Date(),
       },
-    });
-  }
-
-  return updated;
+      });
+    }
+    return updated;
+  });
+  return leased.active ? leased.value : null;
 }
 
 export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier?: QZoneCookieNotifier) {
@@ -141,6 +145,7 @@ export function registerQZoneCookieHeartbeat(logger: FastifyBaseLogger, notifier
         type: "qzone",
         botAccount: {
           enabled: true,
+          tenant: tenantRuntimeRelationFilter,
         },
       },
       select: {

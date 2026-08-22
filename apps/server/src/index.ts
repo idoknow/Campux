@@ -44,6 +44,7 @@ import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
 import { registerTenantLifecycleScheduler } from "./runtime/tenant-lifecycle";
 import { registerPostTagMaintenanceScheduler } from "./runtime/post-tagging";
 import { ensureBotSessionSecretConfigured } from "./lib/secret-json";
+import { isTenantRuntimeActive } from "./lib/tenant-runtime";
 import { createPluginRegistry } from "@campux/plugin";
 import type { PluginQueue } from "@campux/plugin";
 import { reviewNotifyPlugin } from "@campux/plugin-review-notify";
@@ -68,6 +69,7 @@ await app.register(fastifyMultipart, {
 
 const queue = createRuntimeQueue({
   logger: app.log,
+  canRunTenantJob: (job) => isTenantRuntimeActive(prisma, job.tenantId),
 });
 
 // ─── 插件系统 ───────────────────────────────────────────
@@ -154,7 +156,14 @@ app.addHook("onClose", async () => {
 await queue.start();
 await recoverPublishAttempts(queue, app.log);
 const stopQZoneCookieHeartbeat = registerQZoneCookieHeartbeat(app.log, oneBot);
-const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({ logger: app.log, config });
+const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({
+  logger: app.log,
+  config,
+  onTenantDeactivating: (tenantId) => {
+    oneBot.disconnectTenant(tenantId);
+    return () => oneBot.activateTenant(tenantId);
+  },
+});
 const stopQZonePostMetricScheduler = registerQZonePostMetricScheduler({ queue, logger: app.log });
 const stopBotFriendSnapshotScheduler = registerBotFriendSnapshotScheduler({ caller: oneBot, logger: app.log });
 const stopFollowedPostCommentScheduler = registerFollowedPostCommentScheduler({ caller: oneBot, logger: app.log });

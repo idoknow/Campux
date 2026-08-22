@@ -1,5 +1,6 @@
 import { formatReviewQueueReminderMessages, reviewQueueDefaultDisplayLimit, type ReviewQueueItem } from "../lib/bot-messages";
 import type { prisma as prismaClient } from "../lib/prisma";
+import { tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 
 export const reviewQueueDisplayLimit = reviewQueueDefaultDisplayLimit;
 export const reviewQueueReminderIntervalMs = 5 * 60 * 1000;
@@ -91,6 +92,7 @@ export async function collectOverdueReviewReminders(
       reviewGroupId: {
         not: null,
       },
+      tenant: tenantRuntimeRelationFilter,
     },
     orderBy: {
       createdAt: "asc",
@@ -154,6 +156,7 @@ export async function collectOverdueReviewReminders(
         tenantId: bot.tenantId,
         status: "pending_approval",
         reviewQueueReminderSentAt: now,
+        tenant: tenantRuntimeRelationFilter,
       },
       include: {
         author: true,
@@ -196,6 +199,7 @@ export async function markReviewQueueReminderSent(prisma: typeof prismaClient, p
       },
       status: "pending_approval",
       reviewQueueReminderSentAt: null,
+      tenant: tenantRuntimeRelationFilter,
     },
     data: {
       reviewQueueReminderSentAt: sentAt,

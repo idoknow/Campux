@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { hashPassword, isPrismaKnownRequestError, type TenantRole } from "@campux/db";
+import { hashPassword, isPrismaKnownRequestError, type Prisma, type TenantRole } from "@campux/db";
 import { hasTenantRole } from "./auth";
 import { writeAuditLog } from "./audit";
 import { prisma } from "./prisma";
@@ -7,6 +7,8 @@ import { decryptJson, encryptJson } from "./secret-json";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
 import { readTenantPublishMode } from "./tenant-metadata";
+import { tenantRuntimeRelationFilter } from "./tenant-runtime";
+import { lockActiveTenantRuntime, runWithActiveTenantLease } from "./tenant-runtime-lease";
 import type { RuntimeQueue } from "../runtime/queue";
 import { publishToQZone, QZonePublishError } from "@campux/integrations";
 
@@ -41,6 +43,9 @@ export async function registerUserViaBot({
 }) {
   const bot = await findEnabledBot(botQqUin);
   const registration = await prisma.$transaction(async (tx) => {
+    if (!await lockActiveTenantRuntime(tx, bot.tenantId)) {
+      throw new BotWorkflowError("校园墙已暂停或归档", 409);
+    }
     const existingUser = await tx.user.findUnique({
       where: {
         qqUin: BigInt(userQqUin),
@@ -184,14 +189,20 @@ export async function resetPasswordViaBot({
     throw new BotWorkflowError("账号还没有注册这个校园墙，请先发送 #注册账号", 404);
   }
 
-  await prisma.user.update({
-    where: {
-      id: user.id,
-    },
-    data: {
-      passwordHash: await hashPassword(password),
-      passwordChangeRequired: true,
-    },
+  const passwordHash = await hashPassword(password);
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    if (!await lockActiveTenantRuntime(tx, bot.tenantId)) {
+      throw new BotWorkflowError("校园墙已暂停或归档", 409);
+    }
+    await tx.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        passwordHash,
+        passwordChangeRequired: true,
+      },
+    });
   });
   await markBotSeen(bot.id);
   await writeAuditLog({
@@ -251,7 +262,8 @@ export async function reviewPostViaBot({
   }
 
   const nextStatus = action === "approve" ? "approved" : "rejected";
-  const reviewed = await prisma.post.update({
+  const review = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    const reviewed = await transaction.post.update({
     where: {
       id: post.id,
     },
@@ -272,7 +284,7 @@ export async function reviewPostViaBot({
     },
   });
 
-  await markBotSeen(bot.id);
+  await transaction.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
   await writeAuditLog({
     tenantId: bot.tenantId,
     actorId: operator.id,
@@ -284,7 +296,13 @@ export async function reviewPostViaBot({
       groupId: groupId ?? null,
       comment: comment?.trim() || null,
     },
+  }, transaction);
+    return reviewed;
   });
+  if (!review.active) {
+    throw new BotWorkflowError("校园墙当前不可用", 409);
+  }
+  const reviewed = review.value;
 
   if (action === "approve") {
     const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
@@ -336,54 +354,62 @@ export async function approveAllPendingPostsViaBot({
   }
 
   const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
-  const approvedPostIds: string[] = [];
+  const approval = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    const approvedPostIds: string[] = [];
 
-  for (const post of pending) {
-    try {
-      await prisma.post.update({
-        where: { id: post.id, status: "pending_approval" },
-        data: {
-          status: "approved",
-          logs: {
-            create: {
-              tenantId: bot.tenantId,
-              actorId: operator.id,
-              oldStatus: "pending_approval",
-              newStatus: "approved",
-              comment: "审核群命令全部通过",
+    for (const post of pending) {
+      try {
+        await transaction.post.update({
+          where: { id: post.id, status: "pending_approval" },
+          data: {
+            status: "approved",
+            logs: {
+              create: {
+                tenantId: bot.tenantId,
+                actorId: operator.id,
+                oldStatus: "pending_approval",
+                newStatus: "approved",
+                comment: "审核群命令全部通过",
+              },
             },
           },
-        },
-      });
-    } catch (error) {
-      if (isPrismaKnownRequestError(error) && error.code === "P2025") {
-        continue;
+        });
+      } catch (error) {
+        if (isPrismaKnownRequestError(error) && error.code === "P2025") {
+          continue;
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    await writeAuditLog({
-      tenantId: bot.tenantId,
-      actorId: operator.id,
-      action: "bot.review.approve",
-      targetType: "post",
-      targetId: post.id,
-      detail: {
-        displayId: post.displayId,
-        groupId: groupId ?? null,
-        bulk: true,
-      },
-    });
-
-    if (publishMode.mode === "accumulate") {
-      await addApprovedPostToBatch(queue, bot.tenantId, post.id, operator.id);
-    } else {
-      await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+      await writeAuditLog({
+        tenantId: bot.tenantId,
+        actorId: operator.id,
+        action: "bot.review.approve",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          groupId: groupId ?? null,
+          bulk: true,
+        },
+      }, transaction);
+      approvedPostIds.push(post.id);
     }
-    approvedPostIds.push(post.id);
+    await transaction.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
+    return approvedPostIds;
+  });
+  if (!approval.active) {
+    throw new BotWorkflowError("校园墙已暂停或归档", 409);
   }
+  const approvedPostIds = approval.value;
 
-  await markBotSeen(bot.id);
+  for (const postId of approvedPostIds) {
+    if (publishMode.mode === "accumulate") {
+      await addApprovedPostToBatch(queue, bot.tenantId, postId, operator.id);
+    } else {
+      await enqueuePublishFanout(queue, bot.tenantId, postId, operator.id);
+    }
+  }
   return {
     bot,
     operator: serializeUser(operator),
@@ -445,7 +471,8 @@ export async function refreshQZoneCookiesForBot({
     throw new BotWorkflowError("协议端没有返回有效的 QZone cookies", 502);
   }
 
-  const session = await prisma.botSession.upsert({
+  const refresh = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    const session = await transaction.botSession.upsert({
     where: {
       botAccountId_type_domain: {
         botAccountId: bot.id,
@@ -474,7 +501,7 @@ export async function refreshQZoneCookiesForBot({
     },
   });
 
-  await markBotSeen(bot.id);
+  await transaction.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
   await writeAuditLog({
     tenantId: bot.tenantId,
     actorId: actorId ?? null,
@@ -486,7 +513,13 @@ export async function refreshQZoneCookiesForBot({
       cookieNames: Object.keys(cookies),
       ...detail,
     },
+  }, transaction);
+    return session;
   });
+  if (!refresh.active) {
+    throw new BotWorkflowError("校园墙当前不可用", 409);
+  }
+  const session = refresh.value;
 
   return {
     bot,
@@ -512,9 +545,11 @@ export async function findEnabledBot(botQqUin: string) {
     where: {
       platform: "onebot",
       qqUin: BigInt(botQqUin),
+      enabled: true,
+      tenant: tenantRuntimeRelationFilter,
     },
   });
-  if (!bot || !bot.enabled) {
+  if (!bot) {
     throw new BotWorkflowError("Bot 未绑定校园墙", 404);
   }
   return bot;
@@ -606,23 +641,30 @@ export async function publishTextDirectViaBot({
   if (images) {
     qzoneInput.images = images;
   }
-  const result = await publishToQZone(qzoneInput);
-
-  await markBotSeen(bot.id);
-  await writeAuditLog({
-    tenantId: bot.tenantId,
-    actorId: operator.id,
-    action: "bot.text.publish",
-    targetType: "bot_account",
-    targetId: bot.id,
-    detail: {
-      groupId: groupId ?? null,
-      textLength: text.length,
-      imageCount: images?.length ?? 0,
-      externalId: result.externalId,
-      qzoneTid: result.qzoneTid,
-    },
+  const publication = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    const result = await publishToQZone(qzoneInput);
+    await transaction.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: operator.id,
+      action: "bot.text.publish",
+      targetType: "bot_account",
+      targetId: bot.id,
+      detail: {
+        groupId: groupId ?? null,
+        textLength: text.length,
+        imageCount: images?.length ?? 0,
+        externalId: result.externalId,
+        qzoneTid: result.qzoneTid,
+      },
+    }, transaction);
+    return result;
   });
+  if (!publication.active) {
+    throw new BotWorkflowError("校园墙已暂停或归档", 409);
+  }
+  const result = publication.value;
+
 
   return {
     bot,

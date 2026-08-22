@@ -140,4 +140,31 @@ describe("RuntimeQueue", () => {
       await queue.stop();
     }
   });
+
+  it("keeps inactive tenant jobs dormant and resumes them after activation", async () => {
+    const events: string[] = [];
+    let active = false;
+    const queue = createRuntimeQueue({
+      logger,
+      tickIntervalMs: 5,
+      inactiveTenantRetryMs: 20,
+      canRunTenantJob: async () => active,
+    });
+    queue.registerHandler("publishPost", async () => { events.push("publish"); });
+    queue.enqueueUnique(job("publishPost"), "publish:attempt-1");
+
+    await queue.start();
+    try {
+      await Bun.sleep(15);
+      expect(events).toEqual([]);
+      expect(queue.snapshot().queued).toBe(1);
+      expect(queue.enqueueUnique(job("publishPost"), "publish:attempt-1")).toBeNull();
+
+      active = true;
+      await waitUntil(() => events.length === 1);
+      expect(queue.enqueueUnique(job("publishPost"), "publish:attempt-1")).not.toBeNull();
+    } finally {
+      await queue.stop();
+    }
+  });
 });

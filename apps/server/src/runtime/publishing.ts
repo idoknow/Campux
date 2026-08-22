@@ -23,6 +23,8 @@ import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { createOfficialQqForumThread, OfficialQqPublishOutcomeUnknownError } from "./official-qq";
 import { buildPublicForumMediaUrl } from "../lib/public-forum-media";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
+import { isTenantRuntimeActiveStatus, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 const maxPublishAttempts = 3;
 export const defaultPublishIntervalSeconds = 10;
@@ -255,6 +257,7 @@ async function reconcileIncompleteLegacyBatchFanouts(logger: FastifyBaseLogger) 
     where: {
       status: "publishing",
       flushedAt: { not: null },
+      tenant: tenantRuntimeRelationFilter,
     },
     select: {
       id: true,
@@ -420,6 +423,7 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
         { status: "running" },
         { status: "failed", lastError: interruptedPublishAttemptMessage, nextRunAt: null },
       ],
+      post: { tenant: tenantRuntimeRelationFilter },
     },
     select: { id: true, status: true, postId: true, batchId: true },
   });
@@ -455,6 +459,7 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
         status: {
           in: ["publishing", "partially_failed", "failed"],
         },
+        tenant: tenantRuntimeRelationFilter,
       },
     },
   });
@@ -477,6 +482,7 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
       batchItem: {
         is: null,
       },
+      tenant: tenantRuntimeRelationFilter,
     },
     select: {
       id: true,
@@ -543,6 +549,7 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
       status: {
         in: ["publishing", "partially_failed", "failed"],
       },
+      tenant: tenantRuntimeRelationFilter,
     },
     select: {
       id: true,
@@ -558,6 +565,7 @@ export async function recoverPublishAttempts(queue: RuntimeQueue, logger: Fastif
       status: {
         in: ["publishing", "partially_failed", "failed"],
       },
+      tenant: tenantRuntimeRelationFilter,
     },
     select: { id: true },
   });
@@ -590,6 +598,7 @@ export async function requeueExpiredFailedPublishAttempts(queue: RuntimeQueue, l
         status: {
           in: ["partially_failed", "failed"],
         },
+        tenant: tenantRuntimeRelationFilter,
       },
       publishTarget: {
         enabled: true,
@@ -1092,20 +1101,23 @@ async function ensurePostPublishSummary(
   if (cached) {
     return cached;
   }
-  const summary = await generatePublishSummary({ tenantId, text, logger });
-  if (!summary) {
-    return null;
-  }
-  // 仅当仍为空时写入：若另一墙的 attempt 已抢先生成并落库，沿用它那一份以保持各墙一致。
-  await prisma.post
-    .updateMany({ where: { id: postId, publishSummary: null }, data: { publishSummary: summary } })
-    .catch((error) => {
-      logger.warn({ error, postId }, "publish summary: failed to persist generated summary");
-    });
-  const persisted = await prisma.post
-    .findUnique({ where: { id: postId }, select: { publishSummary: true } })
-    .catch(() => null);
-  return persisted?.publishSummary?.trim() || summary;
+  const leased = await runWithActiveTenantLease(prisma, tenantId, async (transaction) => {
+    const summary = await generatePublishSummary({ tenantId, text, logger, transaction });
+    if (!summary) {
+      return null;
+    }
+    // 仅当仍为空时写入：若另一墙的 attempt 已抢先生成并落库，沿用它那一份以保持各墙一致。
+    await transaction.post
+      .updateMany({ where: { id: postId, publishSummary: null }, data: { publishSummary: summary } })
+      .catch((error: unknown) => {
+        logger.warn({ error, postId }, "publish summary: failed to persist generated summary");
+      });
+    const persisted = await transaction.post
+      .findUnique({ where: { id: postId }, select: { publishSummary: true } })
+      .catch(() => null);
+    return persisted?.publishSummary?.trim() || summary;
+  });
+  return leased.active ? leased.value : null;
 }
 
 export function effectivePublishIntervalSeconds(value: number | null | undefined) {
@@ -1281,6 +1293,7 @@ export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue
         status: {
           in: ["publishing", "partially_failed", "failed"],
         },
+        tenant: tenantRuntimeRelationFilter,
       },
     },
     include: {
@@ -1316,6 +1329,28 @@ export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue
   return attempts.length;
 }
 
+async function runPublishSideEffectWithActiveTenantLease<Result>(
+  queue: RuntimeQueue,
+  job: RuntimeJob,
+  attemptId: string,
+  tenantId: string,
+  logger: FastifyBaseLogger,
+  operation: (transaction: Prisma.TransactionClient) => Promise<Result>,
+) {
+  const lease = await runWithActiveTenantLease(prisma, tenantId, operation);
+  if (lease.active) {
+    return lease;
+  }
+  const nextRunAt = new Date(Date.now() + 60_000);
+  await prisma.publishAttempt.updateMany({
+    where: { id: attemptId, status: "running" },
+    data: { status: "queued", nextRunAt },
+  });
+  queue.rescheduleCurrent(job, nextRunAt);
+  logger.info({ attemptId, tenantId }, "publish attempt deferred before external side effect for inactive tenant");
+  return lease;
+}
+
 async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, job: RuntimeJob, notifier?: PublishingNotifier) {
   const attemptId = typeof job.payload.attemptId === "string" ? job.payload.attemptId : "";
   if (!attemptId) {
@@ -1326,6 +1361,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     where: { id: attemptId },
     select: {
       tenantId: true,
+      post: { select: { tenant: { select: { status: true } } } },
       publishTarget: {
         select: {
           botAccountId: true,
@@ -1335,6 +1371,11 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     },
   });
   if (!dispatchTarget) {
+    return;
+  }
+  if (!isTenantRuntimeActiveStatus(dispatchTarget.post.tenant.status)) {
+    queue.rescheduleCurrent(job, new Date(Date.now() + 60_000));
+    logger.info({ attemptId, tenantId: dispatchTarget.tenantId }, "publish attempt dormant for inactive tenant");
     return;
   }
 
@@ -1581,7 +1622,17 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           })),
         });
         const cardKey = `tenants/${attempt.tenantId}/published/qq-forum/${attempt.publishTargetId}/${target.id}.png`;
-        await storage.put(cardKey, renderedCard, "image/png");
+        const storedCard = await runPublishSideEffectWithActiveTenantLease(
+          queue,
+          job,
+          attempt.id,
+          attempt.tenantId,
+          logger,
+          () => storage.put(cardKey, renderedCard, "image/png"),
+        );
+        if (!storedCard.active) {
+          return;
+        }
         forumImageUrls.push(buildPublicForumMediaUrl(config, cardKey));
         for (const attachment of await readPostImageKeys(config, attempt.tenantId, target.attachments)) {
           forumImageUrls.push(buildPublicForumMediaUrl(config, attachment));
@@ -1594,43 +1645,57 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           : forumCaption,
         ...qzonePublication.urls,
       ].filter(Boolean).join("\n").trim();
-      const result = await createOfficialQqForumThread(
-        {
-          id: attempt.publishTarget.botAccount.id,
-          officialAppId: attempt.publishTarget.botAccount.officialAppId,
-          officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
-        },
-        attempt.publishTarget.botAccount.reviewGroupId ?? "",
-        {
-          title: renderOfficialQqForumThreadTitle(forumTitles),
-          content: forumContent,
-          imageUrls: forumImageUrls,
-          matchDisplayIds: forumTitles.map((item) => item.postId),
+      const publication = await runPublishSideEffectWithActiveTenantLease(
+        queue,
+        job,
+        attempt.id,
+        attempt.tenantId,
+        logger,
+        async (transaction) => {
+          const result = await createOfficialQqForumThread(
+          {
+            id: attempt.publishTarget.botAccount.id,
+            officialAppId: attempt.publishTarget.botAccount.officialAppId,
+            officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
+          },
+          attempt.publishTarget.botAccount.reviewGroupId ?? "",
+          {
+            title: renderOfficialQqForumThreadTitle(forumTitles),
+            content: forumContent,
+            imageUrls: forumImageUrls,
+            matchDisplayIds: forumTitles.map((item) => item.postId),
+          },
+          );
+          await transaction.publishAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              status: "succeeded",
+              externalId: result.externalId,
+              qzoneTid: result.threadId,
+              verbose: toInputJson(result.verbose),
+              lastError: null,
+              nextRunAt: null,
+            },
+          });
+          for (const target of postsToPublish) {
+            await transaction.postLog.create({
+              data: {
+                tenantId: attempt.tenantId,
+                postId: target.id,
+                newStatus: "publishing",
+                comment: `${attempt.publishTarget.displayName} QQ 频道帖子发表成功：${result.externalId}`,
+              },
+            });
+          }
+          return result;
         },
       );
+      if (!publication.active) {
+        return;
+      }
+      const result = publication.value;
 
-      await prisma.publishAttempt.update({
-        where: {
-          id: attempt.id,
-        },
-        data: {
-          status: "succeeded",
-          externalId: result.externalId,
-          qzoneTid: result.threadId,
-          verbose: toInputJson(result.verbose),
-          lastError: null,
-          nextRunAt: null,
-        },
-      });
       for (const target of postsToPublish) {
-        await prisma.postLog.create({
-          data: {
-            tenantId: attempt.tenantId,
-            postId: target.id,
-            newStatus: "publishing",
-            comment: `${attempt.publishTarget.displayName} QQ 频道帖子发表成功：${result.externalId}`,
-          },
-        });
         await notifier?.notifyPublishSucceeded(target.id, attempt.publishTargetId, result.externalId).catch((error) => {
           logger.warn({ error, postId: target.id, publishTargetId: attempt.publishTargetId }, "failed to notify publish success");
         });
@@ -1733,39 +1798,53 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     const captionText = isBatch
       ? wrapBatchCaptionWithFixedText(attempt.publishTarget.botAccount.publishTextTemplate, joinBatchCaptions(captionParts))
       : joinBatchCaptions(captionParts);
-    const result = await publishToQZone({
-      tenantId: attempt.tenantId,
-      postId: attempt.postId,
-      targetId: attempt.publishTargetId,
-      targetName: attempt.publishTarget.displayName,
-      text: captionText,
-      imageGroups,
-      imageUrls: aggregatedImageUrls,
-      cookies,
-    });
-
-    await prisma.publishAttempt.update({
-      where: {
-        id: attempt.id,
-      },
-      data: {
-        status: "succeeded",
-        externalId: result.externalId,
-        qzoneTid: result.qzoneTid,
-        verbose: toInputJson(result.verbose),
-        lastError: null,
-        nextRunAt: null,
-      },
-    });
-    for (const target of postsToPublish) {
-      await prisma.postLog.create({
-        data: {
+    const publication = await runPublishSideEffectWithActiveTenantLease(
+      queue,
+      job,
+      attempt.id,
+      attempt.tenantId,
+      logger,
+      async (transaction) => {
+        const result = await publishToQZone({
           tenantId: attempt.tenantId,
-          postId: target.id,
-          newStatus: "publishing",
-          comment: `${attempt.publishTarget.displayName} 发布成功：${result.externalId}`,
-        },
-      });
+          postId: attempt.postId,
+          targetId: attempt.publishTargetId,
+          targetName: attempt.publishTarget.displayName,
+          text: captionText,
+          imageGroups,
+          imageUrls: aggregatedImageUrls,
+          cookies,
+        });
+        await transaction.publishAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: "succeeded",
+            externalId: result.externalId,
+            qzoneTid: result.qzoneTid,
+            verbose: toInputJson(result.verbose),
+            lastError: null,
+            nextRunAt: null,
+          },
+        });
+        for (const target of postsToPublish) {
+          await transaction.postLog.create({
+            data: {
+              tenantId: attempt.tenantId,
+              postId: target.id,
+              newStatus: "publishing",
+              comment: `${attempt.publishTarget.displayName} 发布成功：${result.externalId}`,
+            },
+          });
+        }
+        return result;
+      },
+    );
+    if (!publication.active) {
+      return;
+    }
+    const result = publication.value;
+
+    for (const target of postsToPublish) {
       await notifier?.notifyPublishSucceeded(target.id, attempt.publishTargetId, result.externalId).catch((error) => {
         logger.warn({ error, postId: target.id, publishTargetId: attempt.publishTargetId }, "failed to notify publish success");
       });

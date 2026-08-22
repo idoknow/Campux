@@ -21,6 +21,7 @@ type LifecycleDeps = {
   prisma?: TenantLifecycleStore;
   writeAuditLog?: typeof writeAuditLog;
   sendEmail?: typeof sendEmail;
+  onTenantDeactivating?: (tenantId: string) => (() => void) | void;
   now?: () => Date;
 };
 
@@ -114,7 +115,13 @@ export async function runTenantLifecycleSweep(rawDeps: LifecycleDeps) {
   for (const tenant of candidates) {
     if (tenant.archiveWarningAt !== null) {
       if (tenant.archiveWarningAt <= daysAgo(now, WARNING_GRACE_DAYS)) {
-        await deps.prisma.tenant.update({ where: { id: tenant.id }, data: { status: "archived" } });
+        const rollbackRuntimeFence = deps.onTenantDeactivating?.(tenant.id);
+        try {
+          await deps.prisma.tenant.update({ where: { id: tenant.id }, data: { status: "archived" } });
+        } catch (error) {
+          rollbackRuntimeFence?.();
+          throw error;
+        }
         await deps.writeAuditLog({
           tenantId: tenant.id,
           actorId: null,

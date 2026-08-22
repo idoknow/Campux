@@ -42,12 +42,16 @@ describe("publish fanout transaction wiring", () => {
     const fanoutStart = publishingSource.indexOf("export async function enqueuePublishFanout");
     const fanoutEnd = publishingSource.indexOf("export async function enqueueBatchPublishFanout", fanoutStart);
     const fanoutSource = publishingSource.slice(fanoutStart, fanoutEnd);
-    const transactionStart = fanoutSource.indexOf("const attempts = await prisma.$transaction(async (tx)");
-    const transactionalSchedule = fanoutSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
-    const enqueue = fanoutSource.indexOf("enqueueAttempt(queue", transactionStart);
+    const helperStart = publishingSource.indexOf("async function scheduleAndEnqueueFanoutAttempts");
+    const helperEnd = publishingSource.indexOf("export async function enqueuePublishFanout", helperStart);
+    const helperSource = publishingSource.slice(helperStart, helperEnd);
+    const transactionStart = helperSource.indexOf("await prisma.$transaction(async (tx)");
+    const transactionalSchedule = helperSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
+    const enqueue = helperSource.indexOf("enqueueAttemptUnique(queue", transactionStart);
 
     expect(fanoutStart).toBeGreaterThan(-1);
     expect(fanoutEnd).toBeGreaterThan(fanoutStart);
+    expect(fanoutSource).toContain("scheduleAndEnqueueFanoutAttempts({");
     expect(transactionStart).toBeGreaterThan(-1);
     expect(transactionalSchedule).toBeGreaterThan(transactionStart);
     expect(enqueue).toBeGreaterThan(transactionalSchedule);
@@ -60,7 +64,7 @@ describe("publish fanout transaction wiring", () => {
     const transactionStart = fanoutSource.indexOf("const attempts = await prisma.$transaction(async (tx)");
     const transactionalSchedule = fanoutSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
     const durableMarker = fanoutSource.indexOf("data: { flushedAt: new Date() }", transactionalSchedule);
-    const enqueue = fanoutSource.indexOf("enqueueAttempt(queue", durableMarker);
+    const enqueue = fanoutSource.indexOf("enqueueAttemptUnique(queue", durableMarker);
 
     expect(fanoutStart).toBeGreaterThan(-1);
     expect(fanoutEnd).toBeGreaterThan(fanoutStart);

@@ -15,6 +15,7 @@ import { serializeAssignedPostTags } from "../lib/post-tags";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
+import { lockActiveTenantRuntime } from "../lib/tenant-runtime-lease";
 import {
   buildImageSourceSizeErrorMessage,
   buildVideoGifFfmpegArgs,
@@ -1011,6 +1012,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
         try {
           post = await prisma.$transaction(
             async (tx) => {
+              if (!await lockActiveTenantRuntime(tx, context.selectedTenant.id)) {
+                throw { status: 409, message: "校园墙已暂停或归档" };
+              }
               await convertedGifClaimStore.consumeUsing(
                 remoteGifClaims.map((claim) => claim.proof),
                 {

@@ -6,6 +6,8 @@ import { qzoneCookieDomain } from "../lib/bot-workflows";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
+import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 const refreshIntervalMs = 60 * 60 * 1000;
@@ -63,6 +65,7 @@ async function enqueueRecentQZonePostMetricRefreshes(queue: RuntimeQueue, logger
         status: {
           in: ["published", "pending_recall"],
         },
+        tenant: tenantRuntimeRelationFilter,
       },
     },
     include: {
@@ -145,10 +148,11 @@ async function handleQZonePostMetricRefresh(
           },
         },
       },
+      post: { select: { tenant: { select: { status: true } } } },
     },
   });
 
-  if (!attempt || attempt.status !== "succeeded" || !attempt.qzoneTid) {
+  if (!attempt || attempt.status !== "succeeded" || !attempt.qzoneTid || attempt.post.tenant.status !== "active") {
     logger.info({ attemptId }, "qzone post metric refresh skipped");
     return;
   }
@@ -158,7 +162,21 @@ async function handleQZonePostMetricRefresh(
   const botQqUin = attempt.publishTarget.botAccount.qqUin.toString();
   const session = attempt.publishTarget.botAccount.sessions[0] ?? null;
   if (!session) {
-    await upsertMetricFailure(attempt, qzoneTid, "没有可用的 QZone 登录态，无法获取单条数据");
+    const failure = await runWithActiveTenantLease(
+      prisma,
+      attempt.tenantId,
+      (transaction) => upsertMetricFailure(
+        attempt,
+        qzoneTid,
+        "没有可用的 QZone 登录态，无法获取单条数据",
+        undefined,
+        transaction,
+      ),
+    );
+    if (!failure.active) {
+      logger.info({ attemptId, botAccountId }, "qzone post metric refresh missing session skipped for inactive tenant");
+      return;
+    }
     logger.warn({ attemptId, botAccountId }, "qzone post metric refresh missing session");
     return;
   }
@@ -197,7 +215,12 @@ async function handleQZonePostMetricRefresh(
     return;
   }
   delete job.payload[metricRequestReservationPayloadKey];
-  if (!await claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now))) {
+  const claim = await runWithActiveTenantLease(
+    prisma,
+    attempt.tenantId,
+    (transaction) => claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now), transaction),
+  );
+  if (!claim.active || !claim.value) {
     logger.info({ attemptId, botAccountId }, "qzone post metric refresh skipped after freshness claim lost");
     return;
   }
@@ -205,6 +228,10 @@ async function handleQZonePostMetricRefresh(
   dispatchState.nextReservationAt = Math.max(dispatchState.nextReservationAt, now + perBotRequestSpacingMs);
 
   try {
+    const leased = await runWithActiveTenantLease(prisma, attempt.tenantId, async (transaction) => {
+    if (!await isTenantRuntimeActive(transaction, attempt.tenantId)) {
+      return;
+    }
     const cookies = toCookieRecord(decryptJson(session.cookies));
     const result = await getQZoneEmotionMetrics({
       uin: botQqUin,
@@ -217,6 +244,9 @@ async function handleQZonePostMetricRefresh(
     let comments: QZoneComment[] = [];
     if (result.commentCount > 0) {
       await sleep(400 + Math.floor(Math.random() * 600));
+      if (!await isTenantRuntimeActive(transaction, attempt.tenantId)) {
+        return;
+      }
       try {
         const commentResult = await getQZoneEmotionComments({
           uin: botQqUin,
@@ -231,8 +261,11 @@ async function handleQZonePostMetricRefresh(
       }
     }
     const commentsJson = toInputJson(comments);
+    if (!await isTenantRuntimeActive(transaction, attempt.tenantId)) {
+      return;
+    }
 
-    await prisma.qZonePostMetric.upsert({
+    await transaction.qZonePostMetric.upsert({
       where: {
         publishAttemptId: attempt.id,
       },
@@ -267,14 +300,22 @@ async function handleQZonePostMetricRefresh(
       },
     });
     logger.info({ attemptId, qzoneTid, visitorCount: result.visitorCount, likeCount: result.likeCount, commentCount: result.commentCount }, "qzone post metric refreshed");
+    });
+    if (!leased.active) {
+      return;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "QZone 单条数据获取失败";
-    await upsertMetricFailure(
+    const failure = await runWithActiveTenantLease(prisma, attempt.tenantId, (transaction) => upsertMetricFailure(
       attempt,
       qzoneTid,
       message,
       error instanceof QZoneEmotionMetricsError ? toInputJson(error.verbose) : undefined,
-    );
+      transaction,
+    ));
+    if (!failure.active) {
+      return;
+    }
     logger.warn({ error, attemptId, qzoneTid }, "qzone post metric refresh failed");
   }
 }
@@ -290,11 +331,12 @@ async function claimQZonePostMetricRefresh(
   },
   qzoneTid: string,
   claimedAt: Date,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
   const staleBefore = new Date(claimedAt.getTime() - refreshFreshnessMs);
   const existing = attempt.qzonePostMetrics[0] ?? null;
   if (existing) {
-    const claimed = await prisma.qZonePostMetric.updateMany({
+    const claimed = await client.qZonePostMetric.updateMany({
       where: {
         id: existing.id,
         OR: [
@@ -308,7 +350,7 @@ async function claimQZonePostMetricRefresh(
   }
 
   try {
-    await prisma.qZonePostMetric.create({
+    await client.qZonePostMetric.create({
       data: {
         tenantId: attempt.tenantId,
         postId: attempt.postId,
@@ -339,8 +381,9 @@ async function upsertMetricFailure(
   qzoneTid: string,
   lastError: string,
   verbose?: Prisma.InputJsonValue,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
-  await prisma.qZonePostMetric.upsert({
+  await client.qZonePostMetric.upsert({
     where: {
       publishAttemptId: attempt.id,
     },

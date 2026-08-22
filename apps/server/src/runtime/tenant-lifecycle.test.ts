@@ -64,6 +64,7 @@ describe("runTenantLifecycleSweep", () => {
       },
     ]);
     const auditActions: string[] = [];
+    const disconnectedTenantIds: string[] = [];
 
     await runTenantLifecycleSweep({
       logger: testLogger(),
@@ -74,6 +75,9 @@ describe("runTenantLifecycleSweep", () => {
         auditActions.push(action);
       },
       sendEmail: async () => ({ skipped: true as const }),
+      onTenantDeactivating: (tenantId) => {
+        disconnectedTenantIds.push(tenantId);
+      },
     });
 
     expect(updates).toEqual([
@@ -83,6 +87,36 @@ describe("runTenantLifecycleSweep", () => {
       },
     ]);
     expect(auditActions).toEqual(["tenant.archive.auto"]);
+    expect(disconnectedTenantIds).toEqual(["tenant-overdue"]);
+  });
+
+  test("rolls back the runtime fence when auto-archive persistence fails", async () => {
+    const { store } = createLifecycleStore([
+      {
+        id: "tenant-failed-archive",
+        name: "Failed Archive Wall",
+        archiveWarningAt: daysAgo(8),
+        _count: { memberships: 1 },
+      },
+    ]);
+    store.tenant.update = async () => {
+      throw new Error("database unavailable");
+    };
+    let rolledBack = false;
+
+    await expect(runTenantLifecycleSweep({
+      logger: testLogger(),
+      config: testConfig(),
+      prisma: store,
+      now: () => fixedNow,
+      writeAuditLog: async () => undefined,
+      sendEmail: async () => ({ skipped: true as const }),
+      onTenantDeactivating: () => () => {
+        rolledBack = true;
+      },
+    })).rejects.toThrow("database unavailable");
+
+    expect(rolledBack).toBe(true);
   });
 
   test("keeps an issued warning active even if membership count later exceeds the initial threshold", async () => {

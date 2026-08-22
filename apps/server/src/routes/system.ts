@@ -16,6 +16,7 @@ import {
   updateTenantAfterAdminCheck,
 } from "../lib/tenant-membership-removal";
 import { normalizeTenantHost } from "../lib/tenant-host";
+import { lockTenantRuntime } from "../lib/tenant-runtime-lease";
 import {
   buildTenantDomainHost,
   hostIsUnderTenantSuffix,
@@ -595,11 +596,30 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         ...(cloudflareDnsRecordId ? { cloudflareDnsRecordId } : {}),
       },
     };
-    const persistTenant = () => body.status === "active"
-      ? retryTransactionSerializationFailures(
-        () => prisma.$transaction(
-          async (tx) => {
-            const tenant = await updateTenantAfterAdminCheck({
+    let runtimeTransitionAttempted = false;
+    if (body.status !== undefined && body.status !== "active") {
+      // Fence local OneBot work before waiting on an in-flight durable lease.
+      // If persistence fails, the catch path below reconciles the fence to the
+      // authoritative persisted status.
+      runtimeTransitionAttempted = true;
+      oneBot?.disconnectTenant(params.tenantId);
+    }
+    const persistTenant = () => retryTransactionSerializationFailures(
+      () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const lockedTenant = await lockTenantRuntime(tx, params.tenantId);
+        if (!lockedTenant) {
+          throw new Error("tenant not found");
+        }
+        const currentStatus = lockedTenant.status;
+        const statusChanged = body.status !== undefined && currentStatus !== body.status;
+        if (statusChanged) {
+          runtimeTransitionAttempted = true;
+          if (body.status === "active") {
+            oneBot?.activateTenant(params.tenantId);
+          }
+        }
+        const tenant = body.status === "active"
+          ? await updateTenantAfterAdminCheck({
               countAdmins: () => tx.tenantMembership.count({
                 where: { tenantId: params.tenantId, role: "admin" },
               }),
@@ -607,22 +627,16 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
                 where: { id: params.tenantId },
                 data: updateData,
               }),
+            })
+          : await tx.tenant.update({
+              where: { id: params.tenantId },
+              data: updateData,
             });
-            await writeAuditLog(auditInput, tx);
-            return tenant;
-          },
-          { isolationLevel: TransactionIsolationLevel.Serializable },
-        ),
-        isTransactionSerializationFailure,
-      )
-      : prisma.$transaction(async (tx) => {
-        const tenant = await tx.tenant.update({
-          where: { id: params.tenantId },
-          data: updateData,
-        });
         await writeAuditLog(auditInput, tx);
         return tenant;
-      });
+      }, { isolationLevel: TransactionIsolationLevel.Serializable }),
+      isTransactionSerializationFailure,
+    );
 
     const appliedDnsChange = dnsChange;
     try {
@@ -633,6 +647,17 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         })
         : persistTenant());
     } catch (error) {
+      if (runtimeTransitionAttempted) {
+        const persisted = await prisma.tenant.findUnique({
+          where: { id: params.tenantId },
+          select: { status: true },
+        });
+        if (persisted?.status === "active") {
+          oneBot?.activateTenant(params.tenantId);
+        } else if (persisted) {
+          oneBot?.disconnectTenant(params.tenantId);
+        }
+      }
       if (error instanceof TenantDomainCompensationError) {
         request.log.error({
           err: error.compensationError,

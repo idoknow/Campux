@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { Prisma } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 
 // 说说文字里追加的极短总结硬上限：不超过 16 个字。
@@ -46,6 +47,7 @@ export async function generatePublishSummary(options: {
   tenantId: string;
   text: string;
   logger: FastifyBaseLogger;
+  transaction?: Prisma.TransactionClient;
 }): Promise<string | null> {
   const text = options.text?.trim() ?? "";
   if (!text) {
@@ -54,7 +56,7 @@ export async function generatePublishSummary(options: {
 
   let settings;
   try {
-    settings = await readTenantAiSettings(options.tenantId);
+    settings = await readTenantAiSettings(options.tenantId, options.transaction);
   } catch (error) {
     options.logger.warn({ error, tenantId: options.tenantId }, "publish summary: failed to read AI settings");
     return null;
@@ -65,7 +67,7 @@ export async function generatePublishSummary(options: {
     return null;
   }
 
-  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
+  const apiKey = await resolveTenantAiApiKey(options.tenantId, {}, options.transaction);
   if (!apiKey) {
     return null;
   }

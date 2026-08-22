@@ -22,6 +22,7 @@ import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { formatBanNotify, formatUnbanNotify } from "../lib/bot-messages";
 import { listOfficialQqChannels, listOfficialQqGuilds } from "../runtime/official-qq";
 import { BotWorkflowError } from "../lib/bot-workflows";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 const roleSchema = z.enum(["submitter", "reviewer", "admin"]);
 
@@ -683,12 +684,17 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
   });
 
   app.post("/api/admin/official-qq/discovery", async (request, reply) => {
-    await requireTenantRole(request, reply, "admin");
+    const context = await requireTenantRole(request, reply, "admin");
     const body = officialQqDiscoverySchema.parse(request.body);
     const bot = { id: `discovery:${body.appId}`, officialAppId: body.appId, officialAppSecret: encryptJson(body.appSecret) as Prisma.JsonValue };
     try {
-      if (body.guildId) return { channels: await listOfficialQqChannels(bot, body.guildId) };
-      return { guilds: await listOfficialQqGuilds(bot) };
+      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => (
+        body.guildId
+          ? { channels: await listOfficialQqChannels(bot, body.guildId) }
+          : { guilds: await listOfficialQqGuilds(bot) }
+      ));
+      if (!discovered.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+      return discovered.value;
     } catch (error) {
       if (error instanceof BotWorkflowError) return reply.code(error.statusCode).send({ message: error.message });
       throw error;
@@ -701,7 +707,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "official_qq" } });
     if (!bot) return reply.code(404).send({ message: "QQ 官方机器人不存在" });
     try {
-      return { guilds: await listOfficialQqGuilds(bot) };
+      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => ({ guilds: await listOfficialQqGuilds(bot) }));
+      if (!discovered.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+      return discovered.value;
     } catch (error) {
       if (error instanceof BotWorkflowError) return reply.code(error.statusCode).send({ message: error.message });
       throw error;
@@ -715,7 +723,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "official_qq" } });
     if (!bot) return reply.code(404).send({ message: "QQ 官方机器人不存在" });
     try {
-      return { channels: await listOfficialQqChannels(bot, query.guildId) };
+      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => ({ channels: await listOfficialQqChannels(bot, query.guildId) }));
+      if (!discovered.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+      return discovered.value;
     } catch (error) {
       if (error instanceof BotWorkflowError) return reply.code(error.statusCode).send({ message: error.message });
       throw error;

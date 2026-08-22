@@ -7,6 +7,7 @@ import { toPostListItem, toPostTimeline } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
 import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
+import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
 import { readTenantPublishMode } from "../lib/tenant-metadata";
@@ -163,35 +164,36 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "只有待审核稿件可以通过" });
     }
 
-    await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        status: "approved",
-        logs: {
-          create: {
-            tenantId: context.selectedTenant.id,
-            actorId: context.user.id,
-            oldStatus: post.status,
-            newStatus: "approved",
-            comment: body.comment?.trim() || "审核通过",
+    const approved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      await transaction.post.update({
+        where: { id: post.id },
+        data: {
+          status: "approved",
+          logs: {
+            create: {
+              tenantId: context.selectedTenant.id,
+              actorId: context.user.id,
+              oldStatus: post.status,
+              newStatus: "approved",
+              comment: body.comment?.trim() || "审核通过",
+            },
           },
         },
-      },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.approve",
+        targetType: "post",
+        targetId: post.id,
+        detail: { displayId: post.displayId },
+      }, transaction);
+      return readTenantPublishMode(transaction, context.selectedTenant.id);
     });
-
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.approve",
-      targetType: "post",
-      targetId: post.id,
-      detail: {
-        displayId: post.displayId,
-      },
-    });
-    const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
+    if (!approved.active) {
+      return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
+    const publishMode = approved.value;
     if (publishMode.mode === "accumulate") {
       await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
     } else {
@@ -232,37 +234,34 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     let approved = 0;
 
     for (const post of pending) {
-      // 逐个用 updateMany 带状态守卫，避免并发下重复通过已被处理的稿件。
-      const result = await prisma.post.updateMany({
-        where: { id: post.id, status: "pending_approval" },
-        data: { status: "approved" },
-      });
-      if (result.count === 0) {
-        continue;
-      }
-
-      await prisma.postLog.create({
-        data: {
-          postId: post.id,
+      const approvedPost = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+        const result = await transaction.post.updateMany({
+          where: { id: post.id, status: "pending_approval" },
+          data: { status: "approved" },
+        });
+        if (result.count === 0) return false;
+        await transaction.postLog.create({
+          data: {
+            postId: post.id,
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            oldStatus: "pending_approval",
+            newStatus: "approved",
+            comment: "一键通过",
+          },
+        });
+        await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,
-          oldStatus: "pending_approval",
-          newStatus: "approved",
-          comment: "一键通过",
-        },
+          action: "post.approve",
+          targetType: "post",
+          targetId: post.id,
+          detail: { displayId: post.displayId, bulk: true },
+        }, transaction);
+        return true;
       });
-
-      await writeAuditLog({
-        tenantId: context.selectedTenant.id,
-        actorId: context.user.id,
-        action: "post.approve",
-        targetType: "post",
-        targetId: post.id,
-        detail: {
-          displayId: post.displayId,
-          bulk: true,
-        },
-      });
+      if (!approvedPost.active) break;
+      if (!approvedPost.value) continue;
 
       if (publishMode.mode === "accumulate") {
         await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
@@ -293,35 +292,39 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "只有待审核稿件可以拒绝" });
     }
 
-    const updated = await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        status: "rejected",
-        logs: {
-          create: {
-            tenantId: context.selectedTenant.id,
-            actorId: context.user.id,
-            oldStatus: post.status,
-            newStatus: "rejected",
-            comment: body.comment?.trim() || "审核拒绝",
+    const rejectedPost = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      const updated = await transaction.post.update({
+        where: { id: post.id },
+        data: {
+          status: "rejected",
+          logs: {
+            create: {
+              tenantId: context.selectedTenant.id,
+              actorId: context.user.id,
+              oldStatus: post.status,
+              newStatus: "rejected",
+              comment: body.comment?.trim() || "审核拒绝",
+            },
           },
         },
-      },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.reject",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          comment: body.comment?.trim() || null,
+        },
+      }, transaction);
+      return updated;
     });
-
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.reject",
-      targetType: "post",
-      targetId: post.id,
-      detail: {
-        displayId: post.displayId,
-        comment: body.comment?.trim() || null,
-      },
-    });
+    if (!rejectedPost.active) {
+      return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
+    const updated = rejectedPost.value;
     oneBot?.notifyReviewResult(updated.id, "rejected", body.comment?.trim() || "审核拒绝").catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify review rejection");
     });
@@ -407,37 +410,43 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "只有待撤回稿件可以拒绝撤回申请" });
     }
 
-    await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        status: "published",
-        recallIgnored: false,
-        recallIgnoredAt: null,
-        logs: {
-          create: {
-            tenantId: context.selectedTenant.id,
-            actorId: context.user.id,
-            oldStatus: post.status,
-            newStatus: "published",
-            comment: body.comment?.trim() || "拒绝撤回申请",
+    const rejected = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      await transaction.post.update({
+        where: {
+          id: post.id,
+        },
+        data: {
+          status: "published",
+          recallIgnored: false,
+          recallIgnoredAt: null,
+          logs: {
+            create: {
+              tenantId: context.selectedTenant.id,
+              actorId: context.user.id,
+              oldStatus: post.status,
+              newStatus: "published",
+              comment: body.comment?.trim() || "拒绝撤回申请",
+            },
           },
         },
-      },
-    });
+      });
 
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.recall.reject",
-      targetType: "post",
-      targetId: post.id,
-      detail: {
-        displayId: post.displayId,
-        comment: body.comment?.trim() || null,
-      },
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.recall.reject",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          comment: body.comment?.trim() || null,
+        },
+      }, transaction);
+      return true;
     });
+    if (!rejected.active) {
+      return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
 
     oneBot?.notifyPostRecallRejected(post.id, body.comment?.trim() || "撤回申请未通过").catch((error) => {
       app.log.warn({ error, postId: post.id }, "failed to notify post recall rejection");
@@ -468,35 +477,36 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return { ok: true };
     }
 
-    await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        recallIgnored: true,
-        recallIgnoredAt: new Date(),
-        logs: {
-          create: {
-            tenantId: context.selectedTenant.id,
-            actorId: context.user.id,
-            oldStatus: post.status,
-            newStatus: post.status,
-            comment: "忽略撤回申请",
+    const ignored = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      await transaction.post.update({
+        where: { id: post.id },
+        data: {
+          recallIgnored: true,
+          recallIgnoredAt: new Date(),
+          logs: {
+            create: {
+              tenantId: context.selectedTenant.id,
+              actorId: context.user.id,
+              oldStatus: post.status,
+              newStatus: post.status,
+              comment: "忽略撤回申请",
+            },
           },
         },
-      },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.recall.ignore",
+        targetType: "post",
+        targetId: post.id,
+        detail: { displayId: post.displayId },
+      }, transaction);
+      return true;
     });
-
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.recall.ignore",
-      targetType: "post",
-      targetId: post.id,
-      detail: {
-        displayId: post.displayId,
-      },
-    });
+    if (!ignored.active) {
+      return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
 
     return {
       ok: true,
