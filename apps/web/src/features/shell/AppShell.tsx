@@ -1,7 +1,6 @@
 import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import type { NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
-import { PluginConfigPage } from "@/features/admin/PluginConfigPage";
 import { PostPage } from "@/features/posts/PostPage";
 import { PostsPage } from "@/features/posts/PostsPage";
 import { StatsPage } from "@/features/stats/StatsPage";
@@ -153,16 +152,6 @@ export function AppShell({
 
             <TabsContent value="services" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
               <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
-            </TabsContent>
-
-            <TabsContent value="plugins" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
-              <PluginConfigPage
-                me={me}
-                metadata={metadata}
-                onSaved={async () => {
-                  await Promise.all([onRefreshMe(), onRefreshTenantData()]);
-                }}
-              />
             </TabsContent>
 
             <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">

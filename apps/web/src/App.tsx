@@ -41,7 +41,6 @@ const tabPaths: Record<MainTab, string> = {
   posts: "/posts",
   stats: "/stats",
   services: "/services",
-  plugins: "/plugins",
   admin: "/admin",
 };
 
@@ -58,6 +57,7 @@ const adminTabPaths: Record<AdminTab, string> = {
   bots: "/admin/bots",
   publish: "/admin/publish",
   plugins: "/admin/plugins",
+  pluginConfig: "/admin/plugin-config",
 };
 
 const mainTabTitles: Record<MainTab, string> = {
@@ -65,7 +65,6 @@ const mainTabTitles: Record<MainTab, string> = {
   posts: "稿件",
   stats: "统计",
   services: "服务",
-  plugins: "插件管理",
   admin: "管理",
 };
 
@@ -82,6 +81,7 @@ const adminTabTitles: Record<AdminTab, string> = {
   bots: "机器人管理",
   publish: "发布管理",
   plugins: "插件管理",
+  pluginConfig: "插件配置",
 };
 
 export function App() {

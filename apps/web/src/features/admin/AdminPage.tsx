@@ -52,6 +52,7 @@ import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { PluginsPanel } from "./PluginPanel";
+import { PluginConfigPage } from "./PluginConfigPage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1082,6 +1083,9 @@ export function AdminPage({
           <TabsTrigger value="plugins" className={managementTabsTriggerClassName}>
             插件
           </TabsTrigger>
+          <TabsTrigger value="pluginConfig" className={managementTabsTriggerClassName}>
+            插件配置
+          </TabsTrigger>
         </TabsList>
         {adminLoading ? (
           <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">
@@ -1291,6 +1295,9 @@ export function AdminPage({
             </TabsContent>
             <TabsContent value="plugins" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <PluginsPanel />
+            </TabsContent>
+            <TabsContent value="pluginConfig" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+              <PluginConfigPage tenantId={selectedTenant.id} metadata={metadata} onSaved={onSaved} />
             </TabsContent>
       </Tabs>
       <MemberDetailDialog

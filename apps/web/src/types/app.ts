@@ -1,8 +1,8 @@
 import type { TenantSummary } from "@campux/domain";
 
-export type MainTab = "post" | "posts" | "stats" | "services" | "plugins" | "admin";
+export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
 export type PostsTab = "mine" | "review" | "published";
-export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "plugins";
+export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "plugins" | "pluginConfig";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
 

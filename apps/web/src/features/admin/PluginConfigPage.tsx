@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
-import type { AuthenticatedMe, BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
+import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { Button } from "@/components/ui/button";
@@ -563,7 +563,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
   };
 }
 
-export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedMe; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
+export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureBotMessageDefaults(buildInitialConfig(metadata)));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [showInfo, setShowInfo] = useState(false);
@@ -573,7 +573,6 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const tenantId = me.currentTenant?.id;
 
   useEffect(() => {
     if (!tenantId) {
