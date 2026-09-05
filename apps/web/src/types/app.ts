@@ -130,6 +130,10 @@ export type TenantMetadata = {
   enableAnonymousAvatarSelection: boolean;
   /** 字体选择插件启用的字体 value 白名单（包含 "default"） */
   availableFonts: string[];
+  /** 多彩投稿插件启用的背景色预设（未配置时为空数组，投稿页不展示背景色选项） */
+  availableBgColors: PluginColorPreset[];
+  /** 多彩投稿插件启用的文字色预设（未配置时为空数组，投稿页不展示文字色选项） */
+  availableTextColors: PluginColorPreset[];
   /** 匿名头像插件配置的头像池：id 为持久标识符，svg 为 data URL（内置头像由服务端解析） */
   availableAvatars: Array<{ id: string; svg: string; label: string }>;
 };

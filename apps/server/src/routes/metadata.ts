@@ -142,6 +142,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
     enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
     availableFonts: [] as string[],
+    availableBgColors: [] as Array<{ value: string; label: string; hex: string }>,
+    availableTextColors: [] as Array<{ value: string; label: string; hex: string }>,
     availableAvatars: [] as Array<{ id: string; svg: string; label: string }>,
   };
 }
@@ -203,6 +205,9 @@ async function readPublicMetadata(tenantId: string) {
     // 字体选择插件：将已勾选的字体值白名单透出，投稿页仅展示这些字体；
     // 默认字体是否可用由管理员单独控制（FONT_OPTIONS 中 value="default"）。
     metadata.availableFonts = pluginConfig.fontSelection.fonts.filter((f) => f.enabled).map((f) => f.value);
+    // 多彩投稿插件：透出已配置的背景色/文字色预设。未配置时为空，投稿页不展示对应选项。
+    metadata.availableBgColors = pluginConfig.colorSelection.backgroundColors;
+    metadata.availableTextColors = pluginConfig.colorSelection.textColors;
     // 匿名头像插件：透出当前租户配置的头像池（内置为文件名、自定义为 data URL）。
     metadata.availableAvatars = pluginConfig.anonymousAvatar.items.map((item, index) => {
       const isCustom = Boolean(item.svg);

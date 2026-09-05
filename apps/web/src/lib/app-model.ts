@@ -48,6 +48,8 @@ export const defaultMetadata: TenantMetadata = {
   enableFontSelection: false,
   enableAnonymousAvatarSelection: false,
   availableFonts: [],
+  availableBgColors: [],
+  availableTextColors: [],
   availableAvatars: [],
 };
 

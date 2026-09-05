@@ -6,7 +6,7 @@ import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } f
 import { defaultMetadata } from "@/lib/app-model";
 import { canAcceptAttachmentSelection } from "@/lib/attachment-upload-state";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
-import type { PendingAttachment, TenantMetadata } from "@/types/app";
+import type { PendingAttachment, PluginColorPreset, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,26 +15,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 
-const BG_COLOR_OPTIONS = [
-  { value: "white", label: "白", hex: "#FFFFFF" },
-  { value: "pink", label: "浅粉", hex: "#FFE4E1" },
-  { value: "blue", label: "浅蓝", hex: "#E0F0FF" },
-  { value: "green", label: "浅绿", hex: "#E0FFE0" },
-  { value: "yellow", label: "浅黄", hex: "#FFFDE0" },
-  { value: "orange", label: "浅橙", hex: "#FFE8D0" },
-  { value: "purple", label: "浅紫", hex: "#F0E0FF" },
-] as const;
-
-const TEXT_COLOR_OPTIONS = [
-  { value: "black", label: "黑", hex: "#1a1a1a" },
-  { value: "dark_red", label: "深红", hex: "#8B0000" },
-  { value: "dark_blue", label: "深蓝", hex: "#00008B" },
-  { value: "dark_green", label: "深绿", hex: "#006400" },
-  { value: "dark_pink", label: "深粉", hex: "#C71585" },
-  { value: "dark_purple", label: "深紫", hex: "#4B0082" },
-  { value: "dark_orange", label: "深橙", hex: "#CC5500" },
-] as const;
-
+const BG_COLOR_OPTIONS_FALLBACK: PluginColorPreset[] = [];
+const TEXT_COLOR_OPTIONS_FALLBACK: PluginColorPreset[] = [];
 export function PostPage({
   busy,
   loading,
@@ -82,6 +64,9 @@ export function PostPage({
   const svgAvatars = metadata.availableAvatars.length > 0
     ? metadata.availableAvatars
     : (builtInSvgAvatarFilenames ?? []).map((filename) => ({ id: filename, svg: `/api/svg/${encodeURIComponent(filename)}`, label: filename.replace(/\.svg$/, "") }));
+  // 背景/文字色仅展示后端下发的预设列表；未配置时为空数组，投稿页不展示对应选项。
+  const bgColors = metadata.availableBgColors ?? BG_COLOR_OPTIONS_FALLBACK;
+  const textColors = metadata.availableTextColors ?? TEXT_COLOR_OPTIONS_FALLBACK;
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
@@ -233,14 +218,15 @@ export function PostPage({
               <ChevronDownIcon className="size-4 text-slate-400 transition-transform ui-open:rotate-180" />
             </summary>
             <div className="grid gap-2 border-t border-slate-200 p-3">
-              {metadata.enableColorSelection ? (
+              {(metadata.enableColorSelection && (bgColors.length > 0 || textColors.length > 0)) ? (
                 <>
+                  {bgColors.length > 0 ? (
                   <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
                     <div className="mb-2">
                       <span className="block font-semibold">背景颜色</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {BG_COLOR_OPTIONS.map((opt) => (
+                      {bgColors.map((opt) => (
                         <button
                           key={opt.value}
                           type="button"
@@ -258,13 +244,15 @@ export function PostPage({
                       ))}
                     </div>
                   </div>
+                  ) : null}
 
+                  {textColors.length > 0 ? (
                   <div className="rounded-md border px-3 py-2 text-sm product-accent-blue">
                     <div className="mb-2">
                       <span className="block font-semibold">文字颜色</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {TEXT_COLOR_OPTIONS.map((opt) => (
+                      {textColors.map((opt) => (
                         <button
                           key={opt.value}
                           type="button"
@@ -282,6 +270,7 @@ export function PostPage({
                       ))}
                     </div>
                   </div>
+                  ) : null}
                 </>
               ) : null}
 
