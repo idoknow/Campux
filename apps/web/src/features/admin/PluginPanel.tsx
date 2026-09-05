@@ -478,6 +478,21 @@ function AuditActionBadge({ action }: { action: string }) {
     "plugin:request_sent": "bg-cyan-50 text-cyan-700",
     "plugin:response_received": "bg-emerald-50 text-emerald-700",
     "plugin:error": "bg-red-50 text-red-700",
+    "tenant.plugin.markdownRender.enable": "bg-emerald-50 text-emerald-700",
+    "tenant.plugin.markdownRender.disable": "bg-rose-50 text-rose-700",
+    "tenant.plugin.markdownRender.config": "bg-slate-100 text-slate-600",
+    "tenant.plugin.colorSelection.enable": "bg-emerald-50 text-emerald-700",
+    "tenant.plugin.colorSelection.disable": "bg-rose-50 text-rose-700",
+    "tenant.plugin.colorSelection.config": "bg-slate-100 text-slate-600",
+    "tenant.plugin.fontSelection.enable": "bg-emerald-50 text-emerald-700",
+    "tenant.plugin.fontSelection.disable": "bg-rose-50 text-rose-700",
+    "tenant.plugin.fontSelection.config": "bg-slate-100 text-slate-600",
+    "tenant.plugin.anonymousAvatar.enable": "bg-emerald-50 text-emerald-700",
+    "tenant.plugin.anonymousAvatar.disable": "bg-rose-50 text-rose-700",
+    "tenant.plugin.anonymousAvatar.config": "bg-slate-100 text-slate-600",
+    "tenant.plugin.botStylishMessages.enable": "bg-emerald-50 text-emerald-700",
+    "tenant.plugin.botStylishMessages.disable": "bg-rose-50 text-rose-700",
+    "tenant.plugin.botStylishMessages.config": "bg-slate-100 text-slate-600",
   };
   const className = config[action] ?? "bg-slate-50 text-slate-600";
   const label: Record<string, string> = {

@@ -3,6 +3,7 @@ import type { PluginRegistry } from "@campux/plugin";
 import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
+import { PRESET_NAME_BY_ID } from "../lib/preset-plugins";
 import {
   readTenantPluginConfig,
   tenantPluginConfigSchema,
@@ -49,7 +50,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
 
   // 设置插件启用/禁用状态
   app.patch("/api/admin/plugins/:name/status", async (request, reply) => {
-    await requireReadyTenant(request, reply, "admin");
+    const context = await requireReadyTenant(request, reply, "admin");
     const params = z.object({ name: z.string().min(1) }).parse(request.params);
     const body = pluginStatusSchema.parse(request.body);
 
@@ -59,6 +60,25 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
     }
 
     pluginRegistry.setStatus(params.name, body.status);
+
+    // 反向同步 tenant_metadata.plugin_config：在「管理-插件」里启用/禁用预设插件时，
+    // 同时把 config.enabled 写成相同值，方便「管理-插件配置」页直接看到。
+    // 只处理 5 个预设插件（反向映射 PRESET_NAME_BY_ID）；其他插件（如审核通知）不参与。
+    const presetIdByConfigSection: Array<["markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages", string]> = [
+      ["markdownRender", "campux-plugin-markdown-render"],
+      ["colorSelection", "campux-plugin-color-selection"],
+      ["fontSelection", "campux-plugin-font-selection"],
+      ["anonymousAvatar", "campux-plugin-anonymous-avatar"],
+      ["botStylishMessages", "campux-plugin-bot-stylish-messages"],
+    ];
+    const presetEntry = presetIdByConfigSection.find(([, registryName]) => registryName === params.name);
+    if (presetEntry) {
+      const presetId = presetEntry[0];
+      const before = await readTenantPluginConfig(prisma, context.selectedTenant.id);
+      const next: TenantPluginConfig = { ...before, [presetId]: { ...before[presetId], enabled: body.status === "enabled" } };
+      await writeTenantPluginConfig(prisma, context.selectedTenant.id, next);
+    }
+
     app.log.info(`[PluginRoutes] plugin "${params.name}" status set to "${body.status}" by admin`);
 
     return {
@@ -101,27 +121,74 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       })),
     };
   });
-
-  // 获取插件审计日志
+  // 获取插件审计日志：合并 registry runtime audit 与 prisma 中的 tenant.plugin.* 配置变更。
+  // 两者共用 entry_type 区分来源，前端 PluginPanel 在同一张表展示。
   app.get("/api/admin/plugins/audit", async (request, reply) => {
-    await requireReadyTenant(request, reply, "admin");
+    const context = await requireReadyTenant(request, reply, "admin");
     const query = auditLogQuerySchema.parse(request.query);
 
-    const auditLog = pluginRegistry.getAuditLog(query.limit);
-
-    return {
-      auditLog: auditLog.map((entry) => ({
-        id: `${entry.timestamp}-${entry.pluginName}`,
-        timestamp: new Date(entry.timestamp).toISOString(),
-        action: entry.action,
-        pluginName: entry.pluginName,
-        operator: entry.operator ?? null,
-        detail: entry.detail ?? null,
-        metadata: entry.metadata ?? null,
-      })),
+    const runtime = pluginRegistry.getAuditLog(query.limit);
+    const dbRows = await prisma.auditLog.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+        targetType: "tenant_plugin",
+      },
+      include: { actor: true },
+      orderBy: { createdAt: "desc" },
+      take: query.limit,
+    });
+    type DbRow = {
+      id: string;
+      createdAt: Date;
+      action: string;
+      targetId: string | null;
+      detail: unknown;
+      actor: { displayName: string | null; qqUin: bigint } | null;
     };
-  });
 
+    const merged = [...runtime, ...dbRows];
+    merged.sort((a, b) => {
+      const ta = "timestamp" in a ? a.timestamp : (a as DbRow).createdAt.getTime();
+      const tb = "timestamp" in b ? b.timestamp : (b as DbRow).createdAt.getTime();
+      return tb - ta;
+    });
+    const limited = merged.slice(0, query.limit);
+
+    const auditLog = limited.map((entry) => {
+      if ("pluginName" in entry) {
+        // registry runtime audit（插件注册、状态变更、事件等）
+        return {
+          entry_type: "runtime" as const,
+          id: `${entry.timestamp}-${entry.pluginName}`,
+          timestamp: new Date(entry.timestamp).toISOString(),
+          action: entry.action,
+          pluginName: entry.pluginName,
+          operator: entry.operator ?? null,
+          detail: typeof entry.detail === "string" ? entry.detail : entry.detail ?? null,
+          metadata: entry.metadata ?? null,
+        };
+      }
+      // tenant.plugin.* 配置变更（从 prisma auditLog 表读取）
+      const row = entry as DbRow;
+      const pluginName = row.targetId ? PRESET_NAME_BY_ID[row.targetId] ?? row.targetId : null;
+      const meta = (row.detail as { summary?: string; enabledBefore?: boolean; enabledAfter?: boolean } | null) ?? null;
+      const detailText = meta?.summary
+        ? `${meta.summary}（启用：${meta.enabledBefore ? "是" : "否"} → ${meta.enabledAfter ? "是" : "否"}）`
+        : null;
+      return {
+        entry_type: "config" as const,
+        id: row.id,
+        timestamp: row.createdAt.toISOString(),
+        action: row.action,
+        pluginName,
+        operator: row.actor?.displayName ?? (row.actor?.qqUin != null ? String(row.actor.qqUin) : null),
+        detail: detailText,
+        metadata: (row.detail as Record<string, unknown> | null) ?? null,
+      };
+    });
+
+    return { auditLog };
+  });
   // 读取插件配置（Markdown 渲染、多彩投稿、字体选择、匿名头像、Bot 多彩消息）
   app.get("/api/admin/plugins/settings", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "admin");
@@ -157,6 +224,14 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
           summary = enabledAfter ? "已启用" : "已禁用";
         }
         diffs.push({ pluginId, enabled: enabledAfter, summary });
+        // 同步 registry.setStatus：仅在 enabled 状态变化时更新运行时状态，
+        // 避免频繁配置保存触发 registry 审计日志（只记 enable/disable 事件）。
+        if (enabledBefore !== enabledAfter) {
+          const registryName = PRESET_NAME_BY_ID[pluginId];
+          if (registryName) {
+            pluginRegistry.setStatus(registryName, enabledAfter ? "enabled" : "disabled");
+          }
+        }
         await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
-  FileClockIcon,
   KeyRoundIcon,
   LayersIcon,
   LoaderIcon,
@@ -14,10 +13,12 @@ import { FONT_OPTIONS } from "@campux/domain";
 import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 
 type PluginIconProps = { className?: string };
 
@@ -117,25 +118,15 @@ function PermissionBadge({ permissions, risk, rationale }: { permissions: Plugin
   );
 }
 
-const PLUGIN_NAME_BY_ID: Record<string, string> = {
-  markdownRender: "Markdown 渲染插件",
-  colorSelection: "多彩投稿插件",
-  fontSelection: "字体选择插件",
-  anonymousAvatar: "匿名头像插件",
-  botStylishMessages: "Bot 多彩消息插件",
-};
-
-type ConfigLogEntry = {
-  id: string;
-  createdAt: string;
-  action: string;
-  targetId: string | null;
-  detail: {
-    summary?: string;
-    enabledBefore?: boolean;
-    enabledAfter?: boolean;
-  } | null;
-  actor: { displayName: string | null; qqUin: string } | null;
+// 预设插件 ID → registry 插件 name。与服务端 apps/server/src/lib/preset-plugins.ts
+// 中的 PRESET_NAME_BY_ID 保持同形，前端用这个映射调用 /api/admin/plugins 判断当前租户是否已启用。
+type PresetNameByConfigId = Record<PluginId, string>;
+const PRESET_NAME_BY_ID: PresetNameByConfigId = {
+  markdownRender: "campux-plugin-markdown-render",
+  colorSelection: "campux-plugin-color-selection",
+  fontSelection: "campux-plugin-font-selection",
+  anonymousAvatar: "campux-plugin-anonymous-avatar",
+  botStylishMessages: "campux-plugin-bot-stylish-messages",
 };
 
 const PERMISSION_LABELS: Record<PluginPermission, string> = {
@@ -567,11 +558,11 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureBotMessageDefaults(buildInitialConfig(metadata)));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [showInfo, setShowInfo] = useState(false);
-  const [showLog, setShowLog] = useState(false);
-  const [logs, setLogs] = useState<ConfigLogEntry[]>([]);
-  const [logLoading, setLogLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // 预设插件启用集合：来自 /api/admin/plugins 的 registry status。
+  // 侧栏只展示在插件注册表中已启用的预设插件，与「管理-插件」页保持一致。
+  const [enabledPresetNames, setEnabledPresetNames] = useState<Set<string>>(new Set());
 
 
   useEffect(() => {
@@ -594,13 +585,35 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     return () => { cancelled = true; };
   }, [tenantId]);
 
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    api<{ plugins: Array<{ name: string; status: "enabled" | "disabled" }> }>("/api/admin/plugins")
+      .then((data) => {
+        if (cancelled) return;
+        setEnabledPresetNames(new Set(data.plugins.filter((p) => p.status === "enabled").map((p) => p.name)));
+      })
+      .catch(() => { /* 读取失败时保持空集合，避免误显示 */ });
+    return () => { cancelled = true; };
+  }, [tenantId]);
+  // 保存后 registry 状态可能变化，拉取一次保持侧栏同步
+  async function refreshEnabledPlugins() {
+    if (!tenantId) return;
+    try {
+      const data = await api<{ plugins: Array<{ name: string; status: "enabled" | "disabled" }> }>("/api/admin/plugins");
+      setEnabledPresetNames(new Set(data.plugins.filter((p) => p.status === "enabled").map((p) => p.name)));
+    } catch {
+      // 静默失败；下一次拉取会重新同步。
+    }
+  }
   async function save() {
     setBusy(true);
     try {
       await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(config) });
       toast.success("插件配置已保存");
       await onSaved?.();
-      if (showLog) void refreshLogs();
+      // 插件启用状态可能因为保存而变，重新拉一次列表保持侧栏同步
+      void refreshEnabledPlugins();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "插件配置保存失败");
     } finally {
@@ -608,19 +621,20 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     }
   }
 
-  async function refreshLogs() {
-    setLogLoading(true);
-    try {
-      const data = await api<{ logs: ConfigLogEntry[] }>("/api/admin/plugins/settings/logs?limit=50");
-      setLogs(data.logs);
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "无法加载配置日志");
-    } finally {
-      setLogLoading(false);
-    }
-  }
+  // 侧栏只展示在插件注册表中已启用的预设插件。
+  // 用户需在「管理-插件」页启用后才会出现此处。
+  const enabledPlugins = PLUGINS.filter((plugin) => enabledPresetNames.has(PRESET_NAME_BY_ID[plugin.id]));
 
-  const active = PLUGINS.find((plugin) => plugin.id === activeId) ?? PLUGINS[0]!;
+  // 若当前选中的插件已被禁用，自动跳到第一个已启用的插件。
+  useEffect(() => {
+    if (enabledPlugins.length === 0) return;
+    if (!enabledPlugins.some((plugin) => plugin.id === activeId)) {
+      setActiveId(enabledPlugins[0]!.id);
+    }
+  }, [enabledPlugins, activeId]);
+
+  const active = enabledPlugins.find((plugin) => plugin.id === activeId) ?? enabledPlugins[0];
+  const ActiveIcon = active?.icon;
 
   return (
     <div className="grid h-full grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
@@ -630,71 +644,38 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
             <div className="flex items-center gap-2">
               <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br from-slate-700 to-slate-900 text-white"><LayersIcon className="size-4" /></span>
               <div>
-                <p className="text-sm font-semibold text-slate-900">插件管理</p>
-                <p className="text-xs text-slate-500">共 {PLUGINS.length} 个插件</p>
+                <p className="text-sm font-semibold text-slate-900">插件配置</p>
+                <p className="text-xs text-slate-500">已启用 {enabledPlugins.length} 个</p>
               </div>
             </div>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => setShowInfo((value) => !value)}>说明</Button>
           </div>
           <div className="grid gap-1 overflow-y-auto">
-            {PLUGINS.map((plugin) => {
-              const enabled = plugin.enabled(config);
-              const isActive = plugin.id === active.id;
-              return (
-                <div key={plugin.id} className="group">
-                  <button type="button" onClick={() => setActiveId(plugin.id)} className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-slate-50" data-active={isActive || undefined}>
-                    <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
-                      <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
-                    </div>
-                    <span className={enabled ? "rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700" : "rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500"}>{enabled ? "已启用" : "未启用"}</span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 border-t border-slate-200 pt-3">
-            <Button className="w-full" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />{busy ? "保存中…" : "保存配置"}</Button>
-          </div>
-          <div className="mt-3 border-t border-slate-200 pt-3">
-            <button
-              type="button"
-              onClick={() => {
-                const next = !showLog;
-                setShowLog(next);
-                if (next && logs.length === 0) void refreshLogs();
-              }}
-              className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-            >
-              <span className="flex items-center gap-1.5"><FileClockIcon className="size-3.5" />配置日志</span>
-              <span className="text-slate-400">{showLog ? "隐藏" : "查看"}</span>
-            </button>
-            {showLog ? (
-              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2">
-                {logLoading ? (
-                  <p className="py-2 text-center text-xs text-slate-400">加载中…</p>
-                ) : logs.length === 0 ? (
-                  <p className="py-2 text-center text-xs text-slate-400">暂无配置变更记录</p>
-                ) : (
-                  logs.map((entry) => {
-                    const pluginName = PLUGIN_NAME_BY_ID[entry.targetId ?? ""] ?? entry.targetId ?? "-";
-                    const detail = entry.detail ?? {};
-                    const state = detail.enabledBefore && !detail.enabledAfter ? "禁用" : !detail.enabledBefore && detail.enabledAfter ? "启用" : "更新";
-                    return (
-                      <div key={entry.id} className="rounded border border-slate-100 bg-slate-50 p-1.5 text-[11px] leading-4">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-medium text-slate-700">{pluginName}</span>
-                          <span className={state === "启用" ? "text-emerald-600" : state === "禁用" ? "text-rose-600" : "text-slate-500"}>{state}</span>
-                        </div>
-                        <p className="text-slate-400">{new Date(entry.createdAt).toLocaleString("zh-CN")}</p>
-                        <p className="truncate text-slate-400">操作人：{entry.actor?.displayName ?? entry.actor?.qqUin ?? "系统"}</p>
-                      </div>
-                    );
-                  })
-                )}
+            {enabledPlugins.length === 0 ? (
+              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
+                <p>暂无已启用的插件</p>
+                <p className="mt-1">请到「插件」子页启用预设插件</p>
               </div>
-            ) : null}
+            ) : (
+              enabledPlugins.map((plugin) => {
+                const isActive = plugin.id === activeId;
+                return (
+                  <div key={plugin.id} className="group">
+                    <button type="button" onClick={() => setActiveId(plugin.id)} className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-slate-50" data-active={isActive || undefined}>
+                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
+                        <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
+                      </div>
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">已启用</span>
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="mt-3 border-t border-slate-200 pt-3">
+            <Button className="w-full" disabled={busy || loading || enabledPlugins.length === 0} onClick={() => void save()}><SaveIcon className="size-4" />{busy ? "保存中…" : "保存配置"}</Button>
           </div>
         </CardContent>
       </Card>
@@ -735,18 +716,26 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
               </div>
             </div>
           ) : (
+            enabledPlugins.length === 0 ? (
+              <div className="grid flex-1 place-items-center">
+                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <p className="font-semibold text-slate-700">尚未启用任何预设插件</p>
+                  <p className="mt-1 text-xs">请在「插件」子页启用预设插件后，回来配置。</p>
+                </div>
+              </div>
+            ) : (
             <div className="flex-1 space-y-4 overflow-y-auto">
               <div className="flex items-center gap-3">
-                <span className="grid size-12 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><active.icon className="size-6" /></span>
+                {ActiveIcon ? <span className="grid size-12 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><ActiveIcon className="size-6" /></span> : null}
                 <div className="flex-1">
-                  <p className="text-base font-semibold text-slate-900">{active.name}</p>
-                  <p className="text-xs text-slate-500">{active.description}</p>
+                  <p className="text-base font-semibold text-slate-900">{active?.name}</p>
+                  <p className="text-xs text-slate-500">{active?.description}</p>
                 </div>
                 <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />保存</Button>
               </div>
-              {active.render(config, setConfig, busy)}
+              {active?.render(config, setConfig, busy)}
             </div>
-          )}
+          ))}
         </CardContent>
       </Card>
     </div>
