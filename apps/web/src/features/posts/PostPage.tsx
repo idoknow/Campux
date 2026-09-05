@@ -6,7 +6,7 @@ import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } f
 import { defaultMetadata } from "@/lib/app-model";
 import { canAcceptAttachmentSelection } from "@/lib/attachment-upload-state";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
-import type { PendingAttachment, PluginColorPreset, TenantMetadata } from "@/types/app";
+import type { PendingAttachment, TenantMetadata } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,8 +15,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 
-const BG_COLOR_OPTIONS_FALLBACK: PluginColorPreset[] = [];
-const TEXT_COLOR_OPTIONS_FALLBACK: PluginColorPreset[] = [];
 export function PostPage({
   busy,
   loading,
@@ -65,8 +63,8 @@ export function PostPage({
     ? metadata.availableAvatars
     : (builtInSvgAvatarFilenames ?? []).map((filename) => ({ id: filename, svg: `/api/svg/${encodeURIComponent(filename)}`, label: filename.replace(/\.svg$/, "") }));
   // 背景/文字色仅展示后端下发的预设列表；未配置时为空数组，投稿页不展示对应选项。
-  const bgColors = metadata.availableBgColors ?? BG_COLOR_OPTIONS_FALLBACK;
-  const textColors = metadata.availableTextColors ?? TEXT_COLOR_OPTIONS_FALLBACK;
+  const bgColors = metadata.availableBgColors ?? [];
+  const textColors = metadata.availableTextColors ?? [];
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
