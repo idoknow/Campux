@@ -451,7 +451,7 @@ const PLUGINS: PluginDescriptor[] = [
   {
     id: "markdownRender",
     icon: MarkdownIcon,
-    name: "Markdown 渲染插件",
+    name: "Markdown 渲染",
     tagline: "Markdown",
     description: "为投稿稿件启用 Markdown 语法渲染",
     detailedDescription:
@@ -485,7 +485,7 @@ const PLUGINS: PluginDescriptor[] = [
   {
     id: "colorSelection",
     icon: ColorIcon,
-    name: "多彩投稿插件",
+    name: "多彩投稿",
     tagline: "Colors",
     description: "自定义投稿背景色与文字色的预设色板",
     detailedDescription:
@@ -520,7 +520,7 @@ const PLUGINS: PluginDescriptor[] = [
   {
     id: "fontSelection",
     icon: FontIcon,
-    name: "字体选择插件",
+    name: "字体选择",
     tagline: "Fonts",
     description: "从固定字体库中勾选启用的字体",
     detailedDescription:
@@ -554,7 +554,7 @@ const PLUGINS: PluginDescriptor[] = [
   {
     id: "anonymousAvatar",
     icon: AnonymousAvatarIcon,
-    name: "匿名头像插件",
+    name: "匿名头像",
     tagline: "Avatars",
     description: "自定义匿名投稿使用的 SVG 头像池",
     detailedDescription:
@@ -587,7 +587,7 @@ const PLUGINS: PluginDescriptor[] = [
   {
     id: "botStylishMessages",
     icon: BotIcon,
-    name: "Bot 多彩消息插件",
+    name: "Bot 多彩消息",
     tagline: "Bot",
     description: "自定义机器人反馈消息的多彩语句",
     detailedDescription:
