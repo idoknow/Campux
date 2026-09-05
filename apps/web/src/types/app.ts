@@ -1,6 +1,6 @@
 import type { TenantSummary } from "@campux/domain";
 
-export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
+export type MainTab = "post" | "posts" | "stats" | "services" | "plugins" | "admin";
 export type PostsTab = "mine" | "review" | "published";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "plugins";
 export type TenantRole = "submitter" | "reviewer" | "admin";
@@ -98,7 +98,6 @@ export type MeResponse =
     };
 
 export type AuthenticatedMe = Extract<MeResponse, { authenticated: true }>;
-
 export type TenantMetadata = {
   brand: string;
   banner: string;
@@ -116,8 +115,6 @@ export type TenantMetadata = {
     maxDimension: number;
   };
   imageMaxSizeMb: number;
-  botStylishMessagesEnabled: boolean;
-  botPrivatePostStylishEnabled: boolean;
   publishMode: "single" | "accumulate";
   publishAccumulate: {
     minImages: number;
@@ -125,12 +122,58 @@ export type TenantMetadata = {
     staleMinutes: number;
   };
   publishLlmSummaryEnabled: boolean;
+  botStylishMessagesEnabled: boolean;
+  botPrivatePostStylishEnabled: boolean;
   enableColorSelection: boolean;
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
   enableAnonymousAvatarSelection: boolean;
 };
 
+export type BotMessageTypeConfig = {
+  type: string;
+  label: string;
+  enabled: boolean;
+  messages: string[];
+};
+
+export type PluginColorPreset = {
+  value: string;
+  label: string;
+  hex: string;
+};
+
+export type PluginFontOption = {
+  value: string;
+  enabled: boolean;
+};
+
+export type PluginSvgAvatarItem = {
+  filename: string;
+};
+
+export type TenantPluginConfig = {
+  markdownRender: {
+    enabled: boolean;
+  };
+  colorSelection: {
+    enabled: boolean;
+    backgroundColors: PluginColorPreset[];
+    textColors: PluginColorPreset[];
+  };
+  fontSelection: {
+    enabled: boolean;
+    fonts: PluginFontOption[];
+  };
+  anonymousAvatar: {
+    enabled: boolean;
+    items: PluginSvgAvatarItem[];
+  };
+  botStylishMessages: {
+    enabled: boolean;
+    messageTypes: BotMessageTypeConfig[];
+  };
+};
 export type PostAttachment = {
   kind: "image";
   key: string;

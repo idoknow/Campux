@@ -41,6 +41,7 @@ const tabPaths: Record<MainTab, string> = {
   posts: "/posts",
   stats: "/stats",
   services: "/services",
+  plugins: "/plugins",
   admin: "/admin",
 };
 
@@ -64,6 +65,7 @@ const mainTabTitles: Record<MainTab, string> = {
   posts: "稿件",
   stats: "统计",
   services: "服务",
+  plugins: "插件管理",
   admin: "管理",
 };
 

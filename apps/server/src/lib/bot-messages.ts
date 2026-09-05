@@ -13,6 +13,55 @@ function pick<T>(items: T[]): T {
 }
 
 /**
+ * 根据管理员在插件配置里保存的自定义语句生成消息池。
+ * 支持占位符：{id}（稿件编号）、{reason}（原因/失败信息）、{target}（发布目标）、{externalId}（外部 ID）。
+ * 未配置或全部为空时返回 null，调用方回退到内置默认池。
+ */
+function buildCustomTemplates(
+  customMessages: string[] | undefined,
+): Array<(vars?: Record<string, unknown>) => string> | null {
+  const entries = (customMessages ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
+  if (entries.length === 0) return null;
+  return entries.map((template) => (vars?: Record<string, unknown>) => {
+    let output = template;
+    for (const [key, value] of Object.entries(vars ?? {})) {
+      output = output.split(`{${key}}`).join(String(value));
+    }
+    return output;
+  });
+}
+
+function renderCustom(
+  templates: Array<(vars?: Record<string, unknown>) => string> | null,
+  fallback: () => string,
+  vars?: Record<string, unknown>,
+): string {
+  if (templates && templates.length > 0) return pick(templates)(vars);
+  return fallback();
+}
+
+/**
+ * 供 OneBot 运行时在每次读取 tenant 配置后设置：
+ * 键为消息类型标识，值为管理员自定义的多彩语句列表。
+ * 空数组或 null 表示使用内置语句。
+ */
+let customStylishMessages: Record<string, string[]> | null = null;
+
+export function setBotCustomStylishMessages(messages: Record<string, string[]> | null): void {
+  customStylishMessages = messages;
+}
+
+export function getBotCustomStylishMessages(): Record<string, string[]> | null {
+  return customStylishMessages;
+}
+
+export function readCustomStylishMessages(type: string): string[] | undefined {
+  const pool = customStylishMessages?.[type];
+  if (!pool || pool.length === 0) return undefined;
+  return pool;
+}
+
+/**
  * 转义 QQ/OneBot CQ 码，防止投稿文本中的 [CQ:...] 被解析为消息段。
  * OneBot 使用 XML/JSON 风格的消息段格式，将 [ 替换为全角即可破坏解析。
  */
@@ -34,9 +83,9 @@ const submissionSuccessStylish = [
 
 export function formatSubmissionSuccess(displayId: number, stylishEnabled = false): string {
   if (!stylishEnabled) return submissionSuccessDefault(displayId);
-  return pick(submissionSuccessStylish)(displayId);
+  const custom = buildCustomTemplates(readCustomStylishMessages("submissionSuccess"));
+  return renderCustom(custom, () => pick(submissionSuccessStylish)(displayId), { id: displayId });
 }
-
 // ── 审核通过 ──────────────────────────────────────────
 
 const reviewApprovedDefault = (id: number) => `您的稿件 #${id} 已通过审核`;
@@ -52,7 +101,8 @@ const reviewApprovedStylish = [
 
 export function formatReviewApproved(displayId: number, stylishEnabled = false): string {
   if (!stylishEnabled) return reviewApprovedDefault(displayId);
-  return pick(reviewApprovedStylish)(displayId);
+  const custom = buildCustomTemplates(readCustomStylishMessages("reviewApproved"));
+  return renderCustom(custom, () => pick(reviewApprovedStylish)(displayId), { id: displayId });
 }
 
 // ── 审核拒绝 ──────────────────────────────────────────
@@ -70,7 +120,8 @@ const reviewRejectedStylish = [
 
 export function formatReviewRejected(displayId: number, reason = "审核拒绝", stylishEnabled = false): string {
   if (!stylishEnabled) return reviewRejectedDefault(displayId, reason);
-  return pick(reviewRejectedStylish)(displayId, reason);
+  const custom = buildCustomTemplates(readCustomStylishMessages("reviewRejected"));
+  return renderCustom(custom, () => pick(reviewRejectedStylish)(displayId, reason), { id: displayId, reason });
 }
 
 // ── 撤回成功（通知作者） ───────────────────────────────
@@ -87,7 +138,8 @@ const recallSuccessStylish = [
 
 export function formatRecallSuccess(displayId: number, stylishEnabled = false): string {
   if (!stylishEnabled) return recallSuccessDefault(displayId);
-  return pick(recallSuccessStylish)(displayId);
+  const custom = buildCustomTemplates(readCustomStylishMessages("recallSuccess"));
+  return renderCustom(custom, () => pick(recallSuccessStylish)(displayId), { id: displayId });
 }
 
 // ── 撤回拒绝（通知作者） ───────────────────────────────
@@ -119,7 +171,8 @@ const publishSuccessStylish = [
 
 export function formatPublishSuccess(displayId: number, externalId: string, stylishEnabled = false): string {
   if (!stylishEnabled) return publishSuccessDefault(displayId, externalId);
-  return pick(publishSuccessStylish)(displayId, externalId);
+  const custom = buildCustomTemplates(readCustomStylishMessages("publishSuccess"));
+  return renderCustom(custom, () => pick(publishSuccessStylish)(displayId, externalId), { id: displayId, externalId });
 }
 
 // ── 发布成功（含目标名称） ─────────────────────────────

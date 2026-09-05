@@ -1,6 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { PluginRegistry } from "@campux/plugin";
 import { requireReadyTenant } from "../lib/auth";
+import { prisma } from "../lib/prisma";
+import { writeAuditLog } from "../lib/audit";
+import {
+  readTenantPluginConfig,
+  tenantPluginConfigSchema,
+  writeTenantPluginConfig,
+  type TenantPluginConfig,
+} from "../lib/tenant-plugin-config";
 import { z } from "zod";
 
 const pluginStatusSchema = z.object({
@@ -112,5 +120,35 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         metadata: entry.metadata ?? null,
       })),
     };
+  });
+
+  // 读取插件配置（Markdown 渲染、多彩投稿、字体选择、匿名头像、Bot 多彩消息）
+  app.get("/api/admin/plugins/settings", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "admin");
+    const config = await readTenantPluginConfig(prisma, context.selectedTenant.id);
+    return { config };
+  });
+
+  // 保存插件配置
+  app.patch("/api/admin/plugins/settings", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "admin");
+    const parsed = tenantPluginConfigSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "插件配置格式不正确" });
+    }
+    const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, parsed.data);
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "tenant.plugin_config.update",
+      targetType: "tenant",
+      targetId: context.selectedTenant.id,
+      detail: {
+        fields: Object.keys(parsed.data),
+      },
+    });
+
+    return { config: saved };
   });
 }

@@ -27,6 +27,8 @@ import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
+import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
+import { setBotCustomStylishMessages } from "../lib/bot-messages";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 import { lockActiveTenantRuntime, runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import {
@@ -266,6 +268,7 @@ export class OneBotRuntime {
   private readonly interactionFence = new TenantInteractionGenerationFence();
   private readonly connections = new Set<OneBotConnection>();
   private readonly pendingActions = new Map<string, PendingAction>();
+  private readonly botStylishMessageCache = new Map<string, Record<string, string[]> | null>();
   private readonly privateAutoReplyAt = new Map<string, number>();
   private readonly privateForwardBuffers = new Map<string, PrivateForwardBuffer>();
   private readonly privatePostAggregateBuffers = new Map<string, PrivatePostAggregateBuffer>();
@@ -300,6 +303,30 @@ export class OneBotRuntime {
             this.logger.warn({ error }, "review queue reminder scan failed");
           });
         }, reviewQueueReminderIntervalMs);
+  }
+
+  /**
+   * 读取 tenant 的插件配置，把 Bot 多彩消息类型对应的自定义语句表
+   * 同步到 bot-messages 模块；消息类型未配置时自动回退到内置语句池。
+   * 同时返回“实际启用”标志（原开关 AND 插件配置里的 enabled）。
+   */
+  private async resolveStylishEnabled(tenantId: string): Promise<boolean> {
+    const baseEnabled = await readTenantBotStylishMessagesEnabled(prisma, tenantId);
+    try {
+      const config = await readTenantPluginConfig(prisma, tenantId);
+      const mapping: Record<string, string[]> = {};
+      for (const entry of config.botStylishMessages.messageTypes) {
+        if (entry.enabled && entry.messages.length > 0) {
+          mapping[entry.type] = entry.messages;
+        }
+      }
+      this.botStylishMessageCache.set(tenantId, mapping);
+      setBotCustomStylishMessages(mapping);
+      return baseEnabled && config.botStylishMessages.enabled;
+    } catch {
+      setBotCustomStylishMessages(null);
+      return baseEnabled;
+    }
   }
 
   close() {

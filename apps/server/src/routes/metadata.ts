@@ -8,6 +8,7 @@ import { requireTenantContext, requireTenantRole } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes } from "../lib/attachments";
 import { prisma } from "../lib/prisma";
+import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { assertTenantLogoUpload, tenantLogoMaxBytes } from "../lib/tenant-logo-upload";
 import {
   maxPendingPostLimit,
@@ -186,7 +187,20 @@ async function readPublicMetadata(tenantId: string) {
     },
   });
 
-  return normalizeMetadata(entries);
+  const metadata = normalizeMetadata(entries);
+  // 插件开关从 tenant_metadata.plugin_config 读取，保留对前端公开 metadata 的
+  // 字段兼容性（投稿页、稿件事件的开关均走这里）。
+  try {
+    const pluginConfig = await readTenantPluginConfig(prisma, tenantId);
+    metadata.enableMarkdownRender = pluginConfig.markdownRender.enabled;
+    metadata.enableColorSelection = pluginConfig.colorSelection.enabled;
+    metadata.enableFontSelection = pluginConfig.fontSelection.enabled;
+    metadata.enableAnonymousAvatarSelection = pluginConfig.anonymousAvatar.enabled;
+    metadata.botStylishMessagesEnabled = pluginConfig.botStylishMessages.enabled;
+  } catch {
+    // 缺少插件配置时保留 tenant_metadata 里的旧开关
+  }
+  return metadata;
 }
 
 export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfig) {
