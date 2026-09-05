@@ -209,32 +209,104 @@ function FontSelectionPanel({ config, onChange, busy }: { config: TenantPluginCo
 
 function AnonymousAvatarPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   const enabled = config.anonymousAvatar.enabled;
+  const [customEditorOpen, setCustomEditorOpen] = useState(false);
+  const [customSvgText, setCustomSvgText] = useState("");
+  const [customError, setCustomError] = useState("");
+
+  function handleAddCustom() {
+    const text = customSvgText.trim();
+    if (!text) {
+      setCustomError("请粘贴 SVG 源码");
+      return;
+    }
+    if (!text.toLowerCase().startsWith("<svg")) {
+      setCustomError("仅支持以 <svg 开头的 SVG 源码");
+      return;
+    }
+    if (text.length > 60000) {
+      setCustomError("SVG 源码过大（建议不超过 60KB）");
+      return;
+    }
+    if (config.anonymousAvatar.items.length >= 20) {
+      setCustomError("头像池已满（最多 20 个）");
+      return;
+    }
+    const base64 = btoa(unescape(encodeURIComponent(text)));
+    const svg = `data:image/svg+xml;base64,${base64}`;
+    // 基于 SVG 内容生成短 hash 作为稳定 id（取首 20 个十六进制字符）
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+    }
+    const id = `custom-${hash.toString(16).padStart(8, "0")}${Date.now().toString(36).slice(-4)}`;
+    onChange({
+      ...config,
+      anonymousAvatar: {
+        ...config.anonymousAvatar,
+        items: [...config.anonymousAvatar.items, { id, svg }],
+      },
+    });
+    setCustomSvgText("");
+    setCustomError("");
+    setCustomEditorOpen(false);
+  }
+
   return (
     <div className="space-y-4">
       <SwitchField title="启用匿名头像" description="开启后匿名投稿时可随机选择一个头像，头像池由下方配置。" checked={enabled} disabled={busy} onChange={(value) => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, enabled: value } })} />
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-900">头像池</p>
-          <p className="text-xs text-slate-500">最多 20 个，可自定义顺序。</p>
-        </div>
-        <Button size="sm" variant="outline" disabled={busy || config.anonymousAvatar.items.length >= 20} onClick={() => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, items: [...config.anonymousAvatar.items, { filename: builtInSvgAvatarFilenames[0] ?? "" }] } })}>
-          + 添加头像
+      <div>
+        <p className="text-sm font-medium text-slate-900">头像池</p>
+        <p className="text-xs text-slate-500">最多 20 个，可自定义顺序；支持从内置库选择或粘贴 SVG 源码。</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" disabled={busy || config.anonymousAvatar.items.length >= 20} onClick={() => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, items: [...config.anonymousAvatar.items, { id: builtInSvgAvatarFilenames[0] ?? "" }] } })}>
+          从内置库添加
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy || config.anonymousAvatar.items.length >= 20} onClick={() => setCustomEditorOpen((value) => !value)}>
+          粘贴 SVG 源码
         </Button>
       </div>
-      <div className="grid grid-cols-4 gap-2">
-        {config.anonymousAvatar.items.map((item, index) => (
-          <div key={index} className="group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-2">
-            <img src={`/api/svg/${encodeURIComponent(item.filename)}`} alt={item.filename} className="aspect-square w-full rounded-md object-cover" />
-            <div className="mt-1 flex items-center gap-1">
-              <select className="h-7 w-full truncate rounded border border-slate-200 bg-white px-1 text-xs text-slate-700" value={item.filename} disabled={busy} onChange={(event) => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, items: config.anonymousAvatar.items.map((it, itemIndex) => itemIndex === index ? { ...it, filename: event.target.value } : it) } })}>
-                {builtInSvgAvatarFilenames.map((filename) => (
-                  <option key={filename} value={filename}>{filename}</option>
-                ))}
-              </select>
-              <Button size="sm" variant="ghost" className="h-7 w-7 shrink-0 p-0" disabled={busy} onClick={() => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, items: config.anonymousAvatar.items.filter((_, itemIndex) => itemIndex !== index) } })}>删除</Button>
-            </div>
+      {customEditorOpen ? (
+        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">粘贴以 &lt;svg 开头的完整 SVG 源码，最多 60KB。</p>
+          <textarea
+            className="h-40 w-full resize-y rounded-md border border-slate-300 bg-white p-2 font-mono text-xs text-slate-900"
+            placeholder={'<svg xmlns="http://www.w3.org/2000/svg" ...>...</svg>'}
+            value={customSvgText}
+            onChange={(event) => { setCustomSvgText(event.target.value); setCustomError(""); }}
+            disabled={busy}
+          />
+          {customError ? <p className="text-xs text-red-600">{customError}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { setCustomEditorOpen(false); setCustomError(""); }}>取消</Button>
+            <Button size="sm" onClick={handleAddCustom}>添加</Button>
           </div>
-        ))}
+        </div>
+      ) : null}
+      <div className="grid grid-cols-4 gap-2">
+        {config.anonymousAvatar.items.map((item, index) => {
+          const isCustom = Boolean(item.svg);
+          const previewSrc = item.svg ?? `/api/svg/${encodeURIComponent(item.id)}`;
+          const label = isCustom ? `自定义头像 ${index + 1}` : item.id;
+          return (
+            <div key={`${item.id}-${index}`} className="group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <img src={previewSrc} alt={label} className="aspect-square w-full rounded-md object-cover" />
+              <div className="mt-1 flex items-center gap-1">
+                {isCustom ? (
+                  <span className="h-7 flex-1 truncate rounded border border-slate-200 bg-slate-100 px-1 text-xs text-slate-600" title={item.id}>{label}</span>
+                ) : (
+                  <select className="h-7 w-full truncate rounded border border-slate-200 bg-white px-1 text-xs text-slate-700" value={item.id} disabled={busy} onChange={(event) => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, items: config.anonymousAvatar.items.map((it, itemIndex) => itemIndex === index ? { ...it, id: event.target.value, svg: undefined as string | undefined } : it) } })}>
+                    {builtInSvgAvatarFilenames.map((filename) => (
+                      <option key={filename} value={filename}>{filename}</option>
+                    ))}
+                  </select>
+                )}
+                <Button size="sm" variant="ghost" className="h-7 w-7 shrink-0 p-0" disabled={busy} title="删除" onClick={() => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, items: config.anonymousAvatar.items.filter((_, itemIndex) => itemIndex !== index) } })}>
+                  删除
+                </Button>              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -444,7 +516,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     },
     anonymousAvatar: {
       enabled: metadata.enableAnonymousAvatarSelection ?? false,
-      items: builtInSvgAvatarFilenames.slice(0, 10).map((filename) => ({ filename })),
+      items: builtInSvgAvatarFilenames.slice(0, 10).map((filename) => ({ id: filename })),
     },
     botStylishMessages: {
       enabled: metadata.botStylishMessagesEnabled ?? false,

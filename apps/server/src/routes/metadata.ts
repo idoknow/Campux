@@ -9,6 +9,7 @@ import { writeAuditLog } from "../lib/audit";
 import { compressImageBuffer, uploadAttachmentBytes } from "../lib/attachments";
 import { prisma } from "../lib/prisma";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
+import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { assertTenantLogoUpload, tenantLogoMaxBytes } from "../lib/tenant-logo-upload";
 import {
   maxPendingPostLimit,
@@ -141,6 +142,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
     enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
     availableFonts: [] as string[],
+    availableAvatars: [] as Array<{ id: string; svg: string; label: string }>,
   };
 }
 
@@ -201,6 +203,17 @@ async function readPublicMetadata(tenantId: string) {
     // 字体选择插件：将已勾选的字体值白名单透出，投稿页仅展示这些字体；
     // 默认字体是否可用由管理员单独控制（FONT_OPTIONS 中 value="default"）。
     metadata.availableFonts = pluginConfig.fontSelection.fonts.filter((f) => f.enabled).map((f) => f.value);
+    // 匿名头像插件：透出当前租户配置的头像池（内置为文件名、自定义为 data URL）。
+    metadata.availableAvatars = pluginConfig.anonymousAvatar.items.map((item, index) => {
+      const isCustom = Boolean(item.svg);
+      const label = isCustom
+        ? `自定义头像 ${index + 1}`
+        : (item.id.endsWith(".svg") ? item.id.slice(0, -4) : item.id);
+      const svg = isCustom
+        ? item.svg!
+        : readSvgAvatarDataUrl(item.id) ?? "";
+      return { id: item.id, svg, label };
+    });
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

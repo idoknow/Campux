@@ -46,7 +46,10 @@ export const tenantPluginConfigSchema = z.object({
       items: z
         .array(
           z.object({
-            filename: z.string().min(1).max(120),
+            // 标识符：内置头像用文件名（如 "开心.svg"）；自定义头像用短 hash 作为稳定标识
+            id: z.string().min(1).max(120),
+            // 自定义 SVG 内容：形如 data:image/svg+xml;base64,.... 为空表示使用内置文件
+            svg: z.string().max(65536).optional(),
           }),
         )
         .max(ANONYMOUS_AVATAR_MAX_COUNT)
@@ -87,7 +90,21 @@ export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {
   if (value === null || value === undefined || typeof value !== "object" || Array.isArray(value)) {
     return structuredClone(defaultTenantPluginConfig);
   }
-  const result = tenantPluginConfigSchema.safeParse(value);
+  // 兼容旧版持久化的 { filename } 结构：迁移为 { id }，无 svg 字段。
+  const maybeLegacy = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = { ...maybeLegacy };
+  const anonymousAvatar = maybeLegacy.anonymousAvatar as Record<string, unknown> | undefined;
+  if (anonymousAvatar && Array.isArray(anonymousAvatar.items)) {
+    normalized.anonymousAvatar = {
+      ...anonymousAvatar,
+      items: (anonymousAvatar.items as Array<Record<string, unknown>>).map((item) => {
+        const id = typeof item.id === "string" ? item.id : typeof item.filename === "string" ? item.filename : "";
+        const svg = typeof item.svg === "string" ? item.svg : undefined;
+        return svg ? { id, svg } : { id };
+      }).filter((item) => Boolean((item as { id: string }).id)),
+    };
+  }
+  const result = tenantPluginConfigSchema.safeParse(normalized);
   return result.success ? result.data : structuredClone(defaultTenantPluginConfig);
 }
 

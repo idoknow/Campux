@@ -40,6 +40,8 @@ import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, ty
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
 import { formatBanNotify } from "../lib/bot-messages";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
+import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
+import type { TenantPluginConfig } from "../lib/tenant-plugin-config";
 import type { EventBus } from "@campux/plugin";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -1586,8 +1588,18 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       },
     });
 
+    const customAvatarByShortId = new Map<string, string>();
+    try {
+      const pluginConfig = await readTenantPluginConfig(prisma, post.tenantId);
+      for (const item of pluginConfig.anonymousAvatar.items) {
+        if (item.svg) customAvatarByShortId.set(item.id, item.svg);
+      }
+    } catch {
+      // 忽略：找不到插件配置时回退到内置头像
+    }
+
     const anonymousAvatar = post.anonymous && post.anonymousAvatar
-      ? readSvgAvatarDataUrl(post.anonymousAvatar)
+      ? (customAvatarByShortId.get(post.anonymousAvatar) ?? readSvgAvatarDataUrl(post.anonymousAvatar) ?? undefined)
       : undefined;
 
     const bytes = await renderPostCard({

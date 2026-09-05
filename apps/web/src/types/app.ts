@@ -130,6 +130,8 @@ export type TenantMetadata = {
   enableAnonymousAvatarSelection: boolean;
   /** 字体选择插件启用的字体 value 白名单（包含 "default"） */
   availableFonts: string[];
+  /** 匿名头像插件配置的头像池：id 为持久标识符，svg 为 data URL（内置头像由服务端解析） */
+  availableAvatars: Array<{ id: string; svg: string; label: string }>;
 };
 
 export type BotMessageTypeConfig = {
@@ -151,7 +153,10 @@ export type PluginFontOption = {
 };
 
 export type PluginSvgAvatarItem = {
-  filename: string;
+  /** 稳定标识符：内置头像为文件名；自定义头像为短 hash */
+  id: string;
+  /** 自定义 SVG data URL（data:image/svg+xml;base64,...）；仅自定义头像使用 */
+  svg?: string | undefined;
 };
 
 export type TenantPluginConfig = {

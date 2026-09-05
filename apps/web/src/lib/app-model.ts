@@ -48,6 +48,7 @@ export const defaultMetadata: TenantMetadata = {
   enableFontSelection: false,
   enableAnonymousAvatarSelection: false,
   availableFonts: [],
+  availableAvatars: [],
 };
 
 export const navItems = [

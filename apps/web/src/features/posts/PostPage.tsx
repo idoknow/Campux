@@ -79,7 +79,9 @@ export function PostPage({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [attachmentToRemove, setAttachmentToRemove] = useState<PendingAttachment | null>(null);
-  const svgAvatars = builtInSvgAvatarFilenames;
+  const svgAvatars = metadata.availableAvatars.length > 0
+    ? metadata.availableAvatars
+    : (builtInSvgAvatarFilenames ?? []).map((filename) => ({ id: filename, svg: `/api/svg/${encodeURIComponent(filename)}`, label: filename.replace(/\.svg$/, "") }));
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
@@ -290,22 +292,22 @@ export function PostPage({
                     <span className="block text-xs font-normal opacity-80">选择匿名展示时使用的头像。</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {svgAvatars.map((filename) => (
+                    {svgAvatars.map((entry) => (
                       <button
-                        key={filename}
+                        key={entry.id}
                         type="button"
                         className={`relative h-12 w-12 overflow-hidden rounded-full border-2 transition-all ${
-                          anonymousAvatar === filename
+                          anonymousAvatar === entry.id
                             ? "border-green-500 ring-2 ring-green-200"
                             : "border-slate-200 hover:border-slate-300"
                         }`}
                         disabled={busy}
-                        onClick={() => onAnonymousAvatarChange(anonymousAvatar === filename ? "" : filename)}
-                        title={filename.replace(".svg", "")}
+                        onClick={() => onAnonymousAvatarChange(anonymousAvatar === entry.id ? "" : entry.id)}
+                        title={entry.label}
                       >
                         <img
-                          src={`/api/svg/${encodeURIComponent(filename)}`}
-                          alt={filename}
+                          src={entry.svg}
+                          alt={entry.label}
                           className="h-full w-full object-cover"
                           loading="lazy"
                         />
