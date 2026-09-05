@@ -3,9 +3,11 @@ import type { ReactElement, ReactNode } from "react";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  FileTextIcon,
   InfoIcon,
   KeyRoundIcon,
   LoaderIcon,
+  PowerIcon,
   SaveIcon,
   ShieldCheckIcon,
   ShieldIcon,
@@ -668,10 +670,17 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // 预设插件启用集合：来自 /api/admin/plugins 的 registry status。
-  // 侧栏只展示在插件注册表中已启用的预设插件，与「管理-插件」页保持一致。
+  // 侧栏展示所有预设插件（无论是否启用），每行带启停开关。
   const [enabledPresetNames, setEnabledPresetNames] = useState<Set<string>>(new Set());
   // 侧栏插件列表可折叠；默认展开。
   const [showSidebarPlugins, setShowSidebarPlugins] = useState(true);
+  // 单插件启停中，避免重复点。
+  const [togglingName, setTogglingName] = useState<string | null>(null);
+  // 配置日志：来自 /api/admin/plugins/audit，支持按插件筛选。
+  const [auditLog, setAuditLog] = useState<Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null }>>([]);
+  const [auditLogLoading, setAuditLogLoading] = useState(false);
+  const [logScope, setLogScope] = useState<"all" | "current">("current");
+  const [showLogSection, setShowLogSection] = useState(false);
 
 
   useEffect(() => {
@@ -721,8 +730,9 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(config) });
       toast.success("插件配置已保存");
       await onSaved?.();
-      // 插件启用状态可能因为保存而变，重新拉一次列表保持侧栏同步
+      // 保存可能触发插件启停变化，重新拉一次列表保持侧栏同步。
       void refreshEnabledPlugins();
+      void refreshAuditLog();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "插件配置保存失败");
     } finally {
@@ -730,20 +740,57 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     }
   }
 
-  // 侧栏只展示在插件注册表中已启用的预设插件。
-  // 用户需在「管理-插件」页启用后才会出现此处。
-  const enabledPlugins = PLUGINS.filter((plugin) => enabledPresetNames.has(PRESET_NAME_BY_ID[plugin.id]));
+  // 侧栏展示所有预设插件（启用与未启用共存），每行带启停开关。
+  // 禁用后配置面板不可编辑，但开关仍可重新开启。
+  const activePlugin: PluginDescriptor = PLUGINS.find((plugin) => plugin.id === activeId) ?? PLUGINS[0]!;
+  const activePluginEnabled = enabledPresetNames.has(PRESET_NAME_BY_ID[activePlugin.id]);
 
-  // 若当前选中的插件已被禁用，自动跳到第一个已启用的插件。
+  // 若当前选中的插件不存在（理论上不会发生），回到第一个。
   useEffect(() => {
-    if (enabledPlugins.length === 0) return;
-    if (!enabledPlugins.some((plugin) => plugin.id === activeId)) {
-      setActiveId(enabledPlugins[0]!.id);
+    if (!PLUGINS.some((plugin) => plugin.id === activeId)) {
+      setActiveId(PLUGINS[0]!.id);
     }
-  }, [enabledPlugins, activeId]);
+  }, [activeId]);
 
-  const active = enabledPlugins.find((plugin) => plugin.id === activeId) ?? enabledPlugins[0];
-  const ActiveIcon = active?.icon;
+  async function togglePlugin(pluginId: PluginId) {
+    const registryName = PRESET_NAME_BY_ID[pluginId];
+    const isEnabled = enabledPresetNames.has(registryName);
+    const nextStatus: "enabled" | "disabled" = isEnabled ? "disabled" : "enabled";
+    setTogglingName(registryName);
+    try {
+      await api(`/api/admin/plugins/${encodeURIComponent(registryName)}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const nextSet = new Set(enabledPresetNames);
+      if (isEnabled) nextSet.delete(registryName);
+      else nextSet.add(registryName);
+      setEnabledPresetNames(nextSet);
+      toast.success(isEnabled ? "已禁用插件" : "已启用插件");
+      void refreshAuditLog();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "插件启停失败");
+    } finally {
+      setTogglingName(null);
+    }
+  }
+
+  async function refreshAuditLog() {
+    setAuditLogLoading(true);
+    try {
+      const data = await api<{ auditLog: Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null }> }>("/api/admin/plugins/audit?limit=50");
+      setAuditLog(data.auditLog);
+    } catch {
+      // 读取失败时保留旧列表
+    } finally {
+      setAuditLogLoading(false);
+    }
+  }
+
+  // 首次展开日志时拉取；开启/关闭插件、保存后自动刷新。
+  useEffect(() => {
+    if (showLogSection && auditLog.length === 0 && !auditLogLoading) void refreshAuditLog();
+  }, [showLogSection, auditLog.length, auditLogLoading]);
 
   return (
     <div className="grid h-full grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
@@ -754,7 +801,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
               <span className="grid size-8 place-items-center rounded-md bg-slate-50 ring-1 ring-slate-200"><PluginConfigIcon className="size-6" /></span>
               <div>
                 <p className="text-sm font-semibold text-slate-900">插件配置</p>
-                <p className="text-xs text-slate-500">已启用 {enabledPlugins.length} 个</p>
+                <p className="text-xs text-slate-500">{PLUGINS.length} 个插件 · {enabledPresetNames.size} 个已启用</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -771,39 +818,40 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
           </div>
           <div className="grid gap-1 overflow-y-auto md:grid-flow-row md:grid-rows-[1fr]">
             {showSidebarPlugins ? (
-              enabledPlugins.length === 0 ? (
-                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
-                  <p>暂无已启用的插件</p>
-                  <p className="mt-1">请到「插件」子页启用预设插件</p>
-                </div>
-              ) : (
-                <div className="flex gap-1 overflow-x-auto pb-1 md:grid md:grid-cols-1 md:gap-0 md:overflow-visible md:pb-0">
-                  {enabledPlugins.map((plugin) => {
-                    const isActive = plugin.id === activeId;
-                    return (
+              <div className="flex flex-col gap-1 md:overflow-visible">
+                {PLUGINS.map((plugin) => {
+                  const registryName = PRESET_NAME_BY_ID[plugin.id];
+                  const isActive = plugin.id === activeId;
+                  const isEnabled = enabledPresetNames.has(registryName);
+                  const isToggling = togglingName === registryName;
+                  return (
+                    <div key={plugin.id} className={`flex items-center gap-2 rounded-md p-2 ${isActive ? "bg-slate-100" : "hover:bg-slate-50"}`} data-active={isActive || undefined}>
                       <button
-                        key={plugin.id}
                         type="button"
                         onClick={() => setActiveId(plugin.id)}
-                        className={`flex min-w-0 shrink-0 items-center gap-2 rounded-md p-2 text-left transition hover:bg-slate-50 md:w-full md:min-w-0 md:shrink ${
-                          isActive ? "bg-slate-100" : ""
-                        }`}
-                        data-active={isActive || undefined}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
                       >
-                        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
-                        <div className="min-w-0 md:flex-1">
+                        <span className={`grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white ${isEnabled ? "" : "opacity-50"}`} style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
+                        <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
-                          <p className="hidden truncate text-xs text-slate-500 md:block">{plugin.tagline}</p>
+                          <p className={`hidden truncate text-xs md:block ${isEnabled ? "text-slate-500" : "text-slate-400"}`}>{isEnabled ? plugin.tagline : "已禁用"}</p>
                         </div>
                       </button>
-                    );
-                  })}
-                </div>
-              )
+                      <Switch
+                        checked={isEnabled}
+                        size="sm"
+                        disabled={isToggling}
+                        onCheckedChange={() => void togglePlugin(plugin.id)}
+                        aria-label={`${plugin.name} 启停开关`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             ) : null}
           </div>
           <div className="mt-3 border-t border-slate-200 pt-3">
-            <Button className="w-full" disabled={busy || loading || enabledPlugins.length === 0} onClick={() => void save()}><SaveIcon className="size-4" />{busy ? "保存中…" : "保存配置"}</Button>
+            <Button className="w-full" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />{busy ? "保存中…" : "保存配置"}</Button>
           </div>
         </CardContent>
       </Card>
@@ -813,36 +861,99 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
           {loading ? (
             <div className="grid flex-1 place-items-center text-sm text-slate-500"><LoaderIcon className="size-5 animate-spin" /> 加载插件配置中…</div>
           ) : (
-            enabledPlugins.length === 0 ? (
-              <div className="grid flex-1 place-items-center">
-                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                  <p className="font-semibold text-slate-700">尚未启用任何预设插件</p>
-                  <p className="mt-1 text-xs">请在「插件」子页启用预设插件后，回来配置。</p>
-                </div>
-              </div>
-            ) : (
             <div className="flex-1 space-y-4 overflow-y-auto">
               <div className="flex flex-wrap items-start gap-3">
-                {ActiveIcon ? <span className="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white sm:size-12" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><ActiveIcon className="size-5 sm:size-6" /></span> : null}
+                <span className="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white sm:size-12" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><activePlugin.icon className="size-5 sm:size-6" /></span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-base font-semibold text-slate-900">{active?.name}</p>
-                  <p className="text-xs text-slate-500">{active?.description}</p>
-                  <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-400"><UserIcon className="size-3" />作者：{active?.author}</p>
+                  <p className="text-base font-semibold text-slate-900">{activePlugin.name}</p>
+                  <p className="text-xs text-slate-500">{activePlugin.description}</p>
+                  <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-400"><UserIcon className="size-3" />作者：{activePlugin.author}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" disabled={busy || !active} onClick={() => setShowPluginInfo(true)} title="查看当前插件详细说明"><InfoIcon className="size-4" />说明</Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setShowPluginInfo(true)} title="查看当前插件详细说明"><InfoIcon className="size-4" />说明</Button>
                 </div>
               </div>
-              {active?.render(config, setConfig, busy)}
+              <div className={activePluginEnabled ? "" : "pointer-events-none opacity-50"}>
+                {activePlugin.render(config, setConfig, busy)}
+              </div>
+              {activePluginEnabled ? null : (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <p className="font-semibold">当前插件已禁用</p>
+                  <p className="mt-1">请在左侧插件列表中将开关打开，配置修改才会生效。</p>
+                </div>
+              )}
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !showLogSection;
+                      setShowLogSection(next);
+                      if (next && auditLog.length === 0 && !auditLogLoading) void refreshAuditLog();
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                  >
+                    <FileTextIcon className="size-3.5" />
+                    {showLogSection ? "收起配置日志" : "查看配置日志"}
+                  </button>
+                  <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLogScope("current");
+                        if (!showLogSection) setShowLogSection(true);
+                      }}
+                      className={logScope === "current" ? "rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" : "rounded px-2 py-0.5 hover:bg-slate-50"}
+                    >当前插件</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLogScope("all");
+                        if (!showLogSection) setShowLogSection(true);
+                      }}
+                      className={logScope === "all" ? "rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" : "rounded px-2 py-0.5 hover:bg-slate-50"}
+                    >全部插件</button>
+                  </div>
+                </div>
+                {showLogSection ? (
+                  <div className="mt-2">
+                    {auditLogLoading && auditLog.length === 0 ? (
+                      <div className="grid place-items-center py-6 text-xs text-slate-400"><LoaderIcon className="size-4 animate-spin" /> 加载中…</div>
+                    ) : (
+                      (() => {
+                        const filtered = logScope === "current" ? auditLog.filter((entry) => entry.pluginName === activePlugin.name) : auditLog;
+                        if (filtered.length === 0) {
+                          return <p className="py-4 text-center text-xs text-slate-400">暂无日志</p>;
+                        }
+                        return (
+                          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                            {filtered.map((entry) => (
+                              <div key={entry.id} className="rounded-md border border-slate-200 bg-slate-50 p-2.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-blue-700">{entry.action}</span>
+                                  <span className="font-mono text-xs text-slate-600">{entry.pluginName}</span>
+                                  <span className="ml-auto font-mono text-xs text-slate-400">{new Date(entry.timestamp).toLocaleString("zh-CN", { hour12: false })}</span>
+                                </div>
+                                {entry.detail ? <p className="mt-1 text-xs leading-5 text-slate-600">{entry.detail}</p> : null}
+                                {entry.operator ? <p className="mt-0.5 text-[11px] text-slate-400">操作人：{entry.operator}</p> : null}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </div>
-          ))}
+          )}
         </CardContent>
       </Card>
 
       <PluginInfoDialog
         open={showPluginInfo}
         onOpenChange={(open) => setShowPluginInfo(open)}
-        plugin={active}
+        plugin={activePlugin}
       />
     </div>
   );

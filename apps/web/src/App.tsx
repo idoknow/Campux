@@ -56,7 +56,6 @@ const adminTabPaths: Record<AdminTab, string> = {
   metadata: "/admin/metadata",
   bots: "/admin/bots",
   publish: "/admin/publish",
-  plugins: "/admin/plugins",
   pluginConfig: "/admin/plugin-config",
 };
 
@@ -80,7 +79,6 @@ const adminTabTitles: Record<AdminTab, string> = {
   metadata: "墙面设置",
   bots: "机器人管理",
   publish: "发布管理",
-  plugins: "插件管理",
   pluginConfig: "插件配置",
 };
 
