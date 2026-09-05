@@ -529,6 +529,17 @@ function ensureBotMessageDefaults(config: TenantPluginConfig): TenantPluginConfi
   return { ...config, botStylishMessages: { ...config.botStylishMessages, messageTypes } };
 }
 
+// 后端对新租户返回的 fontSelection.fonts 默认为 []，若不补齐，字体面板会空白无字体可勾。
+// 这里按 FONT_OPTIONS 顺序铺满；已有项保留原 enabled 值，避免覆盖管理员的选择。
+function ensureFontSelectionDefaults(config: TenantPluginConfig): TenantPluginConfig {
+  const existing = new Map(config.fontSelection.fonts.map((item) => [item.value, item]));
+  const fonts = FONT_OPTIONS.map((entry) => ({
+    value: entry.value,
+    enabled: existing.get(entry.value)?.enabled ?? entry.value === "default",
+  }));
+  return { ...config, fontSelection: { ...config.fontSelection, fonts } };
+}
+
 function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
   return {
     markdownRender: { enabled: metadata.enableMarkdownRender ?? false },
@@ -553,7 +564,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
 }
 
 export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
-  const [config, setConfig] = useState<TenantPluginConfig>(() => ensureBotMessageDefaults(buildInitialConfig(metadata)));
+  const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [showInfo, setShowInfo] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -572,7 +583,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     setLoading(true);
     api<{ config: TenantPluginConfig }>("/api/admin/plugins/settings")
       .then((data) => {
-        if (!cancelled) setConfig(ensureBotMessageDefaults(data.config));
+        if (!cancelled) setConfig(ensureFontSelectionDefaults(ensureBotMessageDefaults(data.config)));
       })
       .catch((error) => {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "读取插件配置失败");
