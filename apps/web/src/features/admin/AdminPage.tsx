@@ -76,16 +76,11 @@ type TenantSettingsForm = {
   imageCompressionQuality: number;
   imageCompressionMaxDimension: number;
   imageMaxSizeMb: number;
-  botStylishMessagesEnabled: boolean;
   publishMode: "single" | "accumulate";
   publishAccumulateMinImages: number;
   publishAccumulateMaxImages: number;
   publishAccumulateStaleMinutes: number;
   publishLlmSummaryEnabled: boolean;
-  enableColorSelection: boolean;
-  enableMarkdownRender: boolean;
-  enableFontSelection: boolean;
-  enableAnonymousAvatarSelection: boolean;
 };
 
 type BanForm = {
@@ -386,7 +381,7 @@ export function AdminPage({
     const nextForm = toForm(selectedTenant, metadata);
     setForm(nextForm);
     setImageMaxSizeDraft(String(nextForm.imageMaxSizeMb));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.enableAnonymousAvatarSelection]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -3998,16 +3993,11 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     imageCompressionQuality: metadata.imageCompression.quality,
     imageCompressionMaxDimension: metadata.imageCompression.maxDimension,
     imageMaxSizeMb: metadata.imageMaxSizeMb,
-    botStylishMessagesEnabled: metadata.botStylishMessagesEnabled,
     publishMode: metadata.publishMode,
     publishAccumulateMinImages: metadata.publishAccumulate.minImages,
     publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,
     publishAccumulateStaleMinutes: metadata.publishAccumulate.staleMinutes,
     publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
-    enableColorSelection: metadata.enableColorSelection,
-    enableMarkdownRender: metadata.enableMarkdownRender,
-    enableFontSelection: metadata.enableFontSelection,
-    enableAnonymousAvatarSelection: metadata.enableAnonymousAvatarSelection,
   };
 }
 
