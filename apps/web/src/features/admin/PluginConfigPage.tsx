@@ -8,7 +8,6 @@ import {
   LayersIcon,
   LoaderIcon,
   MousePointerClickIcon,
-  PaletteIcon,
   SaveIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
@@ -25,6 +24,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
+type PluginIconProps = { className?: string };
+
+function ColorIcon({ className }: PluginIconProps) {
+  return <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none"><path d="M512 1024C76.96384 1024 0 947.022507 0 512S76.96384 0 512 0 1024 76.96384 1024 512 947.022507 1024 512 1024z m0-998.4C98.727253 25.6 25.6 98.7136 25.6 512S98.727253 998.4 512 998.4 998.4 925.272747 998.4 512 925.272747 25.6 512 25.6z" fill="#C1D4FC" /><path d="M279.893333 785.066667c-101.034667 0-177.793707-5.270187-236.05248-21.149014C30.26944 698.69568 25.6 616.174933 25.6 512 25.6 98.7136 98.727253 25.6 512 25.6c31.402667 0 60.648107 0.49152 88.255147 1.447253C671.45728 83.367253 689.493333 187.665067 689.493333 375.466667c0 348.023467-61.576533 409.6-409.6 409.6z" fill="#4D7DDD" opacity=".1" /></svg>;
+}
+
 function MarkdownIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
@@ -34,8 +39,6 @@ function MarkdownIcon({ className }: PluginIconProps) {
     </svg>
   );
 }
-
-type PluginIconProps = { className?: string };
 
 type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
@@ -429,7 +432,7 @@ const PLUGINS: PluginDescriptor[] = [
   },
   {
     id: "colorSelection",
-    icon: PaletteIcon,
+    icon: ColorIcon,
     name: "多彩投稿插件",
     tagline: "Colors",
     description: "自定义投稿背景色与文字色的预设色板",
