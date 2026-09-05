@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
-  BotIcon,
   FileClockIcon,
-  InfoIcon,
   KeyRoundIcon,
   LayersIcon,
   LoaderIcon,
   SaveIcon,
-  ShieldAlertIcon,
   ShieldCheckIcon,
   ShieldIcon,
-  UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
@@ -39,12 +35,38 @@ function FontIcon({ className }: PluginIconProps) {
   );
 }
 
+function AnonymousAvatarIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <path d="M64.5 512.7C64.5 760 265 960.4 512.2 960.4S960 760 960 512.7 759.5 65 512.2 65 64.5 265.4 64.5 512.7z" fill="#8C8E93" />
+      <path d="M677.9 220.1c-14.4-1.5-50.8 55.3-50.8 55.3-37.2-11.4-76-16.8-114.9-16.3-38.9-0.6-77.7 4.9-114.9 16.3 0 0-36.4-56.8-50.8-55.3-14.4 1.5-65.4 194.8-106.1 648.3 160.5 122.7 383.3 122.7 543.8 0-40.8-453.6-91.6-646.7-106.3-648.3z" fill="#F2F2F2" />
+      <path d="M802.1 343.8c-4.7-1-9.5-1.6-14.3-1.9-24.5-1.6-49.3-3.1-73.7-3.7-48.4-1-97.7 1.6-144.2 16.2-19.6 6.1-37.7 13-57.7 12.7-20 0.4-38.1-6.5-57.7-12.7-46.2-14.5-95-17.6-143-16.3-24.2 0.5-48.3 2.1-72.4 3.8-19.3 1.4-38.4 3.9-39.4 28-0.7 7.3 2.5 14.4 8.5 18.7 4.5 3.3 12.7 2.1 16.5 6.1 3.8 4 2.8 11.2 3 16.7 1.9 43.8 8.1 92.1 48.9 117.7 33.2 20.9 75.4 23.6 113.5 23.1 35.8-0.4 63.5-17.9 78.8-50.9 7.6-16.5 9.5-34.5 14.3-51.5 0 0 12.1-43.2 29.1-43.1s29.1 43.1 29.1 43.1c4.8 17.1 6.8 35.1 14.3 51.5 15.2 33 42.8 50.4 78.8 50.9 38.1 0.5 80.4-2.3 113.5-23.1 40.8-25.7 47-73.9 48.9-117.7 0.2-5.6-1-12.6 3-16.7 4-4.2 12-2.8 16.5-6.1 5.9-4.3 9.1-11.4 8.5-18.7-0.9-16.5-10.4-23.2-22.8-26.1z" fill="#282C33" />
+    </svg>
+  );
+}
+
 function MarkdownIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
       <path d="M658.645333 64h-389.333333A141.333333 141.333333 0 0 0 128 205.333333v612.949334a141.333333 141.333333 0 0 0 141.333333 141.333333h485.482667a141.333333 141.333333 0 0 0 141.333333-141.333333V301.482667a119.957333 119.957333 0 0 0-35.157333-84.842667l-117.482667-117.504A120 120 0 0 0 658.645333 64z" fill="#53B7F4" />
       <path d="M376.426667 691.349333c13.226667 0 24-10.752 24-24V441.088l94.336 93.290667c9.344 9.216 24.341333 9.258667 33.706666 0.042666l95.253334-93.589333v227.178667a24 24 0 0 0 48 0V383.594667a24 24 0 0 0-40.832-17.109334l-119.210667 117.12-118.4-117.077333a24 24 0 0 0-40.853333 17.066667v283.754666c0 13.248 10.730667 24 24 24z m484.565333-474.709333l-117.482667-117.504a120 120 0 0 0-61.76-32.896v131.882667a75.818667 75.818667 0 0 0 75.818667 75.797333h135.36a119.978667 119.978667 0 0 0-31.936-57.28z" fill="#29A3D3" />
       <path d="M376.405333 347.605333c6.186667 0 12.309333 2.389333 16.874667 6.933334l118.4 117.056 119.210667-117.12a24 24 0 0 1 40.832 17.130666V656a24 24 0 0 1-48 0V428.8l-95.253334 93.610667c-9.386667 9.194667-24.384 9.173333-33.706666-0.042667l-94.336-93.290667V655.36a24 24 0 0 1-48 0V371.605333a24.021333 24.021333 0 0 1 23.978666-24z" fill="#FFFFFF" />
+    </svg>
+  );
+}
+
+function BotIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <rect x="110" y="109" width="804" height="806" rx="264" fill="#F1F2F7" />
+      <rect x="163" y="184" width="698" height="656" rx="207" fill="#FFFFFF" />
+      <ellipse cx="512" cy="462" rx="224" ry="164" fill="#F1F2F7" />
+      <circle cx="404" cy="500" r="46" fill="#4C4C4C" />
+      <circle cx="620" cy="500" r="46" fill="#4C4C4C" />
+      <path d="M512 228v88a26 26 0 1 1-52 0v-88a26 26 0 0 1 52 0z" fill="#4C4C4C" />
+      <circle cx="512" cy="152" r="28" fill="#4C4C4C" />
+      <rect x="130" y="424" width="76" height="112" rx="38" fill="#FFFFFF" />
+      <rect x="818" y="424" width="76" height="112" rx="38" fill="#FFFFFF" />
     </svg>
   );
 }
@@ -475,7 +497,7 @@ const PLUGINS: PluginDescriptor[] = [
   },
   {
     id: "anonymousAvatar",
-    icon: UsersIcon,
+    icon: AnonymousAvatarIcon,
     name: "匿名头像插件",
     tagline: "Avatars",
     description: "自定义匿名投稿使用的 SVG 头像池",
