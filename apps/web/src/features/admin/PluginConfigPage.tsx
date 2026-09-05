@@ -771,7 +771,6 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
               >
                 {showSidebarPlugins ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
               </Button>
-              <Button size="sm" variant="ghost" disabled={busy || !active} onClick={() => setShowPluginInfo(true)} title="查看当前插件说明"><InfoIcon className="size-4" />说明</Button>
             </div>
           </div>
           <div className="grid gap-1 overflow-y-auto">
@@ -830,7 +829,6 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                 </div>
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="ghost" disabled={busy || !active} onClick={() => setShowPluginInfo(true)} title="查看当前插件详细说明"><InfoIcon className="size-4" />说明</Button>
-                  <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />保存</Button>
                 </div>
               </div>
               {active?.render(config, setConfig, busy)}
