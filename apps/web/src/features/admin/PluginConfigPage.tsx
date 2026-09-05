@@ -800,7 +800,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
             <div className="flex items-center gap-2">
               <span className="grid size-8 place-items-center rounded-md bg-slate-50 ring-1 ring-slate-200"><PluginConfigIcon className="size-6" /></span>
               <div>
-                <p className="text-sm font-semibold text-slate-900">插件配置</p>
+                <p className="text-sm font-semibold text-slate-900">插件</p>
                 <p className="text-xs text-slate-500">{PLUGINS.length} 个插件 · {enabledPresetNames.size} 个已启用</p>
               </div>
             </div>

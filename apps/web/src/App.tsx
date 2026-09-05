@@ -79,7 +79,7 @@ const adminTabTitles: Record<AdminTab, string> = {
   metadata: "墙面设置",
   bots: "机器人管理",
   publish: "发布管理",
-  pluginConfig: "插件配置",
+  pluginConfig: "插件",
 };
 
 export function App() {
