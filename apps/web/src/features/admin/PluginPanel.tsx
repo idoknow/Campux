@@ -484,7 +484,7 @@ function StatusBadge({ status }: { status: "enabled" | "disabled" }) {
           status === "enabled" ? "bg-emerald-500" : "bg-slate-300"
         }`}
       />
-      {status === "enabled" ? "已启用" : "已禁用"}
+      {status === "enabled" ? "已启用" : "未启用"}
     </span>
   );
 }
