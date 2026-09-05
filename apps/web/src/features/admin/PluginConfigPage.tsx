@@ -159,13 +159,6 @@ const PERMISSION_LABELS: Record<PluginPermission, string> = {
 function MarkdownRenderPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
     <div className="space-y-4">
-      <SwitchField
-        title="启用 Markdown 渲染"
-        description="开启后稿件支持 **加粗**、`代码`、列表与链接等常见 Markdown 语法。"
-        checked={config.markdownRender.enabled}
-        disabled={busy}
-        onChange={(value) => onChange({ ...config, markdownRender: { ...config.markdownRender, enabled: value } })}
-      />
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
         支持的语法：`**加粗**`、`*斜体*`、`` `代码` ``、`- 列表`、`[链接](url)`。不支持表格与自定义 HTML。
       </div>
@@ -219,7 +212,6 @@ function ColorPresetEditor({ title, hint, values, max, disabled, onChange }: { t
 function ColorSelectionPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
     <div className="space-y-5">
-      <SwitchField title="启用多彩投稿" description="开启后投稿时可选择自定义背景色、文字色，让稿件在墙上更醒目。" checked={config.colorSelection.enabled} disabled={busy} onChange={(value) => onChange({ ...config, colorSelection: { ...config.colorSelection, enabled: value } })} />
       <ColorPresetEditor title="背景色预设" hint="投稿时可选择以下背景色" values={config.colorSelection.backgroundColors} max={10} disabled={busy} onChange={(backgroundColors) => onChange({ ...config, colorSelection: { ...config.colorSelection, backgroundColors } })} />
       <ColorPresetEditor title="文字色预设" hint="投稿时可选择以下文字色" values={config.colorSelection.textColors} max={10} disabled={busy} onChange={(textColors) => onChange({ ...config, colorSelection: { ...config.colorSelection, textColors } })} />
     </div>
@@ -229,7 +221,6 @@ function ColorSelectionPanel({ config, onChange, busy }: { config: TenantPluginC
 function FontSelectionPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
     <div className="space-y-4">
-      <SwitchField title="启用字体选择" description="开启后投稿时可选择字体；关闭后字体下拉菜单自动隐藏。" checked={config.fontSelection.enabled} disabled={busy} onChange={(value) => onChange({ ...config, fontSelection: { ...config.fontSelection, enabled: value } })} />
       <div>
         <p className="text-sm font-medium text-slate-900">可用字体</p>
         <p className="text-xs text-slate-500">系统固定字体库，勾选启用后作者即可选用。</p>
@@ -298,7 +289,6 @@ function AnonymousAvatarPanel({ config, onChange, busy }: { config: TenantPlugin
 
   return (
     <div className="space-y-4">
-      <SwitchField title="启用匿名头像" description="开启后匿名投稿时可随机选择一个头像，头像池由下方配置。" checked={enabled} disabled={busy} onChange={(value) => onChange({ ...config, anonymousAvatar: { ...config.anonymousAvatar, enabled: value } })} />
       <div>
         <p className="text-sm font-medium text-slate-900">头像池</p>
         <p className="text-xs text-slate-500">最多 20 个，可自定义顺序；支持从内置库选择或粘贴 SVG 源码。</p>
@@ -360,7 +350,6 @@ function AnonymousAvatarPanel({ config, onChange, busy }: { config: TenantPlugin
 function BotStylishPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
     <div className="space-y-4">
-      <SwitchField title="启用 Bot 多彩消息" description="开启后机器人反馈消息可随机使用自定义语句；关闭后回退到默认简洁消息。" checked={config.botStylishMessages.enabled} disabled={busy} onChange={(value) => onChange({ ...config, botStylishMessages: { ...config.botStylishMessages, enabled: value } })} />
       <div>
         <p className="text-sm font-medium text-slate-900">消息类型</p>
         <p className="text-xs text-slate-500">每种消息类型可配置最多 10 条自定义语句，支持占位符：<code>{'{id}'}</code>、<code>{'{reason}'}</code>、<code>{'{target}'}</code>、<code>{'{externalId}'}</code>。</p>
@@ -800,7 +789,6 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                           <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
                           <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
                         </div>
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">已启用</span>
                       </button>
                     </div>
                   );
