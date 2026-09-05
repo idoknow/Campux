@@ -1,8 +1,31 @@
 import { useEffect, useState } from "react";
-import { PuzzleIcon, PowerIcon, PowerOffIcon, ActivityIcon, ShieldIcon, ShieldAlertIcon, ShieldCheckIcon, FileTextIcon } from "lucide-react";
+import type { ComponentType } from "react";
+import {
+  PuzzleIcon,
+  PowerIcon,
+  PowerOffIcon,
+  ActivityIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  InfoIcon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+  ShieldIcon,
+  UserIcon,
+} from "lucide-react";
+import {
+  MarkdownIcon,
+  ColorIcon,
+  FontIcon,
+  AnonymousAvatarIcon,
+  BotIcon,
+} from "./PluginConfigPage";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { EmptyCard } from "@/components/app/utility";
 
 type PluginInfo = {
@@ -19,6 +42,19 @@ type PluginInfo = {
 type PluginsResponse = {
   plugins: PluginInfo[];
 };
+
+// 预设插件在 registry 里没有图标/作者元数据，前端按 name 兜底补上；
+// 未来服务端在 /api/admin/plugins 返回这些字段后可去掉本映射。
+type PresetIconProps = { className?: string };
+const PRESET_ICON_BY_NAME: Record<string, ComponentType<PresetIconProps>> = {
+  "campux-plugin-markdown-render": MarkdownIcon,
+  "campux-plugin-color-selection": ColorIcon,
+  "campux-plugin-font-selection": FontIcon,
+  "campux-plugin-anonymous-avatar": AnonymousAvatarIcon,
+  "campux-plugin-bot-stylish-messages": BotIcon,
+};
+const PRESET_ICON_FALLBACK = PuzzleIcon;
+const DEFAULT_PLUGIN_AUTHOR = "MrWoods1692";
 
 type EventLogEntry = {
   timestamp: string;
@@ -69,6 +105,10 @@ export function PluginsPanel() {
   const [showPermissions, setShowPermissions] = useState(false);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
   const [showAuditLog, setShowAuditLog] = useState(false);
+  // 已注册插件列表可折叠；默认展开。
+  const [showAllPlugins, setShowAllPlugins] = useState(true);
+  // 信息弹窗：记录当前选中的插件名，null 时关闭。
+  const [infoPluginName, setInfoPluginName] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,21 +197,32 @@ export function PluginsPanel() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <PuzzleIcon className="size-5 text-slate-600" />
-        <h2 className="text-base font-bold text-slate-900">已注册插件</h2>
-        <Badge variant="secondary">{plugins.length}</Badge>
-        {enabledCount < plugins.length ? (
-          <span className="text-xs text-slate-400">
-            ({enabledCount} 已启用)
-          </span>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => setShowAllPlugins((value) => !value)}
+          className="inline-flex items-center gap-1.5 rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+          title={showAllPlugins ? "收起插件列表" : "展开插件列表"}
+        >
+          {showAllPlugins ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
+          <PuzzleIcon className="size-5 text-slate-600" />
+          <h2 className="text-base font-bold text-slate-900">已注册插件</h2>
+          <Badge variant="secondary">{plugins.length}</Badge>
+          {enabledCount < plugins.length ? (
+            <span className="text-xs text-slate-400">
+              ({enabledCount} 已启用)
+            </span>
+          ) : null}
+        </button>
       </div>
 
       {plugins.length === 0 ? (
         <EmptyCard title="暂无已注册的插件" />
-      ) : (
+      ) : showAllPlugins ? (
         <div className="grid gap-3">
-          {plugins.map((plugin) => (
+          {plugins.map((plugin) => {
+            const Icon = PRESET_ICON_BY_NAME[plugin.name] ?? PRESET_ICON_FALLBACK;
+            const author = DEFAULT_PLUGIN_AUTHOR;
+            return (
             <div
               key={plugin.name}
               className={`rounded-lg border bg-white p-4 transition ${
@@ -181,15 +232,33 @@ export function PluginsPanel() {
               }`}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-bold text-slate-900">
-                    {plugin.name}
-                  </h3>
-                  {plugin.description ? (
-                    <p className="mt-1 text-xs text-slate-500">{plugin.description}</p>
-                  ) : null}
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-md bg-slate-50 ring-1 ring-slate-200">
+                    <Icon className="size-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-bold text-slate-900">
+                      {plugin.name}
+                    </h3>
+                    {plugin.description ? (
+                      <p className="mt-1 text-xs text-slate-500">{plugin.description}</p>
+                    ) : null}
+                    <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-500">
+                      <UserIcon className="size-3" />
+                      <span>作者：{author}</span>
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setInfoPluginName(plugin.name)}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                    title="插件说明"
+                  >
+                    <InfoIcon className="size-3" />
+                    说明
+                  </button>
                   <StatusBadge status={plugin.status} />
                   <Badge variant="outline" className="shrink-0">
                     v{plugin.version}
@@ -229,15 +298,22 @@ export function PluginsPanel() {
                 </p>
               ) : null}
             </div>
-          ))}
+            );
+          })}
         </div>
-      )}
+      ) : null}
 
       <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
         <p className="text-xs font-semibold text-slate-500">
           插件在服务端注册，通过事件系统与核心功能交互。禁用插件将在下次服务重启后生效（已禁用的插件不会执行生命周期钩子）。如需添加或移除插件，请修改服务端配置并重启服务。
         </p>
       </div>
+
+      <PluginInfoDialog
+        open={infoPluginName !== null}
+        onOpenChange={(open: boolean) => { if (!open) setInfoPluginName(null); }}
+        plugin={plugins.find((item) => item.name === infoPluginName) ?? null}
+      />
 
       {/* 事件日志 */}
       <div className="border-t border-slate-200 pt-4">
@@ -509,5 +585,78 @@ function AuditActionBadge({ action }: { action: string }) {
     >
       {label[action] ?? action}
     </span>
+  );
+}
+
+function PluginInfoDialog({
+  open,
+  onOpenChange,
+  plugin,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  plugin: PluginInfo | null;
+}) {
+  if (!plugin) return null;
+  const Icon = PRESET_ICON_BY_NAME[plugin.name] ?? PRESET_ICON_FALLBACK;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <div className="flex items-center gap-3 pr-10">
+            <span className="grid size-10 shrink-0 place-items-center rounded-md bg-slate-100 ring-1 ring-slate-200">
+              <Icon className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="truncate">{plugin.name}</DialogTitle>
+              <DialogDescription className="mt-0.5 inline-flex items-center gap-1 text-xs">
+                <UserIcon className="size-3" />
+                作者：{DEFAULT_PLUGIN_AUTHOR}
+                <span className="mx-1 text-slate-300">·</span>
+                v{plugin.version}
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="space-y-3 px-5 pb-5 text-sm leading-6 text-slate-700">
+          {plugin.description ? (
+            <p className="rounded-md bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+              {plugin.description}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-2 py-1 text-slate-600 ring-1 ring-slate-200">
+              版本：{plugin.version}
+            </span>
+            {plugin.campuxVersion ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-2 py-1 text-slate-600 ring-1 ring-slate-200">
+                兼容 Campux：{plugin.campuxVersion}
+              </span>
+            ) : null}
+            <StatusBadge status={plugin.status} />
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="rounded-md border border-slate-200 p-2">
+              <p className="text-slate-400">onInit</p>
+              <p className="mt-1 font-semibold text-slate-700">{plugin.hasInit ? "✓ 已实现" : "—"}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 p-2">
+              <p className="text-slate-400">onReady</p>
+              <p className="mt-1 font-semibold text-slate-700">{plugin.hasReady ? "✓ 已实现" : "—"}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 p-2">
+              <p className="text-slate-400">onClose</p>
+              <p className="mt-1 font-semibold text-slate-700">{plugin.hasClose ? "✓ 已实现" : "—"}</p>
+            </div>
+          </div>
+          <p className="text-xs leading-5 text-slate-500">
+            如需修改本插件的配置（开关、预设、字体、头像、消息语句等），请在「管理-插件配置」中启用插件后进入对应插件面板；配置变更会写入审计日志，并仅对当前租户生效。
+          </p>
+        </div>
+        <DialogFooter>
+          <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

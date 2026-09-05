@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  InfoIcon,
   KeyRoundIcon,
   LayersIcon,
   LoaderIcon,
   SaveIcon,
   ShieldCheckIcon,
   ShieldIcon,
+  UserIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
@@ -15,18 +19,19 @@ import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 
 type PluginIconProps = { className?: string };
 
-function ColorIcon({ className }: PluginIconProps) {
+export function ColorIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none"><path d="M512 1024C76.96384 1024 0 947.022507 0 512S76.96384 0 512 0 1024 76.96384 1024 512 947.022507 1024 512 1024z m0-998.4C98.727253 25.6 25.6 98.7136 25.6 512S98.727253 998.4 512 998.4 998.4 925.272747 998.4 512 925.272747 25.6 512 25.6z" fill="#C1D4FC" /><path d="M279.893333 785.066667c-101.034667 0-177.793707-5.270187-236.05248-21.149014C30.26944 698.69568 25.6 616.174933 25.6 512 25.6 98.7136 98.727253 25.6 512 25.6c31.402667 0 60.648107 0.49152 88.255147 1.447253C671.45728 83.367253 689.493333 187.665067 689.493333 375.466667c0 348.023467-61.576533 409.6-409.6 409.6z" fill="#4D7DDD" opacity=".1" /><path d="M811.362987 510.948693L571.378347 764.586667h-163.84l-101.512534-115.165867a27.306667 27.306667 0 0 1 0-38.611627l302.598827-302.598826a27.306667 27.306667 0 0 1 38.611627 0l164.12672 164.113066a27.306667 27.306667 0 0 1 0 38.62528z" fill="#C1D4FC" /></svg>
   );
 }
 
-function FontIcon({ className }: PluginIconProps) {
+export function FontIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
       <path d="M442.688 885.76l64.96-62.848-150.016-8.128c45.824-21.632 76.8-43.968 92.864-66.88 16.064-22.912 27.2-59.84 33.28-110.72l5.504-47.744 4.288-39.552h28.16l41.728 1.088 52.544 1.088 46.08 1.088c37.504 0 77.632-25.472 120.192-76.352-57.024 9.728-112.448 14.592-166.272 14.592H500.096l32-287.616h51.968c100.032 0 162.688 3.008 187.968 8.96 25.216 5.952 37.888 20.864 37.888 44.672 0 10.496-2.176 24.96-6.528 43.328 2.944 0.384 5.632 0.576 8.128 0.576 14.08 0 25.6-10.688 34.688-32l8.64-20.032 43.392-111.04c-69.76 4.736-138.176 7.04-205.312 7.04H513.6c-113.024 0-200.192 22.784-261.632 68.288-84.096 62.464-126.208 144.256-126.208 245.376 0 26.688 4.16 54.144 12.48 82.304l87.744-84.48c-16.64-31.424-24.96-62.08-24.96-92.16 0-49.792 20.032-89.024 59.904-117.76 39.936-28.672 94.912-43.072 164.928-43.072h18.432L401.472 589.44l-5.952 53.12c-10.112 85.952-37.12 142.784-81.28 170.624l-58.432-6.528-69.888 67.2 256.768 11.904z" fill="#d4237a" />
@@ -34,7 +39,7 @@ function FontIcon({ className }: PluginIconProps) {
   );
 }
 
-function AnonymousAvatarIcon({ className }: PluginIconProps) {
+export function AnonymousAvatarIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
       <path d="M64.5 512.7C64.5 760 265 960.4 512.2 960.4S960 760 960 512.7 759.5 65 512.2 65 64.5 265.4 64.5 512.7z" fill="#8C8E93" />
@@ -44,7 +49,7 @@ function AnonymousAvatarIcon({ className }: PluginIconProps) {
   );
 }
 
-function MarkdownIcon({ className }: PluginIconProps) {
+export function MarkdownIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
       <path d="M658.645333 64h-389.333333A141.333333 141.333333 0 0 0 128 205.333333v612.949334a141.333333 141.333333 0 0 0 141.333333 141.333333h485.482667a141.333333 141.333333 0 0 0 141.333333-141.333333V301.482667a119.957333 119.957333 0 0 0-35.157333-84.842667l-117.482667-117.504A120 120 0 0 0 658.645333 64z" fill="#53B7F4" />
@@ -54,7 +59,7 @@ function MarkdownIcon({ className }: PluginIconProps) {
   );
 }
 
-function BotIcon({ className }: PluginIconProps) {
+export function BotIcon({ className }: PluginIconProps) {
   return (
     <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
       <path d="M780.8 192.1024H299.2128c-66.816 0-121.4976 54.6816-121.4976 121.4976v291.072c0 80.1792 65.5872 145.7664 145.7664 145.7664h17.92l112.64 108.8512c17.664 17.0496 40.4992 25.6 63.3856 25.6 22.2208 0 44.4928-8.0896 62.0032-24.32l118.8864-110.1312h87.5008c87.5008 0 158.464-70.9632 158.464-158.464V355.584c0-89.9072-73.5744-163.4816-163.4816-163.4816z" fill="#9bc6fc" />
@@ -76,6 +81,10 @@ interface PluginDescriptor {
   name: string;
   tagline: string;
   description: string;
+  /** 详细功能说明，弹窗中展示。 */
+  detailedDescription: string;
+  /** 作者署名。 */
+  author: string;
   hint: string;
   accent: string;
   bgTint: string;
@@ -427,6 +436,8 @@ const DEFAULT_TEXT_COLORS: PluginColorPreset[] = [
   { value: "deep", label: "深色", hex: "#1F2937" },
 ];
 
+const DEFAULT_PLUGIN_AUTHOR = "MrWoods1692";
+
 const PLUGINS: PluginDescriptor[] = [
   {
     id: "markdownRender",
@@ -434,6 +445,23 @@ const PLUGINS: PluginDescriptor[] = [
     name: "Markdown 渲染插件",
     tagline: "Markdown",
     description: "为投稿稿件启用 Markdown 语法渲染",
+    detailedDescription:
+      "本插件在稿件墙展示与投稿详情页中启用 Markdown 语法解析。作者可在投稿时直接使用 Markdown 语法排版文字，无需掌握富文本编辑器。\n\n" +
+      "支持的语法：\n" +
+      "· **加粗** — 用两个星号包裹文字，如 **重点内容**。\n" +
+      "· *斜体* — 用单个星号包裹文字。\n" +
+      "· `行内代码` — 用反引号包裹，用于强调命令、变量、路径等。\n" +
+      "· - 无序列表 — 每行以短横线加空格开头。\n" +
+      "· 1. 有序列表 — 每行以数字加句点开头。\n" +
+      "· [链接文本](https://example.com) — 点击可跳转外部地址。\n" +
+      "· > 引用 — 每行以大于号加空格开头。\n" +
+      "\n" +
+      "不支持的语法：\n" +
+      "· 表格与自定义 HTML（例如 <div>、<br/>）会被安全地过滤或转义，避免出现任意脚本。\n" +
+      "· 图片语法（![]()）不会渲染为图片，请通过投稿页的图片上传功能添加图片。\n" +
+      "\n" +
+      "使用建议：投稿时先按 Markdown 语法排版，保存后稿件卡片会按解析后的样式展示，保持版面整洁。",
+    author: DEFAULT_PLUGIN_AUTHOR,
     hint: "默认支持加粗、斜体、列表、代码与链接。",
     accent: "from-violet-500 to-indigo-500",
     bgTint: "bg-violet-50 text-violet-700",
@@ -451,6 +479,24 @@ const PLUGINS: PluginDescriptor[] = [
     name: "多彩投稿插件",
     tagline: "Colors",
     description: "自定义投稿背景色与文字色的预设色板",
+    detailedDescription:
+      "本插件让管理员在管理页配置一组投稿可用的背景色与文字色预设，投稿页与稿件墙在展示稿件时会渲染管理员设定的色彩样式。\n\n" +
+      "配置方式：\n" +
+      "· 背景色预设：最多 10 个，每个预设包含名称、标识（value）与十六进制颜色（如 #F97316）。\n" +
+      "· 文字色预设：最多 10 个，同上。\n" +
+      "· 系统已内置 5 个背景色与 4 个文字色作为初始模板，可直接修改或新增。\n" +
+      "· 标识（value）用于数据库存储与投稿页匹配，建议保持稳定，不要频繁修改。\n" +
+      "\n" +
+      "使用流程：\n" +
+      "· 作者投稿时可以在稿件编辑区选择一个预设的背景色与文字色。\n" +
+      "· 稿件墙展示时会按预设渲染为带色彩块的文字卡片，视觉更醒目。\n" +
+      "· 稿件发布到 QQ 空间后，颜色信息会随稿件文本一并保留。\n" +
+      "\n" +
+      "使用建议：\n" +
+      "· 避免使用对比度过低的组合（例如米黄底 + 白色字）以免阅读困难。\n" +
+      "· 保持背景色与文字色的组合至少 3 种可用搭配，让作者有选择空间。\n" +
+      "· 修改预设后需要重新保存配置才会生效，已发布的稿件不会追溯变更颜色。",
+    author: DEFAULT_PLUGIN_AUTHOR,
     hint: "背景色与文字色各支持最多 10 个预设，可按需自定义。",
     accent: "from-pink-500 to-orange-500",
     bgTint: "bg-pink-50 text-pink-700",
@@ -468,6 +514,23 @@ const PLUGINS: PluginDescriptor[] = [
     name: "字体选择插件",
     tagline: "Fonts",
     description: "从固定字体库中勾选启用的字体",
+    detailedDescription:
+      "本插件让管理员从系统内置字体库中勾选启用的字体，投稿页会在作者提交稿件时展示对应字体选项，稿件墙与 QQ 空间发布后保留所选字体样式。\n\n" +
+      "字体库说明：\n" +
+      "· 系统固定字体库共 13 款，均由服务端随镜像一起加载，不需要额外部署。\n" +
+      "· 默认字体（value=default）使用浏览器系统字体，永远可用；管理员也可在面板中将其关闭，届时投稿页只显示其余字体。\n" +
+      "· 可选中文字体包括：甲骨文字体、承明手写体、寒蝉活楷体、礼品会自由落体、逸善碑篆体、Cascadia Next 简体、寒蝉半圆体、鸿蒙 Sans SC Medium、临海隶书、纳米点宋、思源圆体、舟字宋体。\n\n" +
+      "配置方式：\n" +
+      "· 在下方「可用字体」列表中逐个勾选/取消勾选，控制投稿页可见字体集合。\n" +
+      "· 至少保留 1 款字体启用；投稿页若发现白名单为空会提示「管理员尚未启用任何字体」并隐藏选项。\n\n" +
+      "使用流程：\n" +
+      "· 作者投稿时点击「字体」按钮可在已启用的字体之间切换；同一稿件可反复切换直到提交。\n" +
+      "· 稿件墙与已发布稿件会使用投稿时选择的字体进行渲染。\n" +
+      "· 未开启字体选择插件的租户，投稿页不会出现字体按钮。\n\n" +
+      "使用建议：\n" +
+      "· 校园场景建议至少启用 3 款中文字体，兼顾可读性与个性化。\n" +
+      "· 修改字体白名单不会追溯已发布稿件；已发布稿件仍使用投稿时选择的字体。",
+    author: DEFAULT_PLUGIN_AUTHOR,
     hint: "系统固定字体库，勾选后投稿页自动展示选项。",
     accent: "from-emerald-500 to-teal-500",
     bgTint: "bg-emerald-50 text-emerald-700",
@@ -485,6 +548,22 @@ const PLUGINS: PluginDescriptor[] = [
     name: "匿名头像插件",
     tagline: "Avatars",
     description: "自定义匿名投稿使用的 SVG 头像池",
+    detailedDescription:
+      "本插件让管理员配置一组匿名投稿使用的 SVG 头像池，作者在投稿时勾选匿名后，稿件会自动从池中随机选取一个头像展示，替代真实 QQ 头像。\n\n" +
+      "配置方式：\n" +
+      "· 头像池上限 20 个，可无限次增删。\n" +
+      "· 内置库：系统预置约 26 款 SVG 头像（如「开心」「可爱的猫」「熊猫吃惊」「头像-男学生1」等），可在面板中一键添加。\n" +
+      "· 自定义头像：粘贴以 <svg 开头的完整 SVG 源码即可加入头像池，大小上限 60KB。\n" +
+      "· 内置头像支持在卡片中直接切换为另一个内置头像。\n" +
+      "· 头像在稿件墙展示时按顺序轮播，随机但不重复。\n\n" +
+      "使用流程：\n" +
+      "· 开启插件后，投稿页在匿名开关打开时会自动展示当前分配到的头像预览。\n" +
+      "· 管理员调整头像池后，下一次匿名投稿会基于新池重新分配。\n" +
+      "· 匿名头像会随稿件内容一起发布到 QQ 空间，替代作者的 QQ 头像。\n\n" +
+      "使用建议：\n" +
+      "· 头像池中至少保留 3 个不同风格头像，避免同一头像高频重复出现。\n" +
+      "· 自定义 SVG 建议保持简单清晰，过大或含外链资源的 SVG 会加载缓慢或被浏览器限制。",
+    author: DEFAULT_PLUGIN_AUTHOR,
     hint: "最多 20 个头像，可无限修改。",
     accent: "from-sky-500 to-cyan-500",
     bgTint: "bg-sky-50 text-sky-700",
@@ -502,6 +581,29 @@ const PLUGINS: PluginDescriptor[] = [
     name: "Bot 多彩消息插件",
     tagline: "Bot",
     description: "自定义机器人反馈消息的多彩语句",
+    detailedDescription:
+      "本插件让管理员自定义机器人反馈消息的语句，让投稿成功、审核通过/拒绝、稿件撤回、发布成功等场景下的反馈更生动，避免千篇一律的机器人回复。消息通过 QQ 空间 API 由墙号机器人发送，与稿件事件实时联动。\n\n" +
+      "消息类型：\n" +
+      "· 投稿成功（submissionSuccess）：作者提交稿件后机器人私聊作者的确认语句。\n" +
+      "· 审核通过（reviewApproved）：稿件通过审核后机器人私聊作者的通过通知。\n" +
+      "· 审核拒绝（reviewRejected）：稿件被拒绝后机器人私聊作者，并告知拒绝原因。\n" +
+      "· 撤回成功（recallSuccess）：作者撤回稿件后机器人发送的撤回确认。\n" +
+      "· 发布成功（publishSuccess）：稿件发布到 QQ 空间后机器人通知作者的最终确认。\n\n" +
+      "占位符说明：\n" +
+      "· {id} — 稿件编号（例如 #1234），投稿成功/审核通过/审核拒绝/撤回成功/发布成功全部支持。\n" +
+      "· {reason} — 拒绝原因，仅审核拒绝支持。\n" +
+      "· {target} — 稿件标题或摘要片段，所有类型可用。\n" +
+      "· {externalId} — QQ 空间发布后的外部 ID，仅发布成功支持。\n" +
+      "· 每种消息类型最多配置 10 条语句，发送时随机选择一条，同一稿件不会连发两条不同语句。\n\n" +
+      "使用流程：\n" +
+      "· 在下方「消息类型」列表中打开或关闭每种类型的自定义语句开关；关闭后回退到系统默认简洁消息。\n" +
+      "· 单条语句可通过输入框编辑，也可点击「删除」移除；不足 10 条时可点击「新增语句」继续添加。\n" +
+      "· 保存配置后，下一次触发对应事件时机器人会立即使用新语句。\n\n" +
+      "使用建议：\n" +
+      "· 语句保持简短友好，单条建议不超过 40 个汉字；过长会被 QQ 空间消息长度限制截断。\n" +
+      "· 避免在语句中包含敏感词、夸大表述或暗示平台身份的信息；插件仅改写文本，不做合规审核。\n" +
+      "· 若希望某些消息类型保持默认简洁风格，直接关闭对应开关即可，不影响其他类型。",
+    author: DEFAULT_PLUGIN_AUTHOR,
     hint: "每种消息类型最多 10 条自定义语句，支持占位符。",
     accent: "from-amber-500 to-rose-500",
     bgTint: "bg-amber-50 text-amber-700",
@@ -566,12 +668,14 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
 export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
-  const [showInfo, setShowInfo] = useState(false);
+  const [showPluginInfo, setShowPluginInfo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // 预设插件启用集合：来自 /api/admin/plugins 的 registry status。
   // 侧栏只展示在插件注册表中已启用的预设插件，与「管理-插件」页保持一致。
   const [enabledPresetNames, setEnabledPresetNames] = useState<Set<string>>(new Set());
+  // 侧栏插件列表可折叠；默认展开。
+  const [showSidebarPlugins, setShowSidebarPlugins] = useState(true);
 
 
   useEffect(() => {
@@ -657,31 +761,45 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                 <p className="text-xs text-slate-500">已启用 {enabledPlugins.length} 个</p>
               </div>
             </div>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setShowInfo((value) => !value)}>说明</Button>
+            <div className="flex items-center gap-1">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setShowSidebarPlugins((value) => !value)}
+                title={showSidebarPlugins ? "收起插件列表" : "展开插件列表"}
+              >
+                {showSidebarPlugins ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy || !active} onClick={() => setShowPluginInfo(true)} title="查看当前插件说明"><InfoIcon className="size-4" />说明</Button>
+            </div>
           </div>
           <div className="grid gap-1 overflow-y-auto">
-            {enabledPlugins.length === 0 ? (
-              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
-                <p>暂无已启用的插件</p>
-                <p className="mt-1">请到「插件」子页启用预设插件</p>
-              </div>
-            ) : (
-              enabledPlugins.map((plugin) => {
-                const isActive = plugin.id === activeId;
-                return (
-                  <div key={plugin.id} className="group">
-                    <button type="button" onClick={() => setActiveId(plugin.id)} className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-slate-50" data-active={isActive || undefined}>
-                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
-                        <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
-                      </div>
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">已启用</span>
-                    </button>
-                  </div>
-                );
-              })
-            )}
+            {showSidebarPlugins ? (
+              enabledPlugins.length === 0 ? (
+                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
+                  <p>暂无已启用的插件</p>
+                  <p className="mt-1">请到「插件」子页启用预设插件</p>
+                </div>
+              ) : (
+                enabledPlugins.map((plugin) => {
+                  const isActive = plugin.id === activeId;
+                  return (
+                    <div key={plugin.id} className="group">
+                      <button type="button" onClick={() => setActiveId(plugin.id)} className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-slate-50" data-active={isActive || undefined}>
+                        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
+                          <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
+                          <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-slate-400"><UserIcon className="size-2.5" />{plugin.author}</p>
+                        </div>
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">已启用</span>
+                      </button>
+                    </div>
+                  );
+                })
+              )
+            ) : null}
           </div>
           <div className="mt-3 border-t border-slate-200 pt-3">
             <Button className="w-full" disabled={busy || loading || enabledPlugins.length === 0} onClick={() => void save()}><SaveIcon className="size-4" />{busy ? "保存中…" : "保存配置"}</Button>
@@ -693,37 +811,6 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
         <CardContent className="flex h-full flex-col p-4">
           {loading ? (
             <div className="grid flex-1 place-items-center text-sm text-slate-500"><LoaderIcon className="size-5 animate-spin" /> 加载插件配置中…</div>
-          ) : showInfo ? (
-            <div className="flex-1 space-y-4 overflow-y-auto">
-              <div className="flex items-center gap-3">
-                <span className="grid size-12 place-items-center rounded-md bg-gradient-to-br from-slate-700 to-slate-900 text-white"><LayersIcon className="size-5" /></span>
-                <div>
-                  <p className="text-base font-semibold text-slate-900">插件说明</p>
-                  <p className="text-xs text-slate-500">开启后可进入配置页；配置内容实时预览。</p>
-                </div>
-              </div>
-              <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
-                <p className="flex items-center gap-1.5 font-semibold"><ShieldIcon className="size-3.5" /> 仅管理员可访问</p>
-                <p className="mt-1">本页面仅对当前租户的 admin 角色开放，所有保存操作均写入审计日志，包含操作人、时间、变更前后快照。</p>
-              </div>
-              <div className="grid gap-3">
-                {PLUGINS.map((plugin) => (
-                  <div key={plugin.id} className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-4" /></span>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{plugin.name}</p>
-                        <p className="text-xs text-slate-500">{plugin.hint}</p>
-                      </div>
-                    </div>
-                    <p className="mt-2 text-xs leading-5 text-slate-600">{plugin.description}</p>
-                    <div className="mt-3">
-                      <PermissionBadge permissions={plugin.required} risk={plugin.riskLevel} rationale={plugin.rationale} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           ) : (
             enabledPlugins.length === 0 ? (
               <div className="grid flex-1 place-items-center">
@@ -739,15 +826,82 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                 <div className="flex-1">
                   <p className="text-base font-semibold text-slate-900">{active?.name}</p>
                   <p className="text-xs text-slate-500">{active?.description}</p>
+                  <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-400"><UserIcon className="size-3" />作者：{active?.author}</p>
                 </div>
-                <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />保存</Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="ghost" disabled={busy || !active} onClick={() => setShowPluginInfo(true)} title="查看当前插件详细说明"><InfoIcon className="size-4" />说明</Button>
+                  <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />保存</Button>
+                </div>
               </div>
               {active?.render(config, setConfig, busy)}
             </div>
           ))}
         </CardContent>
       </Card>
+
+      <PluginInfoDialog
+        open={showPluginInfo}
+        onOpenChange={(open) => setShowPluginInfo(open)}
+        plugin={active}
+      />
     </div>
+  );
+}
+
+function PluginInfoDialog({
+  open,
+  onOpenChange,
+  plugin,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  plugin: PluginDescriptor | undefined;
+}) {
+  if (!plugin) return null;
+  const Icon = plugin.icon;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <div className="flex items-center gap-3 pr-10">
+            <span className="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}>
+              <Icon className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="truncate">{plugin.name}</DialogTitle>
+              <DialogDescription className="mt-0.5 inline-flex items-center gap-1 text-xs">
+                <UserIcon className="size-3" />
+                作者：{plugin.author}
+                <span className="mx-1 text-slate-300">·</span>
+                {plugin.tagline}
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="space-y-3 px-5 pb-5 text-sm leading-6 text-slate-700">
+          <p className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs leading-6 text-slate-600">
+            {plugin.detailedDescription}
+          </p>
+          <div>
+            <p className="text-xs font-medium text-slate-500">使用建议</p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">{plugin.hint}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">风险声明</p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">{plugin.rationale}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">所需权限</p>
+            <div className="mt-2">
+              <PermissionBadge permissions={plugin.required} risk={plugin.riskLevel} rationale={plugin.rationale} />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
