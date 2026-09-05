@@ -1,18 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  FileTextIcon,
-  InfoIcon,
-  KeyRoundIcon,
-  LoaderIcon,
-  PowerIcon,
-  SaveIcon,
-  ShieldCheckIcon,
-  ShieldIcon,
-  UserIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
 import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
@@ -20,7 +8,6 @@ import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 
@@ -52,8 +39,8 @@ export function AnonymousAvatarIcon({ className }: PluginIconProps) {
 
 export function PluginConfigIcon({ className }: PluginIconProps) {
   return (
-    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="currentColor">
-      <path d="M832 640l-128 0 0-256 128 0c105.9 0 192-86.1 192-192s-86.1-192-192-192-192 86.1-192 192l0 128L384 320l0-128c0-105.9-86.1-192-192-192s-192 86.1-192 192 86.1 192 192 192l128 0 0 256L192 640c-105.9 0-192 86.1-192 192 0 105.9 86.1 192 192 192s192-86.1 192-192l0-128 256 0 0 128c0 105.9 86.1 192 192 192s192-86.1 192-192S937.9 640 832 640zM704 192c0-70.6 57.4-128 128-128s128 57.4 128 128-57.4 128-128 128l-128 0L704 192zM192 320c-70.6 0-128-57.4-128-128s57.4-128 128-128 128 57.4 128 128l0 128L192 320zM320 832c0 70.6-57.4 128-128 128s-128-57.4-128-128 57.4-128 128-128l128 0L320 832zM384 384l256 0 0 256L384 640 384 384zM832 960c-70.6 0-128-57.4-128-128l0-128 128 0c70.6 0 128 57.4 128 128S902.6 960 832 960z" />
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <path d="M512 1024C76.96384 1024 0 947.03616 0 512S76.96384 0 512 0 1024 76.96384 1024 512 947.022507 1024 512 1024z m0-998.4C98.727253 25.6 25.6 98.7136 25.6 512S98.727253 998.4 512 998.4 998.4 925.272747 998.4 512 925.272747 25.6 512 25.6z" fill="#EAC1B2" /><path d="M279.893333 785.066667c-101.034667 0-177.793707-5.270187-236.05248-21.149014C30.26944 698.69568 25.6 616.174933 25.6 512 25.6 98.7136 98.727253 25.6 512 25.6c31.402667 0 60.648107 0.49152 88.255147 1.460907C671.45728 83.367253 689.493333 187.665067 689.493333 375.466667c0 348.023467-61.576533 409.6-409.6 409.6z" fill="#EAC1B2" opacity=".2" /><path d="M339.503787 523.946667l228.816213-228.816214 228.816213 228.816214-228.816213 228.816213z" fill="#EAC1B2" /><path d="M802.051413 515.39968L702.99648 614.4H669.013333l109.226667-109.226667s-40.004267-40.809813-54.613333-54.613333c-5.36576-5.065387 10.07616 97.348267-81.92 109.226667-50.039467 6.458027-94.631253-40.1408-95.573334-95.573334-1.14688-67.078827 89.675093-88.255147 81.92-95.573333-41.1648-38.87104-95.573333-95.573333-95.573333-95.573333l-114.688 114.688-47.295147-47.295147a50.83136 50.83136 0 1 0-9.557333 9.775787L408.234667 397.312 286.72 518.826667l144.46592 136.43776-45.970773 45.970773a50.817707 50.817707 0 1 0 9.325226 9.885013s0.12288 0 0.177494-0.068266l46.421333-46.421334L532.48 750.933333l54.613333-54.613333v33.901227l-57.234773 57.207466-89.361067-89.347413A15.837867 15.837867 0 0 0 413.696 712.430933c0 0.314027 0.150187 0.505173 0.150187 0.846507a8.096427 8.096427 0 0 0 1.365333 3.39968 68.840107 68.840107 0 1 1-40.96-41.301333 10.77248 10.77248 0 0 0 2.280107 0.887466A15.824213 15.824213 0 0 0 392.260267 649.898667l-134.51264-134.43072 114.128213-114.059947a15.824213 15.824213 0 0 0-14.363307-26.78784c-0.354987 0-0.505173 0.191147-0.846506 0.191147a8.192 8.192 0 0 0-3.44064 1.365333 68.758187 68.758187 0 1 1 41.314986-40.96 15.837867 15.837867 0 0 0 25.613654 17.98144l115.862186-115.780267 140.16512 140.0832a16.124587 16.124587 0 0 1 0 22.459734 15.824213 15.824213 0 0 1-15.674026 3.97312 7.195307 7.195307 0 0 1-2.321067-0.887467 68.56704 68.56704 0 0 0-72.594773 15.906133 68.717227 68.717227 0 1 0 113.568426 25.408854 9.038507 9.038507 0 0 1-1.365333-3.44064c0-0.354987-0.2048-0.546133-0.2048-0.846507a15.7696 15.7696 0 0 1 4.328107-14.363307 14.7456 14.7456 0 0 1 6.567253-3.822933 15.332693 15.332693 0 0 1 15.906133 3.822933l83.694934 83.64032zM638.64832 655.36h116.61312a10.60864 10.60864 0 1 1 0 21.203627h-116.61312a10.60864 10.60864 0 1 1 0-21.203627z m0 42.407253h95.409493a10.594987 10.594987 0 1 1 0 21.203627h-95.409493a10.594987 10.594987 0 1 1 0-21.203627z m0 42.407254h84.814507a10.60864 10.60864 0 1 1 0 21.203626h-84.814507a10.60864 10.60864 0 1 1 0-21.203626z" fill="#9B3A18" />
     </svg>
   );
 }
@@ -144,6 +131,10 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   anonymousAvatar: "campux-plugin-anonymous-avatar",
   botStylishMessages: "campux-plugin-bot-stylish-messages",
 };
+
+// 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
+// /api/admin/plugins 返回的第三方 registry 插件不参与预设插件的显示。
+const PRESET_REGISTRY_NAMES = new Set(Object.values(PRESET_NAME_BY_ID));
 
 const PERMISSION_LABELS: Record<PluginPermission, string> = {
   "db:read": "读取元数据",
@@ -666,7 +657,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
 export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
-  const [showPluginInfo, setShowPluginInfo] = useState(false);
+  const [activeTab, setActiveTab] = useState<"config" | "info" | "log">("config");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // 预设插件启用集合：来自 /api/admin/plugins 的 registry status。
@@ -680,7 +671,6 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   const [auditLog, setAuditLog] = useState<Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null }>>([]);
   const [auditLogLoading, setAuditLogLoading] = useState(false);
   const [logScope, setLogScope] = useState<"all" | "current">("current");
-  const [showLogSection, setShowLogSection] = useState(false);
 
 
   useEffect(() => {
@@ -709,7 +699,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     api<{ plugins: Array<{ name: string; status: "enabled" | "disabled" }> }>("/api/admin/plugins")
       .then((data) => {
         if (cancelled) return;
-        setEnabledPresetNames(new Set(data.plugins.filter((p) => p.status === "enabled").map((p) => p.name)));
+        setEnabledPresetNames(new Set(data.plugins.filter((p) => p.status === "enabled" && PRESET_REGISTRY_NAMES.has(p.name)).map((p) => p.name)));
       })
       .catch(() => { /* 读取失败时保持空集合，避免误显示 */ });
     return () => { cancelled = true; };
@@ -719,7 +709,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     if (!tenantId) return;
     try {
       const data = await api<{ plugins: Array<{ name: string; status: "enabled" | "disabled" }> }>("/api/admin/plugins");
-      setEnabledPresetNames(new Set(data.plugins.filter((p) => p.status === "enabled").map((p) => p.name)));
+      setEnabledPresetNames(new Set(data.plugins.filter((p) => p.status === "enabled" && PRESET_REGISTRY_NAMES.has(p.name)).map((p) => p.name)));
     } catch {
       // 静默失败；下一次拉取会重新同步。
     }
@@ -787,10 +777,10 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     }
   }
 
-  // 首次展开日志时拉取；开启/关闭插件、保存后自动刷新。
+  // 日志 Tab 首次激活时拉取；开启/关闭插件、保存后自动刷新。
   useEffect(() => {
-    if (showLogSection && auditLog.length === 0 && !auditLogLoading) void refreshAuditLog();
-  }, [showLogSection, auditLog.length, auditLogLoading]);
+    if (activeTab === "log" && auditLog.length === 0 && !auditLogLoading) void refreshAuditLog();
+  }, [activeTab, auditLog.length, auditLogLoading]);
 
   return (
     <div className="grid h-full grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
@@ -870,52 +860,74 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                   <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-400"><UserIcon className="size-3" />作者：{activePlugin.author}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setShowPluginInfo(true)} title="查看当前插件详细说明"><InfoIcon className="size-4" />说明</Button>
+                  <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1">
+                    {[
+                      { key: "config", label: "配置" },
+                      { key: "info", label: "说明" },
+                      { key: "log", label: "日志" },
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setActiveTab(tab.key as "config" | "info" | "log")}
+                        className={
+                          activeTab === tab.key
+                            ? "rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-900 shadow-sm"
+                            : "rounded-full px-3 py-1 text-xs font-medium text-slate-500 hover:text-slate-900"
+                        }
+                      >{tab.label}</button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div className={activePluginEnabled ? "" : "pointer-events-none opacity-50"}>
-                {activePlugin.render(config, setConfig, busy)}
-              </div>
-              {activePluginEnabled ? null : (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  <p className="font-semibold">当前插件已禁用</p>
-                  <p className="mt-1">请在左侧插件列表中将开关打开，配置修改才会生效。</p>
+              {activeTab === "config" ? (
+                <>
+                  <div className={activePluginEnabled ? "" : "pointer-events-none opacity-50"}>
+                    {activePlugin.render(config, setConfig, busy)}
+                  </div>
+                  {activePluginEnabled ? null : (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                      <p className="font-semibold">当前插件已禁用</p>
+                      <p className="mt-1">请在左侧插件列表中将开关打开，配置修改才会生效。</p>
+                    </div>
+                  )}
+                </>
+              ) : null}
+              {activeTab === "info" ? (
+                <div className="space-y-3 text-sm leading-6 text-slate-700">
+                  <p className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs leading-6 text-slate-600">
+                    {activePlugin.detailedDescription}
+                  </p>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">使用建议</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">{activePlugin.hint}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">风险声明</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">{activePlugin.rationale}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">所需权限</p>
+                    <div className="mt-2">
+                      <PermissionBadge permissions={activePlugin.required} risk={activePlugin.riskLevel} rationale={activePlugin.rationale} />
+                    </div>
+                  </div>
                 </div>
-              )}
-              <div className="rounded-md border border-slate-200 bg-white p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !showLogSection;
-                      setShowLogSection(next);
-                      if (next && auditLog.length === 0 && !auditLogLoading) void refreshAuditLog();
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
-                  >
-                    <FileTextIcon className="size-3.5" />
-                    {showLogSection ? "收起配置日志" : "查看配置日志"}
-                  </button>
+              ) : null}
+              {activeTab === "log" ? (
+                <div className="rounded-md border border-slate-200 bg-white p-3">
                   <div className="flex items-center gap-1 text-[11px] text-slate-400">
                     <button
                       type="button"
-                      onClick={() => {
-                        setLogScope("current");
-                        if (!showLogSection) setShowLogSection(true);
-                      }}
+                      onClick={() => setLogScope("current")}
                       className={logScope === "current" ? "rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" : "rounded px-2 py-0.5 hover:bg-slate-50"}
                     >当前插件</button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setLogScope("all");
-                        if (!showLogSection) setShowLogSection(true);
-                      }}
+                      onClick={() => setLogScope("all")}
                       className={logScope === "all" ? "rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700" : "rounded px-2 py-0.5 hover:bg-slate-50"}
                     >全部插件</button>
                   </div>
-                </div>
-                {showLogSection ? (
                   <div className="mt-2">
                     {auditLogLoading && auditLog.length === 0 ? (
                       <div className="grid place-items-center py-6 text-xs text-slate-400"><LoaderIcon className="size-4 animate-spin" /> 加载中…</div>
@@ -943,76 +955,14 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                       })()
                     )}
                   </div>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>
           )}
         </CardContent>
       </Card>
-
-      <PluginInfoDialog
-        open={showPluginInfo}
-        onOpenChange={(open) => setShowPluginInfo(open)}
-        plugin={activePlugin}
-      />
     </div>
   );
 }
 
-function PluginInfoDialog({
-  open,
-  onOpenChange,
-  plugin,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  plugin: PluginDescriptor | undefined;
-}) {
-  if (!plugin) return null;
-  const Icon = plugin.icon;
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg p-4 sm:p-6">
-        <DialogHeader>
-          <div className="flex items-center gap-3 pr-10">
-            <span className="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}>
-              <Icon className="size-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <DialogTitle className="truncate">{plugin.name}</DialogTitle>
-              <DialogDescription className="mt-0.5 inline-flex items-center gap-1 text-xs">
-                <UserIcon className="size-3" />
-                作者：{plugin.author}
-                <span className="mx-1 text-slate-300">·</span>
-                {plugin.tagline}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-        <div className="space-y-3 px-5 pb-5 text-sm leading-6 text-slate-700">
-          <p className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs leading-6 text-slate-600">
-            {plugin.detailedDescription}
-          </p>
-          <div>
-            <p className="text-xs font-medium text-slate-500">使用建议</p>
-            <p className="mt-1 text-xs leading-5 text-slate-600">{plugin.hint}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-slate-500">风险声明</p>
-            <p className="mt-1 text-xs leading-5 text-slate-600">{plugin.rationale}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-slate-500">所需权限</p>
-            <div className="mt-2">
-              <PermissionBadge permissions={plugin.required} risk={plugin.riskLevel} rationale={plugin.rationale} />
-            </div>
-          </div>
-        </div>
-        <DialogFooter className="flex-wrap-reverse">
-          <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
