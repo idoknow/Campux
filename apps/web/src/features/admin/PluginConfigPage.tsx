@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import type { ReactElement, ReactNode } from "react";
 import {
   BotIcon,
   FileClockIcon,
@@ -14,7 +13,6 @@ import {
   ShieldAlertIcon,
   ShieldCheckIcon,
   ShieldIcon,
-  TypeIcon,
   UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -27,15 +25,26 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages";
+function MarkdownIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <path d="M658.645333 64h-389.333333A141.333333 141.333333 0 0 0 128 205.333333v612.949334a141.333333 141.333333 0 0 0 141.333333 141.333333h485.482667a141.333333 141.333333 0 0 0 141.333333-141.333333V301.482667a119.957333 119.957333 0 0 0-35.157333-84.842667l-117.482667-117.504A120 120 0 0 0 658.645333 64z" fill="#53B7F4" />
+      <path d="M376.426667 691.349333c13.226667 0 24-10.752 24-24V441.088l94.336 93.290667c9.344 9.216 24.341333 9.258667 33.706666 0.042666l95.253334-93.589333v227.178667a24 24 0 0 0 48 0V383.594667a24 24 0 0 0-40.832-17.109334l-119.210667 117.12-118.4-117.077333a24 24 0 0 0-40.853333 17.066667v283.754666c0 13.248 10.730667 24 24 24z m484.565333-474.709333l-117.482667-117.504a120 120 0 0 0-61.76-32.896v131.882667a75.818667 75.818667 0 0 0 75.818667 75.797333h135.36a119.978667 119.978667 0 0 0-31.936-57.28z" fill="#29A3D3" />
+      <path d="M376.405333 347.605333c6.186667 0 12.309333 2.389333 16.874667 6.933334l118.4 117.056 119.210667-117.12a24 24 0 0 1 40.832 17.130666V656a24 24 0 0 1-48 0V428.8l-95.253334 93.610667c-9.386667 9.194667-24.384 9.173333-33.706666-0.042667l-94.336-93.290667V655.36a24 24 0 0 1-48 0V371.605333a24.021333 24.021333 0 0 1 23.978666-24z" fill="#FFFFFF" />
+    </svg>
+  );
+}
 
+type PluginIconProps = { className?: string };
+
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
 
 interface PluginDescriptor {
   id: PluginId;
-  icon: LucideIcon;
+  icon: React.ComponentType<PluginIconProps>;
   name: string;
   tagline: string;
   description: string;
@@ -403,7 +412,7 @@ const DEFAULT_TEXT_COLORS: PluginColorPreset[] = [
 const PLUGINS: PluginDescriptor[] = [
   {
     id: "markdownRender",
-    icon: TypeIcon,
+    icon: MarkdownIcon,
     name: "Markdown 渲染插件",
     tagline: "Markdown",
     description: "为投稿稿件启用 Markdown 语法渲染",
@@ -606,7 +615,7 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
               return (
                 <div key={plugin.id} className="group">
                   <button type="button" onClick={() => setActiveId(plugin.id)} className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-slate-50" data-active={isActive || undefined}>
-                    <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-4" /></span>
+                    <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
                       <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
@@ -700,7 +709,7 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
           ) : (
             <div className="flex-1 space-y-4 overflow-y-auto">
               <div className="flex items-center gap-3">
-                <span className="grid size-12 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><active.icon className="size-5" /></span>
+                <span className="grid size-12 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><active.icon className="size-6" /></span>
                 <div className="flex-1">
                   <p className="text-base font-semibold text-slate-900">{active.name}</p>
                   <p className="text-xs text-slate-500">{active.description}</p>
