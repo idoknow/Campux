@@ -654,6 +654,27 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
   };
 }
 
+// 「日志」Tab 的详细记录：从审计 metadata 的 before/after 提取发生变化的字段。
+function extractAuditDiff(metadata: Record<string, unknown> | null | undefined): Array<{ key: string; before: string; after: string }> {
+  const before = metadata?.before;
+  const after = metadata?.after;
+  if (typeof before !== "object" || before === null || typeof after !== "object" || after === null) return [];
+  const beforeRecord = before as Record<string, unknown>;
+  const afterRecord = after as Record<string, unknown>;
+  const diff: Array<{ key: string; before: string; after: string }> = [];
+  for (const key of new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])) {
+    const beforeText = JSON.stringify(beforeRecord[key]) ?? "undefined";
+    const afterText = JSON.stringify(afterRecord[key]) ?? "undefined";
+    if (beforeText !== afterText) diff.push({ key, before: beforeText, after: afterText });
+  }
+  return diff;
+}
+
+// 日志值展示：过长截断，避免单条记录撑爆卡片。
+function formatAuditValue(text: string): string {
+  return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+}
+
 export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
@@ -668,7 +689,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   // 单插件启停中，避免重复点。
   const [togglingName, setTogglingName] = useState<string | null>(null);
   // 配置日志：来自 /api/admin/plugins/audit，支持按插件筛选。
-  const [auditLog, setAuditLog] = useState<Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null }>>([]);
+  const [auditLog, setAuditLog] = useState<Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null; metadata: Record<string, unknown> | null }>>([]);
   const [auditLogLoading, setAuditLogLoading] = useState(false);
   const [logScope, setLogScope] = useState<"all" | "current">("current");
 
@@ -768,7 +789,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   async function refreshAuditLog() {
     setAuditLogLoading(true);
     try {
-      const data = await api<{ auditLog: Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null }> }>("/api/admin/plugins/audit?limit=50");
+      const data = await api<{ auditLog: Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null; metadata: Record<string, unknown> | null }> }>("/api/admin/plugins/audit?limit=50");
       setAuditLog(data.auditLog);
     } catch {
       // 读取失败时保留旧列表
@@ -947,6 +968,18 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                                   <span className="ml-auto font-mono text-xs text-slate-400">{new Date(entry.timestamp).toLocaleString("zh-CN", { hour12: false })}</span>
                                 </div>
                                 {entry.detail ? <p className="mt-1 text-xs leading-5 text-slate-600">{entry.detail}</p> : null}
+                                {(() => {
+                                  const diff = extractAuditDiff(entry.metadata);
+                                  return diff.length > 0 ? (
+                                    <div className="mt-1.5 space-y-0.5 rounded-md bg-white p-2 ring-1 ring-slate-100">
+                                      {diff.map((item) => (
+                                        <p key={item.key} className="break-all font-mono text-[11px] leading-5 text-slate-500">
+                                          <span className="font-semibold text-slate-700">{item.key}</span>：{formatAuditValue(item.before)} → {formatAuditValue(item.after)}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  ) : null;
+                                })()}
                                 {entry.operator ? <p className="mt-0.5 text-[11px] text-slate-400">操作人：{entry.operator}</p> : null}
                               </div>
                             ))}
