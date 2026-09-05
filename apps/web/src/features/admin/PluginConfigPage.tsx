@@ -771,7 +771,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
               </Button>
             </div>
           </div>
-          <div className="grid gap-1 overflow-y-auto">
+          <div className="grid gap-1 overflow-y-auto md:grid-flow-row md:grid-rows-[1fr]">
             {showSidebarPlugins ? (
               enabledPlugins.length === 0 ? (
                 <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
@@ -779,20 +779,28 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                   <p className="mt-1">请到「插件」子页启用预设插件</p>
                 </div>
               ) : (
-                enabledPlugins.map((plugin) => {
-                  const isActive = plugin.id === activeId;
-                  return (
-                    <div key={plugin.id} className="group">
-                      <button type="button" onClick={() => setActiveId(plugin.id)} className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-slate-50" data-active={isActive || undefined}>
+                <div className="flex gap-1 overflow-x-auto pb-1 md:grid md:grid-cols-1 md:gap-0 md:overflow-visible md:pb-0">
+                  {enabledPlugins.map((plugin) => {
+                    const isActive = plugin.id === activeId;
+                    return (
+                      <button
+                        key={plugin.id}
+                        type="button"
+                        onClick={() => setActiveId(plugin.id)}
+                        className={`flex min-w-0 shrink-0 items-center gap-2 rounded-md p-2 text-left transition hover:bg-slate-50 md:w-full md:min-w-0 md:shrink ${
+                          isActive ? "bg-slate-100" : ""
+                        }`}
+                        data-active={isActive || undefined}
+                      >
                         <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><plugin.icon className="size-5" /></span>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 md:flex-1">
                           <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
-                          <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
+                          <p className="hidden truncate text-xs text-slate-500 md:block">{plugin.tagline}</p>
                         </div>
                       </button>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )
             ) : null}
           </div>
@@ -816,9 +824,9 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
               </div>
             ) : (
             <div className="flex-1 space-y-4 overflow-y-auto">
-              <div className="flex items-center gap-3">
-                {ActiveIcon ? <span className="grid size-12 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><ActiveIcon className="size-6" /></span> : null}
-                <div className="flex-1">
+              <div className="flex flex-wrap items-start gap-3">
+                {ActiveIcon ? <span className="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white sm:size-12" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}><ActiveIcon className="size-5 sm:size-6" /></span> : null}
+                <div className="min-w-0 flex-1">
                   <p className="text-base font-semibold text-slate-900">{active?.name}</p>
                   <p className="text-xs text-slate-500">{active?.description}</p>
                   <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-400"><UserIcon className="size-3" />作者：{active?.author}</p>
@@ -855,7 +863,7 @@ function PluginInfoDialog({
   const Icon = plugin.icon;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg p-4 sm:p-6">
         <DialogHeader>
           <div className="flex items-center gap-3 pr-10">
             <span className="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br text-white" style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}>
@@ -891,7 +899,7 @@ function PluginInfoDialog({
             </div>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-wrap-reverse">
           <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
         </DialogFooter>
       </DialogContent>

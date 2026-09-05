@@ -332,33 +332,18 @@ export function PluginsPanel() {
           eventLog.length === 0 ? (
             <EmptyCard title="暂无事件日志" />
           ) : (
-            <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-slate-50 text-left">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold text-slate-500">时间</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500">事件类型</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500">详情</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {eventLog.map((entry, index) => (
-                    <tr key={index} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 text-slate-400 whitespace-nowrap font-mono">
-                        {new Date(entry.timestamp).toLocaleTimeString("zh-CN")}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 font-mono font-semibold text-blue-700">
-                          {entry.type}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-slate-500">
-                        {formatEventDetail(entry)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {eventLog.map((entry, index) => (
+                <div key={index} className="rounded-md border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 font-mono text-xs font-semibold text-blue-700">
+                      {entry.type}
+                    </span>
+                    <span className="font-mono text-xs text-slate-400">{new Date(entry.timestamp).toLocaleTimeString("zh-CN")}</span>
+                  </div>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-600">{formatEventDetail(entry)}</p>
+                </div>
+              ))}
             </div>
           )
         ) : null}
@@ -423,35 +408,17 @@ export function PluginsPanel() {
           auditLog.length === 0 ? (
             <EmptyCard title="暂无审计日志" />
           ) : (
-            <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-slate-50 text-left">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold text-slate-500">时间</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500">操作</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500">插件</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500">详情</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {auditLog.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 text-slate-400 whitespace-nowrap font-mono">
-                        {new Date(entry.timestamp).toLocaleTimeString("zh-CN")}
-                      </td>
-                      <td className="px-3 py-2">
-                        <AuditActionBadge action={entry.action} />
-                      </td>
-                      <td className="px-3 py-2 font-mono text-slate-600">
-                        {entry.pluginName}
-                      </td>
-                      <td className="px-3 py-2 text-slate-500">
-                        {entry.detail ?? "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {auditLog.map((entry) => (
+                <div key={entry.id} className="rounded-md border border-slate-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <AuditActionBadge action={entry.action} />
+                    <span className="font-mono text-xs text-slate-600">{entry.pluginName}</span>
+                    <span className="ml-auto font-mono text-xs text-slate-400">{new Date(entry.timestamp).toLocaleTimeString("zh-CN")}</span>
+                  </div>
+                  {entry.detail ? <p className="mt-1.5 text-xs leading-5 text-slate-600">{entry.detail}</p> : null}
+                </div>
+              ))}
             </div>
           )
         ) : null}
