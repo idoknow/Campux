@@ -140,6 +140,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableMarkdownRender: normalizeEnableMarkdownRender(record[enableMarkdownRenderKey]),
     enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
     enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
+    availableFonts: [] as string[],
   };
 }
 
@@ -197,6 +198,9 @@ async function readPublicMetadata(tenantId: string) {
     metadata.enableFontSelection = pluginConfig.fontSelection.enabled;
     metadata.enableAnonymousAvatarSelection = pluginConfig.anonymousAvatar.enabled;
     metadata.botStylishMessagesEnabled = pluginConfig.botStylishMessages.enabled;
+    // 字体选择插件：将已勾选的字体值白名单透出，投稿页仅展示这些字体；
+    // 默认字体是否可用由管理员单独控制（FONT_OPTIONS 中 value="default"）。
+    metadata.availableFonts = pluginConfig.fontSelection.fonts.filter((f) => f.enabled).map((f) => f.value);
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

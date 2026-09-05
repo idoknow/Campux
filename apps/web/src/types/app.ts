@@ -128,6 +128,8 @@ export type TenantMetadata = {
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
   enableAnonymousAvatarSelection: boolean;
+  /** 字体选择插件启用的字体 value 白名单（包含 "default"） */
+  availableFonts: string[];
 };
 
 export type BotMessageTypeConfig = {

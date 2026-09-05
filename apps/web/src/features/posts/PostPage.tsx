@@ -321,7 +321,7 @@ export function PostPage({
                     <span className="block font-semibold">字体</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {FONT_OPTIONS.map((opt) => (
+                    {FONT_OPTIONS.filter((opt) => metadata.availableFonts.includes(opt.value)).map((opt) => (
                       <button
                         key={opt.value}
                         type="button"
@@ -339,6 +339,9 @@ export function PostPage({
                         </span>
                       </button>
                     ))}
+                    {metadata.availableFonts.length === 0 ? (
+                      <span className="text-xs text-slate-500">管理员尚未启用任何字体</span>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
