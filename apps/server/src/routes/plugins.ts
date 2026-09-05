@@ -136,19 +136,77 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
     if (!parsed.success) {
       return reply.code(400).send({ message: "插件配置格式不正确" });
     }
+    const before = await readTenantPluginConfig(prisma, context.selectedTenant.id);
     const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, parsed.data);
 
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "tenant.plugin_config.update",
-      targetType: "tenant",
-      targetId: context.selectedTenant.id,
-      detail: {
-        fields: Object.keys(parsed.data),
-      },
-    });
+    // 按插件维度逐项写入审计日志，便于管理员追溯单个插件的配置变更
+    const diffs: Array<{ pluginId: string; enabled: boolean; summary: string }> = [];
+    const pluginSections: Array<[string, unknown, unknown]> = [
+      ["markdownRender", before.markdownRender, saved.markdownRender],
+      ["colorSelection", before.colorSelection, saved.colorSelection],
+      ["fontSelection", before.fontSelection, saved.fontSelection],
+      ["anonymousAvatar", before.anonymousAvatar, saved.anonymousAvatar],
+      ["botStylishMessages", before.botStylishMessages, saved.botStylishMessages],
+    ];
+    for (const [pluginId, beforeValue, afterValue] of pluginSections) {
+      if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
+        const enabledAfter = Boolean((afterValue as { enabled?: boolean })?.enabled);
+        const enabledBefore = Boolean((beforeValue as { enabled?: boolean })?.enabled);
+        let summary = "配置已更新";
+        if (enabledBefore !== enabledAfter) {
+          summary = enabledAfter ? "已启用" : "已禁用";
+        }
+        diffs.push({ pluginId, enabled: enabledAfter, summary });
+        await writeAuditLog({
+          tenantId: context.selectedTenant.id,
+          actorId: context.user.id,
+          action: `tenant.plugin.${pluginId}.${enabledBefore !== enabledAfter ? (enabledAfter ? "enable" : "disable") : "config"}`,
+          targetType: "tenant_plugin",
+          targetId: pluginId,
+          detail: {
+            summary,
+            enabledBefore,
+            enabledAfter,
+            before: beforeValue,
+            after: afterValue,
+          },
+        });
+      }
+    }
 
-    return { config: saved };
+    return { config: saved, changed: diffs };
+  });
+
+  // 读取插件配置审计日志（最近 N 条 tenant.plugin.* 记录）
+  app.get("/api/admin/plugins/settings/logs", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "admin");
+    const query = auditLogQuerySchema.parse(request.query);
+    const rows = await prisma.auditLog.findMany({
+      where: {
+        tenantId: context.selectedTenant.id,
+        targetType: "tenant_plugin",
+      },
+      include: { actor: true },
+      orderBy: { createdAt: "desc" },
+      take: query.limit,
+    });
+    type AuditRow = {
+      id: string;
+      createdAt: Date;
+      action: string;
+      targetId: string | null;
+      detail: unknown;
+      actor: { displayName: string | null; qqUin: bigint } | null;
+    };
+    return {
+      logs: (rows as unknown as AuditRow[]).map((entry) => ({
+        id: entry.id,
+        createdAt: entry.createdAt.toISOString(),
+        action: entry.action,
+        targetId: entry.targetId,
+        detail: entry.detail ?? null,
+        actor: entry.actor ? { displayName: entry.actor.displayName, qqUin: entry.actor.qqUin.toString() } : null,
+      })),
+    };
   });
 }

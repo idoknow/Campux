@@ -563,17 +563,11 @@ export function AdminPage({
           imageCompressionQuality: form.imageCompressionQuality,
           imageCompressionMaxDimension: form.imageCompressionMaxDimension,
           imageMaxSizeMb,
-          botStylishMessagesEnabled: form.botStylishMessagesEnabled,
-          botPrivatePostStylishEnabled: form.botStylishMessagesEnabled,
           publishMode: form.publishMode,
           publishAccumulateMinImages: form.publishAccumulateMinImages,
           publishAccumulateMaxImages: form.publishAccumulateMaxImages,
           publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
           publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
-          enableColorSelection: form.enableColorSelection,
-          enableMarkdownRender: form.enableMarkdownRender,
-          enableFontSelection: form.enableFontSelection,
-          enableAnonymousAvatarSelection: form.enableAnonymousAvatarSelection,
         }),
       });
       await onSaved();
@@ -2028,71 +2022,6 @@ function MetadataPanel({
               aria-label="启用说说文字 AI 总结"
             />
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div>
-              <p className="text-sm font-medium text-slate-900">Bot 多彩消息</p>
-              <p className="text-xs text-slate-500">开启后机器人反馈消息和对话框投稿流程中的提示语均使用多风格随机语句，更具趣味性。</p>
-            </div>
-            <Switch
-              checked={form.botStylishMessagesEnabled}
-              disabled={busy}
-              onCheckedChange={(value) => onFormChange({ ...form, botStylishMessagesEnabled: value })}
-              aria-label="启用 Bot 多彩消息"
-            />
-          </div>
-          <details className="rounded-md border border-slate-200 bg-slate-50 md:col-span-2">
-            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">多彩稿件</summary>
-            <div className="grid gap-3 border-t border-slate-200 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">Markdown 渲染</p>
-                  <p className="text-xs text-slate-500">开启后，稿件正文中的 Markdown 语法（表格、列表、引用等）会渲染为对应样式（图片和代码块不会渲染）。</p>
-                </div>
-                <Switch
-                  checked={form.enableMarkdownRender}
-                  disabled={busy}
-                  onCheckedChange={(value) => onFormChange({ ...form, enableMarkdownRender: value })}
-                  aria-label="启用 Markdown 渲染"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">多彩投稿</p>
-                  <p className="text-xs text-slate-500">开启后，投稿页"高级功能"中可选背景颜色和文字颜色，需展开后使用。</p>
-                </div>
-                <Switch
-                  checked={form.enableColorSelection}
-                  disabled={busy}
-                  onCheckedChange={(value) => onFormChange({ ...form, enableColorSelection: value })}
-                  aria-label="启用多彩投稿"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">字体选择</p>
-                  <p className="text-xs text-slate-500">开启后，投稿页"高级功能"中可选字体（含多种艺术字体），选择非默认字体投稿前需预览确认。</p>
-                </div>
-                <Switch
-                  checked={form.enableFontSelection}
-                  disabled={busy}
-                  onCheckedChange={(value) => onFormChange({ ...form, enableFontSelection: value })}
-                  aria-label="启用字体选择"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">匿名头像选择</p>
-                  <p className="text-xs text-slate-500">开启后，用户开启匿名展示时可在"高级功能"中选择匿名头像，稿件渲染时使用所选 SVG 头像。</p>
-                </div>
-                <Switch
-                  checked={form.enableAnonymousAvatarSelection}
-                  disabled={busy}
-                  onCheckedChange={(value) => onFormChange({ ...form, enableAnonymousAvatarSelection: value })}
-                  aria-label="启用匿名头像选择"
-                />
-              </div>
-            </div>
-          </details>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
             投稿规则，每行一条
             <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />

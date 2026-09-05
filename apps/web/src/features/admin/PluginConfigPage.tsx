@@ -3,14 +3,17 @@ import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   BotIcon,
+  FileClockIcon,
   InfoIcon,
+  KeyRoundIcon,
   LayersIcon,
   LoaderIcon,
   MousePointerClickIcon,
   PaletteIcon,
   SaveIcon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
   ShieldIcon,
-  SparklesIcon,
   TypeIcon,
   UsersIcon,
 } from "lucide-react";
@@ -26,6 +29,10 @@ import { Switch } from "@/components/ui/switch";
 
 type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages";
 
+type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
+
+type PluginRisk = "low" | "medium" | "high";
+
 interface PluginDescriptor {
   id: PluginId;
   icon: LucideIcon;
@@ -35,10 +42,74 @@ interface PluginDescriptor {
   hint: string;
   accent: string;
   bgTint: string;
+  role: "admin";
+  required: PluginPermission[];
+  riskLevel: PluginRisk;
+  rationale: string;
   enabled: (config: TenantPluginConfig) => boolean;
   setEnabled: (config: TenantPluginConfig, enabled: boolean) => TenantPluginConfig;
   render: (config: TenantPluginConfig, onChange: (next: TenantPluginConfig) => void, busy: boolean) => ReactNode;
 }
+
+function PermissionBadge({ permissions, risk, rationale }: { permissions: PluginPermission[]; risk: PluginRisk; rationale: string }) {
+  const riskStyles: Record<PluginRisk, string> = {
+    low: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    medium: "bg-amber-50 text-amber-700 ring-amber-200",
+    high: "bg-rose-50 text-rose-700 ring-rose-200",
+  };
+  const riskLabel: Record<PluginRisk, string> = { low: "低风险", medium: "中风险", high: "高风险" };
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+      <div className="flex items-center gap-2">
+        <ShieldIcon className="size-4 text-slate-500" />
+        <p className="text-sm font-medium text-slate-900">所需权限</p>
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${riskStyles[risk]}`}>{riskLabel[risk]}</span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {permissions.map((permission) => (
+          <span key={permission} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">
+            <KeyRoundIcon className="size-3" />
+            {PERMISSION_LABELS[permission] ?? permission}
+            <span className="font-mono text-slate-400">{permission}</span>
+          </span>
+        ))}
+      </div>
+      <p className="text-xs leading-5 text-slate-600">{rationale}</p>
+    </div>
+  );
+}
+
+const PLUGIN_NAME_BY_ID: Record<string, string> = {
+  markdownRender: "Markdown 渲染插件",
+  colorSelection: "多彩投稿插件",
+  fontSelection: "字体选择插件",
+  anonymousAvatar: "匿名头像插件",
+  botStylishMessages: "Bot 多彩消息插件",
+};
+
+type ConfigLogEntry = {
+  id: string;
+  createdAt: string;
+  action: string;
+  targetId: string | null;
+  detail: {
+    summary?: string;
+    enabledBefore?: boolean;
+    enabledAfter?: boolean;
+  } | null;
+  actor: { displayName: string | null; qqUin: string } | null;
+};
+
+const PERMISSION_LABELS: Record<PluginPermission, string> = {
+  "db:read": "读取元数据",
+  "db:write": "写入元数据",
+  "events:emit": "发布事件",
+  "events:listen": "订阅事件",
+  "http:route": "注册路由",
+  "config:read": "读取配置",
+  "tenant:data": "访问租户数据",
+  "user:data": "访问用户数据",
+};
 
 function MarkdownRenderPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
@@ -267,6 +338,10 @@ const PLUGINS: PluginDescriptor[] = [
     hint: "默认支持加粗、斜体、列表、代码与链接。",
     accent: "from-violet-500 to-indigo-500",
     bgTint: "bg-violet-50 text-violet-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write"],
+    riskLevel: "low",
+    rationale: "仅开关型插件：读取/写入 tenant_metadata.plugin_config，无用户数据接触，无额外路由与事件。",
     enabled: (config) => config.markdownRender.enabled,
     setEnabled: (config, value) => ({ ...config, markdownRender: { ...config.markdownRender, enabled: value } }),
     render: (config, onChange, busy) => <MarkdownRenderPanel config={config} onChange={onChange} busy={busy} />,
@@ -280,6 +355,10 @@ const PLUGINS: PluginDescriptor[] = [
     hint: "背景色与文字色各支持最多 10 个预设，可按需自定义。",
     accent: "from-pink-500 to-orange-500",
     bgTint: "bg-pink-50 text-pink-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data"],
+    riskLevel: "medium",
+    rationale: "读取/写入 tenant_metadata.plugin_config；开启后投稿页向 tenant:data 提交色彩预设 ID，需防止预设被滥用为恶意内容。",
     enabled: (config) => config.colorSelection.enabled,
     setEnabled: (config, value) => ({ ...config, colorSelection: { ...config.colorSelection, enabled: value } }),
     render: (config, onChange, busy) => <ColorSelectionPanel config={config} onChange={onChange} busy={busy} />,
@@ -293,6 +372,10 @@ const PLUGINS: PluginDescriptor[] = [
     hint: "系统固定字体库，勾选后投稿页自动展示选项。",
     accent: "from-emerald-500 to-teal-500",
     bgTint: "bg-emerald-50 text-emerald-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data"],
+    riskLevel: "low",
+    rationale: "读取/写入 tenant_metadata.plugin_config；仅开放字体白名单，不引入外部字体源。",
     enabled: (config) => config.fontSelection.enabled,
     setEnabled: (config, value) => ({ ...config, fontSelection: { ...config.fontSelection, enabled: value } }),
     render: (config, onChange, busy) => <FontSelectionPanel config={config} onChange={onChange} busy={busy} />,
@@ -306,6 +389,10 @@ const PLUGINS: PluginDescriptor[] = [
     hint: "最多 20 个头像，可无限修改。",
     accent: "from-sky-500 to-cyan-500",
     bgTint: "bg-sky-50 text-sky-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "user:data", "tenant:data"],
+    riskLevel: "medium",
+    rationale: "读取/写入 tenant_metadata.plugin_config；头像与匿名稿件绑定后进入稿件渲染，需访问投稿者匿名身份与 tenant 稿件数据。",
     enabled: (config) => config.anonymousAvatar.enabled,
     setEnabled: (config, value) => ({ ...config, anonymousAvatar: { ...config.anonymousAvatar, enabled: value } }),
     render: (config, onChange, busy) => <AnonymousAvatarPanel config={config} onChange={onChange} busy={busy} />,
@@ -319,6 +406,10 @@ const PLUGINS: PluginDescriptor[] = [
     hint: "每种消息类型最多 10 条自定义语句，支持占位符。",
     accent: "from-amber-500 to-rose-500",
     bgTint: "bg-amber-50 text-amber-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "events:listen", "tenant:data"],
+    riskLevel: "medium",
+    rationale: "读取/写入 tenant_metadata.plugin_config；监听投稿/审核/发布事件后改写机器人提示语句，需避免语句中包含敏感或误导信息。",
     enabled: (config) => config.botStylishMessages.enabled,
     setEnabled: (config, value) => ({ ...config, botStylishMessages: { ...config.botStylishMessages, enabled: value } }),
     render: (config, onChange, busy) => <BotStylishPanel config={config} onChange={onChange} busy={busy} />,
@@ -366,6 +457,9 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureBotMessageDefaults(buildInitialConfig(metadata)));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [showInfo, setShowInfo] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const [logs, setLogs] = useState<ConfigLogEntry[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -397,10 +491,23 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
       await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(config) });
       toast.success("插件配置已保存");
       await onSaved?.();
+      if (showLog) void refreshLogs();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "插件配置保存失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refreshLogs() {
+    setLogLoading(true);
+    try {
+      const data = await api<{ logs: ConfigLogEntry[] }>("/api/admin/plugins/settings/logs?limit=50");
+      setLogs(data.logs);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "无法加载配置日志");
+    } finally {
+      setLogLoading(false);
     }
   }
 
@@ -441,6 +548,45 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
           <div className="mt-3 border-t border-slate-200 pt-3">
             <Button className="w-full" disabled={busy || loading} onClick={() => void save()}><SaveIcon className="size-4" />{busy ? "保存中…" : "保存配置"}</Button>
           </div>
+          <div className="mt-3 border-t border-slate-200 pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !showLog;
+                setShowLog(next);
+                if (next && logs.length === 0) void refreshLogs();
+              }}
+              className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <span className="flex items-center gap-1.5"><FileClockIcon className="size-3.5" />配置日志</span>
+              <span className="text-slate-400">{showLog ? "隐藏" : "查看"}</span>
+            </button>
+            {showLog ? (
+              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2">
+                {logLoading ? (
+                  <p className="py-2 text-center text-xs text-slate-400">加载中…</p>
+                ) : logs.length === 0 ? (
+                  <p className="py-2 text-center text-xs text-slate-400">暂无配置变更记录</p>
+                ) : (
+                  logs.map((entry) => {
+                    const pluginName = PLUGIN_NAME_BY_ID[entry.targetId ?? ""] ?? entry.targetId ?? "-";
+                    const detail = entry.detail ?? {};
+                    const state = detail.enabledBefore && !detail.enabledAfter ? "禁用" : !detail.enabledBefore && detail.enabledAfter ? "启用" : "更新";
+                    return (
+                      <div key={entry.id} className="rounded border border-slate-100 bg-slate-50 p-1.5 text-[11px] leading-4">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-medium text-slate-700">{pluginName}</span>
+                          <span className={state === "启用" ? "text-emerald-600" : state === "禁用" ? "text-rose-600" : "text-slate-500"}>{state}</span>
+                        </div>
+                        <p className="text-slate-400">{new Date(entry.createdAt).toLocaleString("zh-CN")}</p>
+                        <p className="truncate text-slate-400">操作人：{entry.actor?.displayName ?? entry.actor?.qqUin ?? "系统"}</p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -457,6 +603,10 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
                   <p className="text-xs text-slate-500">开启后可进入配置页；配置内容实时预览。</p>
                 </div>
               </div>
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
+                <p className="flex items-center gap-1.5 font-semibold"><ShieldIcon className="size-3.5" /> 仅管理员可访问</p>
+                <p className="mt-1">本页面仅对当前租户的 admin 角色开放，所有保存操作均写入审计日志，包含操作人、时间、变更前后快照。</p>
+              </div>
               <div className="grid gap-3">
                 {PLUGINS.map((plugin) => (
                   <div key={plugin.id} className="rounded-md border border-slate-200 bg-white p-3">
@@ -468,6 +618,9 @@ export function PluginConfigPage({ me, metadata, onSaved }: { me: AuthenticatedM
                       </div>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-600">{plugin.description}</p>
+                    <div className="mt-3">
+                      <PermissionBadge permissions={plugin.required} risk={plugin.riskLevel} rationale={plugin.rationale} />
+                    </div>
                   </div>
                 ))}
               </div>
