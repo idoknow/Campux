@@ -799,7 +799,6 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-900">{plugin.name}</p>
                           <p className="truncate text-xs text-slate-500">{plugin.tagline}</p>
-                          <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-slate-400"><UserIcon className="size-2.5" />{plugin.author}</p>
                         </div>
                         <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">已启用</span>
                       </button>
