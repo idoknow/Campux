@@ -48,8 +48,6 @@ import { isTenantRuntimeActive } from "./lib/tenant-runtime";
 import { createPluginRegistry } from "@campux/plugin";
 import type { PluginQueue } from "@campux/plugin";
 import { reviewNotifyPlugin } from "@campux/plugin-review-notify";
-import { PRESET_PLUGINS, PRESET_NAME_BY_ID } from "./lib/preset-plugins";
-import { readTenantPluginConfig } from "./lib/tenant-plugin-config";
 
 const config = loadConfig();
 ensureBotSessionSecretConfigured();
@@ -89,36 +87,11 @@ const pluginQueue: PluginQueue = {
 
 const pluginRegistry = createPluginRegistry(app, config, prisma, pluginQueue);
 
-// 注册内置插件
+// 注册内置插件（只有 reviewNotifyPlugin 等真正的 CampuxPlugin）。
+// 租户级预设插件（Markdown 渲染 / 多彩投稿 / 字体选择 / 匿名头像 / Bot 多彩消息）
+// 已经存在 tenant_metadata.plugin_config 里，不作为 CampuxPlugin 实例注册；
+// 「已启用」状态由 plugin_config.*.enabled 直接驱动。
 pluginRegistry.register(reviewNotifyPlugin);
-// 注册租户级预设插件（默认 disabled，由管理员在「管理-插件」里启用，
-// 启用后「管理-插件配置」才会展示对应条目；启用状态会同步写入 tenant_metadata.plugin_config）。
-for (const preset of PRESET_PLUGINS) {
-  pluginRegistry.register(preset);
-}
-
-// 启动时对账：服务重启后 registry 内存状态会重置为 disabled，
-// 需要按每个租户持久化的 plugin_config.enabled 重新把 registry.setStatus 写回，
-// 否则「管理-插件」显示 enabled 但「管理-插件配置」侧栏不出现该插件。
-async function reconcilePresetPluginStatuses() {
-  const tenants = await prisma.tenant.findMany({ select: { id: true } });
-  for (const tenant of tenants) {
-    const cfg = await readTenantPluginConfig(prisma, tenant.id);
-    const pairs: Array<[string, boolean]> = [
-      ["campux-plugin-markdown-render", cfg.markdownRender.enabled],
-      ["campux-plugin-color-selection", cfg.colorSelection.enabled],
-      ["campux-plugin-font-selection", cfg.fontSelection.enabled],
-      ["campux-plugin-anonymous-avatar", cfg.anonymousAvatar.enabled],
-      ["campux-plugin-bot-stylish-messages", cfg.botStylishMessages.enabled],
-    ];
-    for (const [registryName, enabled] of pairs) {
-      if (pluginRegistry.get(registryName)) {
-        pluginRegistry.setStatus(registryName, enabled ? "enabled" : "disabled");
-      }
-    }
-  }
-}
-await reconcilePresetPluginStatuses();
 
 // 初始化所有插件（路由注册前）
 await pluginRegistry.initAll();
