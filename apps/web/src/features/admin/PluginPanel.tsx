@@ -20,6 +20,7 @@ import {
   FontIcon,
   AnonymousAvatarIcon,
   BotIcon,
+  PluginConfigIcon,
 } from "./PluginConfigPage";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -197,6 +198,7 @@ export function PluginsPanel() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
+        <span className="grid size-8 place-items-center rounded-md bg-slate-50 ring-1 ring-slate-200"><PluginConfigIcon className="size-6" /></span>
         <button
           type="button"
           onClick={() => setShowAllPlugins((value) => !value)}
