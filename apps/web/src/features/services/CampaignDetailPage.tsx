@@ -46,6 +46,11 @@ export function CampaignDetailPage({
   const [takedownBusy, setTakedownBusy] = useState(false);
   const [takedownOpen, setTakedownOpen] = useState(false);
 
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load 是稳定的首次加载入口，仅依赖 campaignId
+  }, [campaignId]);
+
   function load() {
     setLoading(true);
     void api<{ campaign: CampaignDetail }>(`/api/campaigns/${encodeURIComponent(campaignId)}`)

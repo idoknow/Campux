@@ -137,18 +137,22 @@ export function CampaignsPage({
             <div key={item.id} className="rounded-md border border-slate-200 bg-white shadow-none transition hover:border-slate-300">
               <button
                 onClick={() => onSelect(item)}
-                className="flex w-full items-start gap-3 p-3 text-left"
+                className="flex w-full items-center gap-3 p-3 text-left"
               >
-              {item.coverAttachment ? <img src={item.coverAttachment.url} alt="" className="size-12 shrink-0 rounded object-cover" /> : <span className="grid size-12 shrink-0 place-items-center rounded bg-slate-100 text-xs text-slate-500">#{item.displayId}</span>}
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">#{item.displayId}</span>
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.text}</span>
-                  {item.anonymous ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">匿名</span> : null}
+                {item.coverAttachment ? (
+                  <img src={item.coverAttachment.url} alt="" className="h-20 w-16 shrink-0 rounded-md border border-slate-200 object-cover" />
+                ) : (
+                  <span className="grid h-20 w-16 shrink-0 place-items-center rounded-md bg-gradient-to-br from-violet-100 to-fuchsia-100 text-xs font-semibold text-violet-400">投票竞选</span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">#{item.displayId}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.text}</span>
+                    {item.anonymous ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">匿名</span> : null}
+                  </span>
+                  <span className="mt-1 line-clamp-2 text-sm font-medium leading-5 text-slate-900">{item.title}</span>
+                  <span className="mt-1 block text-xs text-slate-500">{item.options.length} 个选项 · {formatEndsAt(item.endsAt)}</span>
                 </span>
-                <span className="mt-1 block truncate text-sm font-medium text-slate-900">{item.title}</span>
-                <span className="mt-1 block text-xs text-slate-500">{item.options.length} 个选项 · {formatEndsAt(item.endsAt)}</span>
-              </span>
               </button>
               {showReviewActions ? (
                 <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-3 py-2">
