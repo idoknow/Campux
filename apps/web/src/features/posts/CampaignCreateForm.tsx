@@ -139,7 +139,7 @@ export function CampaignCreateForm({
           ))}
           {options.length < 20 ? <Button size="sm" variant="outline" onClick={addOption}><PlusIcon className="size-4" />添加选项</Button> : null}
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={anonymous} onCheckedChange={setAnonymous} disabled={!metadata.allowAnonymousCampaign} />
             匿名发起{!metadata.allowAnonymousCampaign ? "（未开启）" : ""}
@@ -148,15 +148,24 @@ export function CampaignCreateForm({
             <Switch checked={showVoterDetails} onCheckedChange={setShowVoterDetails} />
             展示投票人明细
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <Switch checked={allowStackOnOption} onCheckedChange={setAllowStackOnOption} />
-            允许同选多张
+          <label className="flex flex-col gap-1 sm:col-span-2">
+            <span className="flex items-center gap-2 text-sm">
+              <Switch checked={allowStackOnOption} onCheckedChange={setAllowStackOnOption} disabled={votesPerPerson <= 1} />
+              <span>
+                <span className="block">允许给同一选项投多张票</span>
+                <span className="block text-xs text-slate-500">开启后，每人可将自己的多张票全部投给同一个选项；关闭则每个选项最多投 1 票。</span>
+              </span>
+            </span>
           </label>
           <label className="flex items-center gap-2 text-sm">
-            每人数：<Input type="number" min={1} max={20} value={votesPerPerson} onChange={(event) => setVotesPerPerson(Math.max(1, Math.min(20, Number(event.target.value) || 1)))} className="w-16" />
+            每人可投：<Input type="number" min={1} max={20} value={votesPerPerson} onChange={(event) => {
+              const next = Math.max(1, Math.min(20, Number(event.target.value) || 1));
+              setVotesPerPerson(next);
+              if (next <= 1) setAllowStackOnOption(false);
+            }} className="w-20" />票
           </label>
-          <label className="flex items-center gap-2 text-sm col-span-2">
-            时长（小时，最小 12 最大 8760）：<Input type="number" min={12} max={8760} value={durationHours} onChange={(event) => setDurationHours(Math.max(12, Math.min(8760, Number(event.target.value) || 12)))} className="w-32" />
+          <label className="flex items-center gap-2 text-sm">
+            时长：<Input type="number" min={12} max={8760} value={durationHours} onChange={(event) => setDurationHours(Math.max(12, Math.min(8760, Number(event.target.value) || 12)))} className="w-24" />小时
           </label>
         </div>
         <div className="flex items-center justify-between">

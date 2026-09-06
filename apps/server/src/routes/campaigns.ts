@@ -248,15 +248,18 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
     });
     if (!campaign) return reply.code(404).send({ message: "竞选不存在" });
     const effectiveStatus = campaign.status === "running" && campaign.endsAt && campaign.endsAt <= new Date() ? "ended" : campaign.status;
-    const myVote = await prisma.campaignVote.findFirst({ where: { campaignId: campaign.id, voterId: context.user.id } });
-    const myVotedCount = myVote?.count ?? 0;
-    const allowAdd = campaign.allowStackOnOption && myVotedCount < campaign.votesPerPerson;
+    const myVoteAgg = await prisma.campaignVote.aggregate({
+      where: { campaignId: campaign.id, voterId: context.user.id },
+      _sum: { count: true },
+    });
+    const myVotedCount = myVoteAgg._sum.count ?? 0;
+    const remainingVotes = campaign.votesPerPerson - myVotedCount;
     return {
       ...toCampaignListItem(campaign as unknown as CampaignRow),
       effectiveStatus,
       myVotedCount,
-      canVote: effectiveStatus === "running" && !myVote,
-      canAddVote: effectiveStatus === "running" && allowAdd,
+      canVote: effectiveStatus === "running" && remainingVotes > 0,
+      canAddVote: effectiveStatus === "running" && remainingVotes > 0 && campaign.allowStackOnOption,
       options: campaign.options
         .slice()
         .sort((left: CampaignOptionRow, right: CampaignOptionRow) => right.voteTotal - left.voteTotal)

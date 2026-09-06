@@ -75,6 +75,12 @@ export function ServicesPage({
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
+  // pushState 不会触发 popstate，这里补一发事件，让本组件与 App 的路由监听都重算一次。
+  function navigateTo(path: string) {
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    setTick((n) => n + 1);
+  }
   // Force re-read of window.location on each tick (used by pushState-driven navigation)
   void tick;
   const campaignRoute = parseCampaignRoute(window.location.pathname, window.location.search);
@@ -88,7 +94,7 @@ export function ServicesPage({
         campaignId={campaignRoute.campaignId}
         me={me}
         metadata={metadata}
-        onBack={() => { window.history.pushState(null, "", "/services/campaigns"); }}
+        onBack={() => navigateTo("/services/campaigns")}
       />
     );
   }
@@ -99,7 +105,7 @@ export function ServicesPage({
         metadata={metadata}
         initialFilter={campaignRoute.filter}
         initialKeyword={campaignRoute.keyword}
-        onSelect={(campaign: Campaign) => { window.history.pushState(null, "", `/services/campaigns/${encodeURIComponent(campaign.id)}`); }}
+        onSelect={(campaign: Campaign) => navigateTo(`/services/campaigns/${encodeURIComponent(campaign.id)}`)}
       />
     );
   }
@@ -126,17 +132,29 @@ export function ServicesPage({
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
         {metadata.enableCampaigns ? (
-          <section className="product-surface p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">投票竞选</h2>
-                <p className="mt-0.5 text-xs text-slate-500">浏览或发起当前校园墙的投票竞选。</p>
-              </div>
-              <Button size="sm" variant="outline" onClick={() => window.history.pushState(null, "", "/services/campaigns")}>
-                浏览竞选
-              </Button>
-            </div>
-          </section>
+          <button
+            onClick={() => navigateTo("/services/campaigns")}
+            className="mb-4 flex w-full items-center gap-4 rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 p-4 text-left text-white shadow-sm transition hover:brightness-110"
+          >
+            <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-white/20">
+              <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="size-7" fill="none">
+                <path d="M5.9 520h50l43.7 62.2h-50z" fill="#FD643A" />
+                <path d="M1009.7 357.9l8.4 24.9-26.9 22.9-8.3-24.9z" fill="#FD9E1C" />
+                <path d="M860.2 954.1H70.6c-23.6 0-42.7-19.1-42.7-42.7l64-170.7c0-23.6 19.1-42.7 42.7-42.7h682.9c23.6 0 42.7 19.1 42.7 42.7l42.7 170.7c0 23.6-19.1 42.7-42.7 42.7z" fill="#90C261" />
+                <path d="M694.9 854.7H250.2c-11.9 0-21.5-9.6-21.5-21.5s9.6-21.5 21.5-21.5h444.7c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5z" fill="#FFFFFF" />
+                <path d="M830 514L576.4 767.5c-56 56-146.8 56-202.9 0l-164-164.1c-56-56-56-146.8 0-202.9L463.1 147c56-56 146.8-56 202.9 0l164 164.1c56 56 56 146.8 0 202.9z" fill="#FD7D24" />
+                <path d="M768.5 487.1L545.3 710.2c-42 42-110.1 42-152.1 0L267.1 584.1c-42-42-42-110.1 0-152.1l223.1-223.1c42-42 110.1-42 152.1 0L768.4 335c42.1 41.9 42.1 110.1 0.1 152.1z" fill="#FFCA28" />
+                <path d="M780 638h26.2l13.1 32.7h-26.2z" fill="#FD9E1C" />
+                <path d="M530.7 548.6l-118-108.4c-7.2-7.2-19-7.2-26.2 0-7.2 7.2-7.2 18.8 0 26l104.8 121.4c7.2 7.2 23.3 2.8 30.6-4.3 7.3-7.2 16-27.6 8.8-34.7z" fill="#FFFFFF" />
+                <path d="M696.6 375.1c-7.2-7.2-19-7.2-26.2 0L478.2 548.6c-7.2 7.2-2.9 23.2 4.4 30.4 7.2 7.2 27.7 15.9 34.9 8.7l179.1-186.4c7.3-7.3 7.3-19 0-26.2z" fill="#FFFFFF" />
+              </svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold">投票竞选</span>
+              <span className="mt-0.5 block text-xs text-white/85">浏览正在进行的投票竞选，查看排名或参与投票。</span>
+            </span>
+            <ChevronRightIcon className="size-5 shrink-0 text-white/80" />
+          </button>
         ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
 

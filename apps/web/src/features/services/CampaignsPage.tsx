@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { SearchIcon } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { canAccess } from "@/lib/app-model";
 import type { AuthenticatedMe, TenantMetadata } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   type Campaign,
   type CampaignFilter,
@@ -40,7 +43,12 @@ export function CampaignsPage({
   const [total, setTotal] = useState(0);
   const [items, setItems] = useState<CampaignWithAuthor[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<CampaignWithAuthor | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectBusy, setRejectBusy] = useState(false);
+
+  function reload() {
     setLoading(true);
     const url = `/api/campaigns?filter=${filter}&page=${page}&limit=20${keyword.trim() ? `&q=${encodeURIComponent(keyword.trim())}` : ""}`;
     void api<{ items: Campaign[]; pagination: { total: number } }>(url).then((res) => {
@@ -48,7 +56,47 @@ export function CampaignsPage({
       setTotal(res.pagination.total);
       setLoading(false);
     }).catch(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    reload();
   }, [filter, page, keyword]);
+
+  async function approveCampaign(target: CampaignWithAuthor) {
+    setActingId(target.id);
+    try {
+      await api(`/api/campaigns/${encodeURIComponent(target.id)}/approve`, { method: "POST" });
+      toast.success("已通过该竞选");
+      reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "操作失败");
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  async function submitReject() {
+    if (!rejectTarget) return;
+    if (rejectReason.trim().length === 0) {
+      toast.error("必须填写拒绝理由");
+      return;
+    }
+    setRejectBusy(true);
+    try {
+      await api(`/api/campaigns/${encodeURIComponent(rejectTarget.id)}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: rejectReason.trim() }),
+      });
+      toast.success("已拒绝该竞选");
+      setRejectTarget(null);
+      setRejectReason("");
+      reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "操作失败");
+    } finally {
+      setRejectBusy(false);
+    }
+  }
 
   const pageCount = Math.max(1, Math.ceil(total / 20));
 
@@ -84,12 +132,13 @@ export function CampaignsPage({
       <div className="mt-3 grid gap-2">
         {loading ? <p className="py-6 text-center text-sm text-slate-500">正在加载…</p> : items.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">暂无竞选。</p> : items.map((item) => {
           const badge = statusBadge(item.status);
+          const showReviewActions = filter === "pending" && item.status === "pending_approval" && canReview;
           return (
-            <button
-              key={item.id}
-              onClick={() => onSelect(item)}
-              className="flex items-start gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-slate-300"
-            >
+            <div key={item.id} className="rounded-md border border-slate-200 bg-white shadow-none transition hover:border-slate-300">
+              <button
+                onClick={() => onSelect(item)}
+                className="flex w-full items-start gap-3 p-3 text-left"
+              >
               {item.coverAttachment ? <img src={item.coverAttachment.url} alt="" className="size-12 shrink-0 rounded object-cover" /> : <span className="grid size-12 shrink-0 place-items-center rounded bg-slate-100 text-xs text-slate-500">#{item.displayId}</span>}
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
@@ -100,7 +149,18 @@ export function CampaignsPage({
                 <span className="mt-1 block truncate text-sm font-medium text-slate-900">{item.title}</span>
                 <span className="mt-1 block text-xs text-slate-500">{item.options.length} 个选项 · {formatEndsAt(item.endsAt)}</span>
               </span>
-            </button>
+              </button>
+              {showReviewActions ? (
+                <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-3 py-2">
+                  <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" disabled={actingId === item.id} onClick={() => void approveCampaign(item)}>
+                    {actingId === item.id ? "通过中..." : "通过"}
+                  </Button>
+                  <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={actingId === item.id} onClick={() => setRejectTarget(item)}>
+                    拒绝
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </div>
@@ -111,6 +171,29 @@ export function CampaignsPage({
           <Button size="sm" variant="outline" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>下一页</Button>
         </div>
       ) : null}
+
+      <Dialog open={rejectTarget !== null} onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectReason(""); } }}>
+        <DialogContent className="w-[min(420px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>拒绝竞选</DialogTitle>
+            <DialogDescription>拒绝必须填写理由，发起人会收到拒绝原因。</DialogDescription>
+          </DialogHeader>
+          <div className="px-5">
+            <Textarea
+              placeholder="填写拒绝理由..."
+              value={rejectReason}
+              rows={3}
+              onChange={(event) => setRejectReason(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={rejectBusy} onClick={() => { setRejectTarget(null); setRejectReason(""); }}>取消</Button>
+            <Button variant="destructive" disabled={rejectBusy} onClick={() => void submitReject()}>
+              {rejectBusy ? "提交中..." : "确认拒绝"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
