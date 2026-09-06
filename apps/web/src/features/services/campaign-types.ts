@@ -18,6 +18,7 @@ export type Campaign = {
   displayId: number;
   title: string;
   status: CampaignStatus;
+  adminOnly: boolean;
   anonymous: boolean;
   votesPerPerson: number;
   allowStackOnOption: boolean;

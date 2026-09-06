@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Prisma } from "@campux/db";
 import type { CampuxConfig } from "@campux/config";
 import { prisma } from "../lib/prisma";
-import { requireReadyTenant } from "../lib/auth";
+import { hasTenantRole, requireReadyTenant } from "../lib/auth";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { writeAuditLog } from "../lib/audit";
 import {
@@ -151,6 +151,7 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
     }
 
     const uploadedKeys: string[] = [];
+    let committed = false;
     try {
       let cover: CampaignAttachment | null = null;
       if (body.cover) {
@@ -195,6 +196,8 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
               })),
             },
           },
+          // 嵌套 create 默认不返回关联，不带 options 会让返回序列化在 .slice() 处抛错并误删已上传对象。
+          include: { options: true },
         });
         await writeAuditLog({
           tenantId,
@@ -210,10 +213,14 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
         await deleteAttachmentObjects(config, uploadedKeys).catch(() => undefined);
         return reply.code(409).send({ message: "校园墙已暂停或归档" });
       }
+      committed = true;
       oneBot?.notifyNewCampaign(created.value.id).catch(() => undefined);
       return toCampaignListItem(created.value as unknown as CampaignRow);
     } catch (error) {
-      await deleteAttachmentObjects(config, uploadedKeys).catch(() => undefined);
+      // 只有竞选尚未落库时才清理已上传对象；落库后的任何异常都不应再删对象。
+      if (!committed) {
+        await deleteAttachmentObjects(config, uploadedKeys).catch(() => undefined);
+      }
       return reply.code(statusOf(error)).send({ message: errorMessageOf(error) });
     }
   });
@@ -223,6 +230,11 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
     const query = listQuerySchema.parse(request.query);
     const now = new Date();
     const where = buildListWhere(context.selectedTenant.id, query.filter, query.q);
+    // 「仅管理可见」竞选只对 admin 可见：普通用户（含 reviewer）的列表一律过滤。
+    const isAdmin = hasTenantRole(context.selectedMembership.role, "admin");
+    if (!isAdmin) {
+      where.adminOnly = false;
+    }
     const [total, rows] = await Promise.all([
       prisma.campaign.count({ where }),
       prisma.campaign.findMany({
@@ -247,6 +259,10 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
       include: { options: { include: { votes: { include: { voter: { select: { displayName: true, qqUin: true } } } } } } },
     });
     if (!campaign) return reply.code(404).send({ message: "竞选不存在" });
+    // 「仅管理可见」竞选仅管理员可看详情；其他人一律按不存在处理。
+    if (campaign.adminOnly && !hasTenantRole(context.selectedMembership.role, "admin")) {
+      return reply.code(404).send({ message: "竞选不存在或已下架" });
+    }
     const effectiveStatus = campaign.status === "running" && campaign.endsAt && campaign.endsAt <= new Date() ? "ended" : campaign.status;
     const myVoteAgg = await prisma.campaignVote.aggregate({
       where: { campaignId: campaign.id, voterId: context.user.id },
@@ -284,6 +300,10 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
     const body = voteBodySchema.parse(request.body ?? {});
     const campaign = await prisma.campaign.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id } });
     if (!campaign) return reply.code(404).send({ message: "竞选不存在" });
+    // 「仅管理可见」竞选仅管理员可投票。
+    if (campaign.adminOnly && !hasTenantRole(context.selectedMembership.role, "admin")) {
+      return reply.code(404).send({ message: "竞选不存在或已下架" });
+    }
     const option = await prisma.campaignOption.findFirst({ where: { id: body.optionId, campaignId: campaign.id } });
     if (!option) return reply.code(404).send({ message: "选项不存在" });
     if (campaign.status !== "running" || (campaign.endsAt && campaign.endsAt <= new Date())) {
@@ -337,6 +357,35 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
     if (!updated.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     oneBot?.notifyCampaignTakenDown(updated.value.id, context.user.id).catch(() => undefined);
     return { ok: true };
+  });
+
+  const adminOnlyBodySchema = z.object({ adminOnly: z.boolean() });
+
+  // 切换「仅管理可见」：隐藏后普通用户列表/详情/投票均不可达，管理员仍可见可操作，可再切回公开。
+  app.post("/api/campaigns/:id/admin-only", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "admin");
+    const params = paramsSchema.parse(request.params);
+    const body = adminOnlyBodySchema.parse(request.body ?? {});
+    const campaign = await prisma.campaign.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id } });
+    if (!campaign) return reply.code(404).send({ message: "竞选不存在" });
+    if (campaign.status === "taken_down") return reply.code(409).send({ message: "已下架的竞选不能切换可见性" });
+    const updated = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      const row = await transaction.campaign.update({
+        where: { id: campaign.id },
+        data: { adminOnly: body.adminOnly },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: body.adminOnly ? "campaign.admin_only.enable" : "campaign.admin_only.disable",
+        targetType: "campaign",
+        targetId: campaign.id,
+        detail: { displayId: campaign.displayId },
+      }, transaction);
+      return row;
+    });
+    if (!updated.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    return { ok: true, adminOnly: updated.value.adminOnly };
   });
 
   app.post("/api/campaigns/:id/approve", async (request, reply) => {
@@ -414,6 +463,7 @@ type CampaignRow = {
   showVoterDetails: boolean;
   durationHours: number;
   status: string;
+  adminOnly: boolean;
   rejectReason: string | null;
   startsAt: Date | null;
   endsAt: Date | null;
@@ -446,6 +496,7 @@ function toCampaignListItem(campaign: CampaignRow) {
     displayId: campaign.displayId,
     title: campaign.title,
     status: campaign.status,
+    adminOnly: campaign.adminOnly,
     anonymous: campaign.anonymous,
     votesPerPerson: campaign.votesPerPerson,
     allowStackOnOption: campaign.allowStackOnOption,

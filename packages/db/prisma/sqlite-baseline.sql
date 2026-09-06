@@ -432,6 +432,7 @@ CREATE TABLE "Campaign" (
     "showVoterDetails" BOOLEAN NOT NULL DEFAULT true,
     "durationHours" INTEGER NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'pending_approval',
+    "adminOnly" BOOLEAN NOT NULL DEFAULT false,
     "rejectReason" TEXT,
     "startsAt" DATETIME,
     "endsAt" DATETIME,

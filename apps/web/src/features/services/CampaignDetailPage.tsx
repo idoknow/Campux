@@ -45,6 +45,8 @@ export function CampaignDetailPage({
   const [rejectBusy, setRejectBusy] = useState(false);
   const [takedownBusy, setTakedownBusy] = useState(false);
   const [takedownOpen, setTakedownOpen] = useState(false);
+  const [adminOnlyOpen, setAdminOnlyOpen] = useState(false);
+  const [adminOnlyBusy, setAdminOnlyBusy] = useState(false);
 
   useEffect(() => {
     load();
@@ -132,6 +134,25 @@ export function CampaignDetailPage({
     }
   }
 
+  async function toggleAdminOnly() {
+    if (!campaign) return;
+    setAdminOnlyBusy(true);
+    try {
+      const next = !campaign.adminOnly;
+      await api(`/api/campaigns/${encodeURIComponent(campaignId)}/admin-only`, {
+        method: "POST",
+        body: JSON.stringify({ adminOnly: next }),
+      });
+      toast.success(next ? "已设为仅管理可见" : "已恢复公开可见");
+      setAdminOnlyOpen(false);
+      load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "操作失败");
+    } finally {
+      setAdminOnlyBusy(false);
+    }
+  }
+
   if (loading) return <section className="product-surface p-4 text-sm text-slate-500">正在加载…</section>;
   if (notFound) return <section className="product-surface p-4 text-sm text-slate-500">竞选不存在或已下架。</section>;
   if (!campaign) return null;
@@ -153,6 +174,7 @@ export function CampaignDetailPage({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-slate-500">#{campaign.displayId}</span>
             <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.text}</span>
+            {campaign.adminOnly ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700">仅管理可见</span> : null}
             {campaign.anonymous ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">匿名</span> : null}
             {campaign.allowStackOnOption ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">可重复投同一选项</span> : null}
           </div>
@@ -172,10 +194,16 @@ export function CampaignDetailPage({
               <span className="text-xs text-amber-700">通过后立即开始计时并通知发起人。</span>
             </div>
           ) : null}
-          {!showReviewActions && campaign.effectiveStatus === "running" && canAdmin ? (
-            <div className="mt-3 flex items-center gap-2">
-              <Button size="sm" variant="outline" className="border-rose-200 text-rose-600" onClick={() => setTakedownOpen(true)}>
-                下架竞选
+          {campaign.adminOnly ? <p className="mt-2 rounded bg-indigo-50 px-2 py-1 text-xs text-indigo-700">该竞选当前仅管理员可见，普通用户无法查看或投票。</p> : null}
+          {!showReviewActions && canAdmin && campaign.status !== "taken_down" ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {campaign.effectiveStatus === "running" ? (
+                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600" onClick={() => setTakedownOpen(true)}>
+                  下架竞选
+                </Button>
+              ) : null}
+              <Button size="sm" variant="outline" className="border-indigo-200 text-indigo-700" onClick={() => setAdminOnlyOpen(true)}>
+                {campaign.adminOnly ? "恢复公开可见" : "设为仅管理可见"}
               </Button>
             </div>
           ) : null}
@@ -318,6 +346,25 @@ export function CampaignDetailPage({
             <Button variant="outline" disabled={takedownBusy} onClick={() => setTakedownOpen(false)}>取消</Button>
             <Button variant="destructive" disabled={takedownBusy} onClick={() => void takedown()}>
               {takedownBusy ? "下架中..." : "确认下架"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={adminOnlyOpen} onOpenChange={(open) => !open && setAdminOnlyOpen(false)}>
+        <DialogContent className="w-[min(420px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>{campaign?.adminOnly ? "恢复公开可见" : "设为仅管理可见"}</DialogTitle>
+            <DialogDescription>
+              {campaign?.adminOnly
+                ? "恢复后所有用户都能查看并参与投票，确定恢复吗？"
+                : "设为仅管理可见后，普通用户将无法查看该竞选或投票，只有管理员可见。确定隐藏吗？"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={adminOnlyBusy} onClick={() => setAdminOnlyOpen(false)}>取消</Button>
+            <Button variant="destructive" disabled={adminOnlyBusy} onClick={() => void toggleAdminOnly()}>
+              {adminOnlyBusy ? "处理中..." : (campaign?.adminOnly ? "确认恢复" : "确认隐藏")}
             </Button>
           </DialogFooter>
         </DialogContent>

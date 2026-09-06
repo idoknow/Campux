@@ -148,6 +148,7 @@ export function CampaignsPage({
                   <span className="flex items-center gap-2">
                     <span className="text-xs text-slate-500">#{item.displayId}</span>
                     <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.text}</span>
+                    {item.adminOnly ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700">仅管理可见</span> : null}
                     {item.anonymous ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">匿名</span> : null}
                   </span>
                   <span className="mt-1 line-clamp-2 text-sm font-medium leading-5 text-slate-900">{item.title}</span>

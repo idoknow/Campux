@@ -134,9 +134,9 @@ export function ServicesPage({
         {metadata.enableCampaigns ? (
           <button
             onClick={() => navigateTo("/services/campaigns")}
-            className="mb-4 flex w-full items-center gap-4 rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 p-4 text-left text-white shadow-sm transition hover:brightness-110"
+            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-sky-200/70 bg-gradient-to-br from-sky-50 via-blue-50 to-pink-100 p-4 text-left shadow-sm transition hover:border-sky-300 hover:shadow-md"
           >
-            <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-white/20">
+            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
               <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="size-7" fill="none">
                 <path d="M5.9 520h50l43.7 62.2h-50z" fill="#FD643A" />
                 <path d="M1009.7 357.9l8.4 24.9-26.9 22.9-8.3-24.9z" fill="#FD9E1C" />
@@ -150,10 +150,10 @@ export function ServicesPage({
               </svg>
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block text-base font-bold">投票竞选</span>
-              <span className="mt-0.5 block text-xs text-white/85">浏览正在进行的投票竞选，查看排名或参与投票。</span>
+              <span className="block text-base font-bold text-sky-950">投票竞选</span>
+              <span className="mt-0.5 block text-xs text-sky-900/60">浏览正在进行的投票竞选，查看排名或参与投票。</span>
             </span>
-            <ChevronRightIcon className="size-5 shrink-0 text-white/80" />
+            <ChevronRightIcon className="size-5 shrink-0 text-sky-400" />
           </button>
         ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}

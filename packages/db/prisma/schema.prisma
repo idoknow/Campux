@@ -583,6 +583,7 @@ model Campaign {
   showVoterDetails      Boolean          @default(true)
   durationHours         Int
   status                CampaignStatus   @default(pending_approval)
+  adminOnly             Boolean          @default(false)
   rejectReason          String?
   startsAt              DateTime?
   endsAt                DateTime?
