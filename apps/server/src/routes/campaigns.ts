@@ -30,14 +30,14 @@ type CampaignAttachment = { key: string; url: string; fileName: string; contentT
 
 const createBodySchema = z.object({
   title: z.string().trim().min(2).max(MAX_TITLE_LENGTH),
-  cover: z.string().max(8 * 1024 * 1024).optional(),
+  cover: z.string().max(8 * 1024 * 1024).nullish(),
   anonymous: z.boolean().optional(),
   votesPerPerson: z.number().int().min(1).max(20).default(1),
   allowStackOnOption: z.boolean().default(false),
   durationHours: z.number().int().min(MIN_DURATION_HOURS).max(MAX_DURATION_HOURS),
   showVoterDetails: z.boolean().default(true),
   options: z
-    .array(z.object({ label: z.string().trim().min(1).max(40), image: z.string().max(8 * 1024 * 1024).optional() }))
+    .array(z.object({ label: z.string().trim().min(1).max(40), image: z.string().max(8 * 1024 * 1024).nullish() }))
     .min(2)
     .max(MAX_OPTIONS),
 });

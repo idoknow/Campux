@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon, BarChart3Icon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
 import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
@@ -62,6 +62,22 @@ export function BotIcon({ className }: PluginIconProps) {
       <path d="M741.4272 333.3632H325.3248c-19.8144 0-35.84 16.0256-35.84 35.84s16.0256 35.84 35.84 35.84h416.1536c19.8144 0 35.84-16.0256 35.84-35.84a35.8912 35.8912 0 0 0-35.8912-35.84zM567.3472 526.6944H330.4448c-19.8144 0-35.84 16.0256-35.84 35.84s16.0256 35.84 35.84 35.84h236.9024c19.8144 0 35.84-16.0256 35.84-35.84s-16.0768-35.84-35.84-35.84z" fill="#FEC963" />
       <path d="M517.5808 896.3072c-28.9792 0-56.4224-11.1104-77.2608-31.232l-102.0928-98.6624H259.7376c-97.1264 0-176.128-79.0016-176.128-176.128V298.7008c0-97.1264 79.0016-176.128 176.128-176.128h517.12c97.1264 0 176.128 79.0016 176.128 176.128v291.584c0 97.1264-79.0016 176.128-176.128 176.128h-75.52l-108.2368 100.3008a110.68416 110.68416 0 0 1-75.52 29.5936zM259.7376 168.6528c-71.7312 0-130.048 58.3168-130.048 130.048v291.584c0 71.7312 58.3168 130.048 130.048 130.048h87.7568c5.9904 0 11.7248 2.304 16.0256 6.4512l108.8 105.1648a64.8192 64.8192 0 0 0 45.2608 18.2784c16.4864 0 32.1536-6.144 44.2368-17.3568l114.8416-106.4448c4.2496-3.9424 9.8304-6.144 15.6672-6.144h84.5312c71.7312 0 130.048-58.3168 130.048-130.048V298.7008c0-71.7312-58.3168-130.048-130.048-130.048h-517.12z" fill="#474747" />
       <path d="M731.4944 372.4288H315.3408c-12.7488 0-23.04-10.2912-23.04-23.04s10.2912-23.04 23.04-23.04h416.1536a23.04 23.04 0 0 1 0 46.08zM557.3632 565.76H320.4608c-12.7488 0-23.04-10.2912-23.04-23.04s10.2912-23.04 23.04-23.04h236.9024c12.7488 0 23.04 10.2912 23.04 23.04s-10.2912 23.04-23.04 23.04z" fill="#474747" />
+    </svg>
+  );
+}
+
+export function CampaignsIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className}>
+      <path d="M5.9 520h50l43.7 62.2h-50z" fill="#FD643A" />
+      <path d="M1009.7 357.9l8.4 24.9-26.9 22.9-8.3-24.9z" fill="#FD9E1C" />
+      <path d="M860.2 954.1H70.6c-23.6 0-42.7-19.1-42.7-42.7l64-170.7c0-23.6 19.1-42.7 42.7-42.7h682.9c23.6 0 42.7 19.1 42.7 42.7l42.7 170.7c0 23.6-19.1 42.7-42.7 42.7z" fill="#90C261" />
+      <path d="M694.9 854.7H250.2c-11.9 0-21.5-9.6-21.5-21.5s9.6-21.5 21.5-21.5h444.7c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5z" fill="#FFFFFF" />
+      <path d="M830 514L576.4 767.5c-56 56-146.8 56-202.9 0l-164-164.1c-56-56-56-146.8 0-202.9L463.1 147c56-56 146.8-56 202.9 0l164 164.1c56 56 56 146.8 0 202.9z" fill="#FD7D24" />
+      <path d="M768.5 487.1L545.3 710.2c-42 42-110.1 42-152.1 0L267.1 584.1c-42-42-42-110.1 0-152.1l223.1-223.1c42-42 110.1-42 152.1 0L768.4 335c42.1 41.9 42.1 110.1 0.1 152.1z" fill="#FFCA28" />
+      <path d="M780 638h26.2l13.1 32.7h-26.2z" fill="#FD9E1C" />
+      <path d="M530.7 548.6l-118-108.4c-7.2-7.2-19-7.2-26.2 0-7.2 7.2-7.2 18.8 0 26l104.8 121.4c7.2 7.2 23.3 2.8 30.6-4.3 7.3-7.2 16-27.6 8.8-34.7z" fill="#FFFFFF" />
+      <path d="M696.6 375.1c-7.2-7.2-19-7.2-26.2 0L478.2 548.6c-7.2 7.2-2.9 23.2 4.4 30.4 7.2 7.2 27.7 15.9 34.9 8.7l179.1-186.4c7.3-7.3 7.3-19 0-26.2z" fill="#FFFFFF" />
     </svg>
   );
 }
@@ -645,7 +661,7 @@ const PLUGINS: PluginDescriptor[] = [
   },
   {
     id: "campaigns",
-    icon: BarChart3Icon,
+    icon: CampaignsIcon,
     name: "投票竞选",
     tagline: "Campaigns",
     description: "发起投票竞选，审核通过后在服务页公开投票",
