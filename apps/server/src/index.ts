@@ -20,6 +20,7 @@ import { registerQZonePostMetricScheduler, registerQZonePostMetricWorker } from 
 import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapshots";
 import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-comments";
 import { registerBatchFlushSweeper, stopBatchFlushSweeper } from "./runtime/publish-batching";
+import { startCampaignScheduler } from "./runtime/campaign-scheduler";
 import { registerTelemetryReporter } from "./runtime/telemetry";
 import { prisma } from "./lib/prisma";
 import { registerAdminRoutes } from "./routes/admin";
@@ -32,6 +33,7 @@ import { registerOAuthRoutes } from "./routes/oauth";
 import { registerOneBotRoutes } from "./routes/onebot";
 import { registerPostRoutes } from "./routes/posts";
 import { registerPostTagRoutes } from "./routes/post-tags";
+import { registerCampaignRoutes } from "./routes/campaigns";
 import { registerReviewRoutes } from "./routes/review";
 import { registerSetupRoutes } from "./routes/setup";
 import { registerStatsRoutes } from "./routes/stats";
@@ -115,6 +117,7 @@ registerAdminRoutes(app, queue, oneBot);
 registerBotRoutes(app, queue);
 registerPostRoutes(app, config, queue, oneBot);
 registerPostTagRoutes(app);
+registerCampaignRoutes(app, config, oneBot);
 registerReviewRoutes(app, queue, oneBot);
 registerSvgRoutes(app);
 registerStatsRoutes(app);
@@ -174,6 +177,7 @@ const stopPostTagMaintenanceScheduler = registerPostTagMaintenanceScheduler({ lo
 const stopTelemetryReporter = registerTelemetryReporter({ logger: app.log, config });
 const stopFailedPublishAttemptRepublisher = registerFailedPublishAttemptRepublisher(queue, app.log);
 registerBatchFlushSweeper(queue, app.log);
+const stopCampaignScheduler = startCampaignScheduler();
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();
@@ -185,6 +189,7 @@ app.addHook("onClose", async () => {
   stopTelemetryReporter();
   stopFailedPublishAttemptRepublisher();
   stopBatchFlushSweeper();
+  stopCampaignScheduler();
 });
 
 await app.listen({

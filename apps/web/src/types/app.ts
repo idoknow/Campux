@@ -136,6 +136,12 @@ export type TenantMetadata = {
   availableTextColors: PluginColorPreset[];
   /** 匿名头像插件配置的头像池：id 为持久标识符，svg 为 data URL（内置头像由服务端解析） */
   availableAvatars: Array<{ id: string; svg: string; label: string }>;
+  /** 投票竞选插件是否启用；关闭时投稿胶囊与服务页入口全部隐藏 */
+  enableCampaigns: boolean;
+  /** 投票竞选插件是否允许匿名发起；插件关闭时为 false */
+  allowAnonymousCampaign: boolean;
+  /** 每个用户最多同时进行的竞选数（待审核 + 进行中）；插件关闭时为 0 */
+  maxActiveCampaignsPerUser: number;
 };
 
 export type BotMessageTypeConfig = {
@@ -183,6 +189,13 @@ export type TenantPluginConfig = {
   botStylishMessages: {
     enabled: boolean;
     messageTypes: BotMessageTypeConfig[];
+  };
+  campaigns: {
+    enabled: boolean;
+    /** 是否允许匿名发起竞选 */
+    allowAnonymousCreate: boolean;
+    /** 每个用户最多同时在进行的竞选数（待审核 + 进行中），默认 1 */
+    maxActivePerUser: number;
   };
 };
 export type PostAttachment = {

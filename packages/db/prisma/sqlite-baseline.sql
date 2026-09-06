@@ -7,6 +7,7 @@ CREATE TABLE "Tenant" (
     "status" TEXT NOT NULL DEFAULT 'active',
     "themeColor" TEXT NOT NULL DEFAULT '#e0574f',
     "nextPostDisplayId" INTEGER NOT NULL DEFAULT 1,
+    "nextCampaignDisplayId" INTEGER NOT NULL DEFAULT 1,
     "readyAt" DATETIME,
     "archiveWarningAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -418,6 +419,56 @@ CREATE TABLE "AuditLog" (
 );
 
 -- CreateTable
+CREATE TABLE "Campaign" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "displayId" INTEGER NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "coverAttachment" JSONB,
+    "anonymous" BOOLEAN NOT NULL DEFAULT false,
+    "votesPerPerson" INTEGER NOT NULL DEFAULT 1,
+    "allowStackOnOption" BOOLEAN NOT NULL DEFAULT false,
+    "showVoterDetails" BOOLEAN NOT NULL DEFAULT true,
+    "durationHours" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending_approval',
+    "rejectReason" TEXT,
+    "startsAt" DATETIME,
+    "endsAt" DATETIME,
+    "takenDownAt" DATETIME,
+    "takenDownById" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Campaign_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Campaign_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CampaignOption" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "campaignId" TEXT,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "label" TEXT NOT NULL,
+    "imageAttachment" JSONB,
+    "voteTotal" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CampaignOption_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CampaignVote" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "campaignId" TEXT NOT NULL,
+    "optionId" TEXT NOT NULL,
+    "voterId" TEXT NOT NULL,
+    "count" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CampaignVote_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CampaignVote_optionId_fkey" FOREIGN KEY ("optionId") REFERENCES "CampaignOption" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CampaignVote_voterId_fkey" FOREIGN KEY ("voterId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "TenantAiSettings" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
@@ -623,6 +674,30 @@ CREATE INDEX "AuditLog_actorId_createdAt_idx" ON "AuditLog"("actorId", "createdA
 
 -- CreateIndex
 CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "Campaign_tenantId_status_endsAt_idx" ON "Campaign"("tenantId", "status", "endsAt");
+
+-- CreateIndex
+CREATE INDEX "Campaign_tenantId_authorId_status_idx" ON "Campaign"("tenantId", "authorId", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Campaign_tenantId_displayId_key" ON "Campaign"("tenantId", "displayId");
+
+-- CreateIndex
+CREATE INDEX "CampaignOption_campaignId_idx" ON "CampaignOption"("campaignId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CampaignOption_campaignId_sortOrder_key" ON "CampaignOption"("campaignId", "sortOrder");
+
+-- CreateIndex
+CREATE INDEX "CampaignVote_campaignId_voterId_idx" ON "CampaignVote"("campaignId", "voterId");
+
+-- CreateIndex
+CREATE INDEX "CampaignVote_optionId_idx" ON "CampaignVote"("optionId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CampaignVote_campaignId_voterId_optionId_key" ON "CampaignVote"("campaignId", "voterId", "optionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TenantAiSettings_tenantId_key" ON "TenantAiSettings"("tenantId");

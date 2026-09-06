@@ -51,6 +51,9 @@ export const defaultMetadata: TenantMetadata = {
   availableBgColors: [],
   availableTextColors: [],
   availableAvatars: [],
+  enableCampaigns: false,
+  allowAnonymousCampaign: false,
+  maxActiveCampaignsPerUser: 0,
 };
 
 export const navItems = [

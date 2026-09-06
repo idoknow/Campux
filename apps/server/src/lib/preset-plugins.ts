@@ -1,9 +1,9 @@
 /**
  * 预设插件元数据。
  *
- * 5 个租户级预设插件（Markdown 渲染 / 多彩投稿 / 字体选择 / 匿名头像 / Bot 多彩消息）
+ * 6 个租户级预设插件（Markdown 渲染 / 多彩投稿 / 字体选择 / 匿名头像 / Bot 多彩消息 / 投票竞选）
  * 已经存在 tenant_metadata.plugin_config 里，不作为 CampuxPlugin 实例注册进 pluginRegistry。
- * 每个租户的「已注册插件」= registry 已注册插件 + 5 个预设插件；
+ * 每个租户的「已注册插件」= registry 已注册插件 + 6 个预设插件；
  * 预设插件的「已启用」= plugin_config.*.enabled === true。
  *
  * 服务端 GET /api/admin/plugins 会把预设插件合入返回，PATCH /api/admin/plugins/:name/status
@@ -17,7 +17,8 @@ export type PresetPluginId =
   | "colorSelection"
   | "fontSelection"
   | "anonymousAvatar"
-  | "botStylishMessages";
+  | "botStylishMessages"
+  | "campaigns";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -76,6 +77,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "events:emit", "events:listen"],
     riskLevel: "low",
     rationale: "仅写入 tenant_metadata.plugin_config；事件只在本租户内。",
+  },
+  {
+    id: "campaigns",
+    name: "campux-plugin-campaigns",
+    version: "1.0.0",
+    description: "投票竞选：投稿页发起投票竞选，经审核群/网页审核通过后在服务页公开投票",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data", "events:emit"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页新增发起入口与服务页浏览入口；竞选内容、投票明细与发起人 QQ 私聊均接入 tenant 数据。",
   },
 ];
 

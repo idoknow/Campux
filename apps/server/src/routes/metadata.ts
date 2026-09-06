@@ -145,6 +145,9 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     availableBgColors: [] as Array<{ value: string; label: string; hex: string }>,
     availableTextColors: [] as Array<{ value: string; label: string; hex: string }>,
     availableAvatars: [] as Array<{ id: string; svg: string; label: string }>,
+    enableCampaigns: false,
+    allowAnonymousCampaign: false,
+    maxActiveCampaignsPerUser: 0,
   };
 }
 
@@ -219,6 +222,13 @@ async function readPublicMetadata(tenantId: string) {
         : readSvgAvatarDataUrl(item.id) ?? "";
       return { id: item.id, svg, label };
     });
+    // 投票竞选插件：三项均为后端真实值，前端不做 fallback；
+    // 插件未启用时名额下发 0，投稿页与服务页入口都隐藏。
+    metadata.enableCampaigns = pluginConfig.campaigns.enabled;
+    metadata.allowAnonymousCampaign = pluginConfig.campaigns.enabled && pluginConfig.campaigns.allowAnonymousCreate;
+    metadata.maxActiveCampaignsPerUser = pluginConfig.campaigns.enabled
+      ? pluginConfig.campaigns.maxActivePerUser
+      : 0;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

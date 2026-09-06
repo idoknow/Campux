@@ -14,6 +14,7 @@ import { LoadingBlock } from "@/components/app/utility";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
+import { CampaignCreateForm } from "./CampaignCreateForm";
 
 export function PostPage({
   busy,
@@ -66,6 +67,7 @@ export function PostPage({
   const bgColors = metadata.availableBgColors ?? [];
   const textColors = metadata.availableTextColors ?? [];
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
+  const [postMode, setPostMode] = useState<"post" | "campaign">("post");
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
@@ -113,7 +115,34 @@ export function PostPage({
           <p className="min-w-0 whitespace-pre-wrap break-words">{metadata.banner}</p>
         </div>
       ) : null}
-
+      {metadata.enableCampaigns ? (
+        <div className="mb-3 flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-sm">
+          <button
+            className={`rounded-full px-3 py-1.5 ${postMode === "post" ? "bg-slate-900 text-white" : "text-slate-600"}`}
+            onClick={() => setPostMode("post")}
+          >
+            投稿
+          </button>
+          <button
+            className={`rounded-full px-3 py-1.5 ${postMode === "campaign" ? "bg-slate-900 text-white" : "text-slate-600"}`}
+            onClick={() => setPostMode("campaign")}
+          >
+            发起竞选
+          </button>
+        </div>
+      ) : null}
+      {metadata.enableCampaigns && postMode === "campaign" ? (
+        <CampaignCreateForm
+          metadata={metadata}
+          onSuccess={() => {
+            window.history.pushState(null, "", "/services/campaigns?filter=pending");
+            window.dispatchEvent(new PopStateEvent("popstate"));
+            setPostMode("post");
+          }}
+          onCancel={() => setPostMode("post")}
+        />
+      ) : (
+        <>
       <section className="product-surface p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
@@ -393,7 +422,8 @@ export function PostPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
+      </>
+      )}
     </div>
   );
 }

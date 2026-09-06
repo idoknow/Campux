@@ -14,6 +14,7 @@ import {
   refreshQZoneCookiesViaBot,
   registerUserViaBot,
   requireBotTenantRole,
+  reviewCampaignViaBot,
   reviewPostViaBot,
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
@@ -2500,6 +2501,70 @@ export class OneBotRuntime {
     return { post };
   }
 
+  // 竞选相关通知：审核群与私信均走现有 review 通道。
+  async notifyNewCampaign(campaignId: string) {
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { author: true },
+    });
+    if (!campaign) return;
+    const bots = await prisma.botAccount.findMany({
+      where: { tenantId: campaign.tenantId, enabled: true, reviewGroupId: { not: null } },
+      orderBy: { createdAt: "asc" },
+    });
+    const text = `竞选 #${campaign.displayId} 「${campaign.title}」待审核，可用 #投票通过 ${campaign.displayId} 或 #投票拒绝 <理由> ${campaign.displayId} 处理。`;
+    for (const bot of bots) {
+      if (!bot.reviewGroupId) continue;
+      const status = this.getBotConnectionStatus(bot.qqUin.toString());
+      if (!status.online) continue;
+      try {
+        await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, text);
+      } catch (error) {
+        this.logger.warn({ botId: bot.id, error }, "failed to notify review group for campaign");
+      }
+    }
+    if (!campaign.anonymous && campaign.author) {
+      void this.sendPrivateMessageViaTenantBots(campaign.tenantId, campaign.author.qqUin, `你发起的竞选 #${campaign.displayId}「${campaign.title}」已进入审核队列。`);
+    }
+  }
+
+  async notifyCampaignApproved(campaignId: string) {
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { author: true },
+    });
+    if (!campaign) return;
+    if (!campaign.anonymous && campaign.author) {
+      void this.sendPrivateMessageViaTenantBots(campaign.tenantId, campaign.author.qqUin, `你的竞选 #${campaign.displayId}「${campaign.title}」已通过审核，开始计时并开放投票。`);
+    }
+  }
+
+  async notifyCampaignRejected(campaignId: string, reason: string | null) {
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { author: true },
+    });
+    if (!campaign) return;
+    if (!campaign.anonymous && campaign.author) {
+      const text = reason
+        ? `你的竞选 #${campaign.displayId}「${campaign.title}」未通过审核。理由：${reason}`
+        : `你的竞选 #${campaign.displayId}「${campaign.title}」未通过审核。`;
+      void this.sendPrivateMessageViaTenantBots(campaign.tenantId, campaign.author.qqUin, text);
+    }
+  }
+
+  async notifyCampaignTakenDown(campaignId: string, adminId: string) {
+    void adminId;
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { author: true },
+    });
+    if (!campaign) return;
+    if (!campaign.anonymous && campaign.author) {
+      void this.sendPrivateMessageViaTenantBots(campaign.tenantId, campaign.author.qqUin, `你的竞选 #${campaign.displayId}「${campaign.title}」已被管理员下架，不再接受投票。`);
+    }
+  }
+
   private async handleGroupMessage(event: OneBotMessageEvent) {
     const botQqUin = normalizeId(event.self_id);
     const groupId = normalizeId(event.group_id);
@@ -2566,6 +2631,52 @@ export class OneBotRuntime {
         for (const message of formatReviewQueueMessages(queueSnapshot.items, new Date(), queueSnapshot.hiddenCount)) {
           await this.sendGroupMessage(botQqUin, groupId, message);
         }
+        return;
+      }
+
+      if (command.name === "投票通过") {
+        const displayId = parseDisplayId(command.args);
+        if (!displayId) {
+          await this.sendGroupMessage(botQqUin, groupId, "用法：#投票通过 <竞选编号>");
+          return;
+        }
+        const result = await reviewCampaignViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          displayId,
+          action: "approve",
+        });
+        await this.sendGroupMessage(botQqUin, groupId, `竞选 #${result.campaign.displayId} 已通过，开始开放投票。`);
+        this.notifyCampaignApproved(result.campaign.id).catch(() => undefined);
+        return;
+      }
+
+      if (command.name === "投票拒绝") {
+        const args = command.args.trim();
+        const tailMatch = args.match(/^(.*?)\s+(\d+)\s*$/);
+        if (!tailMatch || !tailMatch[1] || !tailMatch[2]) {
+          await this.sendGroupMessage(botQqUin, groupId, "用法：#投票拒绝 <理由> <竞选编号>");
+          return;
+        }
+        const comment = tailMatch[1].trim();
+        if (!comment) {
+          await this.sendGroupMessage(botQqUin, groupId, "拒绝必须填写理由");
+          return;
+        }
+        const displayId = Number(tailMatch[2]);
+        const result = await reviewCampaignViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          displayId,
+          action: "reject",
+          comment,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, `竞选 #${result.campaign.displayId} 已拒绝`);
+        this.notifyCampaignRejected(result.campaign.id, comment).catch(() => undefined);
         return;
       }
 

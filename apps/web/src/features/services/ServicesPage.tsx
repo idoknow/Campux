@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { toast } from "sonner";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
@@ -9,6 +9,29 @@ import type { AuthenticatedMe, TenantMetadata } from "@/types/app";
 import { LoadingBlock } from "@/components/app/utility";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CampaignsPage } from "./CampaignsPage";
+import { CampaignDetailPage } from "./CampaignDetailPage";
+import type { Campaign, CampaignFilter } from "./campaign-types";
+
+function parseCampaignRoute(pathname: string, search: string) {
+  if (!pathname.startsWith("/services/campaigns")) return null;
+  const suffix = pathname.slice("/services/campaigns".length);
+  const detailMatch = /^\/([^/?#]+)$/.exec(suffix);
+  if (detailMatch) {
+    return { view: "detail" as const, campaignId: decodeURIComponent(detailMatch[1] as string) };
+  }
+  const params = new URLSearchParams(search);
+  const rawFilter = params.get("filter");
+  const rawKeyword = params.get("q");
+  const filter: CampaignFilter | undefined = rawFilter && (rawFilter === "active" || rawFilter === "ending_soon" || rawFilter === "ended" || rawFilter === "pending") ? rawFilter : undefined;
+  return {
+    view: "list" as const,
+    filter,
+    keyword: rawKeyword ?? undefined,
+  };
+}
+
+
 
 type ServiceAction = "profile" | "password" | "rules" | "";
 
@@ -46,9 +69,40 @@ export function ServicesPage({
   loading: boolean;
   onProfileSaved: () => Promise<void>;
 }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const sync = () => setTick((n) => n + 1);
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+  // Force re-read of window.location on each tick (used by pushState-driven navigation)
+  void tick;
+  const campaignRoute = parseCampaignRoute(window.location.pathname, window.location.search);
   const { accountServices, campusServices } = buildServiceEntries(metadata.services);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
+
+  if (campaignRoute && campaignRoute.view === "detail") {
+    return (
+      <CampaignDetailPage
+        campaignId={campaignRoute.campaignId}
+        me={me}
+        metadata={metadata}
+        onBack={() => { window.history.pushState(null, "", "/services/campaigns"); }}
+      />
+    );
+  }
+  if (campaignRoute && campaignRoute.view === "list") {
+    return (
+      <CampaignsPage
+        me={me}
+        metadata={metadata}
+        initialFilter={campaignRoute.filter}
+        initialKeyword={campaignRoute.keyword}
+        onSelect={(campaign: Campaign) => { window.history.pushState(null, "", `/services/campaigns/${encodeURIComponent(campaign.id)}`); }}
+      />
+    );
+  }
 
   function openService(service: TenantMetadata["services"][number]) {
     if (service.url) {
@@ -71,7 +125,21 @@ export function ServicesPage({
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+        {metadata.enableCampaigns ? (
+          <section className="product-surface p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">投票竞选</h2>
+                <p className="mt-0.5 text-xs text-slate-500">浏览或发起当前校园墙的投票竞选。</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => window.history.pushState(null, "", "/services/campaigns")}>
+                浏览竞选
+              </Button>
+            </div>
+          </section>
+        ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
+
         <section className="product-surface p-4">
           <ServiceGroup title="账户设置" description="管理你在当前校园墙里的基本账号信息。">
             {accountServices.map((service, index) => (

@@ -9,7 +9,6 @@ datasource db {
 }
 
 
-
 enum TenantStatus {
   active
   paused
@@ -57,6 +56,15 @@ enum PublishBatchStatus {
   failed
 }
 
+// 竞选状态机与稿件完全分离：待审核通过后才开始计时，进行中到点自动转结束。
+enum CampaignStatus {
+  pending_approval
+  rejected
+  running
+  ended
+  taken_down
+}
+
 model Tenant {
   id             String             @id @default(uuid())
   slug           String             @unique
@@ -65,6 +73,7 @@ model Tenant {
   status         TenantStatus       @default(active)
   themeColor     String             @default("#e0574f")
   nextPostDisplayId Int                @default(1)
+  nextCampaignDisplayId Int            @default(1)
   readyAt        DateTime?
   archiveWarningAt DateTime?
   createdAt      DateTime           @default(now())
@@ -76,6 +85,7 @@ model Tenant {
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens OAuthAccessToken[]
   posts          Post[]
+  campaigns      Campaign[]
   postTags       PostTag[]
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
@@ -99,7 +109,9 @@ model User {
   createdAt   DateTime           @default(now())
   memberships TenantMembership[]
   posts       Post[]
+  campaigns   Campaign[]
   sessions    AccountSession[]
+  campaignVotes CampaignVote[]
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
@@ -556,6 +568,68 @@ model AuditLog {
   @@index([tenantId, createdAt])
   @@index([actorId, createdAt])
   @@index([action, createdAt])
+}
+
+// 投票竞选：独立于 Post 的租户级活动，编号（displayId）与稿件完全分开。
+model Campaign {
+  id                    String           @id @default(uuid())
+  tenantId              String
+  displayId             Int
+  authorId              String
+  title                 String
+  coverAttachment       Json?
+  anonymous             Boolean          @default(false)
+  votesPerPerson        Int              @default(1)
+  allowStackOnOption    Boolean          @default(false)
+  showVoterDetails      Boolean          @default(true)
+  durationHours         Int
+  status                CampaignStatus   @default(pending_approval)
+  rejectReason          String?
+  startsAt              DateTime?
+  endsAt                DateTime?
+  takenDownAt           DateTime?
+  takenDownById         String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author                User             @relation(fields: [authorId], references: [id])
+  options               CampaignOption[]
+  votes                 CampaignVote[]
+
+  @@unique([tenantId, displayId])
+  @@index([tenantId, status, endsAt])
+  @@index([tenantId, authorId, status])
+}
+
+model CampaignOption {
+  id                String     @id @default(uuid())
+  campaignId        String?
+  sortOrder         Int        @default(0)
+  label             String
+  imageAttachment   Json?
+  voteTotal         Int        @default(0)
+  createdAt         DateTime   @default(now())
+  campaign          Campaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  votes             CampaignVote[]
+
+  @@unique([campaignId, sortOrder])
+  @@index([campaignId])
+}
+
+model CampaignVote {
+  id          String   @id @default(uuid())
+  campaignId  String
+  optionId    String
+  voterId     String
+  count       Int
+  createdAt   DateTime @default(now())
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  option      CampaignOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  voter       User?    @relation(fields: [voterId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, voterId, optionId])
+  @@index([campaignId, voterId])
+  @@index([optionId])
 }
 
 model TenantAiSettings {

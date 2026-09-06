@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon, BarChart3Icon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
 import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
@@ -66,7 +66,7 @@ export function BotIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -130,6 +130,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   fontSelection: "campux-plugin-font-selection",
   anonymousAvatar: "campux-plugin-anonymous-avatar",
   botStylishMessages: "campux-plugin-bot-stylish-messages",
+  campaigns: "campux-plugin-campaigns",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -196,6 +197,44 @@ function ColorPresetEditor({ title, hint, values, max, disabled, onChange }: { t
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CampaignsPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  const setMaxActive = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    // 名额下限 1（保证已发布的竞选仍可重新发起），上限与后端 zod 一致。
+    const next = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 1;
+    onChange({ ...config, campaigns: { ...config.campaigns, maxActivePerUser: next } });
+  };
+
+  return (
+    <div className="space-y-4">
+      <SwitchField
+        title="允许匿名发起"
+        description="开启后，发起竞选时可选择匿名（展示内容不包含发起人身份）。"
+        checked={config.campaigns.allowAnonymousCreate}
+        disabled={busy}
+        onChange={(value) => onChange({ ...config, campaigns: { ...config.campaigns, allowAnonymousCreate: value } })}
+      />
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-slate-900">每个用户最多同时进行的竞选</p>
+            <p className="text-xs leading-5 text-slate-500">统计「待审核 + 进行中」的竞选；已结束、已拒绝、已下架不占名额。默认 1。</p>
+          </div>
+          <Input
+            type="number"
+            min={1}
+            max={50}
+            value={config.campaigns.maxActivePerUser}
+            disabled={busy}
+            onChange={(event) => setMaxActive(event.target.value)}
+            className="w-20 text-right"
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -604,6 +643,39 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, botStylishMessages: { ...config.botStylishMessages, enabled: value } }),
     render: (config, onChange, busy) => <BotStylishPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "campaigns",
+    icon: BarChart3Icon,
+    name: "投票竞选",
+    tagline: "Campaigns",
+    description: "发起投票竞选，审核通过后在服务页公开投票",
+    detailedDescription:
+      "本插件新增「投票竞选」能力：作者在投稿页顶部的胶囊导航中切换到「投票」发起竞选，管理员/审核员通过审核群指令或网页审核后开始计时，参与者在服务页的投票竞选入口查看与投票。\n\n" +
+      "发起参数：\n" +
+      "· 标题与可选封面图；配置开启「允许匿名发起」时才展示匿名选项。\n" +
+      "· 至少 2 个选项，每个选项可选配图。\n" +
+      "· 「每人对每个选项可投多票」关闭时每人 1 票且不展示票数字段；打开后填写每人总票数，可拆到多个选项也可叠在同一选项。\n" +
+      "· 竞选时长最短 12 小时、最长 365 天，审核通过后才开始计时。\n" +
+      "· 「可见谁投了谁」默认开启；关闭后隐藏每人明细，选项总票数与排名仍展示。\n\n" +
+      "审核与通知：\n" +
+      "· 竞选使用与稿件分开的独立编号（竞选#N），审核通知发到同一审核群，文案与指令均与稿件区分。\n" +
+      "· 审核员可用 #投票通过 <编号> / #投票拒绝 <理由> <编号> 处理；网页端在服务 → 投票竞选 → 审核中操作，拒绝必填理由。\n" +
+      "· 通过后私聊发起者并发 QQ 空间；拒绝与下架均私聊告知。\n\n" +
+      "管理：\n" +
+      "· 下方可配置是否允许匿名发起，以及每个用户最多同时在进行的竞选数（统计待审核 + 进行中）。\n" +
+      "· 管理员可随时下架进行中的竞选。插件禁用后入口与页面全部隐藏，进行中的竞选不再接受投票。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "与稿件分开的独立编号与审核队列。",
+    accent: "from-blue-500 to-violet-500",
+    bgTint: "bg-blue-50 text-blue-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data", "events:emit"],
+    riskLevel: "medium",
+    rationale: "开启后新增发起与投票入口；竞选内容、投票明细与发起人私聊均接入租户与用户数据。",
+    enabled: (config) => config.campaigns.enabled,
+    setEnabled: (config, value) => ({ ...config, campaigns: { ...config.campaigns, enabled: value } }),
+    render: (config, onChange, busy) => <CampaignsPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
 
 function ensureBotMessageDefaults(config: TenantPluginConfig): TenantPluginConfig {
@@ -650,6 +722,12 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     botStylishMessages: {
       enabled: metadata.botStylishMessagesEnabled ?? false,
       messageTypes: [],
+    },
+    campaigns: {
+      enabled: metadata.enableCampaigns ?? false,
+      allowAnonymousCreate: metadata.allowAnonymousCampaign ?? false,
+      // 插件关闭时后端下发 0，初始化为 1 以免新建租户保存后直接变为 0。
+      maxActivePerUser: metadata.maxActiveCampaignsPerUser && metadata.maxActiveCampaignsPerUser > 0 ? metadata.maxActiveCampaignsPerUser : 1,
     },
   };
 }

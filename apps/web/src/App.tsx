@@ -22,12 +22,16 @@ import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
 import { SetupWizard } from "@/features/onboarding/SetupWizard";
 import { WallStatusScreen } from "@/features/onboarding/WallStatusScreen";
 import { AppShell } from "@/features/shell/AppShell";
+import { CampaignsPage } from "@/features/services/CampaignsPage";
+import { CampaignDetailPage } from "@/features/services/CampaignDetailPage";
 
 type AppRoute =
   | { kind: "tenant"; tab: MainTab; subTab?: AdminTab | PostsTab }
   | { kind: "login"; returnTo?: string }
   | { kind: "tenants" | "ops" }
-  | { kind: "oauth"; search: string };
+  | { kind: "oauth"; search: string }
+  | { kind: "campaigns"; filter?: string | undefined; keyword?: string | undefined }
+  | { kind: "campaign-detail"; campaignId: string };
 
 type SelectTenantResponse = {
   ok: true;
@@ -90,7 +94,9 @@ export function App() {
   const [route, setRoute] = useState<AppRoute>(() => routeFromPath(window.location.pathname));
   const [activeTab, setActiveTabState] = useState<MainTab>(() => {
     const initialRoute = routeFromPath(window.location.pathname);
-    return initialRoute.kind === "tenant" ? initialRoute.tab : "post";
+    if (initialRoute.kind === "tenant") return initialRoute.tab;
+    if (initialRoute.kind === "campaigns" || initialRoute.kind === "campaign-detail") return "services";
+    return "post";
   });
   const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
   const [oauthClientResponse, setOAuthClientResponse] = useState<OAuthAuthorizeClientResponse | null>(null);
@@ -105,6 +111,7 @@ export function App() {
   const [postTextColor, setPostTextColor] = useState<string>("");
   const [postFont, setPostFont] = useState<string>("");
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
+  const [locationKey, setLocationKey] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const submissionBusyRef = useRef(false);
@@ -291,6 +298,7 @@ export function App() {
     const syncRoute = () => {
       const nextRoute = routeFromPath(window.location.pathname);
       setRoute(nextRoute);
+      setLocationKey((key) => key + 1);
       if (nextRoute.kind === "tenant") {
         setActiveTabState(nextRoute.tab);
       }
@@ -747,6 +755,19 @@ function routeFromPath(pathname: string): AppRoute {
   if (normalized === "/oauth/authorize") {
     return { kind: "oauth", search: window.location.search };
   }
+  if (normalized.startsWith("/services/campaigns")) {
+    const suffix = normalized.slice("/services/campaigns".length);
+    const detailMatch = /^\/([^/?#]+)$/.exec(suffix);
+    if (detailMatch) {
+      return { kind: "campaign-detail", campaignId: decodeURIComponent(detailMatch[1] as string) };
+    }
+    const params = new URLSearchParams(window.location.search);
+    const filter = params.get("filter") ?? undefined;
+    const keyword = params.get("q") ?? undefined;
+    return filter || keyword
+      ? { kind: "campaigns", filter, keyword }
+      : { kind: "campaigns" };
+  }
 
   // Note: "/posts" (the bare posts path) intentionally resolves without an
   // explicit subTab so the default tab can be role-aware (reviewers land on the
@@ -790,6 +811,16 @@ function pathFromRoute(route: AppRoute) {
   }
   if (route.kind === "oauth") {
     return `/oauth/authorize${route.search}`;
+  }
+  if (route.kind === "campaigns") {
+    const params = new URLSearchParams();
+    if (route.filter) params.set("filter", route.filter);
+    if (route.keyword) params.set("q", route.keyword);
+    const qs = params.toString();
+    return `/services/campaigns${qs ? `?${qs}` : ""}`;
+  }
+  if (route.kind === "campaign-detail") {
+    return `/services/campaigns/${encodeURIComponent(route.campaignId)}`;
   }
   if (route.kind === "login") {
     return route.returnTo ? buildLoginPathWithReturnTo(route.returnTo) : "/login";

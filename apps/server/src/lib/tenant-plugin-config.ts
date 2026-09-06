@@ -71,6 +71,15 @@ export const tenantPluginConfigSchema = z.object({
         .default([]),
     })
     .default({ enabled: false, messageTypes: [] }),
+  // 投票竞选：开启后投稿页出现「投票」胶囊与服务页入口；
+  // allowAnonymousCreate 关闭时不展示匿名发起开关，maxActivePerUser 统计「待审核 + 进行中」。
+  campaigns: z
+    .object({
+      enabled: z.boolean(),
+      allowAnonymousCreate: z.boolean(),
+      maxActivePerUser: z.number().int().min(1).max(50),
+    })
+    .default({ enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -84,6 +93,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   fontSelection: { enabled: false, fonts: [] },
   anonymousAvatar: { enabled: false, items: [] },
   botStylishMessages: { enabled: false, messageTypes: [] },
+  campaigns: { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {

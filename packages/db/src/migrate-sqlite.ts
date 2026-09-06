@@ -20,6 +20,7 @@ const SQLITE_BASELINE_NAME = "0_sqlite_baseline";
 const FIRST_PRIVATE_MESSAGE_MIGRATION_NAME = "20260713120000_auto_register_on_first_private_message";
 const LAST_PUBLISH_STARTED_AT_MIGRATION_NAME = "20260724090000_add_bot_last_publish_started_at";
 const REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME = "20260815120000_add_bot_review_queue_reminder_at_all";
+const VOTING_CAMPAIGNS_MIGRATION_NAME = "20260906120000_add_voting_campaigns";
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
 const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
@@ -271,6 +272,60 @@ function applyReviewQueueReminderAtAllSqliteMigration(
 }
 
 /**
+ * 竞选表的 SQLite 增量迁移：只补 Tenant 的编号列；Campaign / CampaignOption /
+ * CampaignVote 三张全新表由刷新后的 baseline DDL 创建（SQLite 不建 enum，
+ * status 为 TEXT 并靠应用层校验取值）。
+ */
+function applyVotingCampaignsSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const tenantTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'Tenant'`)
+    .get() as { present: number } | null;
+  if (!tenantTable) return;
+
+  if (doneNames.has(VOTING_CAMPAIGNS_MIGRATION_NAME)) {
+    skipped.push(VOTING_CAMPAIGNS_MIGRATION_NAME);
+    return;
+  }
+
+  const displayColumn = db
+    .query(`SELECT 1 AS present FROM pragma_table_info('Tenant') WHERE name = 'nextCampaignDisplayId'`)
+    .get() as { present: number } | null;
+  const hasColumn = displayColumn !== null;
+
+  logger.info({ migration: VOTING_CAMPAIGNS_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasColumn) {
+      db.exec(`ALTER TABLE "Tenant" ADD COLUMN "nextCampaignDisplayId" INTEGER NOT NULL DEFAULT 1`);
+    }
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`ALTER TABLE "Tenant" ADD COLUMN "nextCampaignDisplayId" INTEGER NOT NULL DEFAULT 1`),
+        VOTING_CAMPAIGNS_MIGRATION_NAME,
+      ],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(VOTING_CAMPAIGNS_MIGRATION_NAME);
+  applied.push(VOTING_CAMPAIGNS_MIGRATION_NAME);
+  logger.info({ migration: VOTING_CAMPAIGNS_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
+/**
  * 应用 SQLite baseline 建库脚本及后续增量迁移（幂等）。
  *
  * @param baselineSql 内嵌的建库 DDL（sqlite-baseline.sql 文本）
@@ -333,7 +388,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -351,6 +406,7 @@ export function applySqliteBaseline(
     applyFirstPrivateMessageSqliteMigration(db, doneNames, applied, skipped, logger);
     applyLastPublishStartedAtSqliteMigration(db, doneNames, applied, skipped, logger);
     applyReviewQueueReminderAtAllSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyVotingCampaignsSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();
