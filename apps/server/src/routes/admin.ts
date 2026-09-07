@@ -1175,7 +1175,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         displayName: body.displayName,
         enabled: body.enabled,
         required: body.required,
-        publishDelaySeconds: botAccount.platform === "official_qq" ? 0 : body.publishDelaySeconds,
+        publishDelaySeconds: body.publishDelaySeconds ?? 0,
         qzoneRefreshMode: body.qzoneRefreshMode,
       },
       include: {
@@ -1258,8 +1258,8 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
       ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
       ...(body.required === undefined ? {} : { required: body.required }),
+      ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
       ...(target.type === "qq_channel_forum" ? {} : {
-        ...(body.publishDelaySeconds === undefined ? {} : { publishDelaySeconds: body.publishDelaySeconds }),
         ...(body.qzoneRefreshMode === undefined ? {} : { qzoneRefreshMode: body.qzoneRefreshMode }),
       }),
       ...(body.failurePolicy === undefined ? {} : { failurePolicy: body.failurePolicy }),
