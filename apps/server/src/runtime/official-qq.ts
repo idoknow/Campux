@@ -9,6 +9,13 @@ const qqBotOpenApiBaseUrl = "https://api.sgroup.qq.com";
 const qqForumRichTextFormat = 4;
 const qqForumChannelType = 10007;
 
+// 发帖后轮询论坛列表确认新帖子真正出现并拿到 thread_id 的次数与间隔（毫秒）。
+// PUT /channels/{channel_id}/threads 只返回 task_id，帖子创建是异步任务；
+// 若连续多次都查不到刚发的帖子，说明帖子可能未公开落地（如机器人非私域/未移除重加），
+// 应如实标记为“结果未知”而非误报成功。
+const qqForumThreadConfirmAttempts = 3;
+const qqForumThreadConfirmIntervalMs = 1500;
+
 type TokenCacheEntry = {
   accessToken: string;
   expiresAt: number;
@@ -122,6 +129,20 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
     ...(options.matchDisplayIds ? { displayIds: options.matchDisplayIds } : {}),
     matchMode,
   }, accessToken);
+  // 发帖后轮询确认新帖子真正出现在论坛列表中，返回其 thread_id；多次都查不到返回 null。
+  // 帖子创建是异步的，给小延迟重试，避免刚发布尚未进列表就误判为失败。
+  const confirmThreadVisible = async (matchMode: "exact-title" | "any-display-id") => {
+    for (let attempt = 0; attempt < qqForumThreadConfirmAttempts; attempt += 1) {
+      const existingThreadId = await findExistingThread(matchMode);
+      if (existingThreadId) {
+        return existingThreadId;
+      }
+      if (attempt < qqForumThreadConfirmAttempts - 1) {
+        await sleep(qqForumThreadConfirmIntervalMs);
+      }
+    }
+    return null;
+  };
   if (options.matchDisplayIds?.length) {
     const existingThreadId = await findExistingThread("exact-title");
     if (existingThreadId) {
@@ -154,7 +175,9 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
     if (error instanceof BotWorkflowError) {
       throw error;
     }
-    const discoveredThreadId = await findExistingThread("exact-title");
+    // 创建请求传输结果不明（网络失败等）：帖子可能已经发出，也可能没有。
+    // 轮询确认是否真的出现在论坛列表，收敛到确定结果，避免自动重发导致重复帖子。
+    const discoveredThreadId = await confirmThreadVisible("exact-title");
     if (discoveredThreadId) {
       return buildOfficialQqForumThreadResult(
         bot,
@@ -172,11 +195,19 @@ export async function createOfficialQqForumThread(bot: OfficialQqBotAccount, cha
 
   const taskId = readStringField(payload, ["task_id", "taskId"]);
   const directThreadId = readOfficialQqForumThreadId(payload);
-  const discoveredThreadId = directThreadId ?? await findExistingThread(
+  // 优先用返回里带出的 thread_id；否则轮询列表确认刚发的帖子真正公开可见。
+  // 如果确认不到 thread_id（只有 task_id），说明帖子可能未真正落地（如机器人非私域、
+  // 私域权限未在“移除并重新添加”后生效、应用未上线等），应如实标记为结果未知而非误报成功，
+  // 这样才能在管理端暴露“频道上发的内容看不到”的问题。
+  const discoveredThreadId = directThreadId ?? await confirmThreadVisible(
     options.matchDisplayIds?.length === 1 ? "any-display-id" : "exact-title",
   );
-  if (!discoveredThreadId && !taskId) {
-    throw new OfficialQqPublishOutcomeUnknownError("QQ 频道帖子发表后未能确认帖子 ID；为避免重复发布未自动重试");
+  if (!discoveredThreadId) {
+    throw new OfficialQqPublishOutcomeUnknownError(
+      taskId
+        ? "QQ 频道帖子发表后未能在论坛列表确认到对应帖子；帖子可能未公开可见（请确认机器人是私域机器人、已在频道“移除后重新添加”、且应用已上线）。为规避重复发布未自动重试。"
+        : "QQ 频道帖子发表后未能确认帖子 ID；为避免重复发布未自动重试",
+    );
   }
 
   return buildOfficialQqForumThreadResult(
@@ -472,4 +503,8 @@ function readStringField(value: unknown, fieldNames: string[]) {
 function readObjectArray(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }

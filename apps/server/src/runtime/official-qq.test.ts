@@ -206,6 +206,35 @@ describe("QQ 官方机器人论坛子频道", () => {
     expect(result.verbose.create).toEqual({ task_id: "1645413752912602306", create_time: "1645503180" });
   });
 
+  it("task_id-only 发帖响应但帖子列表始终查不到时如实报结果未知，不误报成功", async () => {
+    let listCalls = 0;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url === "https://bots.qq.com/app/getAppAccessToken") {
+        return Response.json({ access_token: "never-listed-token", expires_in: 7200 });
+      }
+      if (init?.method === "PUT") {
+        return Response.json({ task_id: "task-never-physical", create_time: "1645503180" });
+      }
+      listCalls += 1;
+      // 列表始终返回空：帖子没有真正公开落地（例如机器人非私域/权限未生效/应用未上线）。
+      return Response.json({ threads: [], is_finish: 1 });
+    }) as typeof fetch;
+
+    await expect(createOfficialQqForumThread({
+      id: "bot-never-listed",
+      officialAppId: "10010",
+      officialAppSecret: "never-listed-secret",
+    }, "forum-channel", {
+      title: "#999",
+      content: "稿件正文",
+      matchDisplayIds: [999],
+    })).rejects.toBeInstanceOf(OfficialQqPublishOutcomeUnknownError);
+
+    // 发帖后应轮询列表确认多次，而不是只查一次就一律报成功。
+    expect(listCalls).toBeGreaterThanOrEqual(3);
+  });
+
   it("在创建请求传输结果不明时通过帖子列表收敛成功，避免自动重发", async () => {
     const requests: Array<{ url: string; method: string }> = [];
     let listCalls = 0;
