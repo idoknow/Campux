@@ -344,7 +344,7 @@ function AggregateLoginPanel({ config, onChange, busy }: { config: TenantPluginC
             <Input
               value={config.aggregateLogin.endpoint}
               disabled={busy}
-              placeholder="https://a.idcfx.net/connect.php"
+              placeholder="https://…/connect.php"
               onChange={(event) => onChange({ ...config, aggregateLogin: { ...config.aggregateLogin, endpoint: event.target.value } })}
             />
           </label>
@@ -876,7 +876,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       loginTypes: [],
       appId: "",
       appKey: "",
-      endpoint: "https://a.idcfx.net/connect.php",
+      endpoint: "",
     },
   };
 }
@@ -926,20 +926,23 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       setLoading(false);
       return;
     }
-    let cancelled = false;
-    setLoading(true);
-    api<{ config: TenantPluginConfig }>("/api/admin/plugins/settings")
-      .then((data) => {
-        if (!cancelled) setConfig(ensureFontSelectionDefaults(ensureBotMessageDefaults(data.config)));
-      })
-      .catch((error) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : "读取插件配置失败");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
+    void loadConfig();
+    return undefined;
   }, [tenantId]);
+
+  // 拉取最新插件配置（含聚合登录等预设插件的 enabled 状态）。
+  async function loadConfig() {
+    if (!tenantId) return;
+    setLoading(true);
+    try {
+      const data = await api<{ config: TenantPluginConfig }>("/api/admin/plugins/settings");
+      setConfig(ensureFontSelectionDefaults(ensureBotMessageDefaults(data.config)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "读取插件配置失败");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!tenantId) return;
@@ -1004,6 +1007,9 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       if (isEnabled) nextSet.delete(registryName);
       else nextSet.add(registryName);
       setEnabledPresetNames(nextSet);
+      // 预设插件的启用状态也写入 plugin_config.<id>.enabled，重拉一次配置，
+      // 避免本地 config state 里的旧 enabled 在下次「保存」时把开启状态覆盖回禁用。
+      void loadConfig();
       toast.success(isEnabled ? "已禁用插件" : "已启用插件");
       void refreshAuditLog();
     } catch (error) {

@@ -91,14 +91,14 @@ export const tenantPluginConfigSchema = z.object({
       // 聚合登录开放平台的凭证与接口地址。
       appId: z.string().max(128).default(""),
       appKey: z.string().max(256).default(""),
-      endpoint: z.string().max(512).default("https://a.idcfx.net/connect.php"),
+      endpoint: z.string().max(512).default(""),
     })
     .default({
       enabled: false,
       loginTypes: [],
       appId: "",
       appKey: "",
-      endpoint: "https://a.idcfx.net/connect.php",
+      endpoint: "",
     }),
 });
 
@@ -119,7 +119,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
     loginTypes: [],
     appId: "",
     appKey: "",
-    endpoint: "https://a.idcfx.net/connect.php",
+    endpoint: "",
   },
 };
 

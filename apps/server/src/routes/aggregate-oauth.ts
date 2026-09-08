@@ -152,12 +152,12 @@ function assertAggregateReady(plugin: { enabled: boolean; loginTypes: string[]; 
   if (!(plugin.loginTypes as string[]).includes(type)) {
     throw new Error(`未启用该登录方式`);
   }
-  if (!plugin.appId || !plugin.appKey) {
-    throw new Error("未配置聚合登录凭证（appid/appkey）");
+  if (!plugin.appId || !plugin.appKey || !plugin.endpoint) {
+    throw new Error("未配置聚合登录凭证（appid/appkey/接口地址）");
   }
-  // 验证 endpoint 预检，尽早暴露配置错误。
+  // 验证 endpoint，尽早暴露配置错误。
   try {
-    normalizeAggregateEndpoint(plugin.endpoint || "https://a.idcfx.net/connect.php");
+    normalizeAggregateEndpoint(plugin.endpoint);
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "聚合登录接口地址配置错误");
   }
@@ -218,7 +218,7 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
           appId: plugin.appId,
           appKey: plugin.appKey,
           loginType: query.type,
-          endpoint: plugin.endpoint || "https://a.idcfx.net/connect.php",
+          endpoint: plugin.endpoint,
         },
         redirectUri,
       );
@@ -268,7 +268,7 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
           appId: plugin.appId,
           appKey: plugin.appKey,
           loginType: state.p,
-          endpoint: plugin.endpoint || "https://a.idcfx.net/connect.php",
+          endpoint: plugin.endpoint,
         },
         query.code,
       );
