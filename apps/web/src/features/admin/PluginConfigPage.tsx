@@ -806,7 +806,7 @@ const PLUGINS: PluginDescriptor[] = [
       "· 未绑定的第三方身份不会自动创建账号，而是提示先登录已有账号完成绑定。\n\n" +
       "登录方式：可登录的第三方平台由下方「可登录方式」勾选决定，只有勾选的平台会出现在登录页。\n\n" +
       "绑定说明：绑定关系按第三方平台作用域存储（同一用户在多个校园墙各自启用聚合登录时，需分别绑定）。未配凭证或未勾选任何平台时，登录页不会展示第三方登录。",
-    author: DEFAULT_PLUGIN_AUTHOR,
+    author: "HelloFHZ",
     hint: "配置 appid/appkey 并勾选想开放的平台即可。",
     accent: "from-emerald-500 to-teal-500",
     bgTint: "bg-emerald-50 text-emerald-700",
