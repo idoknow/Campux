@@ -221,6 +221,7 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
           endpoint: plugin.endpoint,
         },
         redirectUri,
+        state,
       );
       loginUrl = result.url;
     } catch (error) {
@@ -229,18 +230,21 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
       return reply.code(502).send({ message: detail });
     }
 
-    // 把 state 追加到第三方授权 URL 上（部分聚合服务支持 state 原样回传）。
-    // 用 URL 解析来拼，避免片段(#)后丢失；片段对授权无意义，直接丢弃。
+    // state 已在 act=login 请求时交给聚合服务回传；多数平台会把 state 嵌进授权
+    // URL。仅当返回的 URL 没有 state 参数时，才在此兜底附加（避免重复/丢失）。
     let urlWithState: string;
-    try {
-      const parsed = new URL(loginUrl);
-      parsed.searchParams.set("state", state);
-      parsed.hash = "";
+    const parsed = new URL(loginUrl);
+    if (parsed.searchParams.has("state")) {
       urlWithState = parsed.toString();
-    } catch {
-      // 三方返回了非法 URL，回退到简单拼接（仍保留 state）。
-      const separator = loginUrl.includes("?") ? "&" : "?";
-      urlWithState = `${loginUrl}${separator}state=${encodeURIComponent(state)}`;
+    } else {
+      try {
+        parsed.searchParams.set("state", state);
+        parsed.hash = "";
+        urlWithState = parsed.toString();
+      } catch {
+        const separator = loginUrl.includes("?") ? "&" : "?";
+        urlWithState = `${loginUrl}${separator}state=${encodeURIComponent(state)}`;
+      }
     }
 
     return { url: urlWithState };

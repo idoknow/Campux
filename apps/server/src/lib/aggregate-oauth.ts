@@ -170,8 +170,12 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
-/** 获取第三方授权跳转 URL（act=login）。 */
-export async function fetchAggregateLoginUrl(config: AggregateOauthConfig, redirectUri: string): Promise<AggregateOauthLoginUrlResult> {
+/** 获取第三方授权跳转 URL（act=login）。state 交由聚合服务回传到回调，缺省时由调用方附加。 */
+export async function fetchAggregateLoginUrl(
+  config: AggregateOauthConfig,
+  redirectUri: string,
+  state?: string,
+): Promise<AggregateOauthLoginUrlResult> {
   const endpoint = normalizeAggregateEndpoint(config.endpoint);
   const params = new URLSearchParams({
     act: "login",
@@ -180,6 +184,9 @@ export async function fetchAggregateLoginUrl(config: AggregateOauthConfig, redir
     type: config.loginType,
     redirect_uri: redirectUri,
   });
+  if (state) {
+    params.set("state", state);
+  }
   const payload = (await fetchJson(`${endpoint}?${params.toString()}`)) as Record<string, unknown> | null;
   if (!isSuccessCode(payload?.code)) {
     const providerMessage = extractProviderMessage(payload);
