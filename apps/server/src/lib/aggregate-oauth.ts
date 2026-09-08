@@ -1,7 +1,7 @@
 /**
  * 聚合登录协议客户端。
  *
- * 对接「任性聚合登录-佛系云」的 OAuth 协议（https://a.idcfx.net/doc.php）：
+ * 对接第三方聚合登录的 OAuth 协议（以 https://a.idcfx.net 为例，act=login / act=callback）：
  *   act=login    换取第三方授权跳转 URL（QQ/微信/微信/支付宝/抖音/google/twitter/飞书等）
  *   act=callback 用 code 换取用户信息（social_uid / nickname / faceimg 等）
  *

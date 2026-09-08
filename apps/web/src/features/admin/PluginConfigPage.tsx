@@ -317,7 +317,7 @@ function AggregateLoginPanel({ config, onChange, busy }: { config: TenantPluginC
       <div className="rounded-md border border-slate-200 bg-white p-3">
         <div className="mb-2 space-y-1">
           <p className="text-sm font-medium text-slate-900">聚合登录凭证</p>
-          <p className="text-xs leading-5 text-slate-500">在「任性聚合登录」开放平台申请并配置（appid / appkey / 接口地址）。</p>
+          <p className="text-xs leading-5 text-slate-500">在任意一家聚合登录平台申请并配置（appid / appkey / 接口地址）。</p>
         </div>
         <div className="grid gap-3">
           <label className="grid gap-1.5">
@@ -800,7 +800,7 @@ const PLUGINS: PluginDescriptor[] = [
     detailedDescription:
       "本插件让登录页展示任意勾选的第三方平台登录方式（QQ、微信、支付宝、抖音、微博、百度、华为、小米、Gitee、Gitea、哔哩哔哩、快手）。\n\n" +
       "工作方式：\n" +
-      "· 管理员先在「任性聚合登录」开放平台申请 appid/appkey，填入下方凭证区。\n" +
+      "· 管理员先在任意一家聚合登录平台申请 appid/appkey，填入下方凭证区。\n" +
       "· 用户登录后可在账号设置页把某个第三方身份绑定到自己的 Campux 账号。\n" +
       "· 之后回到登录页点对应的第三方按钮，即可用该身份直接登录本校园墙。\n" +
       "· 未绑定的第三方身份不会自动创建账号，而是提示先登录已有账号完成绑定。\n\n" +
