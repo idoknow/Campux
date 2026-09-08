@@ -115,6 +115,23 @@ model User {
   oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
   postFollows PostFollow[]
+  oauthIdentities OAuthIdentity[]
+}
+
+// 第三方聚合登录绑定：把第三方平台的社交 UID 关联到本地账号。
+// provider 形如 "aggregate:qq"、"aggregate:wx" 等（第三方聚合登录的某种登录方式）。
+model OAuthIdentity {
+  id             String   @id @default(uuid())
+  userId         String
+  provider       String   // 形如 aggregate:qq / aggregate:wx
+  providerUserId String   // 第三方 social_uid
+  name           String?  // 第三方昵称快照
+  avatar         String?  // 第三方头像快照
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
 }
 
 model EmailVerificationCode {

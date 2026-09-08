@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { api } from "@/lib/api";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
+import { AggregateLoginButtons } from "@/features/aggregate-oauth/LoginButtons";
 
 const CREDENTIALS_KEY = "campux.loginCredentials.v1";
 
@@ -74,6 +75,19 @@ export function LoginScreen({
   const [view, setView] = useState<"login" | "register">("login");
   const [loginError, setLoginError] = useState("");
   const displayError = loginError || error;
+
+  // 第三方回调携带的提示参数（未绑定身份 / 无该墙访问权限）。
+  const oauthNotice = useMemo<{ type: "unbound" | "no_access" | null; label: string }>(() => {
+    if (typeof window === "undefined") return { type: null, label: "" };
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("aggregate_unbound") === "1") {
+      return { type: "unbound", label: "该第三方账号尚未绑定本校园墙的本地账号，请先登录已有账号后，到「服务·账户设置·第三方登录」里绑定。" };
+    }
+    if (params.get("aggregate_no_access") === "1") {
+      return { type: "no_access", label: "该账号在当前校园墙没有权限，请联系管理员。登录后可选择已有的校园墙。" };
+    }
+    return { type: null, label: "" };
+  }, []);
 
   function handleRememberChange(checked: boolean) {
     setRemember(checked);
@@ -163,6 +177,11 @@ export function LoginScreen({
                 <span className="basis-full pl-9 text-xs text-slate-400 sm:basis-auto sm:pl-0">仅保存在当前浏览器。</span>
               </div>
               {displayError ? <p className="mt-3 text-sm font-medium text-red-600">{displayError}</p> : null}
+              {oauthNotice.type ? (
+                <p className={`mt-3 rounded-md border px-3 py-2 text-sm leading-5 ${oauthNotice.type === "unbound" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                  {oauthNotice.label}
+                </p>
+              ) : null}
               <Button className="mt-5 w-full font-medium" disabled={busy} type="submit">
                 {busy ? "登录中" : "登录"}
               </Button>
@@ -186,6 +205,8 @@ export function LoginScreen({
                 </div>
               )}
             </form>
+
+            <AggregateLoginButtons returnTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"} />
 
             {managementHost ? (
               <div className="mt-3 product-surface px-4 py-4">

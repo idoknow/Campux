@@ -197,6 +197,14 @@ export type TenantPluginConfig = {
     /** 每个用户最多同时在进行的竞选数（待审核 + 进行中），默认 1 */
     maxActivePerUser: number;
   };
+  aggregateLogin: {
+    enabled: boolean;
+    /** 公开给登录页的第三方登录方式白名单 */
+    loginTypes: string[];
+    appId: string;
+    appKey: string;
+    endpoint: string;
+  };
 };
 export type PostAttachment = {
   kind: "image";

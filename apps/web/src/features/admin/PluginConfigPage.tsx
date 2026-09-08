@@ -6,6 +6,7 @@ import { FONT_OPTIONS } from "@campux/domain";
 import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
+import { AggregateLoginIcon, AGGREGATE_LOGIN_TYPE_LABELS } from "../aggregate-oauth/icons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -82,7 +83,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -147,6 +148,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   anonymousAvatar: "campux-plugin-anonymous-avatar",
   botStylishMessages: "campux-plugin-bot-stylish-messages",
   campaigns: "campux-plugin-campaigns",
+  aggregateLogin: "campux-plugin-aggregate-login",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -249,6 +251,103 @@ function CampaignsPanel({ config, onChange, busy }: { config: TenantPluginConfig
             onChange={(event) => setMaxActive(event.target.value)}
             className="w-20 text-right"
           />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const AGGREGATE_LOGIN_ORDER: Array<keyof typeof AGGREGATE_LOGIN_TYPE_LABELS> = [
+  "qq",
+  "wx",
+  "alipay",
+  "douyin",
+  "sina",
+  "baidu",
+  "huawei",
+  "xiaomi",
+  "gitee",
+  "gitea",
+  "bilibili",
+  "kuaishou",
+];
+
+function AggregateLoginPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  const toggleType = (type: string) => {
+    const has = config.aggregateLogin.loginTypes.includes(type);
+    const next = has
+      ? config.aggregateLogin.loginTypes.filter((item) => item !== type)
+      : [...config.aggregateLogin.loginTypes, type];
+    onChange({ ...config, aggregateLogin: { ...config.aggregateLogin, loginTypes: next } });
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs leading-5 text-slate-500">
+        开启后，登录页会展示下方勾选的第三方登录方式。用户需先在账号设置里绑定第三方身份，之后即可用该身份直接登录本校园墙；未绑定的身份不会自动建号。
+      </p>
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <p className="mb-2 text-sm font-medium text-slate-900">可登录方式</p>
+        <div className="flex flex-wrap gap-2">
+          {AGGREGATE_LOGIN_ORDER.map((type) => {
+            const selected = config.aggregateLogin.loginTypes.includes(type);
+            const Icon = AggregateLoginIcon;
+            return (
+              <button
+                key={type}
+                type="button"
+                disabled={busy}
+                onClick={() => toggleType(type)}
+                aria-pressed={selected}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  selected
+                    ? "border-slate-800 bg-slate-800 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                <span className="h-3.5 w-3.5">
+                  <Icon type={type} className="h-full w-full" />
+                </span>
+                {AGGREGATE_LOGIN_TYPE_LABELS[type] ?? type}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <div className="mb-2 space-y-1">
+          <p className="text-sm font-medium text-slate-900">聚合登录凭证</p>
+          <p className="text-xs leading-5 text-slate-500">在「任性聚合登录」开放平台申请并配置（appid / appkey / 接口地址）。</p>
+        </div>
+        <div className="grid gap-3">
+          <label className="grid gap-1.5">
+            <span className="text-xs text-slate-500">AppID</span>
+            <Input
+              value={config.aggregateLogin.appId}
+              disabled={busy}
+              placeholder="申请到的 AppID"
+              onChange={(event) => onChange({ ...config, aggregateLogin: { ...config.aggregateLogin, appId: event.target.value } })}
+            />
+          </label>
+          <label className="grid gap-1.5">
+            <span className="text-xs text-slate-500">AppKey</span>
+            <Input
+              type="password"
+              value={config.aggregateLogin.appKey}
+              disabled={busy}
+              placeholder="申请到的 AppKey"
+              onChange={(event) => onChange({ ...config, aggregateLogin: { ...config.aggregateLogin, appKey: event.target.value } })}
+            />
+          </label>
+          <label className="grid gap-1.5">
+            <span className="text-xs text-slate-500">接口地址</span>
+            <Input
+              value={config.aggregateLogin.endpoint}
+              disabled={busy}
+              placeholder="https://a.idcfx.net/connect.php"
+              onChange={(event) => onChange({ ...config, aggregateLogin: { ...config.aggregateLogin, endpoint: event.target.value } })}
+            />
+          </label>
         </div>
       </div>
     </div>
@@ -692,6 +791,33 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, campaigns: { ...config.campaigns, enabled: value } }),
     render: (config, onChange, busy) => <CampaignsPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "aggregateLogin",
+    icon: (props: PluginIconProps) => <AggregateLoginIcon type="qq" className={props.className ?? ""} />,
+    name: "聚合登录",
+    tagline: "OAuth",
+    description: "绑定第三方平台身份后，用 QQ/微信/支付宝等直接登录本校园墙",
+    detailedDescription:
+      "本插件让登录页展示任意勾选的第三方平台登录方式（QQ、微信、支付宝、抖音、微博、百度、华为、小米、Gitee、Gitea、哔哩哔哩、快手）。\n\n" +
+      "工作方式：\n" +
+      "· 管理员先在「任性聚合登录」开放平台申请 appid/appkey，填入下方凭证区。\n" +
+      "· 用户登录后可在账号设置页把某个第三方身份绑定到自己的 Campux 账号。\n" +
+      "· 之后回到登录页点对应的第三方按钮，即可用该身份直接登录本校园墙。\n" +
+      "· 未绑定的第三方身份不会自动创建账号，而是提示先登录已有账号完成绑定。\n\n" +
+      "登录方式：可登录的第三方平台由下方「可登录方式」勾选决定，只有勾选的平台会出现在登录页。\n\n" +
+      "绑定说明：绑定关系按第三方平台作用域存储（同一用户在多个校园墙各自启用聚合登录时，需分别绑定）。未配凭证或未勾选任何平台时，登录页不会展示第三方登录。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "配置 appid/appkey 并勾选想开放的平台即可。",
+    accent: "from-emerald-500 to-teal-500",
+    bgTint: "bg-emerald-50 text-emerald-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "user:data", "http:route"],
+    riskLevel: "medium",
+    rationale: "把第三方社交 UID 建立到本地账号的绑定并用其匹配登录；凭证(appid/appkey)属租户配置，需限制访问。",
+    enabled: (config) => config.aggregateLogin.enabled,
+    setEnabled: (config, value) => ({ ...config, aggregateLogin: { ...config.aggregateLogin, enabled: value } }),
+    render: (config, onChange, busy) => <AggregateLoginPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
 
 function ensureBotMessageDefaults(config: TenantPluginConfig): TenantPluginConfig {
@@ -744,6 +870,13 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       allowAnonymousCreate: metadata.allowAnonymousCampaign ?? false,
       // 插件关闭时后端下发 0，初始化为 1 以免新建租户保存后直接变为 0。
       maxActivePerUser: metadata.maxActiveCampaignsPerUser && metadata.maxActiveCampaignsPerUser > 0 ? metadata.maxActiveCampaignsPerUser : 1,
+    },
+    aggregateLogin: {
+      enabled: false,
+      loginTypes: [],
+      appId: "",
+      appKey: "",
+      endpoint: "https://a.idcfx.net/connect.php",
     },
   };
 }

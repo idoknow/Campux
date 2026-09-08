@@ -8,6 +8,8 @@ import {
   readTenantPluginConfig,
   tenantPluginConfigSchema,
   writeTenantPluginConfig,
+  maskAggregateAppKey,
+  restoreAggregateAppKey,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
 import { z } from "zod";
@@ -213,11 +215,12 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
 
     return { auditLog };
   });
-  // 读取插件配置（Markdown 渲染、多彩投稿、字体选择、匿名头像、Bot 多彩消息）
+  // 读取插件配置（Markdown 渲染、多彩投稿、字体选择、匿名头像、Bot 多彩消息、聚合登录）
   app.get("/api/admin/plugins/settings", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "admin");
     const config = await readTenantPluginConfig(prisma, context.selectedTenant.id);
-    return { config };
+    // 聚合登录 AppKey 只写回，不回显明文（避免出现在响应/审计）。
+    return { config: maskAggregateAppKey(config) };
   });
 
   // 保存插件配置
@@ -228,7 +231,9 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       return reply.code(400).send({ message: "插件配置格式不正确" });
     }
     const before = await readTenantPluginConfig(prisma, context.selectedTenant.id);
-    const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, parsed.data);
+    // 聚合登录 AppKey 若仍是掩码占位符则保留库中原值，避免把占位符写回导致凭证失效。
+    const toSave = restoreAggregateAppKey(parsed.data, before);
+    const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, toSave);
 
     // 按插件维度逐项写入审计日志，便于管理员追溯单个插件的配置变更
     const diffs: Array<{ pluginId: string; enabled: boolean; summary: string }> = [];
@@ -238,6 +243,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["fontSelection", before.fontSelection, saved.fontSelection],
       ["anonymousAvatar", before.anonymousAvatar, saved.anonymousAvatar],
       ["botStylishMessages", before.botStylishMessages, saved.botStylishMessages],
+      ["aggregateLogin", before.aggregateLogin, saved.aggregateLogin],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {

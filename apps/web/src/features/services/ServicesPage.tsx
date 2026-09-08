@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CampaignsPage } from "./CampaignsPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
+import { OAuthBindingsPanel } from "./OAuthBindingsPanel";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
 function parseCampaignRoute(pathname: string, search: string) {
@@ -33,7 +34,7 @@ function parseCampaignRoute(pathname: string, search: string) {
 
 
 
-type ServiceAction = "profile" | "password" | "rules" | "";
+type ServiceAction = "profile" | "password" | "rules" | "oauth-bindings" | "";
 
 const servicePalettes = [
   {
@@ -163,6 +164,20 @@ export function ServicesPage({
             {accountServices.map((service, index) => (
               <ServiceTile key={service.title} service={service} index={index} compact onOpen={() => openService(service)} />
             ))}
+            <button
+              type="button"
+              onClick={() => setActiveAction("oauth-bindings")}
+              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-amber">
+                <KeyRoundIcon className="size-5" strokeWidth={2.1} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-950">第三方登录</span>
+                <span className="mt-0.5 block text-sm leading-5 text-slate-600">绑定 QQ/微信/支付宝等，登录后可一键扫码登录</span>
+              </span>
+              <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />
+            </button>
           </ServiceGroup>
 
           {campusServices.length > 0 ? (
@@ -177,6 +192,7 @@ export function ServicesPage({
         {activeAction === "profile" ? <ProfilePanel me={me} onSaved={onProfileSaved} /> : null}
         {activeAction === "password" ? <PasswordPanel onDone={(message) => toast.success(message)} /> : null}
         {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
+        {activeAction === "oauth-bindings" ? <OAuthBindingsPanel /> : null}
       </div>
     </div>
   );

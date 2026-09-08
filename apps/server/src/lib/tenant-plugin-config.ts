@@ -80,6 +80,26 @@ export const tenantPluginConfigSchema = z.object({
       maxActivePerUser: z.number().int().min(1).max(50),
     })
     .default({ enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 }),
+  // 聚合登录：把第三方平台（QQ/微信/支付宝等）身份绑定到已有账号后，用该身份直接登录。
+  // 凭证（appid/appkey/endpoint）放在本配置里（租户级）；未绑定的第三方身份不自动建号，
+  // 而是引导先登录已有账号完成绑定（严格「只做第三方登录、不涉及注册」）。
+  aggregateLogin: z
+    .object({
+      enabled: z.boolean(),
+      // 公开给登录页的第三方登录方式（仅在该集合内的方式才会出现在登录按钮上）。
+      loginTypes: z.array(z.string()).default([]),
+      // 聚合登录开放平台的凭证与接口地址。
+      appId: z.string().max(128).default(""),
+      appKey: z.string().max(256).default(""),
+      endpoint: z.string().max(512).default("https://a.idcfx.net/connect.php"),
+    })
+    .default({
+      enabled: false,
+      loginTypes: [],
+      appId: "",
+      appKey: "",
+      endpoint: "https://a.idcfx.net/connect.php",
+    }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -94,6 +114,13 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   anonymousAvatar: { enabled: false, items: [] },
   botStylishMessages: { enabled: false, messageTypes: [] },
   campaigns: { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 },
+  aggregateLogin: {
+    enabled: false,
+    loginTypes: [],
+    appId: "",
+    appKey: "",
+    endpoint: "https://a.idcfx.net/connect.php",
+  },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {
@@ -141,4 +168,37 @@ export async function writeTenantPluginConfig(
     create: { tenantId, key: tenantPluginConfigKey, value: normalized },
   });
   return normalized;
+}
+
+/** AppKey 返回给管理端前端时的掩码占位符。 */
+export const AGGREGATE_APPKEY_MASK = "••••••••";
+
+/**
+ * 把聚合登录的 AppKey 脱敏后再返回给前端（只读方向），避免明文凭证出现在
+ * 前端响应/审计。保存方向由路由层负责：若提交值等于掩码则保留库中原值。
+ */
+export function maskAggregateAppKey(config: TenantPluginConfig): TenantPluginConfig {
+  const appKey = config.aggregateLogin.appKey;
+  if (!appKey) {
+    return config;
+  }
+  return {
+    ...config,
+    aggregateLogin: {
+      ...config.aggregateLogin,
+      appKey: AGGREGATE_APPKEY_MASK,
+    },
+  };
+}
+
+/** 保存方向：若组件提交的 AppKey 仍是掩码占位符，说明未改动，用库中原值替换，避免把掩码写回。 */
+export function restoreAggregateAppKey(submitted: TenantPluginConfig, existing: TenantPluginConfig): TenantPluginConfig {
+  const appKey = submitted.aggregateLogin.appKey;
+  if (appKey === AGGREGATE_APPKEY_MASK) {
+    return {
+      ...submitted,
+      aggregateLogin: { ...submitted.aggregateLogin, appKey: existing.aggregateLogin.appKey },
+    };
+  }
+  return submitted;
 }

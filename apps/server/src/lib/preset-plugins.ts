@@ -18,7 +18,8 @@ export type PresetPluginId =
   | "fontSelection"
   | "anonymousAvatar"
   | "botStylishMessages"
-  | "campaigns";
+  | "campaigns"
+  | "aggregateLogin";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -86,6 +87,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "tenant:data", "user:data", "events:emit"],
     riskLevel: "medium",
     rationale: "开启后投稿页新增发起入口与服务页浏览入口；竞选内容、投票明细与发起人 QQ 私聊均接入 tenant 数据。",
+  },
+  {
+    id: "aggregateLogin",
+    name: "campux-plugin-aggregate-login",
+    version: "1.0.0",
+    description: "聚合登录：绑定第三方平台身份后，用 QQ/微信/支付宝等直接登录，不自动建号",
+    required: ["config:read", "db:read", "db:write", "user:data", "http:route"],
+    riskLevel: "medium",
+    rationale: "把第三方社交 UID 建立对本地账号的绑定，并用其匹配登录；凭证(appid/appkey)属租户配置，需限制访问。",
   },
 ];
 
