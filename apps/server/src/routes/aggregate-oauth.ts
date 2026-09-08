@@ -224,8 +224,9 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
       );
       loginUrl = result.url;
     } catch (error) {
-      app.log.warn({ err: error }, "aggregate login-url fetch failed");
-      return reply.code(502).send({ message: error instanceof Error ? error.message : "聚合登录授权地址获取失败" });
+      app.log.warn({ err: error, queryType: query.type, endpoint: plugin.endpoint }, "aggregate login-url fetch failed");
+      const detail = error instanceof Error && error.message.trim() ? error.message : "聚合登录授权地址获取失败";
+      return reply.code(502).send({ message: detail });
     }
 
     // 把 state 追加到第三方授权 URL 上（部分聚合服务支持 state 原样回传）。
