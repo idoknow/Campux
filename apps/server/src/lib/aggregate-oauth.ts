@@ -164,17 +164,25 @@ async function fetchJson(url: string): Promise<unknown> {
       throw new Error(`聚合登录接口返回 HTTP ${response.status}${text ? `：${extractProviderMessage(text) ?? text.slice(0, 120)}` : ""}`);
     }
     const text = await response.text();
-    return text ? JSON.parse(text) : null;
+    if (!text) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      const snippet = text.slice(0, 120).replace(/\s+/g, " ");
+      // 非 JSON 响应通常来自 CDN/WAF 挑战页或网关错误页，而非协议响应。
+      throw new Error(`聚合登录接口返回了非 JSON 内容（${snippet || "空响应"}）`);
+    }
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 获取第三方授权跳转 URL（act=login）。state 交由聚合服务回传到回调，缺省时由调用方附加。 */
+/** 获取第三方授权跳转 URL（act=login）。聚合服务不管理 state，由调用方在授权 URL 上附加。 */
 export async function fetchAggregateLoginUrl(
   config: AggregateOauthConfig,
   redirectUri: string,
-  state?: string,
 ): Promise<AggregateOauthLoginUrlResult> {
   const endpoint = normalizeAggregateEndpoint(config.endpoint);
   const params = new URLSearchParams({
@@ -184,9 +192,6 @@ export async function fetchAggregateLoginUrl(
     type: config.loginType,
     redirect_uri: redirectUri,
   });
-  if (state) {
-    params.set("state", state);
-  }
   const payload = (await fetchJson(`${endpoint}?${params.toString()}`)) as Record<string, unknown> | null;
   if (!isSuccessCode(payload?.code)) {
     const providerMessage = extractProviderMessage(payload);
