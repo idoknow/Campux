@@ -54,6 +54,7 @@ export const defaultMetadata: TenantMetadata = {
   enableCampaigns: false,
   allowAnonymousCampaign: false,
   maxActiveCampaignsPerUser: 0,
+  enableAggregateLogin: false,
 };
 
 export const navItems = [

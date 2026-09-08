@@ -148,6 +148,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableCampaigns: false,
     allowAnonymousCampaign: false,
     maxActiveCampaignsPerUser: 0,
+    enableAggregateLogin: false,
   };
 }
 
@@ -229,6 +230,8 @@ async function readPublicMetadata(tenantId: string) {
     metadata.maxActiveCampaignsPerUser = pluginConfig.campaigns.enabled
       ? pluginConfig.campaigns.maxActivePerUser
       : 0;
+    // 聚合登录：未启用时服务页的「第三方登录」入口隐藏。
+    metadata.enableAggregateLogin = pluginConfig.aggregateLogin.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

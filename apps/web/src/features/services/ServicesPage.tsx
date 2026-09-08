@@ -164,6 +164,7 @@ export function ServicesPage({
             {accountServices.map((service, index) => (
               <ServiceTile key={service.title} service={service} index={index} compact onOpen={() => openService(service)} />
             ))}
+            {metadata.enableAggregateLogin ? (
             <button
               type="button"
               onClick={() => setActiveAction("oauth-bindings")}
@@ -178,6 +179,7 @@ export function ServicesPage({
               </span>
               <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />
             </button>
+            ) : null}
           </ServiceGroup>
 
           {campusServices.length > 0 ? (

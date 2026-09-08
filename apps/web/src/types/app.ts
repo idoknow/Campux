@@ -142,6 +142,8 @@ export type TenantMetadata = {
   allowAnonymousCampaign: boolean;
   /** 每个用户最多同时进行的竞选数（待审核 + 进行中）；插件关闭时为 0 */
   maxActiveCampaignsPerUser: number;
+  /** 聚合登录插件是否启用；关闭时服务页「第三方登录」入口隐藏 */
+  enableAggregateLogin: boolean;
 };
 
 export type BotMessageTypeConfig = {
