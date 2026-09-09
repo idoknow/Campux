@@ -29,6 +29,18 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
+CREATE TABLE "OAuthIdentity" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "providerUserId" TEXT NOT NULL,
+    "name" TEXT,
+    "avatar" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "OAuthIdentity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "EmailVerificationCode" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "email" TEXT NOT NULL,
@@ -227,8 +239,7 @@ CREATE TABLE "BotAccount" (
     "tenantId" TEXT NOT NULL,
     "platform" TEXT NOT NULL DEFAULT 'onebot',
     "qqUin" BIGINT NOT NULL,
-    "officialAppId" TEXT,
-    "officialAppSecret" JSONB,
+    "personalQqToken" JSONB,
     "displayName" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "reviewGroupId" TEXT,
@@ -498,6 +509,12 @@ CREATE UNIQUE INDEX "User_qqUin_key" ON "User"("qqUin");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE INDEX "OAuthIdentity_userId_idx" ON "OAuthIdentity"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "OAuthIdentity_provider_providerUserId_key" ON "OAuthIdentity"("provider", "providerUserId");
 
 -- CreateIndex
 CREATE INDEX "EmailVerificationCode_email_purpose_createdAt_idx" ON "EmailVerificationCode"("email", "purpose", "createdAt");

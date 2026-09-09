@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   buildQZonePostUrl,
   deriveAggregateStatus,
-  getOfficialQqForumQZoneLinkBotAccountId,
+  getQqForumQZoneLinkBotAccountId,
   isRecoverableOrphanPublishingPost,
   interruptedPublishAttemptRecoveryData,
   isIncompleteBatchFanout,
@@ -10,12 +10,12 @@ import {
   readExpectedBatchFanoutCount,
   resolveEarliestPublishDispatchAt,
   shouldSkipBatchPublishFanout,
-  renderOfficialQqForumCaption,
-  renderOfficialQqForumThreadTitle,
+  renderQqForumCaption,
+  renderQqForumThreadTitle,
   republishFailureRetryDelayMs,
   serializePublishErrorForLog,
   shouldAutomaticallyRequeueFailedAttempt,
-  shouldAppendOfficialQqForumQZoneLink,
+  shouldAppendQqForumQZoneLink,
   shouldWaitForQZoneAttempt,
 } from "./publishing";
 
@@ -209,9 +209,9 @@ describe("deriveAggregateStatus", () => {
   });
 });
 
-describe("renderOfficialQqForumCaption", () => {
+describe("renderQqForumCaption", () => {
   it("频道正文不重复标题里的稿件编号和投稿人", () => {
-    expect(renderOfficialQqForumCaption({
+    expect(renderQqForumCaption({
       customText: "校园墙",
       suffixText: "欢迎互动",
       includePostId: true,
@@ -226,7 +226,7 @@ describe("renderOfficialQqForumCaption", () => {
   });
 
   it("批量单稿片段不再输出标题信息，避免出现重复的 #编号 投稿人", () => {
-    expect(renderOfficialQqForumCaption({
+    expect(renderQqForumCaption({
       customText: "校园墙",
       suffixText: "欢迎互动",
       includePostId: true,
@@ -247,23 +247,23 @@ describe("renderOfficialQqForumCaption", () => {
       qzoneLinkBotAccountId: "bot-1",
     };
 
-    expect(shouldAppendOfficialQqForumQZoneLink(template)).toBe(true);
-    expect(getOfficialQqForumQZoneLinkBotAccountId(template)).toBe("bot-1");
+    expect(shouldAppendQqForumQZoneLink(template)).toBe(true);
+    expect(getQqForumQZoneLinkBotAccountId(template)).toBe("bot-1");
   });
 });
 
-describe("renderOfficialQqForumThreadTitle", () => {
+describe("renderQqForumThreadTitle", () => {
   it("将稿件 ID 和非匿名投稿人 QQ 放入单稿标题", () => {
-    expect(renderOfficialQqForumThreadTitle([{ postId: 10, anonymous: false, authorQq: "2069528060" }]))
+    expect(renderQqForumThreadTitle([{ postId: 10, anonymous: false, authorQq: "2069528060" }]))
       .toBe("#10 2069528060");
   });
 
   it("匿名稿标题不泄露投稿人 QQ", () => {
-    expect(renderOfficialQqForumThreadTitle([{ postId: 10, anonymous: true, authorQq: "2069528060" }])).toBe("#10");
+    expect(renderQqForumThreadTitle([{ postId: 10, anonymous: true, authorQq: "2069528060" }])).toBe("#10");
   });
 
   it("批量稿件保留批量标题", () => {
-    expect(renderOfficialQqForumThreadTitle([
+    expect(renderQqForumThreadTitle([
       { postId: 10, anonymous: false, authorQq: "10000" },
       { postId: 11, anonymous: false, authorQq: "10001" },
     ])).toBe("#10 等 2 条稿件");

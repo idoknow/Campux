@@ -117,7 +117,7 @@ const memberSortLabels: Record<MemberSort, string> = {
 };
 
 type BotForm = {
-  platform: "onebot" | "official_qq";
+  platform: "onebot" | "personal_qq";
   qqUin: string;
   appId: string;
   appSecret: string;
@@ -128,12 +128,12 @@ type BotForm = {
   createPublishTarget: boolean;
 };
 
-type OfficialQqGuildOption = { id: string; name: string; icon: string | null };
-type OfficialQqChannelOption = { id: string; guildId: string; name: string; type: number | null; parentId: string | null };
+type PersonalQqGuildOption = { id: string; name: string; icon: string | null };
+type PersonalQqChannelOption = { id: string; guildId: string; name: string; type: number | null; parentId: string | null };
 
 const officialQqForumChannelType = 10007;
 
-function officialQqForumChannels(channels: OfficialQqChannelOption[]) {
+function officialQqForumChannels(channels: PersonalQqChannelOption[]) {
   return channels.filter((channel) => channel.type === officialQqForumChannelType);
 }
 
@@ -841,10 +841,10 @@ export function AdminPage({
           reviewGroupId: botForm.reviewGroupId.trim() || undefined,
           createPublishTarget: botForm.createPublishTarget,
         } : {
-          platform: "official_qq",
-          appId: botForm.appId.trim(),
-          appSecret: botForm.appSecret.trim(),
+          platform: "personal_qq",
+          personalQqToken: botForm.appSecret.trim(),
           displayName: botForm.displayName.trim(),
+          guildId: botForm.guildId.trim(),
           channelId: botForm.channelId.trim(),
         }),
       });
@@ -875,7 +875,7 @@ export function AdminPage({
 
   async function updateBotConfig(
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) {
     setBusy(true);
     try {
@@ -929,7 +929,7 @@ export function AdminPage({
   }
 
   async function addPublishTarget() {
-    const botAccountId = targetForm.botAccountId || bots.find((bot) => bot.platform === "onebot" || bot.platform === "official_qq")?.id;
+    const botAccountId = targetForm.botAccountId || bots.find((bot) => bot.platform === "onebot" || bot.platform === "personal_qq")?.id;
     if (!botAccountId) {
       toast.error("需要先添加机器人。");
       return;
@@ -2643,24 +2643,24 @@ function BotsPanel({
   onDelete: (id: string) => void;
   onUpdateConfig: (
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) => void;
   onRefresh: () => void;
 }) {
-  const [guilds, setGuilds] = useState<OfficialQqGuildOption[]>([]);
-  const [channels, setChannels] = useState<OfficialQqChannelOption[]>([]);
+  const [guilds, setGuilds] = useState<PersonalQqGuildOption[]>([]);
+  const [channels, setChannels] = useState<PersonalQqChannelOption[]>([]);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
 
   async function loadGuilds() {
-    if (!form.appId.trim() || !form.appSecret.trim()) {
-      toast.error("请先填写 AppID 和 AppSecret。");
+    if (!form.appSecret.trim()) {
+      toast.error("请先填写 QQ 频道机器人 token。");
       return;
     }
     setDiscoveryBusy(true);
     try {
-      const result = await api<{ guilds: OfficialQqGuildOption[] }>("/api/admin/official-qq/discovery", {
+      const result = await api<{ guilds: PersonalQqGuildOption[] }>("/api/admin/personal-qq/discovery", {
         method: "POST",
-        body: JSON.stringify({ appId: form.appId.trim(), appSecret: form.appSecret.trim() }),
+        body: JSON.stringify({ personalQqToken: form.appSecret.trim() }),
       });
       setGuilds(result.guilds);
       setChannels([]);
@@ -2678,9 +2678,9 @@ function BotsPanel({
     setChannels([]);
     setDiscoveryBusy(true);
     try {
-      const result = await api<{ channels: OfficialQqChannelOption[] }>("/api/admin/official-qq/discovery", {
+      const result = await api<{ channels: PersonalQqChannelOption[] }>("/api/admin/personal-qq/discovery", {
         method: "POST",
-        body: JSON.stringify({ appId: form.appId.trim(), appSecret: form.appSecret.trim(), guildId }),
+        body: JSON.stringify({ personalQqToken: form.appSecret.trim(), guildId }),
       });
       const forumChannels = officialQqForumChannels(result.channels);
       setChannels(forumChannels);
@@ -2722,8 +2722,8 @@ function BotsPanel({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="onebot">QQ 号</SelectItem>
-                    <SelectItem value="official_qq">QQ 官方机器人</SelectItem>
+                    <SelectItem value="onebot">QQ 空间机器人</SelectItem>
+                    <SelectItem value="personal_qq">QQ 频道机器人</SelectItem>
                   </SelectContent>
                 </Select>
               </label>
@@ -2745,16 +2745,8 @@ function BotsPanel({
               ) : (
                 <>
                   <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                    AppID
-                    <Input className="bg-white" value={form.appId} onChange={(event) => {
-                      setGuilds([]);
-                      setChannels([]);
-                      onFormChange({ ...form, appId: event.target.value.replace(/\D/g, ""), guildId: "", channelId: "" });
-                    }} />
-                  </label>
-                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                    AppSecret
-                    <Input className="bg-white" type="password" value={form.appSecret} onChange={(event) => {
+                    QQ 频道机器人 token
+                    <Input className="bg-white" type="password" value={form.appSecret} placeholder="connect.qq.com/ai 扫码产出的 bot: token" onChange={(event) => {
                       setGuilds([]);
                       setChannels([]);
                       onFormChange({ ...form, appSecret: event.target.value, guildId: "", channelId: "" });
@@ -2770,7 +2762,7 @@ function BotsPanel({
                         <p className="text-xs font-semibold text-slate-700">选择 QQ 频道与论坛子频道</p>
                         <p className="mt-0.5 text-xs font-normal text-slate-500">自动读取 guild_id 和 channel_id；稿件将推送到所选论坛子频道。</p>
                       </div>
-                      <Button type="button" variant="outline" size="sm" disabled={discoveryBusy || !form.appId.trim() || !form.appSecret.trim()} onClick={() => void loadGuilds()}>
+                      <Button type="button" variant="outline" size="sm" disabled={discoveryBusy || !form.appSecret.trim()} onClick={() => void loadGuilds()}>
                         {discoveryBusy ? "读取中…" : "获取频道列表"}
                       </Button>
                     </div>
@@ -2792,7 +2784,7 @@ function BotsPanel({
                   </div>
                 </>
               )}
-              <Button className="font-medium" disabled={busy || !form.displayName.trim() || (form.platform === "onebot" ? !form.qqUin.trim() : !form.appId.trim() || !form.appSecret.trim() || !form.channelId.trim())} onClick={onAdd}>
+              <Button className="font-medium" disabled={busy || !form.displayName.trim() || (form.platform === "onebot" ? !form.qqUin.trim() : !form.appSecret.trim() || !form.guildId.trim() || !form.channelId.trim())} onClick={onAdd}>
                 <PlusIcon data-icon="inline-start" />
                 添加
               </Button>
@@ -2825,10 +2817,10 @@ function BotsPanel({
                       {!bot.enabled ? <Badge className="rounded-full bg-red-50 text-red-700 ring-1 ring-red-200 shadow-none">停用</Badge> : null}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-600">
-                      {bot.platform === "official_qq" ? (
+                      {bot.platform === "personal_qq" ? (
                         <>
-                          <span><span className="mr-1 text-xs font-semibold text-slate-400">AppID</span><span className="font-semibold">{bot.officialAppId ?? bot.qqUin}</span></span>
-                          <span><span className="mr-1 text-xs font-semibold text-slate-400">频道 ID</span><span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span></span>
+                          <span><span className="mr-1 text-xs font-semibold text-slate-400">guild_id</span><span className="font-semibold">{bot.qqUin}</span></span>
+                          <span><span className="mr-1 text-xs font-semibold text-slate-400">channel_id</span><span className="font-semibold">{bot.reviewGroupId ?? "未设置"}</span></span>
                         </>
                       ) : (
                         <>
@@ -2939,17 +2931,17 @@ function BotSetupGuide() {
     {
       icon: BotIcon,
       title: "选择接入方式",
-      detail: "QQ 号使用 NapCat / OneBot；QQ 官方机器人填写 AppID、AppSecret 后可直接读取已加入的 QQ 频道和子频道。",
+      detail: "QQ 空间机器人使用 NapCat / OneBot；QQ 频道机器人填写 connect.qq.com MCP token 后可直接读取已加入的 QQ 频道和子频道。",
     },
     {
       icon: RadioTowerIcon,
       title: "完成连接",
-      detail: "QQ 号复制 OneBot URL 到 NapCat；官方机器人使用 AppID、AppSecret 调用 QQ OpenAPI。",
+      detail: "QQ 空间机器人复制 OneBot URL 到 NapCat；QQ 频道机器人使用 QQ 互联 MCP 网关（HTTP 直连）发帖。",
     },
     {
       icon: MessageSquareTextIcon,
       title: "确认消息流",
-      detail: "官方机器人可在后台直接读取已加入的 QQ 频道，并选择对应子频道。",
+      detail: "QQ 频道机器人在后台直接读取已加入的 QQ 频道，并选择对应论坛子频道。",
     },
   ];
 
@@ -2987,12 +2979,11 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "officialAppId" | "officialAppSecret" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderAtAll" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderAtAll" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
-  const [officialAppId, setOfficialAppId] = useState(bot.officialAppId ?? "");
-  const [officialAppSecret, setOfficialAppSecret] = useState("");
+  const [personalQqToken, setPersonalQqToken] = useState("");
   const [userMessageReply, setUserMessageReply] = useState(bot.userMessageReply);
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
   const [reviewGroupMessageReply, setReviewGroupMessageReply] = useState(bot.reviewGroupMessageReply);
@@ -3002,16 +2993,15 @@ function BotConfigEditor({
   const [reviewQueueReminderAtAll, setReviewQueueReminderAtAll] = useState(bot.reviewQueueReminderAtAll);
   const [autoFriendRequestApprovalEnabled, setAutoFriendRequestApprovalEnabled] = useState(bot.autoFriendRequestApprovalEnabled);
   const [enabled, setEnabled] = useState(bot.enabled);
-  const [officialGuilds, setOfficialGuilds] = useState<OfficialQqGuildOption[]>([]);
-  const [officialChannels, setOfficialChannels] = useState<OfficialQqChannelOption[]>([]);
+  const [officialGuilds, setOfficialGuilds] = useState<PersonalQqGuildOption[]>([]);
+  const [officialChannels, setOfficialChannels] = useState<PersonalQqChannelOption[]>([]);
   const [officialGuildId, setOfficialGuildId] = useState("");
   const [officialDiscoveryBusy, setOfficialDiscoveryBusy] = useState(false);
 
   useEffect(() => {
     setDisplayName(bot.displayName);
     setReviewGroupId(bot.reviewGroupId ?? "");
-    setOfficialAppId(bot.officialAppId ?? "");
-    setOfficialAppSecret("");
+    setPersonalQqToken("");
     setUserMessageReply(bot.userMessageReply);
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
     setReviewGroupMessageReply(bot.reviewGroupMessageReply);
@@ -3021,20 +3011,18 @@ function BotConfigEditor({
     setReviewQueueReminderAtAll(bot.reviewQueueReminderAtAll);
     setAutoFriendRequestApprovalEnabled(bot.autoFriendRequestApprovalEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.officialAppId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.reviewQueueReminderAtAll, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.reviewQueueReminderAtAll, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
-  const trimmedOfficialAppId = officialAppId.trim();
-  const trimmedOfficialAppSecret = officialAppSecret.trim();
+  const trimmedPersonalQqToken = personalQqToken.trim();
   const trimmedUserMessageReply = userMessageReply.trim();
   const trimmedReviewGroupMessageReply = reviewGroupMessageReply.trim();
   const normalizedCooldownSeconds = Math.max(0, Number(userMessageReplyCooldownSeconds || 0));
   const normalizedReviewQueueReminderThresholdHours = Math.min(168, Math.max(1, Number(reviewQueueReminderThresholdHours || 6)));
   const changed = trimmedDisplayName !== bot.displayName
     || trimmedReviewGroupId !== (bot.reviewGroupId ?? "")
-    || (bot.platform === "official_qq" && trimmedOfficialAppId !== (bot.officialAppId ?? ""))
-    || (bot.platform === "official_qq" && Boolean(trimmedOfficialAppSecret))
+    || (bot.platform === "personal_qq" && Boolean(trimmedPersonalQqToken))
     || (bot.platform === "onebot" && trimmedUserMessageReply !== bot.userMessageReply)
     || (bot.platform === "onebot" && normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds)
     || (bot.platform === "onebot" && trimmedReviewGroupMessageReply !== bot.reviewGroupMessageReply)
@@ -3044,15 +3032,14 @@ function BotConfigEditor({
     || (bot.platform === "onebot" && normalizedReviewQueueReminderThresholdHours !== bot.reviewQueueReminderThresholdHours)
     || (bot.platform === "onebot" && autoFriendRequestApprovalEnabled !== bot.autoFriendRequestApprovalEnabled)
     || enabled !== bot.enabled;
-  const canSave = !busy && Boolean(trimmedDisplayName) && (bot.platform === "official_qq" ? Boolean(trimmedOfficialAppId) && Boolean(trimmedReviewGroupId) : Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply)) && changed;
+  const canSave = !busy && Boolean(trimmedDisplayName) && (bot.platform === "personal_qq" ? Boolean(trimmedReviewGroupId) : Boolean(trimmedUserMessageReply) && Boolean(trimmedReviewGroupMessageReply)) && changed;
 
   function saveConfig() {
-    if (bot.platform === "official_qq") {
+    if (bot.platform === "personal_qq") {
       onSave({
         displayName: trimmedDisplayName,
         reviewGroupId: trimmedReviewGroupId || null,
-        officialAppId: trimmedOfficialAppId,
-        ...(trimmedOfficialAppSecret ? { officialAppSecret: trimmedOfficialAppSecret } : {}),
+        ...(trimmedPersonalQqToken ? { personalQqToken: trimmedPersonalQqToken } : {}),
         enabled,
       });
       return;
@@ -3072,10 +3059,10 @@ function BotConfigEditor({
     });
   }
 
-  async function loadExistingOfficialGuilds() {
+  async function loadExistingPersonalQqGuilds() {
     setOfficialDiscoveryBusy(true);
     try {
-      const result = await api<{ guilds: OfficialQqGuildOption[] }>(`/api/admin/bots/${bot.id}/official-qq/guilds`);
+      const result = await api<{ guilds: PersonalQqGuildOption[] }>(`/api/admin/bots/${bot.id}/personal-qq/guilds`);
       setOfficialGuilds(result.guilds);
       setOfficialChannels([]);
       setOfficialGuildId("");
@@ -3087,12 +3074,12 @@ function BotConfigEditor({
     }
   }
 
-  async function loadExistingOfficialChannels(guildId: string) {
+  async function loadExistingPersonalQqChannels(guildId: string) {
     setOfficialGuildId(guildId);
     setOfficialChannels([]);
     setOfficialDiscoveryBusy(true);
     try {
-      const result = await api<{ channels: OfficialQqChannelOption[] }>(`/api/admin/bots/${bot.id}/official-qq/channels?guildId=${encodeURIComponent(guildId)}`);
+      const result = await api<{ channels: PersonalQqChannelOption[] }>(`/api/admin/bots/${bot.id}/personal-qq/channels?guildId=${encodeURIComponent(guildId)}`);
       const forumChannels = officialQqForumChannels(result.channels);
       setOfficialChannels(forumChannels);
       if (forumChannels.length === 0) toast.info("该 QQ 频道下没有可用于稿件推送的论坛子频道。");
@@ -3109,21 +3096,17 @@ function BotConfigEditor({
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-sm font-semibold text-slate-800">基础设置</p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-500">{bot.platform === "official_qq" ? "显示名、稿件推送论坛子频道、凭证和启用状态。" : "显示名、审核群、启用状态。"}</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">{bot.platform === "personal_qq" ? "显示名、稿件推送论坛子频道、凭证和启用状态。" : "显示名、审核群、启用状态。"}</p>
           </div>
           <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
         </summary>
         <div className="grid gap-3 border-t border-slate-200 p-3">
           <div className="grid gap-3">
-            {bot.platform === "official_qq" ? (
+            {bot.platform === "personal_qq" ? (
               <>
                 <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                  AppID
-                  <Input className="bg-white" value={officialAppId} onChange={(event) => setOfficialAppId(event.target.value.replace(/\D/g, ""))} />
-                </label>
-                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
-                  AppSecret <span className="font-normal text-slate-400">留空则不修改</span>
-                  <Input className="bg-white" type="password" value={officialAppSecret} onChange={(event) => setOfficialAppSecret(event.target.value)} placeholder={bot.officialAppSecretConfigured ? "已配置，输入新值可替换" : "未配置"} />
+                  QQ 频道机器人 token <span className="font-normal text-slate-400">留空则不修改</span>
+                  <Input className="bg-white" type="password" value={personalQqToken} onChange={(event) => setPersonalQqToken(event.target.value)} placeholder={bot.personalQqTokenConfigured ? "已配置，输入新值可替换" : "未配置"} />
                 </label>
                 <div className="grid gap-2 rounded-md border border-sky-100 bg-sky-50/50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3131,11 +3114,11 @@ function BotConfigEditor({
                       <p className="text-xs font-semibold text-slate-700">稿件推送论坛子频道</p>
                       <p className="mt-0.5 text-xs font-normal text-slate-500">当前 channel_id：{reviewGroupId || "未设置"}</p>
                     </div>
-                    <Button type="button" variant="outline" size="sm" disabled={officialDiscoveryBusy} onClick={() => void loadExistingOfficialGuilds()}>
+                    <Button type="button" variant="outline" size="sm" disabled={officialDiscoveryBusy} onClick={() => void loadExistingPersonalQqGuilds()}>
                       {officialDiscoveryBusy ? "读取中…" : "重新获取频道"}
                     </Button>
                   </div>
-                  <Select value={officialGuildId} onValueChange={(value) => void loadExistingOfficialChannels(value)} disabled={officialGuilds.length === 0 || officialDiscoveryBusy}>
+                  <Select value={officialGuildId} onValueChange={(value) => void loadExistingPersonalQqChannels(value)} disabled={officialGuilds.length === 0 || officialDiscoveryBusy}>
                     <SelectTrigger className="bg-white"><SelectValue placeholder="选择 QQ 频道（guild_id）" /></SelectTrigger>
                     <SelectContent>{officialGuilds.map((guild) => <SelectItem key={guild.id} value={guild.id}>{guild.name} · {guild.id}</SelectItem>)}</SelectContent>
                   </Select>
@@ -3306,11 +3289,11 @@ function BotPublishTemplateEditor({ bot, qzoneBots = [], busy, onSave }: { bot: 
   const previewParts = [];
   if (template.customText.trim()) previewParts.push(template.customText.trim());
   if (template.includePostId) previewParts.push("#12");
-  if (template.includeAuthorMention) previewParts.push(bot.platform === "official_qq" ? "10000" : "@{uin:10000,nick:,who:1}");
+  if (template.includeAuthorMention) previewParts.push(bot.platform === "personal_qq" ? "10000" : "@{uin:10000,nick:,who:1}");
   const preview = [
     previewParts.join(" ").trim(),
     ...(template.includeLinks ? ["https://example.com/activity"] : []),
-    ...(bot.platform === "official_qq" && template.includeQZoneLink ? ["https://user.qzone.qq.com/123456789/mood/example_tid"] : []),
+    ...(bot.platform === "personal_qq" && template.includeQZoneLink ? ["https://user.qzone.qq.com/123456789/mood/example_tid"] : []),
     template.suffixText.trim(),
   ]
     .filter(Boolean)
@@ -3320,7 +3303,7 @@ function BotPublishTemplateEditor({ bot, qzoneBots = [], busy, onSave }: { bot: 
     <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
-          <p className="text-sm font-semibold text-slate-800">{bot.platform === "official_qq" ? "频道帖子配文模板" : "说说配文模板"}</p>
+          <p className="text-sm font-semibold text-slate-800">{bot.platform === "personal_qq" ? "频道帖子配文模板" : "说说配文模板"}</p>
           <p className="mt-0.5 text-xs font-semibold text-slate-500">正文在渲染图里，这里只改发布配文。</p>
         </div>
         <Badge variant={dirty ? "secondary" : "outline"}>{dirty ? "有改动" : "低频"}</Badge>
@@ -3339,7 +3322,7 @@ function BotPublishTemplateEditor({ bot, qzoneBots = [], busy, onSave }: { bot: 
               className="mt-1 min-h-20 resize-y bg-white text-sm"
               value={template.customText}
               onChange={(event) => updateTemplate({ customText: event.target.value })}
-              placeholder={bot.platform === "official_qq" ? "会显示在稿件编号和投稿人 QQ 之前" : "会显示在稿件编号和 @ 用户之前"}
+              placeholder={bot.platform === "personal_qq" ? "会显示在稿件编号和投稿人 QQ 之前" : "会显示在稿件编号和 @ 用户之前"}
             />
           </label>
           <label className="text-xs font-semibold text-slate-500">
@@ -3359,14 +3342,14 @@ function BotPublishTemplateEditor({ bot, qzoneBots = [], busy, onSave }: { bot: 
           </label>
           <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
             <input type="checkbox" checked={template.includeAuthorMention} onChange={(event) => updateTemplate({ includeAuthorMention: event.target.checked })} />
-            {bot.platform === "official_qq" ? "非匿名时显示投稿人 QQ" : "非匿名时 @ 用户"}
+            {bot.platform === "personal_qq" ? "非匿名时显示投稿人 QQ" : "非匿名时 @ 用户"}
           </label>
           <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-2">
             <input type="checkbox" checked={template.includeLinks} onChange={(event) => updateTemplate({ includeLinks: event.target.checked })} />
-            {bot.platform === "official_qq" ? "附上正文中的链接" : "提取正文链接"}
+            {bot.platform === "personal_qq" ? "附上正文中的链接" : "提取正文链接"}
           </label>
         </div>
-        {bot.platform === "official_qq" ? (
+        {bot.platform === "personal_qq" ? (
           <div className="mt-2 grid gap-2 rounded-md border border-sky-100 bg-sky-50 p-2 text-xs font-semibold text-sky-800 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)] md:items-center">
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={template.includeQZoneLink} onChange={(event) => updateTemplate({ includeQZoneLink: event.target.checked })} />
@@ -3455,7 +3438,7 @@ function PublishPanel({
   onSaveTemplate: (botId: string, template: PublishTextTemplate) => void;
 }) {
   const attemptGroups = groupPublishAttempts(attempts);
-  const publishBots = bots.filter((bot) => bot.platform === "onebot" || bot.platform === "official_qq");
+  const publishBots = bots.filter((bot) => bot.platform === "onebot" || bot.platform === "personal_qq");
 
   return (
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
@@ -3471,7 +3454,7 @@ function PublishPanel({
               <SelectContent>
                 <SelectItem value="none">选择机器人</SelectItem>
                 {publishBots.map((bot) => (
-                  <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.platform === "official_qq" ? `QQ 频道 ${bot.reviewGroupId ?? "未设置"}` : `QQ ${bot.qqUin}`}</SelectItem>
+                  <SelectItem key={bot.id} value={bot.id}>{bot.displayName} · {bot.platform === "personal_qq" ? `QQ 频道 ${bot.reviewGroupId ?? "未设置"}` : `QQ ${bot.qqUin}`}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -3510,7 +3493,7 @@ function PublishPanel({
             <EmptyCard title="还没有发布目标，添加后审核通过的稿件会自动进入发布队列" />
           ) : (
             targets.map((target) => {
-              const isOfficialQqTarget = target.botAccount.platform === "official_qq" || target.type === "qq_channel_forum";
+              const isPersonalQqTarget = target.botAccount.platform === "personal_qq" || target.type === "qq_channel_forum";
               return (
               <details key={target.id} className="product-row-card group overflow-hidden p-0">
                 <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-3 [&::-webkit-details-marker]:hidden">
@@ -3519,30 +3502,30 @@ function PublishPanel({
                       <p className="font-semibold">{target.displayName}</p>
                       <Badge className={`rounded-full shadow-none ${target.required ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200" : "bg-slate-100 text-slate-600"}`}>{target.required ? "必需" : "可选"}</Badge>
                       <Badge className={`rounded-full shadow-none ${target.botAccount.enabled ? "bg-green-50 text-green-800 ring-1 ring-green-200" : "bg-slate-100 text-slate-500"}`}>{target.botAccount.enabled ? "机器人启用" : "机器人停用"}</Badge>
-                      {isOfficialQqTarget ? (
+                      {isPersonalQqTarget ? (
                         <Badge className="rounded-full bg-sky-50 text-sky-700 ring-1 ring-sky-200 shadow-none">无需登录态</Badge>
                       ) : (
                         <Badge className={`rounded-full shadow-none ${sessionStatusBadgeClass(target.botAccount.qzoneSession?.status ?? "unchecked")}`}>登录态 {sessionStatusLabel(target.botAccount.qzoneSession?.status ?? "unchecked")}</Badge>
                       )}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {target.botAccount.displayName} · {isOfficialQqTarget ? "官方机器人" : `QQ ${target.botAccount.qqUin}`}
+                      {target.botAccount.displayName} · {isPersonalQqTarget ? "QQ 频道机器人" : `QQ ${target.botAccount.qqUin}`}
                     </p>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
-                      {isOfficialQqTarget ? "发布到 QQ 频道论坛，不需要 QZone 登录态。" : `最近检测：${target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"}`}
+                      {isPersonalQqTarget ? "发布到 QQ 频道论坛，不需要 QZone 登录态。" : `最近检测：${target.botAccount.qzoneSession?.checkedAt ? formatDateTime(target.botAccount.qzoneSession.checkedAt) : "未检测"}`}
                     </p>
                   </div>
                   <span className="rounded-md border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500 group-open:bg-slate-100">详情</span>
                 </summary>
                 <div className="border-t border-slate-100 bg-slate-50/70 p-3">
                 <div className="grid gap-2 text-xs font-semibold text-slate-600 md:grid-cols-4">
-                  {isOfficialQqTarget ? (
+                  {isPersonalQqTarget ? (
                     <>
                       <InfoPill label="发布方式" value="QQ 频道论坛" />
                       <InfoPill label="登录态" value="无需登录" />
                       <InfoPill label="风控间隔" value={`${target.publishDelaySeconds}s`} />
-                      <InfoPill label="认证方式" value="AppID / AppSecret" />
-                      <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1.5 text-sky-700 md:col-span-4">官方机器人发布走 QQ OpenAPI，不使用 QZone cookies，也不需要扫码或协议登录；发帖任务仍会按风控间隔排队。</p>
+                      <InfoPill label="认证方式" value="QQ 互联 MCP Token" />
+                      <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1.5 text-sky-700 md:col-span-4">QQ 频道机器人通过 QQ 互联 MCP 网关（HTTP 直连）发布，无需 QZone cookies 或协议登录；发帖任务仍会按风控间隔排队。</p>
                     </>
                   ) : (
                     <>
@@ -3561,7 +3544,7 @@ function PublishPanel({
                   <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { required: !target.required })}>
                     {target.required ? "改为可选" : "设为必需"}
                   </Button>
-                  {isOfficialQqTarget ? null : (
+                  {isPersonalQqTarget ? null : (
                     <>
                       <Button variant="outline" size="sm" onClick={() => onPatchTarget(target, { qzoneRefreshMode: target.qzoneRefreshMode === "qr" ? "protocol" : "qr" })}>
                         切换登录模式
@@ -3722,14 +3705,14 @@ function PublishTargetConfigEditor({
     setQzoneRefreshMode(target.qzoneRefreshMode);
   }, [target.displayName, target.enabled, target.required, target.publishDelaySeconds, target.qzoneRefreshMode]);
 
-  const isOfficialQqTarget = target.botAccount.platform === "official_qq" || target.type === "qq_channel_forum";
+  const isPersonalQqTarget = target.botAccount.platform === "personal_qq" || target.type === "qq_channel_forum";
   const normalizedDelay = Math.max(Number(publishDelaySeconds || DEFAULT_PUBLISH_INTERVAL_SECONDS), 0);
   const normalizedName = displayName.trim();
   const changed = normalizedName !== target.displayName
     || enabled !== target.enabled
     || required !== target.required
     || normalizedDelay !== target.publishDelaySeconds
-    || (!isOfficialQqTarget && qzoneRefreshMode !== target.qzoneRefreshMode);
+    || (!isPersonalQqTarget && qzoneRefreshMode !== target.qzoneRefreshMode);
 
   function saveConfig() {
     onSave({
@@ -3737,7 +3720,7 @@ function PublishTargetConfigEditor({
       enabled,
       required,
       publishDelaySeconds: normalizedDelay,
-      ...(isOfficialQqTarget ? {} : { qzoneRefreshMode }),
+      ...(isPersonalQqTarget ? {} : { qzoneRefreshMode }),
     });
   }
 
@@ -3746,7 +3729,7 @@ function PublishTargetConfigEditor({
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <div>
           <p className="text-sm font-semibold text-slate-800">目标设置</p>
-          <p className="mt-0.5 text-xs font-semibold text-slate-500">{isOfficialQqTarget ? "名称、启用状态、风控间隔和必发策略。官方机器人发布无需登录态。" : "名称、启用状态、风控间隔、登录方式。"}</p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">{isPersonalQqTarget ? "名称、启用状态、风控间隔和必发策略。QQ 频道机器人发布无需登录态。" : "名称、启用状态、风控间隔、登录方式。"}</p>
         </div>
         <Badge variant={changed ? "secondary" : "outline"}>{changed ? "有改动" : "设置"}</Badge>
       </summary>
@@ -3763,7 +3746,7 @@ function PublishTargetConfigEditor({
             保存目标设置
           </Button>
         </div>
-        <div className={`mt-3 grid gap-2 ${isOfficialQqTarget ? "md:grid-cols-[minmax(180px,1fr)_150px]" : "md:grid-cols-[minmax(180px,1fr)_150px_180px]"}`}>
+        <div className={`mt-3 grid gap-2 ${isPersonalQqTarget ? "md:grid-cols-[minmax(180px,1fr)_150px]" : "md:grid-cols-[minmax(180px,1fr)_150px_180px]"}`}>
           <Input className="bg-white" placeholder="发布目标名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
           <Input
             className="bg-white"
@@ -3772,7 +3755,7 @@ function PublishTargetConfigEditor({
             value={publishDelaySeconds}
             onChange={(event) => setPublishDelaySeconds(event.target.value.replace(/\D/g, ""))}
           />
-          {isOfficialQqTarget ? null : (
+          {isPersonalQqTarget ? null : (
             <Select value={qzoneRefreshMode} onValueChange={(value) => setQzoneRefreshMode(value as "protocol" | "qr")}>
               <SelectTrigger className="h-10 w-full bg-white font-bold"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -3798,9 +3781,9 @@ function PublishTargetConfigEditor({
 }
 
 function PublishAttemptDetail({ attempt, onRetry }: { attempt: PublishAttemptItem; onRetry: (id: string) => void }) {
-  const isOfficialQq = attempt.platform === "official_qq" || attempt.publishTarget.botAccount.platform === "official_qq";
-  const botIdentity = isOfficialQq
-    ? `AppID ${attempt.publishTarget.botAccount.officialAppId ?? attempt.publishTarget.botAccount.qqUin}`
+  const isPersonalQq = attempt.platform === "personal_qq" || attempt.publishTarget.botAccount.platform === "personal_qq";
+  const botIdentity = isPersonalQq
+    ? `频道 ${attempt.publishTarget.botAccount.reviewGroupId ?? "无"}`
     : `QQ ${attempt.publishTarget.botAccount.qqUin}`;
   return (
     <details className="rounded-md border border-slate-200 bg-white">
@@ -3831,36 +3814,37 @@ function PublishAttemptDetail({ attempt, onRetry }: { attempt: PublishAttemptIte
           {attempt.nextRunAt ? <p className="font-bold text-amber-700 md:col-span-2">下次执行：{formatDateTime(attempt.nextRunAt)}</p> : null}
         </div>
         {attempt.lastError ? <p className="mt-2 break-all rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{attempt.lastError}</p> : null}
-        {attempt.verbose ? <PublishVerboseLog verbose={attempt.verbose} isOfficialQq={isOfficialQq} /> : null}
+        {attempt.verbose ? <PublishVerboseLog verbose={attempt.verbose} isPersonalQq={isPersonalQq} /> : null}
       </div>
     </details>
   );
 }
 
-function PublishVerboseLog({ verbose, isOfficialQq }: { verbose: NonNullable<PublishAttemptItem["verbose"]>; isOfficialQq?: boolean }) {
+function PublishVerboseLog({ verbose, isPersonalQq }: { verbose: NonNullable<PublishAttemptItem["verbose"]>; isPersonalQq?: boolean }) {
   const httpLogs = Array.isArray(verbose.http) ? verbose.http : [];
 
   return (
     <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge className="rounded-full bg-slate-100 text-slate-700 shadow-none">模式 {String(verbose.mode ?? "unknown")}</Badge>
-        {isOfficialQq ? (
+        {isPersonalQq ? (
           <Badge className="rounded-full bg-violet-50 text-violet-700 shadow-none ring-1 ring-violet-200">QQ 频道论坛</Badge>
         ) : (
           <Badge className="rounded-full bg-blue-50 text-blue-700 shadow-none ring-1 ring-blue-200">登录态 {String(verbose.cookieStatus ?? "unknown")}</Badge>
         )}
         <span className="text-xs font-bold text-slate-500">
-          {isOfficialQq ? `正文 ${typeof verbose.contentLength === "number" ? verbose.contentLength : 0} 字 · 图片 ${typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张` : `渲染图 ${formatBytes(verbose.renderedBytes)} · 图片 ${typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张`}
+          {isPersonalQq ? `正文 ${typeof verbose.contentLength === "number" ? verbose.contentLength : 0} 字 · 图片 ${typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张` : `渲染图 ${formatBytes(verbose.renderedBytes)} · 图片 ${typeof verbose.imageCount === "number" ? verbose.imageCount : 0} 张`}
         </span>
         {verbose.publishedAt ? <span className="text-xs font-bold text-slate-500">发布 {formatDateTime(verbose.publishedAt)}</span> : null}
       </div>
       {verbose.note ? <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">{verbose.note}</p> : null}
       <div className="mt-2 grid gap-2 text-xs font-semibold text-slate-500 md:grid-cols-2">
-        {isOfficialQq ? (
+        {isPersonalQq ? (
           <>
-            <p className="break-all">AppID：{verbose.appId ?? "未知"}</p>
-            <p className="break-all">频道 ID：{verbose.channelId ?? "未知"}</p>
-            {verbose.title ? <p className="break-all md:col-span-2">帖子标题：{verbose.title}</p> : null}
+            <p className="break-all">guild_id：{verbose.guildId ?? "未知"}</p>
+            <p className="break-all">channel_id：{verbose.channelId ?? "未知"}</p>
+            {verbose.feedId ? <p className="break-all md:col-span-2">feed_id：{verbose.feedId}</p> : null}
+            {verbose.shareUrl ? <p className="break-all md:col-span-2">链接：{verbose.shareUrl}</p> : null}
           </>
         ) : (
           <>

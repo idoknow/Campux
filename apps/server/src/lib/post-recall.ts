@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { Prisma } from "@campux/db";
 import { QZoneRecallError, setQZoneEmotionPrivate } from "@campux/integrations";
-import { deleteOfficialQqForumThread, findOfficialQqForumThreadIdByDisplayIds, readOfficialQqForumThreadId } from "../runtime/official-qq";
+import { deletePersonalQqForumThread } from "../runtime/personal-qq";
 import { qzoneCookieDomain } from "./bot-workflows";
 import { prisma } from "./prisma";
 import { decryptJson } from "./secret-json";
@@ -139,30 +139,29 @@ export async function executePostRecall({
         if (!qzoneTid) {
           throw new Error("缺少 QZone TID");
         }
-        if (attempt.publishTarget.botAccount.platform === "official_qq") {
-          let threadId = resolveOfficialQqRecallThreadId(attempt.qzoneTid, attempt.verbose);
-          if (!threadId) {
-            threadId = await findOfficialQqForumThreadIdByDisplayIds(
-              {
-                id: attempt.publishTarget.botAccount.id,
-                officialAppId: attempt.publishTarget.botAccount.officialAppId,
-                officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
-              },
-              attempt.publishTarget.botAccount.reviewGroupId ?? "",
-              [post.displayId],
-            );
-          }
-          if (!threadId) {
+        if (attempt.publishTarget.botAccount.platform === "personal_qq") {
+          const feedId = resolvePersonalQqRecallFeedId(attempt.qzoneTid, attempt.verbose);
+          const createTime = resolvePersonalQqRecallCreateTime(attempt.verbose);
+          if (!feedId) {
             throw new Error("缺少 QQ 频道帖子 ID，无法调用删除帖子 API");
           }
-          const recall = await deleteOfficialQqForumThread(
+          if (createTime == null) {
+            throw new Error("缺少 QQ 频道帖子 create_time，无法调用删除帖子 API");
+          }
+          const recall = await deletePersonalQqForumThread(
+            undefined,
             {
               id: attempt.publishTarget.botAccount.id,
-              officialAppId: attempt.publishTarget.botAccount.officialAppId,
-              officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
+              qqUin: attempt.publishTarget.botAccount.qqUin,
+              personalQqToken: attempt.publishTarget.botAccount.personalQqToken,
+              reviewGroupId: attempt.publishTarget.botAccount.reviewGroupId,
             },
-            attempt.publishTarget.botAccount.reviewGroupId ?? "",
-            threadId,
+            {
+              guildId: attempt.publishTarget.botAccount.qqUin.toString(),
+              channelId: attempt.publishTarget.botAccount.reviewGroupId ?? "",
+              feedId,
+              createTime,
+            },
           );
           await transaction.publishAttempt.update({
             where: {
@@ -183,7 +182,7 @@ export async function executePostRecall({
               actorId,
               oldStatus: post.status,
               newStatus: "pending_recall",
-              comment: `${targetName} QQ 频道帖子已删除：${qzoneTid}`,
+              comment: `${targetName} QQ 频道帖子已删除：${feedId}`,
             },
           });
           results.push({
@@ -336,11 +335,31 @@ export async function executePostRecall({
 }
 
 function resolveRecallExternalId(qzoneTid: string | null, externalId: string | null, verbose: Prisma.JsonValue) {
-  return qzoneTid ?? externalId ?? readOfficialQqForumThreadId(verbose);
+  return qzoneTid ?? externalId ?? resolvePersonalQqRecallFeedId(null, verbose);
 }
 
-function resolveOfficialQqRecallThreadId(qzoneTid: string | null, verbose: Prisma.JsonValue) {
-  return qzoneTid ?? readOfficialQqForumThreadId(verbose);
+/** 从（qzoneTid 或 verbose）解析 personal_qq 频道的 feed_id。 */
+function resolvePersonalQqRecallFeedId(qzoneTid: string | null, verbose: Prisma.JsonValue) {
+  if (qzoneTid) return qzoneTid;
+  const parsed = decryptJson(verbose);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const feedId = (parsed as Record<string, unknown>).feedId;
+    if (typeof feedId === "string" && feedId) return feedId;
+    const externalId = (parsed as Record<string, unknown>).externalId;
+    if (typeof externalId === "string" && externalId) return externalId;
+  }
+  return null;
+}
+
+/** 从 verbose 解析 personal_qq 频道的 create_time（删除帖子必填）。 */
+function resolvePersonalQqRecallCreateTime(verbose: Prisma.JsonValue): number | null {
+  const parsed = decryptJson(verbose);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const v = (parsed as Record<string, unknown>).createTime;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  }
+  return null;
 }
 
 function toCookieRecord(value: Prisma.JsonValue) {

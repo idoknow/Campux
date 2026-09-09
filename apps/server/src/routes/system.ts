@@ -149,7 +149,7 @@ export function toSystemTenant(tenant: SystemTenantRecord, oneBot?: BotConnectio
       enabled: bot.enabled,
       reviewGroupId: bot.reviewGroupId,
       lastSeenAt: bot.lastSeenAt?.toISOString() ?? null,
-      connection: bot.platform === "official_qq"
+      connection: bot.platform === "personal_qq"
         ? { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 }
         : oneBot?.getBotConnectionStatus(bot.qqUin.toString()) ?? { online: false, connectionCount: 0 },
       publishTargets: bot.publishTargets.map((target) => ({

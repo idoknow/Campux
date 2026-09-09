@@ -56,6 +56,10 @@ const configSchema = z.object({
   CLOUDFLARE_API_KEY: z.string().optional(),
   CAMPUX_CLOUDFLARE_ZONE_ID: z.string().optional(),
   CLOUDFLARE_ZONE_ID: z.string().optional(),
+  // QQ 频道机器人（personal_qq）接入配置。
+  // CAMPUX_PERSONAL_QQ_MCP_URL: 覆盖 QQ 开放平台 MCP 网关地址。默认
+  // https://graph.qq.com/mcp_gateway/open_platform_agent_mcp/mcp（一般无需设置）。
+  CAMPUX_PERSONAL_QQ_MCP_URL: z.string().default(""),
 });
 
 const DEFAULT_TELEMETRY_ENDPOINT = "https://dash.campux.top";
@@ -179,6 +183,10 @@ export function loadConfig() {
           ?? nonEmpty(env.CLOUDFLARE_API_KEY),
         zoneId: nonEmpty(env.CAMPUX_CLOUDFLARE_ZONE_ID) ?? nonEmpty(env.CLOUDFLARE_ZONE_ID),
       },
+    },
+    // QQ 频道机器人（personal_qq）专用配置。
+    personalQq: {
+      mcpUrl: env.CAMPUX_PERSONAL_QQ_MCP_URL.trim(),
     },
   };
 }

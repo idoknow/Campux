@@ -20,7 +20,7 @@ import { generatePublishSummary } from "./publish-summary";
 import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
 import { imageStorageHardMaxBytes } from "../lib/image-upload-policy";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
-import { createOfficialQqForumThread, OfficialQqPublishOutcomeUnknownError } from "./official-qq";
+import { createPersonalQqForumThread, PersonalQqPublishOutcomeUnknownError } from "./personal-qq";
 import { buildPublicForumMediaUrl } from "../lib/public-forum-media";
 import type { RuntimeJob, RuntimeQueue } from "./queue";
 import { isTenantRuntimeActiveStatus, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
@@ -1544,13 +1544,14 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   }
 
   try {
-    if (attempt.publishTarget.botAccount.platform === "official_qq") {
+    if (attempt.publishTarget.botAccount.platform === "personal_qq") {
+      // QQ 频道机器人（个人 QQ 授权，connect.qq.com MCP 直连）发帖。完整流程：渲染卡片、批次、摘要、QZone 联动。
       const postsToPublish = attempt.batch
         ? attempt.batch.items.map((item) => item.post)
         : [attempt.post];
-      const qzoneLinkBotAccountId = getOfficialQqForumQZoneLinkBotAccountId(attempt.publishTarget.botAccount.publishTextTemplate);
-      const qzonePublication = shouldAppendOfficialQqForumQZoneLink(attempt.publishTarget.botAccount.publishTextTemplate)
-        ? await resolveQZonePublicationForOfficialForum({
+      const qzoneLinkBotAccountId = getQqForumQZoneLinkBotAccountId(attempt.publishTarget.botAccount.publishTextTemplate);
+      const qzonePublication = shouldAppendQqForumQZoneLink(attempt.publishTarget.botAccount.publishTextTemplate)
+        ? await resolveQZonePublicationForQqForum({
           postId: attempt.postId,
           batchId: attempt.batchId,
           botAccountId: qzoneLinkBotAccountId,
@@ -1566,7 +1567,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           },
         });
         enqueueAttempt(queue, attempt.tenantId, attempt.id, nextRunAt);
-        logger.info({ attemptId: attempt.id, nextRunAt }, "official QQ forum publication waiting for QZone tid");
+        logger.info({ attemptId: attempt.id, nextRunAt }, "personal QQ forum publication waiting for QZone tid");
         return;
       }
 
@@ -1587,15 +1588,23 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       const forumImageUrls: string[] = [];
       const storage = getStorageDriver(config);
       await storage.ensureReady();
+      // 配置了 LLM 且开启开关时，给每条稿件追加一句极短总结（≤16 字）。失败静默跳过，不阻塞发布。
+      const summaryEnabled = await readTenantPublishLlmSummaryEnabled(prisma, attempt.tenantId);
       for (const target of postsToPublish) {
         const authorQq = target.author.qqUin.toString();
         forumTitles.push({ postId: target.displayId, anonymous: target.anonymous, authorQq });
-        forumBodyParts.push(renderOfficialQqForumCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
+        // 同一稿件发往多个墙时复用同一份提要：首个 attempt 生成并落库，其余墙直接读，
+        // 避免 LLM temperature 造成各墙文字分叉，也省去重复调用。
+        const summary = summaryEnabled
+          ? await ensurePostPublishSummary(attempt.tenantId, target.id, target.text, target.publishSummary, logger)
+          : null;
+        forumBodyParts.push(renderQqForumCaption(attempt.publishTarget.botAccount.publishTextTemplate, {
           postId: target.displayId,
           text: target.text,
           anonymous: target.anonymous,
           authorQq,
           omitFixedText: isForumBatch,
+          summary,
         }));
 
         const avatarFilename = target.anonymous
@@ -1652,26 +1661,27 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         attempt.tenantId,
         logger,
         async (transaction) => {
-          const result = await createOfficialQqForumThread(
-          {
-            id: attempt.publishTarget.botAccount.id,
-            officialAppId: attempt.publishTarget.botAccount.officialAppId,
-            officialAppSecret: attempt.publishTarget.botAccount.officialAppSecret,
-          },
-          attempt.publishTarget.botAccount.reviewGroupId ?? "",
-          {
-            title: renderOfficialQqForumThreadTitle(forumTitles),
-            content: forumContent,
-            imageUrls: forumImageUrls,
-            matchDisplayIds: forumTitles.map((item) => item.postId),
-          },
+          const result = await createPersonalQqForumThread(
+            config,
+            {
+              id: attempt.publishTarget.botAccount.id,
+              qqUin: attempt.publishTarget.botAccount.qqUin,
+              personalQqToken: attempt.publishTarget.botAccount.personalQqToken,
+              reviewGroupId: attempt.publishTarget.botAccount.reviewGroupId,
+            },
+            attempt.publishTarget.botAccount.reviewGroupId ?? "",
+            {
+              title: renderQqForumThreadTitle(forumTitles),
+              content: forumContent,
+              imageUrls: forumImageUrls,
+            },
           );
           await transaction.publishAttempt.update({
             where: { id: attempt.id },
             data: {
               status: "succeeded",
               externalId: result.externalId,
-              qzoneTid: result.threadId,
+              qzoneTid: result.feedId,
               verbose: toInputJson(result.verbose),
               lastError: null,
               nextRunAt: null,
@@ -1862,7 +1872,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     const qzoneError = caught && typeof caught === "object" && "verbose" in caught
       ? caught as QZonePublishError
       : null;
-    const ambiguousPublishOutcome = caught instanceof OfficialQqPublishOutcomeUnknownError
+    const ambiguousPublishOutcome = caught instanceof PersonalQqPublishOutcomeUnknownError
       || isAmbiguousQZonePublishTimeout(qzoneError?.verbose.http ?? []);
     const nonRetryableClientError = caught instanceof BotWorkflowError && caught.statusCode < 500;
     const operatorMessage = ambiguousPublishOutcome
@@ -2568,7 +2578,7 @@ export function buildQZonePostUrl(uin: string, tid: string) {
   return `https://user.qzone.qq.com/${encodeURIComponent(uin)}/mood/${encodeURIComponent(tid)}`;
 }
 
-export function renderOfficialQqForumThreadTitle(posts: Array<{ postId: number; anonymous?: boolean; authorQq?: string }>) {
+export function renderQqForumThreadTitle(posts: Array<{ postId: number; anonymous?: boolean; authorQq?: string }>) {
   const firstPost = posts[0];
   if (!firstPost) {
     return "稿件";
@@ -2579,28 +2589,32 @@ export function renderOfficialQqForumThreadTitle(posts: Array<{ postId: number; 
   return [`#${firstPost.postId}`, firstPost.anonymous ? null : firstPost.authorQq?.trim()].filter(Boolean).join(" ");
 }
 
-export function renderOfficialQqForumCaption(value: Prisma.JsonValue | null | undefined, post: {
+export function renderQqForumCaption(value: Prisma.JsonValue | null | undefined, post: {
   postId: number;
   text: string;
   anonymous: boolean;
   authorQq: string;
   omitFixedText?: boolean;
+  summary?: string | null;
 }) {
   const template = normalizePublishCaptionTemplate(value);
   const omitFixedText = Boolean(post.omitFixedText);
+  // LLM 极短总结：作为正文主体，置于固定文案之后、链接之前。批量时每条子稿件各自携带。
+  const summary = post.summary?.trim();
   const lines = [
     omitFixedText ? null : template.customText?.trim(),
+    summary ? summary : null,
     ...(template.includeLinks ? extractLinks(post.text) : []),
     omitFixedText ? null : template.suffixText?.trim(),
   ].filter((line): line is string => Boolean(line));
   return lines.join("\n").trim();
 }
 
-export function shouldAppendOfficialQqForumQZoneLink(value: Prisma.JsonValue | null | undefined) {
+export function shouldAppendQqForumQZoneLink(value: Prisma.JsonValue | null | undefined) {
   return normalizePublishCaptionTemplate(value).includeQZoneLink;
 }
 
-export function getOfficialQqForumQZoneLinkBotAccountId(value: Prisma.JsonValue | null | undefined) {
+export function getQqForumQZoneLinkBotAccountId(value: Prisma.JsonValue | null | undefined) {
   return normalizePublishCaptionTemplate(value).qzoneLinkBotAccountId?.trim() || null;
 }
 
@@ -2626,7 +2640,7 @@ async function readPostImageKeys(config: CampuxConfig, tenantId: string, attachm
   return keys;
 }
 
-async function resolveQZonePublicationForOfficialForum(input: { postId: string; batchId: string | null; botAccountId?: string | null }) {
+async function resolveQZonePublicationForQqForum(input: { postId: string; batchId: string | null; botAccountId?: string | null }) {
   const attempts = await prisma.publishAttempt.findMany({
     where: {
       ...(input.batchId ? { batchId: input.batchId } : { postId: input.postId, batchId: null }),

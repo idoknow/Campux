@@ -20,7 +20,7 @@ import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflo
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { formatBanNotify, formatUnbanNotify } from "../lib/bot-messages";
-import { listOfficialQqChannels, listOfficialQqGuilds } from "../runtime/official-qq";
+import { listPersonalQqChannels, listPersonalQqGuilds } from "../runtime/personal-qq";
 import { BotWorkflowError } from "../lib/bot-workflows";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
@@ -80,14 +80,14 @@ const botCreateSchema = z.discriminatedUnion("platform", [
     createPublishTarget: z.boolean().default(true),
   }),
   z.object({
-    platform: z.literal("official_qq"),
-    appId: z.string().regex(/^\d+$/, "AppID 必须是数字"),
-    appSecret: z.string().trim().min(1, "AppSecret 不能为空").max(500),
-    displayName: z.string().min(1).max(80),
-    channelId: z.string().trim().min(1, "频道 ID 不能为空").max(40),
-    enabled: z.boolean().default(true),
-  }),
-]);
+      platform: z.literal("personal_qq"),
+      personalQqToken: z.string().trim().min(1, "QQ 频道机器人 token 不能为空").max(1000),
+      displayName: z.string().min(1).max(80),
+      guildId: z.string().trim().min(1, "频道 ID 不能为空").max(40),
+      channelId: z.string().trim().min(1, "版块 ID 不能为空").max(40),
+      enabled: z.boolean().default(true),
+    }),
+  ]);
 
 const publishTextTemplateSchema = z.object({
   customText: z.string().max(1000).default(""),
@@ -101,10 +101,11 @@ const publishTextTemplateSchema = z.object({
 
 const botPatchSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
-  enabled: z.boolean().optional(),
-  reviewGroupId: z.string().trim().max(40).nullable().optional(),
-  officialAppId: z.string().regex(/^\d+$/, "AppID 必须是数字").optional(),
-  officialAppSecret: z.string().trim().min(1).max(500).optional(),
+    enabled: z.boolean().optional(),
+    reviewGroupId: z.string().trim().max(40).nullable().optional(),
+    guildId: z.string().trim().max(40).optional(),
+    channelId: z.string().trim().max(40).optional(),
+    personalQqToken: z.string().trim().min(1).max(1000).optional(),
   reviewNotificationEnabled: z.boolean().optional(),
   reviewQueueAutoReminderEnabled: z.boolean().optional(),
   reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).optional(),
@@ -129,13 +130,12 @@ const botParamsOnlySchema = z.object({
   id: z.string().min(1),
 });
 
-const officialQqChannelQuerySchema = z.object({
+const personalQqChannelQuerySchema = z.object({
   guildId: z.string().trim().min(1).max(40),
 });
 
-const officialQqDiscoverySchema = z.object({
-  appId: z.string().regex(/^\d+$/, "AppID 必须是数字"),
-  appSecret: z.string().trim().min(1).max(500),
+const personalQqDiscoverySchema = z.object({
+  personalQqToken: z.string().trim().min(1).max(1000),
   guildId: z.string().trim().min(1).max(40).optional(),
 });
 
@@ -678,20 +678,20 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     });
 
     return {
-      bots: bots.map((bot) => toBotAccount(bot, bot.platform === "official_qq" ? { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(bot.qqUin.toString()))),
+      bots: bots.map((bot) => toBotAccount(bot, bot.platform === "personal_qq" ? { online: bot.enabled, connectionCount: bot.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(bot.qqUin.toString()))),
       events: auditLogs.map(toTenantBotEvent),
     };
   });
 
-  app.post("/api/admin/official-qq/discovery", async (request, reply) => {
+  app.post("/api/admin/personal-qq/discovery", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
-    const body = officialQqDiscoverySchema.parse(request.body);
-    const bot = { id: `discovery:${body.appId}`, officialAppId: body.appId, officialAppSecret: encryptJson(body.appSecret) as Prisma.JsonValue };
+    const body = personalQqDiscoverySchema.parse(request.body);
+    const bot = { id: `discovery:token`, qqUin: 0n, personalQqToken: encryptJson({ token: body.personalQqToken.trim() }) as Prisma.JsonValue, reviewGroupId: null as string | null };
     try {
       const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => (
         body.guildId
-          ? { channels: await listOfficialQqChannels(bot, body.guildId) }
-          : { guilds: await listOfficialQqGuilds(bot) }
+          ? { channels: await listPersonalQqChannels(undefined, bot, body.guildId) }
+          : { guilds: await listPersonalQqGuilds(undefined, bot) }
       ));
       if (!discovered.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
       return discovered.value;
@@ -701,13 +701,14 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     }
   });
 
-  app.get("/api/admin/bots/:id/official-qq/guilds", async (request, reply) => {
+  app.get("/api/admin/bots/:id/personal-qq/guilds", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const params = botParamsOnlySchema.parse(request.params);
-    const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "official_qq" } });
-    if (!bot) return reply.code(404).send({ message: "QQ 官方机器人不存在" });
+    const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "personal_qq" } });
+    if (!bot) return reply.code(404).send({ message: "QQ 频道机器人不存在" });
+    const clientBot = { id: bot.id, qqUin: bot.qqUin, personalQqToken: bot.personalQqToken, reviewGroupId: bot.reviewGroupId };
     try {
-      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => ({ guilds: await listOfficialQqGuilds(bot) }));
+      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => ({ guilds: await listPersonalQqGuilds(undefined, clientBot) }));
       if (!discovered.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
       return discovered.value;
     } catch (error) {
@@ -716,14 +717,15 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     }
   });
 
-  app.get("/api/admin/bots/:id/official-qq/channels", async (request, reply) => {
+  app.get("/api/admin/bots/:id/personal-qq/channels", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const params = botParamsOnlySchema.parse(request.params);
-    const query = officialQqChannelQuerySchema.parse(request.query);
-    const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "official_qq" } });
-    if (!bot) return reply.code(404).send({ message: "QQ 官方机器人不存在" });
+    const query = personalQqChannelQuerySchema.parse(request.query);
+    const bot = await prisma.botAccount.findFirst({ where: { id: params.id, tenantId: context.selectedTenant.id, platform: "personal_qq" } });
+    if (!bot) return reply.code(404).send({ message: "QQ 频道机器人不存在" });
+    const clientBot = { id: bot.id, qqUin: bot.qqUin, personalQqToken: bot.personalQqToken, reviewGroupId: bot.reviewGroupId };
     try {
-      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => ({ channels: await listOfficialQqChannels(bot, query.guildId) }));
+      const discovered = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async () => ({ channels: await listPersonalQqChannels(undefined, clientBot, query.guildId) }));
       if (!discovered.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
       return discovered.value;
     } catch (error) {
@@ -735,16 +737,15 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
   app.post("/api/admin/bots", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const body = botCreateSchema.parse(request.body);
-    if (body.platform === "official_qq") {
-      const identityUin = BigInt(body.appId);
+    if (body.platform === "personal_qq") {
+      const identityUin = BigInt(body.guildId);
 
       const bot = await prisma.botAccount.create({
         data: {
           tenantId: context.selectedTenant.id,
-          platform: "official_qq",
+          platform: "personal_qq",
           qqUin: identityUin,
-          officialAppId: body.appId,
-          officialAppSecret: encryptJson(body.appSecret.trim()),
+          personalQqToken: encryptJson({ token: body.personalQqToken.trim() }),
           displayName: body.displayName,
           reviewGroupId: body.channelId.trim(),
           enabled: body.enabled,
@@ -774,7 +775,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         targetId: bot.id,
         detail: {
           platform: body.platform,
-          appId: body.appId,
+          guildId: body.guildId,
           displayName: body.displayName,
           channelId: body.channelId.trim(),
         },
@@ -879,8 +880,8 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     if (!bot) {
       return reply.code(404).send({ message: "Bot 账号不存在" });
     }
-    if (bot.platform === "official_qq" && body.reviewGroupId !== undefined && !body.reviewGroupId?.trim()) {
-      return reply.code(400).send({ message: "稿件推送论坛子频道 ID 不能为空" });
+    if (bot.platform === "personal_qq" && body.channelId !== undefined && !body.channelId.trim()) {
+      return reply.code(400).send({ message: "稿件推送论坛版块 ID 不能为空" });
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -905,8 +906,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
           ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
           ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
-          ...(bot.platform === "official_qq" && body.officialAppId !== undefined ? { qqUin: BigInt(body.officialAppId), officialAppId: body.officialAppId } : {}),
-          ...(bot.platform === "official_qq" && body.officialAppSecret !== undefined ? { officialAppSecret: encryptJson(body.officialAppSecret) } : {}),
+          ...(bot.platform === "personal_qq" && body.guildId !== undefined ? { qqUin: BigInt(body.guildId) } : {}),
+          ...(bot.platform === "personal_qq" && body.channelId !== undefined ? { reviewGroupId: body.channelId.trim() } : {}),
+          ...(bot.platform === "personal_qq" && body.personalQqToken !== undefined ? { personalQqToken: encryptJson({ token: body.personalQqToken.trim() }) } : {}),
           ...(bot.platform === "onebot" && body.reviewNotificationEnabled !== undefined ? { reviewNotificationEnabled: body.reviewNotificationEnabled } : {}),
           ...(bot.platform === "onebot" && body.reviewQueueAutoReminderEnabled !== undefined ? { reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled } : {}),
           ...(bot.platform === "onebot" && body.reviewQueueReminderThresholdHours !== undefined ? { reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours } : {}),
@@ -934,7 +936,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     });
 
     return {
-      bot: toBotAccount(updated, updated.platform === "official_qq" ? { online: updated.enabled, connectionCount: updated.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(updated.qqUin.toString())),
+      bot: toBotAccount(updated, updated.platform === "personal_qq" ? { online: updated.enabled, connectionCount: updated.enabled ? 1 : 0 } : oneBot?.getBotConnectionStatus(updated.qqUin.toString())),
     };
   });
 
@@ -1111,7 +1113,6 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       detail: {
         platform: bot.platform,
         qqUin: bot.qqUin.toString(),
-        appId: bot.officialAppId,
         displayName: bot.displayName,
         publishTargetCount: bot.publishTargets.length,
       },
@@ -1171,7 +1172,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       data: {
         tenantId: context.selectedTenant.id,
         botAccountId: botAccount.id,
-        type: botAccount.platform === "official_qq" ? "qq_channel_forum" : "qzone",
+        type: botAccount.platform === "personal_qq" ? "qq_channel_forum" : "qzone",
         displayName: body.displayName,
         enabled: body.enabled,
         required: body.required,
@@ -1509,8 +1510,7 @@ function toBotAccount(
     id: string;
     platform: string;
     qqUin: bigint;
-    officialAppId: string | null;
-    officialAppSecret: Prisma.JsonValue | null;
+    personalQqToken: Prisma.JsonValue | null;
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
@@ -1550,8 +1550,7 @@ function toBotAccount(
     id: bot.id,
     platform: bot.platform,
     qqUin: bot.qqUin.toString(),
-    officialAppId: bot.officialAppId,
-    officialAppSecretConfigured: bot.officialAppSecret !== null,
+    personalQqTokenConfigured: bot.personalQqToken !== null,
     displayName: bot.displayName,
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
@@ -1717,13 +1716,12 @@ function toPublishAttempt(attempt: {
     botAccount: {
       platform: string;
       qqUin: bigint;
-      officialAppId: string | null;
       reviewGroupId: string | null;
       displayName: string;
     };
   };
 }) {
-  const isOfficialQq = attempt.publishTarget.botAccount.platform === "official_qq";
+  const isPersonalQq = attempt.publishTarget.botAccount.platform === "personal_qq";
   return {
     id: attempt.id,
     status: attempt.status,
@@ -1741,16 +1739,15 @@ function toPublishAttempt(attempt: {
       botAccount: {
         platform: attempt.publishTarget.botAccount.platform,
         qqUin: attempt.publishTarget.botAccount.qqUin.toString(),
-        officialAppId: attempt.publishTarget.botAccount.officialAppId,
         reviewGroupId: attempt.publishTarget.botAccount.reviewGroupId,
         displayName: attempt.publishTarget.botAccount.displayName,
       },
     },
     platform: attempt.publishTarget.botAccount.platform,
-    destinationLabel: isOfficialQq ? "QQ 频道论坛" : "QQ 空间",
-    destinationId: isOfficialQq ? attempt.publishTarget.botAccount.reviewGroupId : attempt.publishTarget.botAccount.qqUin.toString(),
-    externalIdLabel: isOfficialQq ? "频道帖子 ID / 任务 ID" : "外部 ID",
-    qzoneTidLabel: isOfficialQq ? "频道帖子 ID" : "QZone TID",
+    destinationLabel: isPersonalQq ? "QQ 频道论坛" : "QQ 空间",
+    destinationId: isPersonalQq ? attempt.publishTarget.botAccount.reviewGroupId : attempt.publishTarget.botAccount.qqUin.toString(),
+    externalIdLabel: isPersonalQq ? "频道帖子 ID" : "外部 ID",
+    qzoneTidLabel: isPersonalQq ? "频道帖子 ID" : "QZone TID",
     post: {
       id: attempt.post.id,
       displayId: attempt.post.displayId,

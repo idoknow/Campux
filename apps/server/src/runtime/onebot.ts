@@ -980,14 +980,11 @@ export class OneBotRuntime {
   }
 
   private async sendBotReviewGroupMessage(
-    bot: { platform?: string; qqUin: bigint; officialAppId?: string | null; officialAppSecret?: Prisma.JsonValue | null; displayName?: string; reviewGroupId: string | null },
+    bot: { platform?: string; qqUin: bigint; displayName?: string; reviewGroupId: string | null },
     message: unknown,
     logMessage: string,
   ) {
     if (!bot.reviewGroupId) {
-      return;
-    }
-    if (bot.platform === "official_qq") {
       return;
     }
     await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, message).catch((error) => {

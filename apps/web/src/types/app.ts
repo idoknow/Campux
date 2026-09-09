@@ -400,7 +400,7 @@ export type PublishTargetItem = {
   qzoneRefreshMode: "protocol" | "qr";
   botAccount: {
     id: string;
-    platform: "onebot" | "official_qq";
+    platform: "onebot" | "personal_qq";
     qqUin: string;
     displayName: string;
     enabled: boolean;
@@ -420,7 +420,7 @@ export type PublishAttemptItem = {
   qzoneTid: string | null;
   verbose: PublishAttemptVerbose | null;
   updatedAt: string;
-  platform: "onebot" | "official_qq" | string;
+  platform: "onebot" | "personal_qq" | string;
   destinationLabel: string;
   destinationId: string | null;
   externalIdLabel: string;
@@ -441,9 +441,8 @@ export type PublishAttemptItem = {
     displayName: string;
     required: boolean;
     botAccount: {
-      platform: "onebot" | "official_qq" | string;
+      platform: "onebot" | "personal_qq" | string;
       qqUin: string;
-      officialAppId: string | null;
       reviewGroupId: string | null;
       displayName: string;
     };
@@ -453,7 +452,10 @@ export type PublishAttemptItem = {
 export type PublishAttemptVerbose = {
   mode?: string;
   appId?: string | null;
+  guildId?: string | null;
   channelId?: string | null;
+  feedId?: string | null;
+  shareUrl?: string | null;
   title?: string | null;
   contentLength?: number;
   targetName?: string;
@@ -489,11 +491,10 @@ export type PublishAttemptVerbose = {
 
 export type AdminBotAccount = {
   id: string;
-  platform: "onebot" | "official_qq";
+  platform: "onebot" | "personal_qq";
   qqUin: string;
-  officialAppId: string | null;
-  officialAppSecretConfigured: boolean;
-  officialAppSecret?: string;
+  personalQqTokenConfigured: boolean;
+  personalQqToken?: string;
   displayName: string;
   enabled: boolean;
   reviewGroupId: string | null;

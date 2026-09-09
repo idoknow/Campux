@@ -366,8 +366,9 @@ model BotAccount {
   tenantId       String
   platform       String          @default("onebot")
   qqUin          BigInt
-  officialAppId  String?
-  officialAppSecret Json?
+
+  // QQ 频道机器人（personal_qq）个人授权 token，加密 JSON 存储（形如 { token: "bot:..." }）。
+  personalQqToken Json?
   displayName    String
   enabled        Boolean         @default(true)
   reviewGroupId  String?
