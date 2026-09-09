@@ -129,13 +129,7 @@ type BotForm = {
 };
 
 type PersonalQqGuildOption = { id: string; name: string; icon: string | null };
-type PersonalQqChannelOption = { id: string; guildId: string; name: string; type: number | null; parentId: string | null };
-
-const officialQqForumChannelType = 10007;
-
-function officialQqForumChannels(channels: PersonalQqChannelOption[]) {
-  return channels.filter((channel) => channel.type === officialQqForumChannelType);
-}
+type PersonalQqChannelOption = { id: string; guildId: string; name: string };
 
 type PublishTargetForm = {
   botAccountId: string;
@@ -2682,9 +2676,7 @@ function BotsPanel({
         method: "POST",
         body: JSON.stringify({ personalQqToken: form.appSecret.trim(), guildId }),
       });
-      const forumChannels = officialQqForumChannels(result.channels);
-      setChannels(forumChannels);
-      if (forumChannels.length === 0) toast.info("该 QQ 频道下没有可用于稿件推送的论坛子频道。");
+      setChannels(result.channels);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "获取子频道失败");
     } finally {
@@ -3080,9 +3072,7 @@ function BotConfigEditor({
     setOfficialDiscoveryBusy(true);
     try {
       const result = await api<{ channels: PersonalQqChannelOption[] }>(`/api/admin/bots/${bot.id}/personal-qq/channels?guildId=${encodeURIComponent(guildId)}`);
-      const forumChannels = officialQqForumChannels(result.channels);
-      setOfficialChannels(forumChannels);
-      if (forumChannels.length === 0) toast.info("该 QQ 频道下没有可用于稿件推送的论坛子频道。");
+      setOfficialChannels(result.channels);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "获取子频道失败");
     } finally {
