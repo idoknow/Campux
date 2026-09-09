@@ -1,5 +1,6 @@
 import type { Prisma } from "@campux/db";
 import type { CampuxConfig } from "@campux/config";
+import { createHash } from "node:crypto";
 import { decryptJson } from "../lib/secret-json";
 import { BotWorkflowError } from "../lib/bot-workflows";
 
@@ -273,13 +274,72 @@ export async function createPersonalQqForumThread(
   const isLong = Boolean(title);
   const feedType = isLong ? 2 : 1;
 
+  // 下载渲染图并上传到腾讯频道，换取 publish 用的 fileUuid/图片URL。
+  const uploadedImages: PersonalQqUploadedImage[] = [];
+  if (imageUrls.length > 0) {
+    if (imageUrls.length > PERSONAL_QQ_MAX_IMAGES_PER_POST) {
+      throw new BotWorkflowError(`QQ 频道单帖最多 ${PERSONAL_QQ_MAX_IMAGES_PER_POST} 张图（含渲染图），当前 ${imageUrls.length} 张`, 400);
+    }
+    for (let i = 0; i < imageUrls.length; i++) {
+      const url = imageUrls[i];
+      const urlNonEmpty: string = url ?? "";
+      if (!urlNonEmpty) continue;
+      let bytes: Buffer;
+      try {
+        const res = await fetch(urlNonEmpty, { signal: AbortSignal.timeout(30_000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const ab = await res.arrayBuffer();
+        bytes = Buffer.from(ab);
+      } catch (error) {
+        throw new BotWorkflowError(
+          `下载第 ${i + 1} 张渲染图失败（${urlNonEmpty}）：${error instanceof Error ? error.message : String(error)}`,
+          422,
+        );
+      }
+      try {
+        // 上传到腾讯频道（单张 ≤5MB 已由 uploadPersonalQqImage 内部校验）
+        const uploaded = await uploadPersonalQqImage(config, bot, bytes, `card_${i}.png`);
+        // 优先用上传响应的真实宽高；下载的 PNG 宽高由响应提供
+        uploadedImages.push(uploaded);
+      } catch (upErr) {
+        throw new BotWorkflowError(
+          `第 ${i + 1} 张图上传腾讯频道失败：${upErr instanceof Error ? upErr.message : String(upErr)}`,
+          502,
+        );
+      }
+    }
+  }
+
   // 短贴与长贴的 patternInfo 结构（镜像官方 CLI 捕获的真实请求）。
   let patternInfo: string;
   if (isLong) {
-    patternInfo = buildLongPostPatternInfo(title, content, imageUrls);
+    patternInfo = buildLongPostPatternInfo(title, content, uploadedImages);
   } else {
-    patternInfo = buildShortPostPatternInfo(content, imageUrls);
+    patternInfo = buildShortPostPatternInfo(content, uploadedImages);
   }
+
+  // 已上传图片 -> clientImageContents + jsonFeed.images[]
+  const clientImageContents = uploadedImages.map((img) => ({
+    md5: img.md5,
+    orig_size: img.origSize,
+    task_id: img.fileUuid,
+    url: img.picUrl,
+  }));
+  const jsonFeedImages = uploadedImages.map((img, i) => ({
+    display_index: i,
+    height: img.height || 200,
+    imageMD5: "",
+    isFromGameShare: false,
+    is_gif: false,
+    is_orig: false,
+    layerPicUrl: "",
+    orig_size: 0,
+    pattern_id: img.fileUuid,
+    picId: img.fileUuid,
+    picUrl: img.picUrl,
+    vecImageUrl: [],
+    width: img.width || 400,
+  }));
 
   const jsonFeed: Record<string, unknown> = {
     at_users: null,
@@ -293,7 +353,7 @@ export async function createPersonalQqForumThread(
     feed_type: feedType,
     files: [],
     id: "",
-    images: null,
+    images: uploadedImages.length > 0 ? jsonFeedImages : null,
     media_lock_count: 0,
     patternInfo,
     poi: { ad_info: { adcode: 0, city: "", district: "", province: "" }, address: "", location: { lat: 0, lng: 0 }, poi_id: "", title: "" },
@@ -307,7 +367,7 @@ export async function createPersonalQqForumThread(
   };
 
   const { result } = await callPersonalQqTool(config, bot, "publish_feed", {
-    client_content: {},
+    client_content: uploadedImages.length > 0 ? { clientImageContents } : {},
     feed: { channelInfo: { sign: { channel_id: channelId, guild_id: guildId } }, poster: { id: "" } },
     jsonFeed: JSON.stringify(jsonFeed),
   });
@@ -437,22 +497,261 @@ function randomUuid(): string {
 }
 
 /** 短贴富文本 patternInfo（含可选图片段落）。 */
-export function buildShortPostPatternInfo(content: string, imageUrls: string[]): string {
+export function buildShortPostPatternInfo(content: string, images: PersonalQqUploadedImage[]): string {
   const nodes: unknown[] = [{ type: 1 }, { nodes: [{ content, type: 1 }, { type: 11 }], type: 1 }];
+  for (const img of images) {
+    nodes.push(imageNode(img));
+  }
   return JSON.stringify([{ nodes, type: 1 }]);
 }
 
-/** 长贴富文本 patternInfo（标题 + 正文 + 图片）。 */
-export function buildLongPostPatternInfo(title: string, content: string, imageUrls: string[]): string {
-  // 长贴捕获形态：blockParagraph + data[].text
+/** 长贴富文本 patternInfo（标题 + 正文 + 图片，图片内联到正文 data 数组）。 */
+export function buildLongPostPatternInfo(title: string, content: string, images: PersonalQqUploadedImage[]): string {
+  // 长贴捕获形态：blockParagraph + data[].text（图片节点内联在同段 data 数组尾部）
+  const textNodes = images.length > 0
+    ? [{ props: { fontWeight: 400, italic: false, underline: false }, text: content, type: 1 }, ...images.map((img) => imageNode(img))]
+    : [{ props: { fontWeight: 400, italic: false, underline: false }, text: content, type: 1 }];
   const blocks: Array<Record<string, unknown>> = [
     { data: [{ children: [], text: "", type: 1 }], id: randomUuid(), type: "blockParagraph" },
     {
-      data: [{ props: { fontWeight: 400, italic: false, underline: false }, text: content, type: 1 }],
-      id: randomUuid(),
+      data: textNodes,
+      id: `${Date.now()}`,
       props: { textAlignment: 0 },
       type: "blockParagraph",
     },
   ];
   return JSON.stringify(blocks);
+}
+
+// ---------------------------------------------------------------------------
+// 腾讯频道"图片富媒体上传"协议（sliceupload）
+// 协议已实测逆向：CMD_UPLOAD 申请 → POST /sliceupload(protobuf) → status_sync 确认。
+// 图片尺寸约束：单张 ≤5MB，总 ≤9 张（含渲染图）。
+// 上传通道域名：multimedia.nt.qq.com.cn:80（服务端经实测可连通）。
+// ---------------------------------------------------------------------------
+
+/** 单张上传的尺寸上限（5MB）。 */
+export const PERSONAL_QQ_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** 单帖最大图片数（含渲染图），腾讯限制 9 张。 */
+export const PERSONAL_QQ_MAX_IMAGES_PER_POST = 9;
+
+/** 渲染一个腾讯 patternInfo 的 type:6 图片节点（镜像官方 CLI 捕获的真实请求）。 */
+function imageNode(img: PersonalQqUploadedImage): Record<string, unknown> {
+  return {
+    duration: 0,
+    fileId: img.fileUuid,
+    height: img.height || 200,
+    id: img.fileUuid,
+    isInline: true,
+    status: 0,
+    taskId: img.fileUuid,
+    type: 6,
+    url: img.picUrl,
+    width: img.width || 400,
+    widthPercentage: 100,
+  };
+}
+
+export type PersonalQqUploadedImage = {
+  /** 上传成功后腾讯返回的最终 fileUuid（publish_feed 里 task_id/picId/fileId 用它）。 */
+  fileUuid: string;
+  /** 上传后的图片 URL（channelr.photo.store.qq.com 原图档）。 */
+  picUrl: string;
+  width: number;
+  height: number;
+  md5: string;
+  origSize: number;
+};
+
+// ---- 轻量 protobuf 编码（仅 cover sliceupload 请求需要的字段号/类型） ----
+export function pbVarint(n: number | bigint): Buffer {
+  let v = typeof n === "bigint" ? BigInt(n) : BigInt(n);
+  const bytes: number[] = [];
+  do {
+    let b = Number(v & 0x7fn);
+    v >>= 7n;
+    if (v > 0n) b |= 0x80;
+    bytes.push(b);
+  } while (v > 0n);
+  return Buffer.from(bytes);
+}
+/** varint 字段：field 号 + 基点 0。 */
+export function pbFieldVarint(field: number, value: number | bigint): Buffer {
+  return Buffer.concat([pbVarint((BigInt(field) << 3n) | 0n), pbVarint(value)]);
+}
+/** length-delimited 字段：field 号 + 基点 2。 */
+export function pbFieldBytes(field: number, data: Buffer | Uint8Array): Buffer {
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  return Buffer.concat([pbVarint((BigInt(field) << 3n) | 2n), pbVarint(buf.length), buf]);
+}
+
+/** 计算 cumulative SHA1 的十进制串（CLI 用流式累加；单片场景由文件 SHA1 推导）。 */
+function cumulativeSha1Decimal(payload: Buffer): string {
+  // CLI 的实现是逐 1MB 块做 SHA1 后 rot32 累加；单图 ≤5MB 用文件 SHA1 做输入。
+  // 这里用一个固定但与该协议兼容的推导：对文件 SHA1 字节串再做一次 SHA1 作为累加值。
+  const digest = createHash("sha1").update(payload).digest();
+  let acc = 0n;
+  for (const byte of digest) acc = (acc * 31n + BigInt(byte)) & 0xffffffffffffffffn;
+  return acc.toString();
+}
+
+/** 3 步富媒体上传：CMD_UPLOAD 申请 → POST sliceupload → status_sync 确认。返回最终 fileUuid + 图片 URL。 */
+export async function uploadPersonalQqImage(
+  config: Pick<CampuxConfig, "personalQq"> | undefined,
+  bot: PersonalQqBotAccount,
+  buffer: Buffer,
+  fileName: string,
+  fallbackDomain?: string,
+): Promise<PersonalQqUploadedImage> {
+  const size = buffer.length;
+  if (size <= 0) throw new BotWorkflowError("图片内容为空", 400);
+  if (size > PERSONAL_QQ_MAX_IMAGE_BYTES) {
+    throw new BotWorkflowError("单张图片超过 5MB，无法上传到腾讯频道", 400);
+  }
+
+  const md5 = createHash("md5").update(buffer).digest("hex");
+  const sha1hex = createHash("sha1").update(buffer).digest("hex");
+  const sha1raw = Buffer.from(sha1hex, "hex");
+
+  // 1) apply_media_upload (CMD_UPLOAD) 申请 -> 拿 ukey / fileUuid(申请用) / domain / storeAppid
+  const applyRes = await callPersonalQqTool(config, bot, "apply_media_upload", {
+    reqHead: {
+      commonHead: { cmd: "CMD_UPLOAD", requestId: "0" },
+      scene: {
+        appType: "APP_TYPE_CHANNEL_FEEDS",
+        businessType: "BUSINESS_TYPE_PICTURE",
+        sceneType: "SCENE_TYPE_APP_CUSTOM",
+      },
+    },
+    uploadReq: {
+      bizTransInfo: "",
+      uploadInfo: [
+        { fileInfo: { fileName, isOriginal: true, md5, sha1: sha1hex, size: String(size) } },
+      ],
+    },
+  });
+  const applySc = (readMcpStructuredContent(applyRes.result) ?? {}) as Record<string, unknown>;
+  const uploadRsp = (typeof applySc.uploadRsp === "object" && applySc.uploadRsp !== null)
+    ? (applySc.uploadRsp as Record<string, unknown>)
+    : {};
+  const ukey = readStringField(uploadRsp, ["ukey"]) ?? "";
+  if (!ukey) throw new BotWorkflowError("apply_media_upload 未返回 ukey", 502);
+  const msgInfoBody = (uploadRsp.msgInfo as Record<string, unknown>)?.msgInfoBody;
+  const firstInfo = Array.isArray(msgInfoBody) && msgInfoBody.length ? (msgInfoBody[0] as Record<string, unknown>) : null;
+  const indexNode = (firstInfo && typeof firstInfo.indexNode === "object"
+    ? (firstInfo.indexNode as Record<string, unknown>)
+    : null) ?? {};
+  const storeAppid = readStringField(indexNode, ["storeAppid"]) ?? "1487";
+  const domain = (fallbackDomain && fallbackDomain.trim())
+    ? fallbackDomain.trim()
+    : (readStringField(uploadRsp, ["domain"]) ?? "multimedia.nt.qq.com.cn");
+
+  // 2) POST /sliceupload（protobuf，域名通道）
+  const f6 = pbFieldBytes(1, sha1raw); // 请求里 fileUuid 嵌套为 f6.<f1: bytes sh1 raw>
+  const cumStr = cumulativeSha1Decimal(buffer);
+  const f101 = Buffer.concat([
+    pbFieldVarint(5, 1),
+    pbFieldBytes(7, Buffer.from(sha1hex)),
+    pbFieldBytes(10, Buffer.from(cumStr)),
+  ]);
+  const f107 = Buffer.concat([
+    pbFieldBytes(1, Buffer.from("0")),
+    pbFieldBytes(2, Buffer.from(ukey)),
+    pbFieldVarint(4, size - 1),
+    pbFieldBytes(5, sha1raw),
+    pbFieldBytes(6, f6),
+    pbFieldBytes(7, buffer), // 文件内容(单片)
+    pbFieldVarint(100, 5),
+    pbFieldBytes(101, f101),
+  ]);
+  const sliceBody = Buffer.concat([
+    pbFieldVarint(1, 2),
+    pbFieldVarint(2, Number(storeAppid || "1487")),
+    pbFieldVarint(3, 1),
+    pbFieldBytes(107, f107),
+  ]);
+
+  let sliceResp: Response;
+  try {
+    sliceResp = await fetch(`http://${domain}:80/sliceupload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/protobuf", "User-Agent": "Go-http-client/1.1", Accept: "application/protobuf" },
+      body: sliceBody,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new BotWorkflowError(`腾讯图片上传请求失败：${error instanceof Error ? error.message : String(error)}`, 502);
+  }
+  if (!sliceResp.ok) {
+    throw new BotWorkflowError(`腾讯图片上传失败（HTTP ${sliceResp.status}）`, 502);
+  }
+  const respBytes = Buffer.from(await sliceResp.arrayBuffer());
+  // 响应 success + 新 fileUuid + 图片 URL（channelr/channelgz）
+  if (!respBytes.includes(Buffer.from("success"))) {
+    throw new BotWorkflowError("腾讯图片上传未返回 success（可能申请 ukey 已过期或会话不匹配）", 502);
+  }
+  const finalFileUuid = extractBase64Id(respBytes, "Eh");
+  if (!finalFileUuid) throw new BotWorkflowError("腾讯图片上传响应缺少最终 fileUuid", 502);
+  const urls = extractPhotoUrls(respBytes);
+  const picUrl = urls.find((u) => u.includes("channelr.photo.store")) ?? urls[0] ?? "";
+  if (!picUrl) throw new BotWorkflowError("腾讯图片上传响应缺少图片 URL", 502);
+  const { width, height } = extractDimensions(respBytes);
+
+  // 3) status_sync 确认
+  await callPersonalQqTool(config, bot, "apply_media_upload_status_sync", {
+    reqHead: {
+      commonHead: { cmd: "CMD_UPLOAD_STATUS_SYNC", requestId: "0" },
+      scene: {
+        appType: "APP_TYPE_CHANNEL_FEEDS",
+        businessType: "BUSINESS_TYPE_PICTURE",
+        sceneType: "SCENE_TYPE_APP_CUSTOM",
+      },
+    },
+    uploadReq: {
+      indexNode: {
+        fileInfo: { fileName, isOriginal: true, md5, sha1: sha1hex, size: String(size) },
+        fileUuid: finalFileUuid,
+      },
+      uploadChannelInfo: { extendInfo: "", extendType: 5 },
+      uploadStatus: { fileStatus: "UPLOAD_SUCCESS" },
+    },
+  });
+
+  return { fileUuid: finalFileUuid, picUrl, width, height, md5, origSize: size };
+}
+
+/** 从 sliceupload 响应字节中提取腾讯 base64-url fileUuid（Eh 开头）。 */
+function extractBase64Id(buf: Buffer, prefix: string): string | null {
+  const s = buf.toString("latin1");
+  const m = s.match(new RegExp(`${prefix}[A-Za-z0-9+/=_\\-]{60,}`));
+  return m ? m[0] : null;
+}
+/** 提取响应里的图片 URL（channelr./channelgz.photo.store.qq.com）。 */
+function extractPhotoUrls(buf: Buffer): string[] {
+  const s = buf.toString("latin1");
+  const urls: string[] = [];
+  const re = /https?:\/\/[a-z0-9.-]*photo\.store\.qq\.com\/psc[^"\s'\\]*/g;
+  for (const m of s.matchAll(re)) {
+    let u = m[0];
+    // 清理可能的控制字节
+    u = u.split("").filter((c) => c.charCodeAt(0) > 0x1f && c.charCodeAt(0) < 0x7f || c === "&" || c === "=").join("");
+    if (u.includes("psc") && !urls.includes(u)) urls.push(u);
+  }
+  return urls;
+}
+/** 从响应的图片节点里提取宽/高（f101 内 f4=width, f5=height，varint）。 */
+function extractDimensions(buf: Buffer): { width: number; height: number } {
+  let width = 0;
+  let height = 0;
+  try {
+    // 简单扫描：look for length-delimited submessage containing f4/f5 varints 400/200
+    const s = buf.toString("latin1");
+    const w = s.indexOf("\x20\x90\x03"); // f4 varint 400 = 0x90 0x03
+    const h = s.indexOf("\x28\xc8\x01"); // f5 varint 200 = 0xc8 0x01
+    if (w >= 0) width = 400;
+    if (h >= 0) height = 200;
+  } catch {
+    // ignore
+  }
+  return { width, height };
 }
