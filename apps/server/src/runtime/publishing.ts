@@ -778,7 +778,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     },
   });
 
-  const attempts = await prisma.$transaction(async (tx) => {
+  const scheduledTargets = await prisma.$transaction(async (tx) => {
     await lockPublishFanout(tx, tenantId, `post:${postId}`);
     const currentPost = await tx.post.findUnique({
       where: { id: postId },
@@ -838,16 +838,16 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     maxWait: 5_000,
     timeout: 30_000,
   });
-  // Use the transaction's returned result as the sole gate: it returns [] when
-  // fanout is skipped or no targets exist, and the targets array otherwise.
-  if (!targets || targets.length === 0) {
+  // 以事务返回值为唯一闸门：跳过或无目标时返回 []，否则返回待调度 targets。
+  // 不能用外层预查询的 targets——并发下锁内可能已决定 skip。
+  if (!scheduledTargets || scheduledTargets.length === 0) {
     return [];
   }
   return scheduleAndEnqueueFanoutAttempts({
     queue,
     tenantId,
     postId,
-    targets,
+    targets: scheduledTargets,
     resetAttempt: false,
   });
 }
