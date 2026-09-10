@@ -14,6 +14,7 @@ import {
   parseDisplayId,
   parseRejectArgs,
   parseReviewGroupCommand,
+  parseReviewGroupShortCommand,
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
   resolvePrivatePostSemanticAction,
@@ -83,6 +84,35 @@ describe("parseRejectArgs 尾部标点兼容", () => {
 
   test("编号带 # 前缀", () => {
     expect(parseRejectArgs("内容违规 #6724")).toEqual({ comment: "内容违规", displayId: 6724 });
+  });
+
+  test("理由中的句号等标点保留", () => {
+    expect(parseRejectArgs("内容违规。请处理 6724")).toEqual({ comment: "内容违规。请处理", displayId: 6724 });
+  });
+});
+
+describe("parseReviewGroupShortCommand", () => {
+  test("去掉 CQ at 后识别「通过」", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过")).toEqual({ name: "通过", args: "" });
+  });
+
+  test("「过」简写", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 过")).toEqual({ name: "通过", args: "" });
+  });
+
+  test("通过带混排编号，args 原样交给 parseDisplayId", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过！6724")).toEqual({ name: "通过", args: "！6724" });
+  });
+
+  test("拒绝理由中的标点不得被改写", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 拒绝 内容违规。请处理 6724")).toEqual({
+      name: "拒绝",
+      args: "内容违规。请处理 6724",
+    });
+  });
+
+  test("非审核简写返回 null", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 你好")).toBeNull();
   });
 });
 

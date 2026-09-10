@@ -2580,21 +2580,7 @@ export class OneBotRuntime {
 
     // 如果没有以 # 或 / 明确给出命令，但消息是 @ 机器人的短命令（比如 过/拒），支持基于 mention 的快捷命令。
     if (!command && isMentioningBot(event, botQqUin)) {
-      const normalized = extractPlainText(event)
-        .replace(/\[CQ:at,qq=\d+\]/g, "")
-        .replace(/[#＃/]/g, " ")
-        .replace(/[！!。．.、，,]/g, " ")
-        .trim();
-      // 允许 "通过"、"过"、"通过 6724"、"通过！6724" 等
-      const shortMatch = normalized.match(/^(过|通过)\s*(.*)$/);
-      if (shortMatch) {
-        command = { name: "通过", args: (shortMatch[2] ?? "").trim() };
-      } else {
-        const rejectMatch = normalized.match(/^(拒|拒绝)\s*(.*)$/);
-        if (rejectMatch) {
-          command = { name: "拒绝", args: (rejectMatch[2] ?? "").trim() };
-        }
-      }
+      command = parseReviewGroupShortCommand(extractPlainText(event));
     }
 
 
@@ -3947,6 +3933,25 @@ export function parseReviewGroupCommand(input: string) {
     name: bareCommand[1].toLowerCase(),
     args: bareCommand[2]?.trim() ?? "",
   };
+}
+
+/**
+ * @机器人 的简写审核命令（过/通过/拒/拒绝）。
+ * 只去掉 CQ at 段；args 保留原文，拒绝理由中的标点不得被改写。
+ * 「通过！6724」等混排由后续 parseDisplayId / parseRejectArgs 处理。
+ */
+export function parseReviewGroupShortCommand(input: string): { name: string; args: string } | null {
+  const withoutAt = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  // 长词优先，避免「拒」抢在「拒绝」前面
+  const approve = withoutAt.match(/^(通过|过)([\s\S]*)$/);
+  if (approve) {
+    return { name: "通过", args: (approve[2] ?? "").trim() };
+  }
+  const reject = withoutAt.match(/^(拒绝|拒)([\s\S]*)$/);
+  if (reject) {
+    return { name: "拒绝", args: (reject[2] ?? "").trim() };
+  }
+  return null;
 }
 
 export function shouldNotifyReviewGroupAfterPrivatePostCreate(post: { status: string }) {
