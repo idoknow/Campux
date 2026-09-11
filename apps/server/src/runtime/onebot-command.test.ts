@@ -11,6 +11,8 @@ import {
   shouldSubmitPrivatePostAfterModeSelection,
   parseBanCommandArgs,
   parseCommand,
+  parseDisplayId,
+  parseRejectArgs,
   parseReviewGroupCommand,
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
@@ -45,6 +47,42 @@ describe("parseCommand prefix handling", () => {
 
   test("命令前有非 @ 文本时不识别", () => {
     expect(parseCommand("随便说点什么 ＃通过 1")).toBeNull();
+  });
+});
+
+describe("parseDisplayId 混排与标点兼容", () => {
+  test("纯数字", () => {
+    expect(parseDisplayId("6724")).toBe(6724);
+  });
+
+  test("全角感叹号前缀（输入法粘连）", () => {
+    expect(parseDisplayId("！6724")).toBe(6724);
+  });
+
+  test("全角感叹号后缀", () => {
+    expect(parseDisplayId("6724！")).toBe(6724);
+  });
+
+  test("带 # 前缀", () => {
+    expect(parseDisplayId("#6724")).toBe(6724);
+  });
+
+  test("无数字时返回 null", () => {
+    expect(parseDisplayId("通过")).toBeNull();
+  });
+});
+
+describe("parseRejectArgs 尾部标点兼容", () => {
+  test("标准 理由 + 编号", () => {
+    expect(parseRejectArgs("内容违规 6724")).toEqual({ comment: "内容违规", displayId: 6724 });
+  });
+
+  test("编号后带全角感叹号", () => {
+    expect(parseRejectArgs("内容违规 6724！")).toEqual({ comment: "内容违规", displayId: 6724 });
+  });
+
+  test("编号带 # 前缀", () => {
+    expect(parseRejectArgs("内容违规 #6724")).toEqual({ comment: "内容违规", displayId: 6724 });
   });
 });
 
