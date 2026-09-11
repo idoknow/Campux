@@ -778,7 +778,9 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     },
   });
 
-  const scheduledTargets = await prisma.$transaction(async (tx) => {
+  // 锁内完成状态变更与 attempt 落库；锁释放后才 enqueue。
+  // 与 enqueueBatchPublishFanout 一致：并发方等锁后重读，会看到 active/succeeded attempts 并 skip。
+  const scheduledAttempts = await prisma.$transaction(async (tx) => {
     await lockPublishFanout(tx, tenantId, `post:${postId}`);
     const currentPost = await tx.post.findUnique({
       where: { id: postId },
@@ -833,23 +835,35 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
         },
       },
     });
-    return targets;
+
+    const results = [];
+    for (const target of targets) {
+      const scheduled = await schedulePublishAttemptInTransaction(tx, {
+        tenantId,
+        postId,
+        publishTargetId: target.id,
+        botAccountId: target.botAccountId,
+        intervalSeconds: publishTargetIntervalSeconds(target),
+      });
+      results.push(scheduled);
+    }
+    return results;
   }, {
     maxWait: 5_000,
     timeout: 30_000,
   });
-  // 以事务返回值为唯一闸门：跳过或无目标时返回 []，否则返回待调度 targets。
-  // 不能用外层预查询的 targets——并发下锁内可能已决定 skip。
-  if (!scheduledTargets || scheduledTargets.length === 0) {
+
+  if (scheduledAttempts.length === 0) {
     return [];
   }
-  return scheduleAndEnqueueFanoutAttempts({
-    queue,
-    tenantId,
-    postId,
-    targets: scheduledTargets,
-    resetAttempt: false,
-  });
+
+  // attempt 已在同一把锁事务内落库；锁外只负责入队。
+  for (const scheduled of scheduledAttempts) {
+    const dedupeKey = `publish:${postId}:${scheduled.attempt.publishTargetId}`;
+    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
+  }
+
+  return scheduledAttempts.map(({ attempt }) => attempt);
 }
 
 export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
