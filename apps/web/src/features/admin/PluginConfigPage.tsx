@@ -6,6 +6,7 @@ import { FONT_OPTIONS } from "@campux/domain";
 import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
+import { filterPluginAuditLogs } from "./plugin-audit-log-filter";
 import { AggregateLoginIcon, AGGREGATE_LOGIN_TYPE_LABELS } from "../aggregate-oauth/icons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1187,7 +1188,9 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                       <div className="grid place-items-center py-6 text-xs text-slate-400"><LoaderIcon className="size-4 animate-spin" /> 加载中…</div>
                     ) : (
                       (() => {
-                        const filtered = logScope === "current" ? auditLog.filter((entry) => entry.pluginName === activePlugin.name) : auditLog;
+                        const filtered = logScope === "current"
+                          ? filterPluginAuditLogs(auditLog, activePlugin.id, PRESET_NAME_BY_ID[activePlugin.id])
+                          : auditLog;
                         if (filtered.length === 0) {
                           return <p className="py-4 text-center text-xs text-slate-400">暂无日志</p>;
                         }

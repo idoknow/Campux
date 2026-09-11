@@ -1056,7 +1056,7 @@ export function AdminPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
-      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="min-h-0 flex-1">
+      <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="min-h-0 flex-1 overflow-hidden">
         <TabsList className={managementTabsListClassName}>
           <TabsTrigger value="users" className={managementTabsTriggerClassName}>
             用户

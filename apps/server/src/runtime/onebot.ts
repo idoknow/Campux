@@ -32,6 +32,7 @@ import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { setBotCustomStylishMessages } from "../lib/bot-messages";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 import { lockActiveTenantRuntime, runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
+import { extractDisplayIdFromReviewText, isAllowedReplySender } from "./review-reply-resolve";
 import {
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
@@ -2579,16 +2580,7 @@ export class OneBotRuntime {
 
     // 如果没有以 # 或 / 明确给出命令，但消息是 @ 机器人的短命令（比如 过/拒），支持基于 mention 的快捷命令。
     if (!command && isMentioningBot(event, botQqUin)) {
-      const normalized = extractPlainText(event).replace(/\[CQ:at,qq=\d+\]/g, "").trim();
-      const shortMatch = normalized.match(/^(过|通过)(?:\s*(.*))?$/);
-      if (shortMatch) {
-        command = { name: "通过", args: (shortMatch[2] ?? "").trim() };
-      } else {
-        const rejectMatch = normalized.match(/^(拒|拒绝)(?:\s*(.*))?$/);
-        if (rejectMatch) {
-          command = { name: "拒绝", args: (rejectMatch[2] ?? "").trim() };
-        }
-      }
+      command = parseReviewGroupShortCommand(extractPlainText(event));
     }
 
 
@@ -2684,7 +2676,10 @@ export class OneBotRuntime {
           displayId = await this.tryResolveDisplayIdFromReply(event, botQqUin);
         }
         if (!displayId) {
-          await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+          await this.sendGroupMessage(botQqUin, groupId, [
+            "未解析到稿件编号。可发送：#通过 <稿件id>",
+            "或直接回复（引用）审核通知消息，并 @机器人 发送「通过」。",
+          ].join("\n"));
           return;
         }
         const result = await reviewPostViaBot({
@@ -3384,26 +3379,8 @@ export class OneBotRuntime {
 
   private async tryResolveDisplayIdFromReply(event: OneBotMessageEvent, botQqUin: string): Promise<number | null> {
     try {
-      const replyId = (() => {
-        if (typeof event.raw_message === "string") {
-          const m = event.raw_message.match(/\[CQ:reply,id=(\d+)(?:,.*)?\]/);
-          if (m) return m[1];
-        }
-        if (Array.isArray(event.message)) {
-          for (const seg of event.message as any[]) {
-            if (!seg || typeof seg !== "object") continue;
-            if (seg.type === "reply") {
-              const id = seg.data?.id ?? seg.data?.msg_id ?? seg.data?.message_id;
-              if (id) return String(id);
-            }
-          }
-        }
-        if (event.message_id) {
-          return String(event.message_id);
-        }
-        return null;
-      })();
-
+      // 只解析真正的 reply 段；不要回退到 event.message_id（那是当前消息，不是被引用的审核通知）。
+      const replyId = this.extractReplyMessageId(event);
       if (!replyId) {
         return null;
       }
@@ -3411,12 +3388,13 @@ export class OneBotRuntime {
       const data = await this.callAction(botQqUin, "get_msg", { message_id: replyId }).catch(() => null);
       if (!data) return null;
 
-      // Verify the replied message was sent by the bot itself
+      // 仅当能明确识别发送者且不是本 bot 时才拒绝。
+      // 部分 OneBot 实现（NapCat 等）get_msg 可能不带 sender，此时仍尝试从正文解析编号。
       const sender = (data as any).sender ?? (data as any).user ?? null;
       const senderId = sender
         ? normalizeId(sender.user_id ?? sender.userId ?? sender.uin ?? sender.qq ?? sender.id)
         : null;
-      if (!senderId || senderId !== botQqUin) {
+      if (!isAllowedReplySender(senderId, botQqUin)) {
         return null;
       }
 
@@ -3424,22 +3402,22 @@ export class OneBotRuntime {
       let text = "";
       if (Array.isArray((data as any).message)) {
         text = (data as any).message
-          .map((seg: any) => (seg?.type === "text" ? seg?.data?.text ?? "" : ""))
+          .map((seg: any) => {
+            if (seg?.type === "text") return seg?.data?.text ?? "";
+            if (seg?.type === "reply" || seg?.type === "at") return "";
+            return typeof seg?.data?.text === "string" ? seg.data.text : "";
+          })
           .join("");
       } else if (typeof (data as any).message === "string") {
         text = (data as any).message;
-      } else if (typeof (data as any).raw_message === "string") {
+      }
+      if (!text && typeof (data as any).raw_message === "string") {
         text = (data as any).raw_message;
       }
 
       if (!text) return null;
-
-      // Try to extract displayId from notification text: prefer `编号：#123` then `#123`
-      const m = text.match(/(?:编号：#|#)(\d+)\b/);
-      if (!m) return null;
-      const id = Number(m[1]);
-      return Number.isInteger(id) && id > 0 ? id : null;
-    } catch (error) {
+      return extractDisplayIdFromReviewText(text);
+    } catch {
       return null;
     }
   }
@@ -3957,6 +3935,26 @@ export function parseReviewGroupCommand(input: string) {
   };
 }
 
+/**
+ * @机器人 的简写审核命令（过/通过/拒/拒绝）。
+ * 只去掉 CQ at 段；args 保留原文，拒绝理由中的标点不得被改写。
+ * 命令词后必须是结尾、空白或标点，避免「通过率」「拒绝率」被当成命令。
+ * 「通过！6724」等混排由后续 parseDisplayId / parseRejectArgs 处理。
+ */
+export function parseReviewGroupShortCommand(input: string): { name: string; args: string } | null {
+  const withoutAt = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  // 长词优先；(?![\p{L}\p{N}_]) 拒绝与后续汉字/字母/数字粘连
+  const approve = withoutAt.match(/^(通过|过)(?![\p{L}\p{N}_])([\s\S]*)$/u);
+  if (approve) {
+    return { name: "通过", args: (approve[2] ?? "").trim() };
+  }
+  const reject = withoutAt.match(/^(拒绝|拒)(?![\p{L}\p{N}_])([\s\S]*)$/u);
+  if (reject) {
+    return { name: "拒绝", args: (reject[2] ?? "").trim() };
+  }
+  return null;
+}
+
 export function shouldNotifyReviewGroupAfterPrivatePostCreate(post: { status: string }) {
   return post.status === "pending_approval";
 }
@@ -4051,14 +4049,22 @@ function parsePrivateCommand(input: string) {
   };
 }
 
-function parseDisplayId(args: string) {
-  const id = Number(args.trim());
+export function parseDisplayId(args: string) {
+  // 整段必须是独立编号，仅允许前后粘连明确支持的标点/前缀：
+  // "6724"、"！6724"、"6724！"、"#6724"、"#6724！"
+  // 拒绝 "abc123"、"误操作 6724" 等夹杂普通文本的输入。
+  const match = args.trim().match(/^[#＃！!]?\s*(\d+)\s*[！!]?$/);
+  if (!match?.[1]) {
+    return null;
+  }
+  const id = Number(match[1]);
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-function parseRejectArgs(args: string) {
-  const match = args.trim().match(/^(.*\S)\s+(\d+)$/);
-  if (!match) {
+export function parseRejectArgs(args: string) {
+  // 兼容尾部标点：#拒绝 理由 6724！
+  const match = args.trim().match(/^(.*\S)\s+#?(\d+)[！!。．]*$/);
+  if (!match?.[1] || !match[2]) {
     return null;
   }
   const comment = match[1];

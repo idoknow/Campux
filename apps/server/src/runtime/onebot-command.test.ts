@@ -11,7 +11,10 @@ import {
   shouldSubmitPrivatePostAfterModeSelection,
   parseBanCommandArgs,
   parseCommand,
+  parseDisplayId,
+  parseRejectArgs,
   parseReviewGroupCommand,
+  parseReviewGroupShortCommand,
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
   resolvePrivatePostSemanticAction,
@@ -45,6 +48,84 @@ describe("parseCommand prefix handling", () => {
 
   test("命令前有非 @ 文本时不识别", () => {
     expect(parseCommand("随便说点什么 ＃通过 1")).toBeNull();
+  });
+});
+
+describe("parseDisplayId 混排与标点兼容", () => {
+  test("纯数字", () => {
+    expect(parseDisplayId("6724")).toBe(6724);
+  });
+
+  test("全角感叹号前缀（输入法粘连）", () => {
+    expect(parseDisplayId("！6724")).toBe(6724);
+  });
+
+  test("全角感叹号后缀", () => {
+    expect(parseDisplayId("6724！")).toBe(6724);
+  });
+
+  test("带 # 前缀", () => {
+    expect(parseDisplayId("#6724")).toBe(6724);
+  });
+
+  test("无数字时返回 null", () => {
+    expect(parseDisplayId("通过")).toBeNull();
+  });
+
+  test("夹杂普通文本时拒绝，避免误操作错误稿件", () => {
+    expect(parseDisplayId("abc123")).toBeNull();
+    expect(parseDisplayId("误操作 6724")).toBeNull();
+    expect(parseDisplayId("123abc")).toBeNull();
+  });
+});
+
+describe("parseRejectArgs 尾部标点兼容", () => {
+  test("标准 理由 + 编号", () => {
+    expect(parseRejectArgs("内容违规 6724")).toEqual({ comment: "内容违规", displayId: 6724 });
+  });
+
+  test("编号后带全角感叹号", () => {
+    expect(parseRejectArgs("内容违规 6724！")).toEqual({ comment: "内容违规", displayId: 6724 });
+  });
+
+  test("编号带 # 前缀", () => {
+    expect(parseRejectArgs("内容违规 #6724")).toEqual({ comment: "内容违规", displayId: 6724 });
+  });
+
+  test("理由中的句号等标点保留", () => {
+    expect(parseRejectArgs("内容违规。请处理 6724")).toEqual({ comment: "内容违规。请处理", displayId: 6724 });
+  });
+});
+
+describe("parseReviewGroupShortCommand", () => {
+  test("去掉 CQ at 后识别「通过」", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过")).toEqual({ name: "通过", args: "" });
+  });
+
+  test("「过」简写", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 过")).toEqual({ name: "通过", args: "" });
+  });
+
+  test("通过带混排编号，args 原样交给 parseDisplayId", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过！6724")).toEqual({ name: "通过", args: "！6724" });
+  });
+
+  test("拒绝理由中的标点不得被改写", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 拒绝 内容违规。请处理 6724")).toEqual({
+      name: "拒绝",
+      args: "内容违规。请处理 6724",
+    });
+  });
+
+  test("非审核简写返回 null", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 你好")).toBeNull();
+  });
+
+  test("与后续字词粘连时不当作命令（通过率/拒绝率/通过了）", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过率")).toBeNull();
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 拒绝率")).toBeNull();
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过了")).toBeNull();
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 过期")).toBeNull();
   });
 });
 

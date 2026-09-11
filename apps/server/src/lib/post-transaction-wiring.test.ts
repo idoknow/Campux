@@ -38,23 +38,52 @@ describe("post transaction compensation wiring", () => {
 });
 
 describe("publish fanout transaction wiring", () => {
-  test("persists every single-post target atomically before enqueueing any attempt", () => {
-    const fanoutStart = publishingSource.indexOf("export async function enqueuePublishFanout");
-    const fanoutEnd = publishingSource.indexOf("export async function enqueueBatchPublishFanout", fanoutStart);
-    const fanoutSource = publishingSource.slice(fanoutStart, fanoutEnd);
-    const helperStart = publishingSource.indexOf("async function scheduleAndEnqueueFanoutAttempts");
-    const helperEnd = publishingSource.indexOf("export async function enqueuePublishFanout", helperStart);
-    const helperSource = publishingSource.slice(helperStart, helperEnd);
-    const transactionStart = helperSource.indexOf("await prisma.$transaction(async (tx)");
-    const transactionalSchedule = helperSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
-    const enqueue = helperSource.indexOf("enqueueAttemptUnique(queue", transactionStart);
+  test("requeue creates attempts inside the lock transaction before any enqueue", () => {
+    const requeueStart = publishingSource.indexOf("export async function requeuePublishFanout");
+    const requeueEnd = publishingSource.indexOf("export async function enqueueBatchPublishFanout", requeueStart);
+    const requeueSource = publishingSource.slice(requeueStart, requeueEnd);
 
-    expect(fanoutStart).toBeGreaterThan(-1);
-    expect(fanoutEnd).toBeGreaterThan(fanoutStart);
-    expect(fanoutSource).toContain("scheduleAndEnqueueFanoutAttempts({");
+    const lock = requeueSource.indexOf("lockPublishFanout(tx, tenantId, `requeue:${postId}`)");
+    const transactionStart = requeueSource.indexOf("await prisma.$transaction(async (tx)");
+    const statusUpdate = requeueSource.indexOf('status: "publishing"', lock);
+    const transactionalSchedule = requeueSource.indexOf("schedulePublishAttemptInTransaction(tx", lock);
+    const transactionEnd = requeueSource.indexOf("}, {", transactionalSchedule);
+    const enqueue = requeueSource.indexOf("enqueueAttemptUnique(queue", transactionEnd);
+
+    expect(lock).toBeGreaterThan(-1);
     expect(transactionStart).toBeGreaterThan(-1);
-    expect(transactionalSchedule).toBeGreaterThan(transactionStart);
-    expect(enqueue).toBeGreaterThan(transactionalSchedule);
+    expect(lock).toBeGreaterThan(transactionStart);
+    // 状态更新与 attempt 创建都必须在锁事务内
+    expect(statusUpdate).toBeGreaterThan(lock);
+    expect(statusUpdate).toBeLessThan(transactionEnd);
+    expect(transactionalSchedule).toBeGreaterThan(statusUpdate);
+    expect(transactionalSchedule).toBeLessThan(transactionEnd);
+    // 入队只能在事务提交之后
+    expect(enqueue).toBeGreaterThan(transactionEnd);
+    expect(requeueSource).not.toContain("scheduleAndEnqueueFanoutAttempts({");
+  });
+
+  test("single-post fanout creates attempts inside the lock transaction before any enqueue", () => {
+    const fanoutStart = publishingSource.indexOf("export async function enqueuePublishFanout");
+    const fanoutEnd = publishingSource.indexOf("export async function requeuePublishFanout", fanoutStart);
+    const fanoutSource = publishingSource.slice(fanoutStart, fanoutEnd);
+
+    const lock = fanoutSource.indexOf("lockPublishFanout(tx, tenantId, `post:${postId}`)");
+    const transactionStart = fanoutSource.indexOf("await prisma.$transaction(async (tx)");
+    const transactionalSchedule = fanoutSource.indexOf("schedulePublishAttemptInTransaction(tx", lock);
+    const transactionEnd = fanoutSource.indexOf("}, {", transactionalSchedule);
+    const enqueue = fanoutSource.indexOf("enqueueAttemptUnique(queue", transactionEnd);
+
+    expect(lock).toBeGreaterThan(-1);
+    expect(transactionStart).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(transactionStart);
+    // attempt 必须在锁事务内创建，锁释放后并发方才能看到并 skip
+    expect(transactionalSchedule).toBeGreaterThan(lock);
+    expect(transactionalSchedule).toBeLessThan(transactionEnd);
+    // 入队只能在事务提交之后
+    expect(enqueue).toBeGreaterThan(transactionEnd);
+    // 不得再把调度甩到锁外的 scheduleAndEnqueueFanoutAttempts
+    expect(fanoutSource).not.toContain("scheduleAndEnqueueFanoutAttempts({");
   });
 
   test("commits every batch target and its durable marker before enqueueing", () => {

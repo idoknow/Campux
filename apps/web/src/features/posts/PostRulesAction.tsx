@@ -38,8 +38,9 @@ const RuleButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"butto
 });
 
 function RuleList({ rules }: { rules: string[] }) {
+  // 不用 flex-1：在 Drawer/Dialog 的 flex 列里会把中间区域撑满，底部出现大片空白。
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-5">
+    <div className="max-h-[50dvh] overflow-y-auto px-4 md:px-5">
       <div className="flex flex-col gap-2 pb-1">
         {rules.map((rule, index) => (
           <Alert key={rule} className="rounded-md">
@@ -67,7 +68,7 @@ export function PostRulesAction({ rules }: { rules: string[] }) {
               <DrawerDescription>发布前请确认内容符合当前校园墙规范。</DrawerDescription>
             </DrawerHeader>
             <RuleList rules={rules} />
-            <DrawerFooter className="shrink-0">
+            <DrawerFooter className="mt-0 shrink-0">
               <DrawerClose asChild>
                 <Button>好的</Button>
               </DrawerClose>
