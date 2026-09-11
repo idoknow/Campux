@@ -675,63 +675,6 @@ export function publishTargetIntervalSeconds(target: { publishDelaySeconds: numb
   return target.publishDelaySeconds ?? null;
 }
 
-interface ScheduleAndEnqueueFanoutOptions {
-  queue: RuntimeQueue;
-  tenantId: string;
-  postId: string;
-  batchId?: string | null;
-  targets: Array<{ id: string; botAccountId: string; publishDelaySeconds: number | null }>;
-  resetAttempt?: boolean;
-}
-
-/**
- * Shared helper: schedule publish attempts for each target and enqueue them.
- * Used by both enqueuePublishFanout and requeuePublishFanout to keep behavior aligned.
- *
- * All scheduling happens in a single transaction so that either all targets succeed
- * or none do, preventing orphaned PublishAttempt records without queue jobs.
- *
- * Enqueueing uses enqueueUnique with a stable dedupe key (postId:publishTargetId or
- * batchId:publishTargetId) to ensure each attempt produces at most one publishPost job.
- */
-async function scheduleAndEnqueueFanoutAttempts(options: ScheduleAndEnqueueFanoutOptions) {
-  const { queue, tenantId, postId, batchId, targets, resetAttempt } = options;
-
-  const scheduledAttempts = await prisma.$transaction(async (tx) => {
-    const results = [];
-    for (const target of targets) {
-      const scheduleOptions: SchedulePublishAttemptOptions = {
-        tenantId,
-        postId,
-        publishTargetId: target.id,
-        botAccountId: target.botAccountId,
-        intervalSeconds: publishTargetIntervalSeconds(target),
-        resetAttempt: resetAttempt ?? false,
-      };
-      if (batchId !== undefined) {
-        scheduleOptions.batchId = batchId;
-      }
-      const scheduled = await schedulePublishAttemptInTransaction(tx, scheduleOptions);
-      results.push({ scheduled, targetId: target.id });
-    }
-    return results;
-  }, {
-    maxWait: 5_000,
-    timeout: 30_000,
-  });
-
-  // Enqueue all attempts after successful transaction commit using unique keys
-  // to prevent duplicate jobs for the same (postId, publishTargetId) or (batchId, publishTargetId)
-  for (const { scheduled, targetId } of scheduledAttempts) {
-    const dedupeKey = batchId
-      ? `publish:${batchId}:${targetId}`
-      : `publish:${postId}:${targetId}`;
-    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
-  }
-
-  return scheduledAttempts.map(({ scheduled }) => scheduled.attempt);
-}
-
 export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string, postId: string, actorId?: string | null) {
   const post = await prisma.post.findUnique({
     where: {
@@ -901,38 +844,63 @@ export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string
     return [];
   }
 
-  // Serialize concurrent requeue scheduling for the same post
-  await prisma.$transaction(async (tx) => {
+  // 锁内完成状态变更与 attempt 落库；锁释放后才 enqueue。
+  // 与 enqueuePublishFanout / enqueueBatchPublishFanout 一致，避免并发 requeue 双入队。
+  const scheduledAttempts = await prisma.$transaction(async (tx) => {
     await lockPublishFanout(tx, tenantId, `requeue:${postId}`);
+    const currentPost = await tx.post.findUnique({
+      where: { id: postId },
+      select: { id: true, status: true },
+    });
+    if (!currentPost) {
+      return [];
+    }
+
+    await tx.post.update({
+      where: {
+        id: postId,
+      },
+      data: {
+        status: "publishing",
+        logs: {
+          create: {
+            tenantId,
+            actorId: actorId ?? null,
+            newStatus: "publishing",
+            comment: `手动重发，已重置 ${targets.length} 个发布任务并重新排队`,
+          },
+        },
+      },
+    });
+
+    const results = [];
+    for (const target of targets) {
+      const scheduled = await schedulePublishAttemptInTransaction(tx, {
+        tenantId,
+        postId,
+        publishTargetId: target.id,
+        botAccountId: target.botAccountId,
+        intervalSeconds: publishTargetIntervalSeconds(target),
+        resetAttempt: true,
+      });
+      results.push(scheduled);
+    }
+    return results;
   }, {
     maxWait: 5_000,
     timeout: 30_000,
   });
 
-  await prisma.post.update({
-    where: {
-      id: postId,
-    },
-    data: {
-      status: "publishing",
-      logs: {
-        create: {
-          tenantId,
-          actorId: actorId ?? null,
-          newStatus: "publishing",
-          comment: `手动重发，已重置 ${targets.length} 个发布任务并重新排队`,
-        },
-      },
-    },
-  });
+  if (scheduledAttempts.length === 0) {
+    return [];
+  }
 
-  return scheduleAndEnqueueFanoutAttempts({
-    queue,
-    tenantId,
-    postId,
-    targets,
-    resetAttempt: true,
-  });
+  for (const scheduled of scheduledAttempts) {
+    const dedupeKey = `publish:${postId}:${scheduled.attempt.publishTargetId}`;
+    enqueueAttemptUnique(queue, tenantId, scheduled.attempt.id, dedupeKey, scheduled.nextRunAt);
+  }
+
+  return scheduledAttempts.map(({ attempt }) => attempt);
 }
 
 /**

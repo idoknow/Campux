@@ -71,6 +71,12 @@ describe("parseDisplayId 混排与标点兼容", () => {
   test("无数字时返回 null", () => {
     expect(parseDisplayId("通过")).toBeNull();
   });
+
+  test("夹杂普通文本时拒绝，避免误操作错误稿件", () => {
+    expect(parseDisplayId("abc123")).toBeNull();
+    expect(parseDisplayId("误操作 6724")).toBeNull();
+    expect(parseDisplayId("123abc")).toBeNull();
+  });
 });
 
 describe("parseRejectArgs 尾部标点兼容", () => {

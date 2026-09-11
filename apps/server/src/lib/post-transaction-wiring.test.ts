@@ -38,22 +38,29 @@ describe("post transaction compensation wiring", () => {
 });
 
 describe("publish fanout transaction wiring", () => {
-  test("requeue still schedules atomically via shared helper before enqueueing", () => {
+  test("requeue creates attempts inside the lock transaction before any enqueue", () => {
     const requeueStart = publishingSource.indexOf("export async function requeuePublishFanout");
     const requeueEnd = publishingSource.indexOf("export async function enqueueBatchPublishFanout", requeueStart);
     const requeueSource = publishingSource.slice(requeueStart, requeueEnd);
-    const helperStart = publishingSource.indexOf("async function scheduleAndEnqueueFanoutAttempts");
-    const helperEnd = publishingSource.indexOf("export async function enqueuePublishFanout", helperStart);
-    const helperSource = publishingSource.slice(helperStart, helperEnd);
-    const transactionStart = helperSource.indexOf("await prisma.$transaction(async (tx)");
-    const transactionalSchedule = helperSource.indexOf("schedulePublishAttemptInTransaction(tx", transactionStart);
-    const enqueue = helperSource.indexOf("enqueueAttemptUnique(queue", transactionStart);
 
-    expect(requeueStart).toBeGreaterThan(-1);
-    expect(requeueSource).toContain("scheduleAndEnqueueFanoutAttempts({");
+    const lock = requeueSource.indexOf("lockPublishFanout(tx, tenantId, `requeue:${postId}`)");
+    const transactionStart = requeueSource.indexOf("await prisma.$transaction(async (tx)");
+    const statusUpdate = requeueSource.indexOf('status: "publishing"', lock);
+    const transactionalSchedule = requeueSource.indexOf("schedulePublishAttemptInTransaction(tx", lock);
+    const transactionEnd = requeueSource.indexOf("}, {", transactionalSchedule);
+    const enqueue = requeueSource.indexOf("enqueueAttemptUnique(queue", transactionEnd);
+
+    expect(lock).toBeGreaterThan(-1);
     expect(transactionStart).toBeGreaterThan(-1);
-    expect(transactionalSchedule).toBeGreaterThan(transactionStart);
-    expect(enqueue).toBeGreaterThan(transactionalSchedule);
+    expect(lock).toBeGreaterThan(transactionStart);
+    // 状态更新与 attempt 创建都必须在锁事务内
+    expect(statusUpdate).toBeGreaterThan(lock);
+    expect(statusUpdate).toBeLessThan(transactionEnd);
+    expect(transactionalSchedule).toBeGreaterThan(statusUpdate);
+    expect(transactionalSchedule).toBeLessThan(transactionEnd);
+    // 入队只能在事务提交之后
+    expect(enqueue).toBeGreaterThan(transactionEnd);
+    expect(requeueSource).not.toContain("scheduleAndEnqueueFanoutAttempts({");
   });
 
   test("single-post fanout creates attempts inside the lock transaction before any enqueue", () => {

@@ -4049,8 +4049,10 @@ function parsePrivateCommand(input: string) {
 }
 
 export function parseDisplayId(args: string) {
-  // 兼容 "6724"、"！6724"、"6724！"、"#6724" 等常见粘贴/输入法混排
-  const match = args.trim().match(/#?(\d+)/);
+  // 整段必须是独立编号，仅允许前后粘连明确支持的标点/前缀：
+  // "6724"、"！6724"、"6724！"、"#6724"、"#6724！"
+  // 拒绝 "abc123"、"误操作 6724" 等夹杂普通文本的输入。
+  const match = args.trim().match(/^[#＃！!]?\s*(\d+)\s*[！!]?$/);
   if (!match?.[1]) {
     return null;
   }
