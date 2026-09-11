@@ -57,6 +57,17 @@ describe("publish fanout transaction wiring", () => {
     expect(enqueue).toBeGreaterThan(transactionalSchedule);
   });
 
+  test("single-post fanout gates scheduling on the locked transaction result, not the pre-query targets", () => {
+    const fanoutStart = publishingSource.indexOf("export async function enqueuePublishFanout");
+    const fanoutEnd = publishingSource.indexOf("export async function requeuePublishFanout", fanoutStart);
+    const fanoutSource = publishingSource.slice(fanoutStart, fanoutEnd);
+
+    expect(fanoutSource).toContain("const scheduledTargets = await prisma.$transaction(");
+    expect(fanoutSource).toContain("if (!scheduledTargets || scheduledTargets.length === 0)");
+    expect(fanoutSource).toContain("targets: scheduledTargets");
+    expect(fanoutSource).not.toMatch(/if \(!targets \|\| targets\.length === 0\)/);
+  });
+
   test("commits every batch target and its durable marker before enqueueing", () => {
     const fanoutStart = publishingSource.indexOf("export async function enqueueBatchPublishFanout");
     const fanoutEnd = publishingSource.indexOf("async function ensurePostPublishSummary", fanoutStart);
