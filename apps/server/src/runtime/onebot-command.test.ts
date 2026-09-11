@@ -120,6 +120,13 @@ describe("parseReviewGroupShortCommand", () => {
   test("非审核简写返回 null", () => {
     expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 你好")).toBeNull();
   });
+
+  test("与后续字词粘连时不当作命令（通过率/拒绝率/通过了）", () => {
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过率")).toBeNull();
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 拒绝率")).toBeNull();
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过了")).toBeNull();
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 过期")).toBeNull();
+  });
 });
 
 describe("review group ban command parsing", () => {

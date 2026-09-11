@@ -3938,16 +3938,17 @@ export function parseReviewGroupCommand(input: string) {
 /**
  * @机器人 的简写审核命令（过/通过/拒/拒绝）。
  * 只去掉 CQ at 段；args 保留原文，拒绝理由中的标点不得被改写。
+ * 命令词后必须是结尾、空白或标点，避免「通过率」「拒绝率」被当成命令。
  * 「通过！6724」等混排由后续 parseDisplayId / parseRejectArgs 处理。
  */
 export function parseReviewGroupShortCommand(input: string): { name: string; args: string } | null {
   const withoutAt = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
-  // 长词优先，避免「拒」抢在「拒绝」前面
-  const approve = withoutAt.match(/^(通过|过)([\s\S]*)$/);
+  // 长词优先；(?![\p{L}\p{N}_]) 拒绝与后续汉字/字母/数字粘连
+  const approve = withoutAt.match(/^(通过|过)(?![\p{L}\p{N}_])([\s\S]*)$/u);
   if (approve) {
     return { name: "通过", args: (approve[2] ?? "").trim() };
   }
-  const reject = withoutAt.match(/^(拒绝|拒)([\s\S]*)$/);
+  const reject = withoutAt.match(/^(拒绝|拒)(?![\p{L}\p{N}_])([\s\S]*)$/u);
   if (reject) {
     return { name: "拒绝", args: (reject[2] ?? "").trim() };
   }
