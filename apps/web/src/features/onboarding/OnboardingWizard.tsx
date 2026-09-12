@@ -177,7 +177,7 @@ export function OnboardingWizard({
     }
   }
 
-  /** 填错 QQ 时：回到表单重新填写；保存时删旧墙号再按新 QQ 创建。 */
+  /** 填错 QQ 时：回到表单重新填写；保存时先按新 QQ 创建，成功后再删旧墙号，避免失败时租户失去墙号。 */
   function beginEditBot() {
     if (!primaryBot) return;
     setBotQq(String(primaryBot.qqUin));
@@ -200,9 +200,10 @@ export function OnboardingWizard({
       setEditingBot(false);
       return;
     }
+    const previousBotId = primaryBot.id;
     setCreatingBot(true);
     try {
-      await api(`/api/admin/bots/${primaryBot.id}`, { method: "DELETE" });
+      // 先建新号：创建失败时旧墙号仍在，租户不会失去机器人。
       await api("/api/admin/bots", {
         method: "POST",
         body: JSON.stringify({
@@ -214,12 +215,17 @@ export function OnboardingWizard({
           createPublishTarget: true,
         }),
       });
+      try {
+        await api(`/api/admin/bots/${previousBotId}`, { method: "DELETE" });
+      } catch (deleteError) {
+        toast.error(deleteError instanceof Error ? deleteError.message : "新墙号已创建，但删除旧墙号失败，请到管理页手动删除");
+      }
       toast.success("墙号 QQ 已更新，请按新的连接地址在 NapCat 中接入。");
       setEditingBot(false);
-      await refreshBots();
+      await refreshBots().catch(() => undefined);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "修改墙号 QQ 失败");
-      await refreshBots();
+      await refreshBots().catch(() => undefined);
     } finally {
       setCreatingBot(false);
     }
@@ -333,7 +339,7 @@ export function OnboardingWizard({
                 </div>
               ) : editingBot ? (
                 <div className="grid min-w-0 gap-3">
-                  <p className="text-xs font-semibold text-slate-500">修改后会删除当前墙号并按新 QQ 重新创建；若 NapCat 已用错误 QQ 接入，请先断开。</p>
+                  <p className="text-xs font-semibold text-slate-500">会先按新 QQ 创建墙号，成功后再删除当前墙号；创建失败时会保留原墙号。若 NapCat 已接入，请先断开。</p>
                   <Field label="墙号 QQ">
                     <Input value={botQq} onChange={(event) => setBotQq(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="负责发布的 QQ 号" />
                   </Field>
