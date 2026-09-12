@@ -101,6 +101,8 @@ const publishTextTemplateSchema = z.object({
 
 const botPatchSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
+  /** 仅 onebot：修正填错的墙号 QQ（同租户内唯一），在事务内原地更新，保留 BotAccount.id。 */
+  qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字").optional(),
     enabled: z.boolean().optional(),
     reviewGroupId: z.string().trim().max(40).nullable().optional(),
     guildId: z.string().trim().max(40).optional(),
@@ -883,6 +885,23 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     if (bot.platform === "personal_qq" && body.channelId !== undefined && !body.channelId.trim()) {
       return reply.code(400).send({ message: "稿件推送论坛版块 ID 不能为空" });
     }
+    const nextOnebotQq =
+      bot.platform === "onebot" && body.qqUin !== undefined && body.qqUin.trim() !== String(bot.qqUin)
+        ? BigInt(body.qqUin.trim())
+        : null;
+    if (nextOnebotQq !== null) {
+      const conflict = await prisma.botAccount.findFirst({
+        where: {
+          tenantId: context.selectedTenant.id,
+          qqUin: nextOnebotQq,
+          id: { not: bot.id },
+        },
+        select: { id: true },
+      });
+      if (conflict) {
+        return reply.code(409).send({ message: "该 QQ 已绑定本校园墙的其他墙号" });
+      }
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       if (body.reviewNotificationEnabled === true && bot.platform === "onebot") {
@@ -907,6 +926,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
           ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
           ...(bot.platform === "personal_qq" && body.guildId !== undefined ? { qqUin: BigInt(body.guildId) } : {}),
+          ...(nextOnebotQq !== null ? { qqUin: nextOnebotQq } : {}),
           ...(bot.platform === "personal_qq" && body.channelId !== undefined ? { reviewGroupId: body.channelId.trim() } : {}),
           ...(bot.platform === "personal_qq" && body.personalQqToken !== undefined ? { personalQqToken: encryptJson({ token: body.personalQqToken.trim() }) } : {}),
           ...(bot.platform === "onebot" && body.reviewNotificationEnabled !== undefined ? { reviewNotificationEnabled: body.reviewNotificationEnabled } : {}),

@@ -177,7 +177,7 @@ export function OnboardingWizard({
     }
   }
 
-  /** 填错 QQ 时：回到表单重新填写；保存时先按新 QQ 创建，成功后再删旧墙号，避免失败时租户失去墙号。 */
+  /** 填错 QQ 时：回到表单重新填写；保存时 PATCH 原地更新，保留 BotAccount.id 与关联记录。 */
   function beginEditBot() {
     if (!primaryBot) return;
     setBotQq(String(primaryBot.qqUin));
@@ -196,35 +196,30 @@ export function OnboardingWizard({
       toast.error("请输入正确的墙号 QQ");
       return;
     }
-    if (nextQq === String(primaryBot.qqUin)) {
+    const nextName = botName.trim() || `${tenant.name} 墙号`;
+    const nextReviewGroup = reviewGroup.trim() || null;
+    const qqChanged = nextQq !== String(primaryBot.qqUin);
+    const nameChanged = nextName !== primaryBot.displayName;
+    const reviewGroupChanged = nextReviewGroup !== (primaryBot.reviewGroupId || null);
+    if (!qqChanged && !nameChanged && !reviewGroupChanged) {
       setEditingBot(false);
       return;
     }
-    const previousBotId = primaryBot.id;
     setCreatingBot(true);
     try {
-      // 先建新号：创建失败时旧墙号仍在，租户不会失去机器人。
-      await api("/api/admin/bots", {
-        method: "POST",
+      await api(`/api/admin/bots/${primaryBot.id}`, {
+        method: "PATCH",
         body: JSON.stringify({
-          platform: "onebot",
-          qqUin: nextQq,
-          displayName: botName.trim() || `${tenant.name} 墙号`,
-          reviewGroupId: reviewGroup.trim() || undefined,
-          reviewNotificationEnabled: true,
-          createPublishTarget: true,
+          ...(qqChanged ? { qqUin: nextQq } : {}),
+          ...(nameChanged ? { displayName: nextName } : {}),
+          ...(reviewGroupChanged ? { reviewGroupId: nextReviewGroup } : {}),
         }),
       });
-      try {
-        await api(`/api/admin/bots/${previousBotId}`, { method: "DELETE" });
-      } catch (deleteError) {
-        toast.error(deleteError instanceof Error ? deleteError.message : "新墙号已创建，但删除旧墙号失败，请到管理页手动删除");
-      }
-      toast.success("墙号 QQ 已更新，请按新的连接地址在 NapCat 中接入。");
+      toast.success(qqChanged ? "墙号 QQ 已更新，请按新的连接地址在 NapCat 中接入。" : "墙号信息已保存。");
       setEditingBot(false);
       await refreshBots().catch(() => undefined);
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "修改墙号 QQ 失败");
+      toast.error(caught instanceof Error ? caught.message : "修改墙号失败");
       await refreshBots().catch(() => undefined);
     } finally {
       setCreatingBot(false);
@@ -339,7 +334,7 @@ export function OnboardingWizard({
                 </div>
               ) : editingBot ? (
                 <div className="grid min-w-0 gap-3">
-                  <p className="text-xs font-semibold text-slate-500">会先按新 QQ 创建墙号，成功后再删除当前墙号；创建失败时会保留原墙号。若 NapCat 已接入，请先断开。</p>
+                  <p className="text-xs font-semibold text-slate-500">会原地更新墙号 QQ / 名称 / 审核群，不会删除重建；改 QQ 后需在 NapCat 使用新的连接地址。</p>
                   <Field label="墙号 QQ">
                     <Input value={botQq} onChange={(event) => setBotQq(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="负责发布的 QQ 号" />
                   </Field>
@@ -353,7 +348,7 @@ export function OnboardingWizard({
                     <Button variant="ghost" size="sm" disabled={creatingBot} onClick={() => setEditingBot(false)}>取消</Button>
                     <Button disabled={creatingBot} onClick={() => void replaceBotWithNewQq()}>
                       {creatingBot ? <Loader2Icon className="animate-spin" data-icon="inline-start" /> : null}
-                      保存并重建墙号
+                      保存
                     </Button>
                   </div>
                 </div>
