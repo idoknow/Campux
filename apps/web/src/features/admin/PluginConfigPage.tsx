@@ -7,7 +7,7 @@ import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPlu
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { filterPluginAuditLogs } from "./plugin-audit-log-filter";
-import { AggregateLoginIcon, AGGREGATE_LOGIN_TYPE_LABELS } from "../aggregate-oauth/icons";
+import { AggregateLoginIcon, AggregateLoginPluginIcon, AGGREGATE_LOGIN_TYPE_LABELS } from "../aggregate-oauth/icons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -794,7 +794,7 @@ const PLUGINS: PluginDescriptor[] = [
   },
   {
     id: "aggregateLogin",
-    icon: (props: PluginIconProps) => <AggregateLoginIcon type="qq" className={props.className ?? ""} />,
+    icon: (props: PluginIconProps) => <AggregateLoginPluginIcon className={props.className ?? ""} />,
     name: "聚合登录",
     tagline: "OAuth",
     description: "绑定第三方平台身份后，用 QQ/微信/支付宝等直接登录本校园墙",
