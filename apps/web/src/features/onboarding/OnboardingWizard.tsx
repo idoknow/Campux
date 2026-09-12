@@ -56,6 +56,8 @@ export function OnboardingWizard({
   const [botQq, setBotQq] = useState("");
   const [botName, setBotName] = useState("");
   const [reviewGroup, setReviewGroup] = useState("");
+  /** 已创建墙号后是否回到表单，便于改错填的 QQ（会删掉旧墙号再建）。 */
+  const [editingBot, setEditingBot] = useState(false);
 
   const [qrLogin, setQrLogin] = useState<QrLoginState>({ open: false, botId: "", loginId: "", qrImage: "", status: "", message: "" });
 
@@ -166,9 +168,58 @@ export function OnboardingWizard({
         }),
       });
       toast.success("墙号已创建，请在 NapCat 中接入。");
+      setEditingBot(false);
       await refreshBots();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建墙号失败");
+    } finally {
+      setCreatingBot(false);
+    }
+  }
+
+  /** 填错 QQ 时：回到表单重新填写；保存时删旧墙号再按新 QQ 创建。 */
+  function beginEditBot() {
+    if (!primaryBot) return;
+    setBotQq(String(primaryBot.qqUin));
+    setBotName(primaryBot.displayName || "");
+    setReviewGroup(primaryBot.reviewGroupId || "");
+    setEditingBot(true);
+  }
+
+  async function replaceBotWithNewQq() {
+    if (!primaryBot) {
+      await createBot();
+      return;
+    }
+    const nextQq = botQq.trim();
+    if (!/^\d{5,}$/.test(nextQq)) {
+      toast.error("请输入正确的墙号 QQ");
+      return;
+    }
+    if (nextQq === String(primaryBot.qqUin)) {
+      setEditingBot(false);
+      return;
+    }
+    setCreatingBot(true);
+    try {
+      await api(`/api/admin/bots/${primaryBot.id}`, { method: "DELETE" });
+      await api("/api/admin/bots", {
+        method: "POST",
+        body: JSON.stringify({
+          platform: "onebot",
+          qqUin: nextQq,
+          displayName: botName.trim() || `${tenant.name} 墙号`,
+          reviewGroupId: reviewGroup.trim() || undefined,
+          reviewNotificationEnabled: true,
+          createPublishTarget: true,
+        }),
+      });
+      toast.success("墙号 QQ 已更新，请按新的连接地址在 NapCat 中接入。");
+      setEditingBot(false);
+      await refreshBots();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "修改墙号 QQ 失败");
+      await refreshBots();
     } finally {
       setCreatingBot(false);
     }
@@ -280,12 +331,35 @@ export function OnboardingWizard({
                     </Button>
                   </div>
                 </div>
+              ) : editingBot ? (
+                <div className="grid min-w-0 gap-3">
+                  <p className="text-xs font-semibold text-slate-500">修改后会删除当前墙号并按新 QQ 重新创建；若 NapCat 已用错误 QQ 接入，请先断开。</p>
+                  <Field label="墙号 QQ">
+                    <Input value={botQq} onChange={(event) => setBotQq(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="负责发布的 QQ 号" />
+                  </Field>
+                  <Field label="墙号名称">
+                    <Input value={botName} onChange={(event) => setBotName(event.target.value)} maxLength={80} />
+                  </Field>
+                  <Field label="审核群号（可选）">
+                    <Input value={reviewGroup} onChange={(event) => setReviewGroup(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="接收新稿件和审核通知的 QQ 群" />
+                  </Field>
+                  <div className="flex items-center justify-between gap-2">
+                    <Button variant="ghost" size="sm" disabled={creatingBot} onClick={() => setEditingBot(false)}>取消</Button>
+                    <Button disabled={creatingBot} onClick={() => void replaceBotWithNewQq()}>
+                      {creatingBot ? <Loader2Icon className="animate-spin" data-icon="inline-start" /> : null}
+                      保存并重建墙号
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <div className="grid min-w-0 gap-4">
                   <ConnectionPanel bot={primaryBot} online={botOnline} />
                   <NapCatGuide url={buildOneBotUrl(primaryBot)} />
-                  <div className="flex min-w-0 items-center justify-between gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setStep("info")}>上一步</Button>
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setStep("info")}>上一步</Button>
+                      <Button variant="ghost" size="sm" onClick={beginEditBot}>QQ 填错了？修改</Button>
+                    </div>
                     <div className="flex items-center gap-2">
                       <Button variant="outline" size="sm" onClick={() => void refreshBots()}>
                         <RotateCcwIcon data-icon="inline-start" />
