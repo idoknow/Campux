@@ -3831,14 +3831,15 @@ function getHeaderValue(value: string | string[] | undefined) {
 
 /**
  * 去掉不影响命令正文的 CQ 段（引用/合并转发等）。
- * 引用审核通知后 @机器人 发「过」时，raw_message 常带 [CQ:reply,id=…]，
- * 若不剥掉会导致短命令/带 # 命令都解析失败，机器人误回「未找到审核通知」。
+ * 用空格替换而不是删除，避免命令与稿件编号被粘在一起（如
+ * `#通过[CQ:reply,id=1]6724` → `#通过6724`）。
  */
 export function stripReviewCommandCqNoise(input: string) {
   return input
-    .replace(/\[CQ:reply,[^\]]*\]/gi, "")
-    .replace(/\[CQ:forward,[^\]]*\]/gi, "")
-    .replace(/\[CQ:json,[^\]]*\]/gi, "")
+    .replace(/\[CQ:reply,[^\]]*\]/gi, " ")
+    .replace(/\[CQ:forward,[^\]]*\]/gi, " ")
+    .replace(/\[CQ:json,[^\]]*\]/gi, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
