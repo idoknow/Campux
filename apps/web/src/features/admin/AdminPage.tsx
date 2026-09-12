@@ -1160,7 +1160,7 @@ export function AdminPage({
               />
             </TabsContent>
 
-            <TabsContent value="metadata" className="mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+            <TabsContent value="metadata" className="relative mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <div className="flex flex-col gap-4">
                 <MetadataPanel
                   form={form}

@@ -29,7 +29,9 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/15 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // translateZ(0)+isolation：独立合成层，减少失焦/扫过窗口边缘时的横缝
+        // 略提高不透明度，降低底层 border-b 透出后被误认为「多出来的线」
+        "fixed inset-0 z-50 isolate bg-black/25 [transform:translateZ(0)] data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
