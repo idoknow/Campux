@@ -54,28 +54,6 @@ interface IconProps {
   className?: string;
 }
 
-function Svg({ className, d, scale = 1 }: IconProps & { d: string; scale?: number }) {
-  // path 坐标系已是 0..1024，与 viewBox 一致；默认不再缩放。
-  // （原先 scale=24/1024 会把图标缩到约 2% 视口，看起来像「不显示」。）
-  return (
-    <svg
-      viewBox="0 0 1024 1024"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      className={className ?? ""}
-      fill="currentColor"
-      stroke="none"
-      strokeWidth="0"
-    >
-      {scale === 1 ? <path d={d} /> : (
-        <g transform={`scale(${scale})`}>
-          <path d={d} />
-        </g>
-      )}
-    </svg>
-  );
-}
-
 function SmallIcon({ className, d }: IconProps & { d: string }) {
   return (
     <svg
