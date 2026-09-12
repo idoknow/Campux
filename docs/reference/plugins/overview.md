@@ -152,3 +152,9 @@ interface PluginContext {
 3. **审计追踪**：所有插件操作记录审计日志，包含时间戳、操作类型、插件名、详情
 4. **状态管理**：插件可被管理员禁用/启用，禁用后 `initAll` / `readyAll` 跳过该插件
 5. **错误隔离**：`onReady` 失败不中断其他插件，事件 handler 异常不中断其他 handler
+
+## 文档索引
+
+- [预设插件](./preset-plugins.md) — 管理页内置插件（Markdown、多彩投稿、字体、匿名头像、Bot 文案、竞选、聚合登录）
+- [插件开发指南](./development.md)
+- [HelloWorld 参考插件](./hello-world.md)
