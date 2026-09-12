@@ -3829,6 +3829,19 @@ function getHeaderValue(value: string | string[] | undefined) {
   return value ?? null;
 }
 
+/**
+ * 去掉不影响命令正文的 CQ 段（引用/合并转发等）。
+ * 引用审核通知后 @机器人 发「过」时，raw_message 常带 [CQ:reply,id=…]，
+ * 若不剥掉会导致短命令/带 # 命令都解析失败，机器人误回「未找到审核通知」。
+ */
+export function stripReviewCommandCqNoise(input: string) {
+  return input
+    .replace(/\[CQ:reply,[^\]]*\]/gi, "")
+    .replace(/\[CQ:forward,[^\]]*\]/gi, "")
+    .replace(/\[CQ:json,[^\]]*\]/gi, "")
+    .trim();
+}
+
 function extractPlainText(event: OneBotMessageEvent) {
   if (Array.isArray(event.message)) {
     return event.message
@@ -3839,10 +3852,10 @@ function extractPlainText(event: OneBotMessageEvent) {
       .join("");
   }
   if (typeof event.message === "string") {
-    return event.message;
+    return stripReviewCommandCqNoise(event.message);
   }
   if (typeof event.raw_message === "string") {
-    return event.raw_message;
+    return stripReviewCommandCqNoise(event.raw_message);
   }
   return "";
 }
@@ -3891,7 +3904,7 @@ function escapeRegex(value: string) {
 }
 
 function normalizeCommandInput(input: string) {
-  return input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  return stripReviewCommandCqNoise(input.replace(/\[CQ:at,qq=\d+\]/g, ""));
 }
 
 export function parseCommand(input: string) {
@@ -3942,7 +3955,9 @@ export function parseReviewGroupCommand(input: string) {
  * 「通过！6724」等混排由后续 parseDisplayId / parseRejectArgs 处理。
  */
 export function parseReviewGroupShortCommand(input: string): { name: string; args: string } | null {
-  const withoutAt = input.replace(/\[CQ:at,qq=\d+\]/g, "").trim();
+  const withoutAt = stripReviewCommandCqNoise(
+    input.replace(/\[CQ:at,qq=\d+\]/g, ""),
+  );
   // 长词优先；(?![\p{L}\p{N}_]) 拒绝与后续汉字/字母/数字粘连
   const approve = withoutAt.match(/^(通过|过)(?![\p{L}\p{N}_])([\s\S]*)$/u);
   if (approve) {
