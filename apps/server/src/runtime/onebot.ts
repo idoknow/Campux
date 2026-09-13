@@ -958,9 +958,18 @@ export class OneBotRuntime {
   async sendTenantReviewNotification(tenantId: string, message: unknown) {
     const bot = await this.findTenantReviewNotificationBot(tenantId);
     if (!bot) {
-      return;
+      return false;
     }
-    await this.sendBotReviewGroupMessage(bot, message, "failed to send tenant review notification");
+    try {
+      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId!, message);
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        { error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId },
+        "failed to send tenant review notification",
+      );
+      return false;
+    }
   }
 
   private async findTenantReviewNotificationBot(tenantId: string) {
@@ -2459,7 +2468,7 @@ export class OneBotRuntime {
               },
             });
           },
-          { isolationLevel: TransactionIsolationLevel.Serializable },
+          { isolationLevel: TransactionIsolationLevel.Serializable, maxWait: 15_000, timeout: 60_000 },
         );
         break;
       } catch (error) {
@@ -4185,8 +4194,21 @@ function extractCookiesFromActionData(data: unknown) {
 }
 
 function toErrorMessage(error: unknown) {
-  if (error instanceof Error) {
+  if (error instanceof BotWorkflowError) {
     return error.message;
+  }
+  if (error instanceof Error) {
+    const message = error.message;
+    // Never leak Prisma / driver internals into QQ chats.
+    if (
+      message.includes("Transaction API error")
+      || message.includes("expired transaction")
+      || message.includes("Invalid `prisma.")
+      || message.includes("Connection")
+    ) {
+      return "系统繁忙，请稍后再试";
+    }
+    return message;
   }
   return "Bot 命令处理失败";
 }

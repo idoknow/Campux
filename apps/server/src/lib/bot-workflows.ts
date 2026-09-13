@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { hashPassword, isPrismaKnownRequestError, type Prisma, type TenantRole } from "@campux/db";
+import { hashPassword, isPrismaKnownRequestError, type TenantRole } from "@campux/db";
 import { hasTenantRole } from "./auth";
 import { writeAuditLog } from "./audit";
 import { prisma } from "./prisma";
@@ -8,7 +8,7 @@ import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
 import { readTenantPublishMode } from "./tenant-metadata";
 import { tenantRuntimeRelationFilter } from "./tenant-runtime";
-import { lockActiveTenantRuntime, runWithActiveTenantLease } from "./tenant-runtime-lease";
+import { runWithActiveTenantLease } from "./tenant-runtime-lease";
 import type { RuntimeQueue } from "../runtime/queue";
 import { publishToQZone, QZonePublishError } from "@campux/integrations";
 import { prisma as dbPrisma } from "../lib/prisma";
@@ -42,11 +42,47 @@ export async function registerUserViaBot({
   role?: TenantRole;
   resetExistingPassword?: boolean;
 }) {
+  // findEnabledBot already requires an active tenant; the exclusive lease is
+  // only needed when this call mutates durable state.
   const bot = await findEnabledBot(botQqUin);
-  const registration = await prisma.$transaction(async (tx) => {
-    if (!await lockActiveTenantRuntime(tx, bot.tenantId)) {
-      throw new BotWorkflowError("校园墙已暂停或归档", 409);
-    }
+  const previewUser = await prisma.user.findUnique({
+    where: {
+      qqUin: BigInt(userQqUin),
+    },
+    include: {
+      memberships: true,
+    },
+  });
+  const previewMembership = previewUser?.memberships.find((membership) => membership.tenantId === bot.tenantId);
+  const previewMembershipRole = previewMembership && hasTenantRole(previewMembership.role, role) ? previewMembership.role : role;
+  const previewNeedsPassword = !previewUser || resetExistingPassword;
+  const previewNeedsDisplayName = Boolean(previewUser && !previewUser.displayName && displayName);
+
+  // Common private-message path: already registered with membership and no
+  // pending account changes. Skip the tenant row lock so concurrent publish /
+  // archive traffic cannot stall every chat into a registration timeout.
+  if (
+    previewUser
+    && previewMembership
+    && !previewNeedsPassword
+    && !previewNeedsDisplayName
+    && previewMembershipRole === previewMembership.role
+  ) {
+    return {
+      bot,
+      user: serializeUser(previewUser),
+      membership: previewMembership,
+      password: null,
+      alreadyHadAccount: true,
+      alreadyHadTenantAccess: true,
+    };
+  }
+
+  // Argon2 is intentionally expensive; keep it outside the transaction so the
+  // interactive timeout covers DB work only.
+  const passwordHash = previewNeedsPassword ? await hashPassword(password) : null;
+
+  const registration = await runWithActiveTenantLease(prisma, bot.tenantId, async (tx) => {
     const existingUser = await tx.user.findUnique({
       where: {
         qqUin: BigInt(userQqUin),
@@ -73,20 +109,16 @@ export async function registerUserViaBot({
         password: null,
         alreadyHadAccount: true,
         alreadyHadTenantAccess: true,
-        didMutate: false,
-        membershipRole,
       };
     }
 
-    const passwordHash = shouldSetPassword ? await hashPassword(password) : null;
     const user = existingUser
       ? await tx.user.update({
           where: {
             id: existingUser.id,
           },
           data: {
-            ...(passwordHash ? { passwordHash } : {}),
-            ...(passwordHash ? { passwordChangeRequired: true } : {}),
+            ...(shouldSetPassword && passwordHash ? { passwordHash, passwordChangeRequired: true } : {}),
             ...(!existingUser.displayName && displayName ? { displayName } : {}),
           },
         })
@@ -134,29 +166,20 @@ export async function registerUserViaBot({
       password: shouldSetPassword ? password : null,
       alreadyHadAccount: Boolean(existingUser),
       alreadyHadTenantAccess: Boolean(existingMembership),
-      didMutate: true,
-      membershipRole,
     };
   });
 
-  if (!registration.didMutate) {
-    return {
-      bot,
-      user: registration.user,
-      membership: registration.membership,
-      password: registration.password,
-      alreadyHadAccount: registration.alreadyHadAccount,
-      alreadyHadTenantAccess: registration.alreadyHadTenantAccess,
-    };
+  if (!registration.active) {
+    throw new BotWorkflowError("校园墙已暂停或归档", 409);
   }
 
   return {
     bot,
-    user: registration.user,
-    membership: registration.membership,
-    password: registration.password,
-    alreadyHadAccount: registration.alreadyHadAccount,
-    alreadyHadTenantAccess: registration.alreadyHadTenantAccess,
+    user: registration.value.user,
+    membership: registration.value.membership,
+    password: registration.value.password,
+    alreadyHadAccount: registration.value.alreadyHadAccount,
+    alreadyHadTenantAccess: registration.value.alreadyHadTenantAccess,
   };
 }
 
@@ -185,10 +208,7 @@ export async function resetPasswordViaBot({
   }
 
   const passwordHash = await hashPassword(password);
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    if (!await lockActiveTenantRuntime(tx, bot.tenantId)) {
-      throw new BotWorkflowError("校园墙已暂停或归档", 409);
-    }
+  const reset = await runWithActiveTenantLease(prisma, bot.tenantId, async (tx) => {
     await tx.user.update({
       where: {
         id: user.id,
@@ -208,6 +228,9 @@ export async function resetPasswordViaBot({
       detail: { botQqUin, userQqUin },
     }, tx);
   });
+  if (!reset.active) {
+    throw new BotWorkflowError("校园墙已暂停或归档", 409);
+  }
   return {
     bot,
     user: serializeUser(user),

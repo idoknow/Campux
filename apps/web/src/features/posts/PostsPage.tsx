@@ -28,7 +28,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
-import type { AssignedPostTag, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
+import type { AssignedPostTag, FeedbackItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -259,6 +259,7 @@ export function PostsPage({
   mineLoading,
   autoFollowOwnPosts,
   enableMarkdownRender,
+  enableFeedback,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -272,6 +273,7 @@ export function PostsPage({
   mineLoading: boolean;
   autoFollowOwnPosts: boolean;
   enableMarkdownRender?: boolean;
+  enableFeedback?: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -279,6 +281,7 @@ export function PostsPage({
 }) {
   const canReview = canAccess(currentRole, "reviewer");
   const isAdmin = canAccess(currentRole, "admin");
+  const showFeedbackTab = Boolean(enableFeedback);
   const [pendingRecallPosts, setPendingRecallPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPagination, setReviewPagination] = useState<Pagination>(() => defaultPagination());
@@ -298,6 +301,12 @@ export function PostsPage({
   const [mineSearchPosts, setMineSearchPosts] = useState<PostItem[] | null>(null);
   const [mineSearchPagination, setMineSearchPagination] = useState<Pagination | null>(null);
   const [mineSearchLoading, setMineSearchLoading] = useState(false);
+  const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
+  const [feedbackPagination, setFeedbackPagination] = useState<Pagination>(() => defaultPagination());
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackPage, setFeedbackPage] = useState(1);
+  const [feedbackScope, setFeedbackScope] = useState<"all" | "mine">("mine");
+  const [feedbackNonce, setFeedbackNonce] = useState(0);
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
@@ -344,10 +353,30 @@ export function PostsPage({
   }, [preview.url]);
 
   useEffect(() => {
-    if (!canReview && activeTab !== "mine" && activeTab !== "published") {
-      onTabChange("mine");
+    const allowed: PostsTab[] = ["mine", "published"];
+    if (canReview) allowed.push("review");
+    if (showFeedbackTab) allowed.push("feedback");
+    if (!allowed.includes(activeTab)) {
+      onTabChange(canReview ? "review" : "mine");
     }
-  }, [activeTab, canReview, onTabChange]);
+  }, [activeTab, canReview, showFeedbackTab, onTabChange]);
+
+  useEffect(() => {
+    if (activeTab !== "feedback" || !showFeedbackTab) {
+      return;
+    }
+    setFeedbackLoading(true);
+    api<{ items: FeedbackItem[]; pagination: Pagination; scope: "all" | "mine" }>(`/api/feedback?page=${feedbackPage}&limit=20`)
+      .then((data) => {
+        setFeedbackItems(data.items);
+        setFeedbackPagination(data.pagination);
+        setFeedbackScope(data.scope);
+      })
+      .catch((caught) => {
+        toast.error(caught instanceof Error ? caught.message : "无法读取意见列表");
+      })
+      .finally(() => setFeedbackLoading(false));
+  }, [activeTab, showFeedbackTab, feedbackPage, feedbackNonce, tenantId]);
 
   useEffect(() => {
     if (activeTab !== "review") {
@@ -875,6 +904,11 @@ export function PostsPage({
             <TabsTrigger value="published" className={postTabsTriggerClassName}>
               已发布
             </TabsTrigger>
+            {showFeedbackTab ? (
+              <TabsTrigger value="feedback" className={postTabsTriggerClassName}>
+                意见
+              </TabsTrigger>
+            ) : null}
           </TabsList>
           <div className="flex items-center gap-3">
             <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-500" title="开启后，你的每条稿件发布成功时会自动关注其评论，新评论每 12 小时私信提醒你">
@@ -1011,6 +1045,47 @@ export function PostsPage({
             </>
           )}
         </TabsContent>
+        {showFeedbackTab ? (
+          <TabsContent value="feedback" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-slate-500">
+                {feedbackScope === "all" ? "本墙全部意见" : "你提交的意见"}
+                {feedbackPagination.total > 0 ? ` · 共 ${feedbackPagination.total} 条` : ""}
+              </p>
+              <Button variant="outline" size="sm" disabled={feedbackLoading} onClick={() => setFeedbackNonce((n) => n + 1)}>
+                刷新
+              </Button>
+            </div>
+            {feedbackLoading && feedbackItems.length === 0 ? (
+              <LoadingBlock title="正在加载意见..." />
+            ) : feedbackItems.length === 0 ? (
+              <EmptyCard title="还没有意见反馈" />
+            ) : (
+              <>
+                <div className="space-y-3">
+                  {feedbackItems.map((item) => (
+                    <Card key={item.id} className="border-sky-200 bg-white shadow-none dark:border-sky-900 dark:bg-slate-900">
+                      <CardContent className="space-y-2 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {item.canViewIdentity || feedbackScope === "mine"
+                              ? `${item.author.displayName || "未设置昵称"} · QQ ${item.author.qqUin}`
+                              : "匿名用户"}
+                          </span>
+                          <span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
+                          {item.content}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                <PaginationControls pagination={feedbackPagination} busy={feedbackLoading} onPageChange={setFeedbackPage} />
+              </>
+            )}
+          </TabsContent>
+        ) : null}
         {canReview ? (
           <TabsContent value="review" className="mt-3 flex min-h-0 flex-1 flex-col">
             <div className="mb-2 flex md:hidden">

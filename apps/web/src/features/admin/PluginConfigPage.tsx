@@ -84,7 +84,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "feedback";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -150,6 +150,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   botStylishMessages: "campux-plugin-bot-stylish-messages",
   campaigns: "campux-plugin-campaigns",
   aggregateLogin: "campux-plugin-aggregate-login",
+  feedback: "campux-plugin-feedback",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -166,6 +167,25 @@ const PERMISSION_LABELS: Record<PluginPermission, string> = {
   "tenant:data": "访问租户数据",
   "user:data": "访问用户数据",
 };
+
+function FeedbackIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <path d="M128 192c0-35.3 28.7-64 64-64h640c35.3 0 64 28.7 64 64v448c0 35.3-28.7 64-64 64H384l-160 128V704H192c-35.3 0-64-28.7-64-64V192z" fill="#7DD3FC" />
+      <path d="M320 352h384v64H320v-64zm0 128h256v64H320v-64z" fill="#0369A1" opacity=".85" />
+    </svg>
+  );
+}
+
+function FeedbackPanel() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，投稿页最上方会出现「意见反馈」入口。用户提交的文字意见会发送到已开启审核群通知的墙号审核群；墙号不在线或未配置审核群时，提交会失败并提示重试。
+      </div>
+    </div>
+  );
+}
 
 function MarkdownRenderPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
@@ -819,6 +839,33 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, aggregateLogin: { ...config.aggregateLogin, enabled: value } }),
     render: (config, onChange, busy) => <AggregateLoginPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "feedback",
+    icon: FeedbackIcon,
+    name: "意见反馈",
+    tagline: "Feedback",
+    description: "投稿页顶部意见反馈入口，提交后通知审核群",
+    detailedDescription:
+      "本插件在投稿页最上方展示「意见反馈」入口，方便用户对校园墙本身提出建议或问题（与稿件投稿分开）。\n\n" +
+      "工作方式：\n" +
+      "· 用户点击入口，填写最多 500 字的文字意见并提交。\n" +
+      "· 提交成功后，意见会发送到本墙已开启「审核群通知」的墙号审核群。\n" +
+      "· 未配置审核群、墙号离线或未开启审核群通知时，提交会失败并提示。\n\n" +
+      "使用建议：\n" +
+      "· 请先在「管理 → 墙号」配置审核群，并开启审核群通知。\n" +
+      "· 关闭本插件后投稿页入口立即隐藏，已提交的历史意见不会重新展示。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "开启即可用；通知发到审核群。",
+    accent: "from-sky-500 to-cyan-500",
+    bgTint: "bg-sky-50 text-sky-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后用户可提交文字意见并通知审核群；需读写插件配置，并关联投稿人身份与租户数据。",
+    enabled: (config) => config.feedback.enabled,
+    setEnabled: (config, value) => ({ ...config, feedback: { ...config.feedback, enabled: value } }),
+    render: () => <FeedbackPanel />,
+  },
 ];
 
 function ensureBotMessageDefaults(config: TenantPluginConfig): TenantPluginConfig {
@@ -878,6 +925,9 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       appId: "",
       appKey: "",
       endpoint: "",
+    },
+    feedback: {
+      enabled: metadata.enableFeedback ?? false,
     },
   };
 }

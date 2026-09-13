@@ -32,10 +32,12 @@ describe("applySqliteBaseline", () => {
     const dbPath = join(dir, "test.db");
     const url = `file:${dbPath}`;
     try {
-      // first run applies
+      // first run applies baseline; incremental names that are already embedded
+      // in a fresh product baseline are recorded as skipped.
       const r1 = applySqliteBaseline(BASELINE, url, silentLogger);
       expect(r1.applied).toEqual(["0_sqlite_baseline"]);
-      expect(r1.skipped).toEqual([]);
+      expect(r1.skipped).toContain("20260909000000_add_personal_qq_token");
+      expect(r1.skipped).toContain("20260913120000_add_campaign_tables_sqlite");
 
       // tables exist
       const db = new Database(dbPath);
@@ -58,7 +60,7 @@ describe("applySqliteBaseline", () => {
       // second run skips (idempotent)
       const r2 = applySqliteBaseline(BASELINE, url, silentLogger);
       expect(r2.applied).toEqual([]);
-      expect(r2.skipped).toEqual(["0_sqlite_baseline"]);
+      expect(r2.skipped).toContain("0_sqlite_baseline");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

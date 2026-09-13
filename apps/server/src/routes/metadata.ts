@@ -149,6 +149,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     allowAnonymousCampaign: false,
     maxActiveCampaignsPerUser: 0,
     enableAggregateLogin: false,
+    enableFeedback: false,
   };
 }
 
@@ -232,6 +233,8 @@ async function readPublicMetadata(tenantId: string) {
       : 0;
     // 聚合登录：未启用时服务页的「第三方登录」入口隐藏。
     metadata.enableAggregateLogin = pluginConfig.aggregateLogin.enabled;
+    // 意见反馈：未启用时投稿页顶部入口隐藏。
+    metadata.enableFeedback = pluginConfig.feedback.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }
