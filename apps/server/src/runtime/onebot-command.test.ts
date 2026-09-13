@@ -127,6 +127,40 @@ describe("parseReviewGroupShortCommand", () => {
     expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 通过了")).toBeNull();
     expect(parseReviewGroupShortCommand("[CQ:at,qq=10001] 过期")).toBeNull();
   });
+
+  test("引用审核通知 + @bot + 过 仍应识别为通过（剥离 CQ:reply）", () => {
+    expect(parseReviewGroupShortCommand("[CQ:reply,id=12345][CQ:at,qq=10001] 过")).toEqual({
+      name: "通过",
+      args: "",
+    });
+    expect(parseReviewGroupShortCommand("[CQ:reply,id=12345][CQ:at,qq=10001]通过")).toEqual({
+      name: "通过",
+      args: "",
+    });
+    expect(parseReviewGroupShortCommand("[CQ:reply,id=999][CQ:at,qq=10001] 拒绝 内容违规。请处理 6724")).toEqual({
+      name: "拒绝",
+      args: "内容违规。请处理 6724",
+    });
+  });
+});
+
+describe("parseCommand with reply noise", () => {
+  test("引用后带 #通过 编号仍可解析", () => {
+    expect(parseCommand("[CQ:reply,id=1]#通过 6724")).toEqual({ name: "通过", args: "6724" });
+  });
+
+  test("引用后 at + ＃通过 仍可解析", () => {
+    expect(parseCommand("[CQ:reply,id=1][CQ:at,qq=10001] ＃通过 6724")).toEqual({ name: "通过", args: "6724" });
+  });
+
+  test("引用夹在命令与稿件编号之间时仍分开解析（空格替换）", () => {
+    // 若把 CQ 段直接删成空串，会变成 #通过6724，命令名/参数粘连
+    expect(parseCommand("#通过[CQ:reply,id=999]6724")).toEqual({ name: "通过", args: "6724" });
+    expect(parseReviewGroupShortCommand("[CQ:at,qq=1]通过[CQ:reply,id=2] 6724")).toEqual({
+      name: "通过",
+      args: "6724",
+    });
+  });
 });
 
 describe("review group ban command parsing", () => {
