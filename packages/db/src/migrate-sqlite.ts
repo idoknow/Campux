@@ -427,13 +427,15 @@ function applyOAuthIdentitySqliteMigration(
       db.exec(`CREATE INDEX "OAuthIdentity_userId_idx" ON "OAuthIdentity"("userId")`);
       db.exec(`CREATE UNIQUE INDEX "OAuthIdentity_provider_providerUserId_key" ON "OAuthIdentity"("provider", "providerUserId")`);
     }
+    // Bound as ? below — static seed only (not SQL interpolation).
+    const checksumSeed = hasTable ? "create-oauth-identity-present" : "create-oauth-identity-missing";
     db.run(
       `INSERT INTO "_prisma_migrations"
          ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
       [
         randomUUID(),
-        checksumOf(`create-oauth-identity-has=${hasTable}`),
+        checksumOf(checksumSeed),
         OAUTH_IDENTITY_MIGRATION_NAME,
       ],
     );
@@ -480,13 +482,14 @@ function applyPersonalQqTokenSqliteMigration(
     if (!hasColumn) {
       db.exec(`ALTER TABLE "BotAccount" ADD COLUMN "personalQqToken" JSONB`);
     }
+    const checksumSeed = hasColumn ? "alter-bot-personalQqToken-present" : "alter-bot-personalQqToken-missing";
     db.run(
       `INSERT INTO "_prisma_migrations"
          ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
       [
         randomUUID(),
-        checksumOf(`alter-bot-personalQqToken-has=${hasColumn}`),
+        checksumOf(checksumSeed),
         PERSONAL_QQ_TOKEN_MIGRATION_NAME,
       ],
     );
@@ -585,13 +588,14 @@ function applyCampaignTablesSqliteMigration(
       db.exec(`CREATE INDEX "CampaignVote_campaignId_voterId_idx" ON "CampaignVote"("campaignId", "voterId")`);
       db.exec(`CREATE INDEX "CampaignVote_optionId_idx" ON "CampaignVote"("optionId")`);
     }
+    const checksumSeed = hasTable ? "create-campaign-tables-present" : "create-campaign-tables-missing";
     db.run(
       `INSERT INTO "_prisma_migrations"
          ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
       [
         randomUUID(),
-        checksumOf(`create-campaign-tables-has=${hasTable}`),
+        checksumOf(checksumSeed),
         CAMPAIGN_TABLES_MIGRATION_NAME,
       ],
     );
@@ -647,13 +651,14 @@ function applyTenantFeedbackSqliteMigration(
       db.exec(`CREATE INDEX "TenantFeedback_tenantId_createdAt_idx" ON "TenantFeedback"("tenantId", "createdAt")`);
       db.exec(`CREATE INDEX "TenantFeedback_tenantId_authorId_createdAt_idx" ON "TenantFeedback"("tenantId", "authorId", "createdAt")`);
     }
+    const checksumSeed = hasTable ? "create-tenant-feedback-present" : "create-tenant-feedback-missing";
     db.run(
       `INSERT INTO "_prisma_migrations"
          ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
       [
         randomUUID(),
-        checksumOf(`create-tenant-feedback-has=${hasTable}`),
+        checksumOf(checksumSeed),
         TENANT_FEEDBACK_MIGRATION_NAME,
       ],
     );
@@ -720,13 +725,16 @@ function applyTenantFeedbackMessagesSqliteMigration(
     }
     const indexSql = `CREATE INDEX IF NOT EXISTS "TenantFeedback_tenantId_groupMessageId_idx" ON "TenantFeedback"("tenantId", "groupMessageId")`;
     db.exec(indexSql);
+    const checksumSeed = hasGroupColumn && hasMessageTable
+      ? "feedback-messages-present"
+      : "feedback-messages-created";
     db.run(
       `INSERT INTO "_prisma_migrations"
          ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
       [
         randomUUID(),
-        checksumOf(`feedback-messages group=${hasGroupColumn} msg=${hasMessageTable}`),
+        checksumOf(checksumSeed),
         TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME,
       ],
     );

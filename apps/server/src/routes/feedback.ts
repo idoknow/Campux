@@ -82,8 +82,12 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
       ? await oneBot.sendTenantReviewNotification(context.selectedTenant.id, message)
       : { ok: false, messageId: null };
 
+    // Feedback is already durable. Partial success avoids 503 retries that
+    // would insert a duplicate row when only the review-group notify fails.
     if (!notified.ok) {
-      return reply.code(503).send({
+      return reply.code(202).send({
+        ok: true,
+        id: saved.id,
         message: "意见已保存，但暂时无法送达审核群，请确认墙号在线且已配置审核群通知",
       });
     }
@@ -221,12 +225,12 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
     if (role === "user" && oneBot) {
       const recentMessages = await prisma.tenantFeedbackMessage.findMany({
         where: { feedbackId: feedback.id },
-        orderBy: { createdAt: "asc" },
-        take: 50,
+        orderBy: { createdAt: "desc" },
+        take: 5,
         select: { role: true, content: true, createdAt: true },
       });
       const recent = recentMessages
-        .slice(-5)
+        .reverse()
         .map((message) => ({
           role: message.role as "user" | "admin",
           content: message.content,
@@ -239,7 +243,12 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
         qqUin,
         recentMessages: recent,
       });
-      await oneBot.sendTenantReviewNotification(context.selectedTenant.id, notice);
+      const notified = await oneBot.sendTenantReviewNotification(context.selectedTenant.id, notice);
+      if (!notified.ok) {
+        return reply.code(503).send({
+          message: "回复已保存，但暂时无法送达审核群，请确认墙号在线且已配置审核群通知",
+        });
+      }
     }
 
     return { ok: true, role };

@@ -59,8 +59,8 @@ export async function registerUserViaBot({
   const previewNeedsDisplayName = Boolean(previewUser && !previewUser.displayName && displayName);
 
   // Common private-message path: already registered with membership and no
-  // pending account changes. Skip the tenant row lock so concurrent publish /
-  // archive traffic cannot stall every chat into a registration timeout.
+  // pending account changes. Re-check tenant status under the lease so a
+  // concurrent pause/archive cannot race the no-op return past an inactive wall.
   if (
     previewUser
     && previewMembership
@@ -68,6 +68,10 @@ export async function registerUserViaBot({
     && !previewNeedsDisplayName
     && previewMembershipRole === previewMembership.role
   ) {
+    const statusLease = await runWithActiveTenantLease(prisma, bot.tenantId, async () => true);
+    if (!statusLease.active) {
+      throw new BotWorkflowError("校园墙已暂停或归档", 409);
+    }
     return {
       bot,
       user: serializeUser(previewUser),
