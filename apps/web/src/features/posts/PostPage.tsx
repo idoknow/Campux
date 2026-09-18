@@ -149,7 +149,10 @@ export function PostPage({
             <h2 className="text-base font-semibold text-slate-950">写一条投稿</h2>
             <p className="mt-1 text-sm leading-5 text-slate-500">审核通过后会发布到校园墙，匿名开关只影响对外展示。</p>
           </div>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{postText.length}/1000</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+            {postText.length}/1000
+            {postText.trim().length > 0 ? <span className="ml-1.5 font-normal text-slate-400">已自动保存草稿</span> : null}
+          </span>
         </div>
         <Textarea
           value={postText}
