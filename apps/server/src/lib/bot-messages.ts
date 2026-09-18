@@ -834,23 +834,7 @@ export function formatPrivateReplyNoTarget(stylishEnabled = false): string {
   return pick(privateReplyNoTargetStylish)();
 }
 
-// ── 意见反馈回复 ──────────────────────────────────────
-
-export function formatFeedbackAdminReplyToUser(feedbackPreview: string, replyText: string, stylishEnabled = false): string {
-  void stylishEnabled;
-  return [
-    `📩 管理员已回复你的意见：`,
-    `意见：${feedbackPreview}`,
-    `回复：${replyText}`,
-    "",
-    "你可以到网站「稿件 → 意见」页继续回复管理员。",
-  ].join("\n");
-}
-
-export function formatFeedbackAdminReplySent(nickname: string, qqUin: string, stylishEnabled = false): string {
-  void stylishEnabled;
-  return `✅ 已回复意见 ${nickname}（QQ ${qqUin}），并私信通知对方。`;
-}
+// ── 意见反馈回复（站内回复 → 审核群提醒） ─────────────
 
 export function formatFeedbackUserReplyNotice(input: {
   feedbackContent: string;

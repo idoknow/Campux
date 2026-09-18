@@ -76,9 +76,6 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
       `【意见反馈】${tenantName}`,
       `来自：${displayName}（QQ ${qqUin}）`,
       content,
-      "",
-      `意见编号：${saved.id}`,
-      "审核员可引用本条消息并发送：#回复 内容",
     ].join("\n");
 
     const notified = oneBot
@@ -88,13 +85,6 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
     if (!notified.ok) {
       return reply.code(503).send({
         message: "意见已保存，但暂时无法送达审核群，请确认墙号在线且已配置审核群通知",
-      });
-    }
-
-    if (notified.messageId) {
-      await prisma.tenantFeedback.update({
-        where: { id: saved.id },
-        data: { groupMessageId: notified.messageId },
       });
     }
 
