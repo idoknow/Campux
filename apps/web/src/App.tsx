@@ -8,6 +8,7 @@ import {
   runWhenSubmissionIdle,
 } from "@/lib/attachment-upload-state";
 import { readQueryInt, writeQueryParams } from "@/lib/url-query";
+import { clearPostDraft, readLastDraftTenantId, readPostDraft, writeDraftMirrorSync, writePostDraft } from "@/lib/post-draft";
 import { buildLoginPathWithReturnTo, readLoginReturnTo, readOAuthAuthorizeSearchFromReturnTo } from "@/lib/oauth-login-return";
 import type { ActiveBan, AdminTab, AuthenticatedMe, CurrentMembership, MainTab, MeResponse, OAuthAuthorizeClientResponse, Pagination, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import { usePendingAttachments } from "@/hooks/useUploadImages";
@@ -106,7 +107,10 @@ export function App() {
   const [postsPagination, setPostsPagination] = useState<Pagination>(() => defaultPagination());
   const [postsPage, setPostsPageState] = useState(() => readQueryInt("page", 1, { min: 1 }));
   const [tenantDataLoading, setTenantDataLoading] = useState(false);
-  const [postText, setPostText] = useState("");
+  const [postText, setPostText] = useState(() => {
+    // 从本地存储同步回填最近一份草稿，避免刷新后先看到空表单再跳变。
+    return readPostDraft(readLastDraftTenantId())?.text ?? "";
+  });
   const [anonymous, setAnonymous] = useState(false);
   const [anonymousAvatar, setAnonymousAvatar] = useState<string>("");
   const [postBgColor, setPostBgColor] = useState<string>("");
@@ -117,6 +121,7 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const submissionBusyRef = useRef(false);
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, validateBeforeUpload, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments({
     maxSizeMb: metadata.imageMaxSizeMb,
     compressionEnabled: metadata.imageCompression.enabled,
@@ -324,6 +329,63 @@ export function App() {
     });
   }, [postsPage]);
 
+  // 草稿自动保存：正文/匿名/样式变化即写入浏览器本地数据库，按租户隔离。
+  // 切墙或登出时清理，避免恢复出上一个校园墙的草稿。
+  const draftTenantId = me?.authenticated && me.currentTenant ? me.currentTenant.id : null;
+  const draftKeyRef = useRef(draftTenantId);
+  useEffect(() => {
+    if (draftTenantId === draftKeyRef.current) {
+      return;
+    }
+    const previousTenantId = draftKeyRef.current;
+    draftKeyRef.current = draftTenantId;
+    if (previousTenantId) {
+      void clearPostDraft(previousTenantId).catch(() => undefined);
+    }
+    const restored = readPostDraft(draftTenantId ?? "");
+    if (!restored) {
+      setPostText("");
+      setAnonymous(false);
+      setAnonymousAvatar("");
+      setPostBgColor("");
+      setPostTextColor("");
+      setPostFont("");
+      return;
+    }
+    setPostText(restored.text);
+    setAnonymous(restored.anonymous);
+    setAnonymousAvatar(restored.anonymousAvatar);
+    setPostBgColor(restored.bgColor);
+    setPostTextColor(restored.textColor);
+    setPostFont(restored.font);
+  }, [draftTenantId]);
+
+  useEffect(() => {
+    if (!draftTenantId) {
+      return;
+    }
+    const state = { text: postText, anonymous, anonymousAvatar, bgColor: postBgColor, textColor: postTextColor, font: postFont };
+    // 镜像随每次变化同步落盘，保证任何时候刷新都能回填。
+    writeDraftMirrorSync(draftTenantId, state);
+    // IndexedDB 提交去抖 250ms，避免每字一次事务。
+    if (draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current);
+    }
+    draftSaveTimerRef.current = setTimeout(() => {
+      draftSaveTimerRef.current = null;
+      void writePostDraft(draftTenantId, state).catch(() => undefined);
+    }, 250);
+    const handleUnload = () => {
+      // 关闭页面前取消未完成的提交：镜像已同步写入，正文不会丢。
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+  }, [draftTenantId, postText, anonymous, anonymousAvatar, postBgColor, postTextColor, postFont]);
+
   useEffect(() => {
     if (!me?.authenticated || !me.currentMembership) {
       return;
@@ -439,6 +501,9 @@ export function App() {
 
   async function logout() {
     await api<{ ok: true }>("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    if (draftTenantId) {
+      void clearPostDraft(draftTenantId).catch(() => undefined);
+    }
     setMe({ authenticated: false });
     setPostText("");
     clearAttachments();
@@ -538,12 +603,20 @@ export function App() {
         anonymousAvatar || undefined,
       );
       clearAttachments(submissionAttachmentIds);
+      // 取消尚未落盘的 IndexedDB 提交，避免提交后 250ms 内又把旧草稿写回去。
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
       setPostText("");
       setAnonymous(false);
       setAnonymousAvatar("");
       setPostBgColor("");
       setPostTextColor("");
       setPostFont("");
+      if (draftTenantId) {
+        void clearPostDraft(draftTenantId).catch(() => undefined);
+      }
       toast.success("投稿已提交，等待审核。");
       const data = await api<{ posts: PostItem[]; pagination: Pagination }>("/api/posts/mine?page=1&limit=10");
       setPosts(data.posts);
