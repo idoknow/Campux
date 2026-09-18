@@ -26,6 +26,7 @@ const OAUTH_IDENTITY_MIGRATION_NAME = "20260907120000_add_oauth_identity";
 const PERSONAL_QQ_TOKEN_MIGRATION_NAME = "20260909000000_add_personal_qq_token";
 const CAMPAIGN_TABLES_MIGRATION_NAME = "20260913120000_add_campaign_tables_sqlite";
 const TENANT_FEEDBACK_MIGRATION_NAME = "20260913140000_add_tenant_feedback";
+const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedback_messages";
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
 const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
@@ -668,6 +669,79 @@ function applyTenantFeedbackSqliteMigration(
 }
 
 /**
+ * TenantFeedback.groupMessageId + TenantFeedbackMessage：意见对话。
+ */
+function applyTenantFeedbackMessagesSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const feedbackTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantFeedback'`)
+    .get() as { present: number } | null;
+  if (!feedbackTable) return;
+
+  if (doneNames.has(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME)) {
+    skipped.push(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME);
+    return;
+  }
+
+  const messageTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantFeedbackMessage'`)
+    .get() as { present: number } | null;
+  const hasMessageTable = messageTable !== null;
+  const groupMessageColumn = db
+    .query(`SELECT 1 AS present FROM pragma_table_info('TenantFeedback') WHERE name = 'groupMessageId'`)
+    .get() as { present: number } | null;
+  const hasGroupColumn = groupMessageColumn !== null;
+
+  logger.info({ migration: TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasGroupColumn) {
+      db.exec(`ALTER TABLE "TenantFeedback" ADD COLUMN "groupMessageId" TEXT`);
+    }
+    if (!hasMessageTable) {
+      db.exec(`CREATE TABLE "TenantFeedbackMessage" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "feedbackId" TEXT NOT NULL,
+        "tenantId" TEXT NOT NULL,
+        "role" TEXT NOT NULL,
+        "authorId" TEXT,
+        "authorLabel" TEXT,
+        "content" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "TenantFeedbackMessage_feedbackId_fkey" FOREIGN KEY ("feedbackId") REFERENCES "TenantFeedback" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+      db.exec(`CREATE INDEX "TenantFeedbackMessage_feedbackId_createdAt_idx" ON "TenantFeedbackMessage"("feedbackId", "createdAt")`);
+      db.exec(`CREATE INDEX "TenantFeedbackMessage_tenantId_createdAt_idx" ON "TenantFeedbackMessage"("tenantId", "createdAt")`);
+    }
+    const indexSql = `CREATE INDEX IF NOT EXISTS "TenantFeedback_tenantId_groupMessageId_idx" ON "TenantFeedback"("tenantId", "groupMessageId")`;
+    db.exec(indexSql);
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`feedback-messages group=${hasGroupColumn} msg=${hasMessageTable}`),
+        TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME,
+      ],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME);
+  applied.push(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME);
+  logger.info({ migration: TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
+/**
  * 应用 SQLite baseline 建库脚本及后续增量迁移（幂等）。
  *
  * @param baselineSql 内嵌的建库 DDL（sqlite-baseline.sql 文本）
@@ -740,6 +814,7 @@ export function applySqliteBaseline(
         PERSONAL_QQ_TOKEN_MIGRATION_NAME,
         CAMPAIGN_TABLES_MIGRATION_NAME,
         TENANT_FEEDBACK_MIGRATION_NAME,
+        TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME,
       ]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
@@ -764,6 +839,7 @@ export function applySqliteBaseline(
     applyCampaignTablesSqliteMigration(db, doneNames, applied, skipped, logger);
     applyCampaignAdminOnlySqliteMigration(db, doneNames, applied, skipped, logger);
     applyTenantFeedbackSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyTenantFeedbackMessagesSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

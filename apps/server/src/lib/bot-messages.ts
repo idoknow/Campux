@@ -834,6 +834,47 @@ export function formatPrivateReplyNoTarget(stylishEnabled = false): string {
   return pick(privateReplyNoTargetStylish)();
 }
 
+// ── 意见反馈回复 ──────────────────────────────────────
+
+export function formatFeedbackAdminReplyToUser(feedbackPreview: string, replyText: string, stylishEnabled = false): string {
+  void stylishEnabled;
+  return [
+    `📩 管理员已回复你的意见：`,
+    `意见：${feedbackPreview}`,
+    `回复：${replyText}`,
+    "",
+    "你可以到网站「稿件 → 意见」页继续回复管理员。",
+  ].join("\n");
+}
+
+export function formatFeedbackAdminReplySent(nickname: string, qqUin: string, stylishEnabled = false): string {
+  void stylishEnabled;
+  return `✅ 已回复意见 ${nickname}（QQ ${qqUin}），并私信通知对方。`;
+}
+
+export function formatFeedbackUserReplyNotice(input: {
+  feedbackContent: string;
+  userNickname: string;
+  qqUin: string;
+  recentMessages: Array<{ role: "user" | "admin"; content: string }>;
+}): string {
+  const lines = [
+    `【意见有新回复】${input.userNickname}（QQ ${input.qqUin}）`,
+    `意见：${input.feedbackContent}`,
+    "最近对话：",
+  ];
+  const recent = input.recentMessages.slice(-5);
+  if (recent.length === 0) {
+    lines.push("（暂无对话记录）");
+  } else {
+    recent.forEach((message, index) => {
+      const who = message.role === "admin" ? "管理员" : "用户";
+      lines.push(`${index + 1}. ${who}: ${message.content}`);
+    });
+  }
+  return lines.join("\n");
+}
+
 // ── 好友数量查询 ──────────────────────────────────────
 
 const friendCountDefault = (displayName: string, count: number) =>

@@ -28,7 +28,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
-import type { AssignedPostTag, FeedbackItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
+import type { AssignedPostTag, FeedbackItem, FeedbackMessageItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -307,6 +307,8 @@ export function PostsPage({
   const [feedbackPage, setFeedbackPage] = useState(1);
   const [feedbackScope, setFeedbackScope] = useState<"all" | "mine">("mine");
   const [feedbackNonce, setFeedbackNonce] = useState(0);
+  const [feedbackReplyDrafts, setFeedbackReplyDrafts] = useState<Record<string, string>>({});
+  const [feedbackReplyBusyId, setFeedbackReplyBusyId] = useState("");
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
@@ -377,6 +379,28 @@ export function PostsPage({
       })
       .finally(() => setFeedbackLoading(false));
   }, [activeTab, showFeedbackTab, feedbackPage, feedbackNonce, tenantId]);
+
+  async function submitFeedbackReply(feedbackId: string) {
+    const content = (feedbackReplyDrafts[feedbackId] ?? "").trim();
+    if (!content) {
+      toast.error("请输入回复内容");
+      return;
+    }
+    setFeedbackReplyBusyId(feedbackId);
+    try {
+      await api(`/api/feedback/${feedbackId}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      toast.success("已回复");
+      setFeedbackReplyDrafts((drafts) => ({ ...drafts, [feedbackId]: "" }));
+      setFeedbackNonce((n) => n + 1);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "回复失败");
+    } finally {
+      setFeedbackReplyBusyId("");
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== "review") {
@@ -1065,7 +1089,7 @@ export function PostsPage({
                 <div className="space-y-3">
                   {feedbackItems.map((item) => (
                     <Card key={item.id} className="border-sky-200 bg-white shadow-none dark:border-sky-900 dark:bg-slate-900">
-                      <CardContent className="space-y-2 p-4">
+                      <CardContent className="space-y-3 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                           <span className="font-semibold text-slate-700 dark:text-slate-200">
                             {item.canViewIdentity || feedbackScope === "mine"
@@ -1077,6 +1101,48 @@ export function PostsPage({
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
                           {item.content}
                         </p>
+                        {item.messages.length > 1 ? (
+                          <div className="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                            {item.messages.map((message: FeedbackMessageItem) => (
+                              <div key={message.id} className="space-y-1">
+                                <p className="text-[11px] font-semibold text-slate-500">
+                                  {message.role === "admin" ? "管理员" : "用户"}
+                                  {message.authorLabel ? ` · ${message.authorLabel}` : ""}
+                                  {" · "}
+                                  {new Date(message.createdAt).toLocaleString("zh-CN")}
+                                </p>
+                                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 dark:text-slate-100">
+                                  {message.content}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="space-y-2">
+                          <Textarea
+                            value={feedbackReplyDrafts[item.id] ?? ""}
+                            maxLength={500}
+                            placeholder="回复这条意见…"
+                            className="min-h-16 resize-none"
+                            disabled={feedbackReplyBusyId === item.id}
+                            onChange={(event) =>
+                              setFeedbackReplyDrafts((drafts) => ({
+                                ...drafts,
+                                [item.id]: event.target.value,
+                              }))
+                            }
+                          />
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              disabled={feedbackReplyBusyId === item.id || !(feedbackReplyDrafts[item.id] ?? "").trim()}
+                              onClick={() => void submitFeedbackReply(item.id)}
+                            >
+                              {feedbackReplyBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+                              回复
+                            </Button>
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
                   ))}

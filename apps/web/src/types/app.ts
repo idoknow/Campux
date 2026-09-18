@@ -872,6 +872,14 @@ export type AuditLogItem = {
   } | null;
 };
 
+export type FeedbackMessageItem = {
+  id: string;
+  role: "user" | "admin";
+  authorLabel: string | null;
+  content: string;
+  createdAt: string;
+};
+
 export type FeedbackItem = {
   id: string;
   content: string;
@@ -882,4 +890,5 @@ export type FeedbackItem = {
     qqUin: string;
   };
   canViewIdentity: boolean;
+  messages: FeedbackMessageItem[];
 };

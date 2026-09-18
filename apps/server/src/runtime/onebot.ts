@@ -93,6 +93,9 @@ import {
   formatPrivateReplySent,
   formatPrivateReplyReceived,
   formatPrivateReplyNoTarget,
+  formatFeedbackAdminReplyToUser,
+  formatFeedbackAdminReplySent,
+  formatFeedbackUserReplyNotice,
   formatFriendCount,
   formatBotPublishSuccess,
   formatBotPublishHelp,
@@ -248,7 +251,7 @@ const reviewHelp = [
   "#审核队列",
   "#拒绝 <理由> <稿件id>",
   "#重发 <稿件id>",
-  "#回复 <内容> （引用转发私信后使用）",
+  "#回复 <内容> （引用转发私信或意见反馈通知后使用）",
   "#发布 <内容> （可附带图片，文字+图片一起发布到空间）",
   "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
   "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
@@ -949,26 +952,27 @@ export class OneBotRuntime {
   }
 
   async sendGroupMessage(botQqUin: string, groupId: string | bigint, message: unknown) {
-    await this.callAction(botQqUin, "send_group_msg", {
+    const data = await this.callAction(botQqUin, "send_group_msg", {
       group_id: Number(groupId),
       message,
     });
+    return this.extractMessageId(data);
   }
 
-  async sendTenantReviewNotification(tenantId: string, message: unknown) {
+  async sendTenantReviewNotification(tenantId: string, message: unknown): Promise<{ ok: boolean; messageId: string | null }> {
     const bot = await this.findTenantReviewNotificationBot(tenantId);
     if (!bot) {
-      return false;
+      return { ok: false, messageId: null };
     }
     try {
-      await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId!, message);
-      return true;
+      const messageId = await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId!, message);
+      return { ok: true, messageId };
     } catch (error) {
       this.logger.warn(
         { error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId },
         "failed to send tenant review notification",
       );
-      return false;
+      return { ok: false, messageId: null };
     }
   }
 
@@ -3629,6 +3633,22 @@ export class OneBotRuntime {
       await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
       return;
     }
+    this.logger.info({ replyToMsgId, groupId, botQqUin }, "review group #回复 quote received");
+
+    // 优先：引用审核群里的「意见反馈」通知 → 回复意见
+    const feedbackResult = await this.handleFeedbackGroupReply({
+      bot,
+      botQqUin,
+      groupId,
+      operatorQqUin: normalizeId(event.user_id) ?? "",
+      replyToMsgId,
+      text,
+      stylishEnabled,
+      event,
+    });
+    if (feedbackResult !== "not-feedback") {
+      return;
+    }
 
     const target = this.privateForwardMsgIdMap.get(replyToMsgId);
     if (!target) {
@@ -3652,6 +3672,234 @@ export class OneBotRuntime {
     });
   }
 
+  private async handleFeedbackGroupReply({
+    bot,
+    botQqUin,
+    groupId,
+    operatorQqUin,
+    replyToMsgId,
+    text,
+    stylishEnabled,
+    event,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint };
+    botQqUin: string;
+    groupId: string;
+    operatorQqUin: string;
+    replyToMsgId: string;
+    text: string;
+    stylishEnabled: boolean;
+    event: OneBotMessageEvent;
+  }): Promise<"handled" | "feedback-error" | "not-feedback"> {
+    const feedback = await this.resolveFeedbackByQuotedMessage({
+      tenantId: bot.tenantId,
+      botQqUin,
+      replyToMsgId,
+      event,
+    });
+    if (feedback === "not-feedback") {
+      return "not-feedback";
+    }
+    if (!feedback) {
+      await this.sendGroupMessage(botQqUin, groupId, "未能识别引用中的意见反馈，请引用「【意见反馈】」通知后重试 #回复 内容");
+      return "feedback-error";
+    }
+
+    const operator = await prisma.user.findUnique({
+      where: { qqUin: BigInt(operatorQqUin) },
+      select: { id: true, displayName: true },
+    });
+
+    await prisma.tenantFeedbackMessage.create({
+      data: {
+        feedbackId: feedback.id,
+        tenantId: bot.tenantId,
+        role: "admin",
+        authorId: operator?.id ?? null,
+        authorLabel: operator?.displayName || `QQ ${operatorQqUin}`,
+        content: text,
+      },
+    });
+
+    const userQq = feedback.author.qqUin.toString();
+    const feedbackPreview = feedback.content.length > 80
+      ? `${feedback.content.slice(0, 80)}…`
+      : feedback.content;
+    await this.sendPrivateMessage(botQqUin, userQq, formatFeedbackAdminReplyToUser(feedbackPreview, text, stylishEnabled));
+    await this.sendGroupMessage(
+      botQqUin,
+      groupId,
+      formatFeedbackAdminReplySent(feedback.author.displayName || "投稿人", userQq, stylishEnabled),
+    );
+
+    runWithActiveTenantLease(prisma, bot.tenantId, (transaction) => transaction.botAccount.update({
+      where: { id: bot.id },
+      data: { adminRepliesSent: { increment: 1 } },
+    })).catch((error) => {
+      this.logger.warn({ error, botId: bot.id }, "failed to increment admin reply counter");
+    });
+
+    return "handled";
+  }
+
+  /**
+   * 解析 #回复 引用到的意见：
+   * 1) groupMessageId 精确匹配
+   * 2) 回退：拉取被引用消息正文，按「意见编号」或【意见反馈】头匹配
+   * 返回 null=像意见但没匹配上；"not-feedback"=明显不是意见通知。
+   */
+  private async resolveFeedbackByQuotedMessage({
+    tenantId,
+    botQqUin,
+    replyToMsgId,
+    event,
+  }: {
+    tenantId: string;
+    botQqUin: string;
+    replyToMsgId: string;
+    event: OneBotMessageEvent;
+  }): Promise<{ id: string; content: string; author: { qqUin: bigint; displayName: string | null } } | null | "not-feedback"> {
+    const select = {
+      id: true,
+      content: true,
+      author: { select: { qqUin: true, displayName: true } },
+    } as const;
+
+    // 1) message_id 精确匹配（字符串/数字两种形态）
+    const idCandidates = [replyToMsgId, String(Number(replyToMsgId) || "")]
+      .filter((value, index, arr) => value && arr.indexOf(value) === index);
+    for (const candidate of idCandidates) {
+      const byMessageId = await prisma.tenantFeedback.findFirst({
+        where: { tenantId, groupMessageId: candidate },
+        select,
+      });
+      if (byMessageId) {
+        return byMessageId;
+      }
+    }
+
+    // 2) 读被引用消息正文，按意见编号 / 发送者 QQ 匹配
+    const quoted = await this.fetchQuotedMessageText(botQqUin, replyToMsgId, event);
+    this.logger.info({ replyToMsgId, quotedPreview: quoted?.slice(0, 120) ?? null }, "feedback reply quote resolved text");
+    if (quoted === null) {
+      return "not-feedback";
+    }
+    const looksLikeFeedback = quoted.includes("【意见反馈】")
+      || quoted.includes("意见编号：")
+      || /来自：.*QQ\s*\d{5,}/.test(quoted);
+    if (!looksLikeFeedback) {
+      return "not-feedback";
+    }
+
+    const idMatch = quoted.match(/意见编号：\s*([0-9a-fA-F-]{8,64})/);
+    if (idMatch?.[1]) {
+      const byCode = await prisma.tenantFeedback.findFirst({
+        where: { tenantId, id: idMatch[1] },
+        select,
+      });
+      if (byCode) {
+        return byCode;
+      }
+    }
+
+    // 3) 按发送者 QQ 找最近一条意见
+    const qqMatch = quoted.match(/QQ\s*(\d{5,})/);
+    if (qqMatch?.[1]) {
+      const author = await prisma.user.findUnique({
+        where: { qqUin: BigInt(qqMatch[1]) },
+        select: {
+          feedbacks: {
+            where: { tenantId },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select,
+          },
+        },
+      });
+      const latest = author?.feedbacks[0];
+      if (latest) {
+        return latest;
+      }
+    }
+
+    // 4) 按意见正文片段匹配（通知里的 content 行）
+    const lines = quoted.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const contentLine = lines.find((line) => !line.startsWith("【")
+      && !line.startsWith("来自")
+      && !line.startsWith("意见编号")
+      && !line.startsWith("审核员"));
+    if (contentLine && contentLine.length >= 4) {
+      const byContent = await prisma.tenantFeedback.findFirst({
+        where: {
+          tenantId,
+          OR: [
+            { content: contentLine },
+            { content: { startsWith: contentLine.slice(0, Math.min(40, contentLine.length)) } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+        select,
+      });
+      if (byContent) {
+        return byContent;
+      }
+    }
+
+    return null;
+  }
+
+  private async fetchQuotedMessageText(botQqUin: string, replyToMsgId: string, event: OneBotMessageEvent): Promise<string | null> {
+    const numericId = Number(replyToMsgId);
+    const data = await this.callAction(
+      botQqUin,
+      "get_msg",
+      { message_id: Number.isFinite(numericId) ? numericId : replyToMsgId },
+    ).catch(() => null);
+    if (data) {
+      const message = (data as { message?: unknown }).message ?? data;
+      const text = this.extractPlainTextFromMessage(message) || this.extractPlainTextFromMessage(data);
+      if (text) {
+        return text;
+      }
+    }
+    return this.extractQuotedTextFromEvent(event);
+  }
+
+  private extractQuotedTextFromEvent(event: OneBotMessageEvent): string | null {
+    // OneBot 不保证带引用正文；尽量从 raw / message 找
+    if (typeof event.raw_message === "string" && event.raw_message.includes("【意见反馈】")) {
+      return event.raw_message;
+    }
+    if (Array.isArray(event.message)) {
+      for (const seg of event.message as any[]) {
+        if (seg?.type === "text" && typeof seg.data?.text === "string" && seg.data.text.includes("【意见反馈】")) {
+          return seg.data.text;
+        }
+      }
+    }
+    return null;
+  }
+
+  private extractPlainTextFromMessage(message: unknown): string {
+    if (typeof message === "string") {
+      return message;
+    }
+    if (Array.isArray(message)) {
+      return message
+        .map((seg) => {
+          if (!seg || typeof seg !== "object") return "";
+          const s = seg as { type?: string; data?: { text?: string } };
+          if (s.type === "text") return s.data?.text ?? "";
+          return "";
+        })
+        .join("");
+    }
+    if (message && typeof message === "object" && "message" in (message as Record<string, unknown>)) {
+      return this.extractPlainTextFromMessage((message as { message: unknown }).message);
+    }
+    return "";
+  }
+
   private storePrivateForwardMapping(msgId: string, tenantId: string, userQqUin: string, userNickname: string, botQqUin: string) {
     if (this.privateForwardMsgIdMap.size >= OneBotRuntime.MAX_FORWARD_MSG_ID_MAP_SIZE) {
       // 删除最早的一条记录
@@ -3664,11 +3912,18 @@ export class OneBotRuntime {
   }
 
   private extractMessageId(data: unknown): string | null {
-    if (data && typeof data === "object") {
-      const d = data as Record<string, unknown>;
-      if (d.message_id !== undefined) {
-        return String(d.message_id);
-      }
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+    const d = data as Record<string, unknown>;
+    if (d.message_id !== undefined && d.message_id !== null) {
+      return String(d.message_id);
+    }
+    if (d.data && typeof d.data === "object") {
+      return this.extractMessageId(d.data);
+    }
+    if (d.real_id !== undefined && d.real_id !== null) {
+      return String(d.real_id);
     }
     return null;
   }
