@@ -4,7 +4,7 @@ import { requireTenantContext } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
-import { formatFeedbackUserReplyNotice } from "../lib/bot-messages";
+import { formatFeedbackUserReplyNotice, escapeCqCode } from "../lib/bot-messages";
 import type { OneBotRuntime } from "../runtime/onebot";
 
 const feedbackBodySchema = z.object({
@@ -71,11 +71,11 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
       },
     });
 
-    const tenantName = context.selectedTenant.name;
+    const tenantName = escapeCqCode(context.selectedTenant.name);
     const message = [
       `【意见反馈】${tenantName}`,
-      `来自：${displayName}（QQ ${qqUin}）`,
-      content,
+      `来自：${escapeCqCode(displayName)}（QQ ${qqUin}）`,
+      escapeCqCode(content),
     ].join("\n");
 
     const notified = oneBot
@@ -245,7 +245,9 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
       });
       const notified = await oneBot.sendTenantReviewNotification(context.selectedTenant.id, notice);
       if (!notified.ok) {
-        return reply.code(503).send({
+        return reply.code(202).send({
+          ok: true,
+          role,
           message: "回复已保存，但暂时无法送达审核群，请确认墙号在线且已配置审核群通知",
         });
       }

@@ -119,11 +119,15 @@ export function PostPage({
     }
     setFeedbackBusy(true);
     try {
-      await api("/api/feedback", {
+      const result = await api<{ ok: boolean; id?: string; message?: string }>("/api/feedback", {
         method: "POST",
         body: JSON.stringify({ content }),
       });
-      toast.success("意见已提交，会尽快在审核群处理");
+      if (result.message) {
+        toast.warning(result.message);
+      } else {
+        toast.success("意见已提交，会尽快在审核群处理");
+      }
       setFeedbackText("");
       setFeedbackOpen(false);
     } catch (caught) {

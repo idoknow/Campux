@@ -59,8 +59,8 @@ export async function registerUserViaBot({
   const previewNeedsDisplayName = Boolean(previewUser && !previewUser.displayName && displayName);
 
   // Common private-message path: already registered with membership and no
-  // pending account changes. Re-check tenant status under the lease so a
-  // concurrent pause/archive cannot race the no-op return past an inactive wall.
+  // pending account changes. Decide inside the lease so concurrent
+  // pause/archive or membership removal cannot return stale access data.
   if (
     previewUser
     && previewMembership
@@ -68,18 +68,40 @@ export async function registerUserViaBot({
     && !previewNeedsDisplayName
     && previewMembershipRole === previewMembership.role
   ) {
-    const statusLease = await runWithActiveTenantLease(prisma, bot.tenantId, async () => true);
-    if (!statusLease.active) {
+    const noOpLease = await runWithActiveTenantLease(prisma, bot.tenantId, async (tx) => {
+      const freshUser = await tx.user.findUnique({
+        where: { qqUin: BigInt(userQqUin) },
+        include: { memberships: true },
+      });
+      const freshMembership = freshUser?.memberships.find((membership) => membership.tenantId === bot.tenantId);
+      if (!freshUser || !freshMembership) {
+        return null;
+      }
+      const freshNeedsPassword = resetExistingPassword;
+      const freshNeedsDisplayName = Boolean(!freshUser.displayName && displayName);
+      const freshRole = hasTenantRole(freshMembership.role, role) ? freshMembership.role : role;
+      if (freshNeedsPassword || freshNeedsDisplayName || freshRole !== freshMembership.role) {
+        return null;
+      }
+      return {
+        user: serializeUser(freshUser),
+        membership: freshMembership,
+      };
+    });
+    if (!noOpLease.active) {
       throw new BotWorkflowError("校园墙已暂停或归档", 409);
     }
-    return {
-      bot,
-      user: serializeUser(previewUser),
-      membership: previewMembership,
-      password: null,
-      alreadyHadAccount: true,
-      alreadyHadTenantAccess: true,
-    };
+    if (noOpLease.value) {
+      return {
+        bot,
+        user: noOpLease.value.user,
+        membership: noOpLease.value.membership,
+        password: null,
+        alreadyHadAccount: true,
+        alreadyHadTenantAccess: true,
+      };
+    }
+    // Fresh read still needs mutations — fall through to the write path.
   }
 
   // Argon2 is intentionally expensive; keep it outside the transaction so the

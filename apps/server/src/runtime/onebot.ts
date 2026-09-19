@@ -837,7 +837,7 @@ export class OneBotRuntime {
       await this.resumeWaitingPublishAttemptsForBot(bot.id);
       return result;
     } catch (error) {
-      const errorMessage = toErrorMessage(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       this.qzoneProtocolAutoRefreshFailures.set(bot.id, {
         failedAt: Date.now(),
         error: errorMessage,
@@ -1674,6 +1674,7 @@ export class OneBotRuntime {
       const generalStylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled));
     } catch (error) {
+      this.logger.warn({ error }, "private message handler failed");
       await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
     }
   }
@@ -1810,6 +1811,7 @@ export class OneBotRuntime {
       try {
         staged = await this.stagePrivatePostAttachments(bot, event, permit);
       } catch (error) {
+        this.logger.warn({ error }, "stage private post attachments failed");
         await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
         return false;
       }
@@ -3026,6 +3028,7 @@ export class OneBotRuntime {
 
       await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
     } catch (error) {
+      this.logger.warn({ error, botQqUin, groupId }, "review group command handler failed");
       await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
     }
   }
@@ -4207,7 +4210,7 @@ function toErrorMessage(error: unknown) {
   }
   if (error instanceof Error) {
     const message = error.message;
-    // Never leak Prisma / driver internals into QQ chats.
+    // Dependency/driver failures: same user-facing copy as unexpected errors.
     if (
       message.includes("Transaction API error")
       || message.includes("expired transaction")
@@ -4216,7 +4219,8 @@ function toErrorMessage(error: unknown) {
     ) {
       return "系统繁忙，请稍后再试";
     }
-    return message;
+    // Unexpected Error: do not leak internals into QQ chats; callers should log.
+    return "系统繁忙，请稍后再试";
   }
   return "Bot 命令处理失败";
 }

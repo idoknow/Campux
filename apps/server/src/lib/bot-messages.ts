@@ -842,9 +842,11 @@ export function formatFeedbackUserReplyNotice(input: {
   qqUin: string;
   recentMessages: Array<{ role: "user" | "admin"; content: string }>;
 }): string {
+  const nickname = escapeCqCode(input.userNickname);
+  const feedbackContent = escapeCqCode(input.feedbackContent);
   const lines = [
-    `【意见有新回复】${input.userNickname}（QQ ${input.qqUin}）`,
-    `意见：${input.feedbackContent}`,
+    `【意见有新回复】${nickname}（QQ ${input.qqUin}）`,
+    `意见：${feedbackContent}`,
     "最近对话：",
   ];
   const recent = input.recentMessages.slice(-5);
@@ -853,7 +855,7 @@ export function formatFeedbackUserReplyNotice(input: {
   } else {
     recent.forEach((message, index) => {
       const who = message.role === "admin" ? "管理员" : "用户";
-      lines.push(`${index + 1}. ${who}: ${message.content}`);
+      lines.push(`${index + 1}. ${who}: ${escapeCqCode(message.content)}`);
     });
   }
   return lines.join("\n");

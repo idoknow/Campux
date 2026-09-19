@@ -364,20 +364,34 @@ export function PostsPage({
   }, [activeTab, canReview, showFeedbackTab, onTabChange]);
 
   useEffect(() => {
+    // Tenant switch invalidates any in-flight feedback list for the old wall.
+    setFeedbackPage(1);
+    setFeedbackItems([]);
+  }, [tenantId]);
+
+  useEffect(() => {
     if (activeTab !== "feedback" || !showFeedbackTab) {
       return;
     }
+    let cancelled = false;
     setFeedbackLoading(true);
     api<{ items: FeedbackItem[]; pagination: Pagination; scope: "all" | "mine" }>(`/api/feedback?page=${feedbackPage}&limit=20`)
       .then((data) => {
+        if (cancelled) return;
         setFeedbackItems(data.items);
         setFeedbackPagination(data.pagination);
         setFeedbackScope(data.scope);
       })
       .catch((caught) => {
+        if (cancelled) return;
         toast.error(caught instanceof Error ? caught.message : "无法读取意见列表");
       })
-      .finally(() => setFeedbackLoading(false));
+      .finally(() => {
+        if (!cancelled) setFeedbackLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab, showFeedbackTab, feedbackPage, feedbackNonce, tenantId]);
 
   async function submitFeedbackReply(feedbackId: string) {
@@ -388,11 +402,15 @@ export function PostsPage({
     }
     setFeedbackReplyBusyId(feedbackId);
     try {
-      await api(`/api/feedback/${feedbackId}/reply`, {
+      const result = await api<{ ok: boolean; role?: string; message?: string }>(`/api/feedback/${feedbackId}/reply`, {
         method: "POST",
         body: JSON.stringify({ content }),
       });
-      toast.success("已回复");
+      if (result.message) {
+        toast.warning(result.message);
+      } else {
+        toast.success("已回复");
+      }
       setFeedbackReplyDrafts((drafts) => ({ ...drafts, [feedbackId]: "" }));
       setFeedbackNonce((n) => n + 1);
     } catch (caught) {
@@ -1101,23 +1119,27 @@ export function PostsPage({
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
                           {item.content}
                         </p>
-                        {item.messages.length > 1 ? (
-                          <div className="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                            {item.messages.map((message: FeedbackMessageItem) => (
-                              <div key={message.id} className="space-y-1">
-                                <p className="text-[11px] font-semibold text-slate-500">
-                                  {message.role === "admin" ? "管理员" : "用户"}
-                                  {message.authorLabel ? ` · ${message.authorLabel}` : ""}
-                                  {" · "}
-                                  {new Date(message.createdAt).toLocaleString("zh-CN")}
-                                </p>
-                                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 dark:text-slate-100">
-                                  {message.content}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
+                        {(() => {
+                          const thread = item.messages.slice(1);
+                          if (thread.length === 0) return null;
+                          return (
+                            <div className="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                              {thread.map((message: FeedbackMessageItem) => (
+                                <div key={message.id} className="space-y-1">
+                                  <p className="text-[11px] font-semibold text-slate-500">
+                                    {message.role === "admin" ? "管理员" : "用户"}
+                                    {message.authorLabel ? ` · ${message.authorLabel}` : ""}
+                                    {" · "}
+                                    {new Date(message.createdAt).toLocaleString("zh-CN")}
+                                  </p>
+                                  <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 dark:text-slate-100">
+                                    {message.content}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         <div className="space-y-2">
                           <Textarea
                             value={feedbackReplyDrafts[item.id] ?? ""}
