@@ -9,6 +9,7 @@ datasource db {
 }
 
 
+
 enum TenantStatus {
   active
   paused
@@ -94,6 +95,7 @@ model Tenant {
   qzoneVisitorSnapshots QZoneVisitorSnapshot[]
   botFriendSnapshots BotFriendSnapshot[]
   publishBatches PublishBatch[]
+  feedbacks      TenantFeedback[]
 }
 
 model User {
@@ -117,6 +119,7 @@ model User {
   auditLogs   AuditLog[]
   postFollows PostFollow[]
   oauthIdentities OAuthIdentity[]
+  feedbacks   TenantFeedback[]
 }
 
 // 第三方聚合登录绑定：把第三方平台的社交 UID 关联到本地账号。
@@ -666,4 +669,37 @@ model TenantAiSettings {
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
   tenant                     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// 意见反馈：投稿页入口提交，存档供管理员/本人在稿件页查看。
+model TenantFeedback {
+  id             String   @id @default(uuid())
+  tenantId       String
+  authorId       String
+  content        String
+  groupMessageId String?
+  createdAt      DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author         User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  messages       TenantFeedbackMessage[]
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, authorId, createdAt])
+  @@index([tenantId, groupMessageId])
+}
+
+// 意见对话消息：role=user 为投稿人，role=admin 为审核员/管理员回复。
+model TenantFeedbackMessage {
+  id          String         @id @default(uuid())
+  feedbackId  String
+  tenantId    String
+  role        String // user | admin
+  authorId    String?
+  authorLabel String?
+  content     String
+  createdAt   DateTime       @default(now())
+  feedback    TenantFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId, createdAt])
+  @@index([tenantId, createdAt])
 }

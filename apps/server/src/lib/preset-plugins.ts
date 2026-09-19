@@ -19,7 +19,8 @@ export type PresetPluginId =
   | "anonymousAvatar"
   | "botStylishMessages"
   | "campaigns"
-  | "aggregateLogin";
+  | "aggregateLogin"
+  | "feedback";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -96,6 +97,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "user:data", "http:route"],
     riskLevel: "medium",
     rationale: "把第三方社交 UID 建立对本地账号的绑定，并用其匹配登录；凭证(appid/appkey)属租户配置，需限制访问。",
+  },
+  {
+    id: "feedback",
+    name: "campux-plugin-feedback",
+    version: "1.0.0",
+    description: "意见反馈：投稿页顶部入口，提交后通知审核群",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后用户可提交文字意见并通知审核群；需读写插件配置，并关联投稿人身份与租户数据。",
   },
 ];
 

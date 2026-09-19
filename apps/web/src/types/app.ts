@@ -1,7 +1,7 @@
 import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
-export type PostsTab = "mine" | "review" | "published";
+export type PostsTab = "mine" | "review" | "published" | "feedback";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "pluginConfig";
 export type TenantRole = "submitter" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
@@ -144,6 +144,8 @@ export type TenantMetadata = {
   maxActiveCampaignsPerUser: number;
   /** 聚合登录插件是否启用；关闭时服务页「第三方登录」入口隐藏 */
   enableAggregateLogin: boolean;
+  /** 意见反馈插件是否启用；关闭时投稿页顶部入口隐藏 */
+  enableFeedback: boolean;
 };
 
 export type BotMessageTypeConfig = {
@@ -206,6 +208,9 @@ export type TenantPluginConfig = {
     appId: string;
     appKey: string;
     endpoint: string;
+  };
+  feedback: {
+    enabled: boolean;
   };
 };
 export type PostAttachment = {
@@ -865,4 +870,25 @@ export type AuditLogItem = {
     qqUin: string;
     displayName: string | null;
   } | null;
+};
+
+export type FeedbackMessageItem = {
+  id: string;
+  role: "user" | "admin";
+  authorLabel: string | null;
+  content: string;
+  createdAt: string;
+};
+
+export type FeedbackItem = {
+  id: string;
+  content: string;
+  createdAt: string;
+  author: {
+    id: string;
+    displayName: string | null;
+    qqUin: string;
+  };
+  canViewIdentity: boolean;
+  messages: FeedbackMessageItem[];
 };

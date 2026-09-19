@@ -834,6 +834,33 @@ export function formatPrivateReplyNoTarget(stylishEnabled = false): string {
   return pick(privateReplyNoTargetStylish)();
 }
 
+// ── 意见反馈回复（站内回复 → 审核群提醒） ─────────────
+
+export function formatFeedbackUserReplyNotice(input: {
+  feedbackContent: string;
+  userNickname: string;
+  qqUin: string;
+  recentMessages: Array<{ role: "user" | "admin"; content: string }>;
+}): string {
+  const nickname = escapeCqCode(input.userNickname);
+  const feedbackContent = escapeCqCode(input.feedbackContent);
+  const lines = [
+    `【意见有新回复】${nickname}（QQ ${input.qqUin}）`,
+    `意见：${feedbackContent}`,
+    "最近对话：",
+  ];
+  const recent = input.recentMessages.slice(-5);
+  if (recent.length === 0) {
+    lines.push("（暂无对话记录）");
+  } else {
+    recent.forEach((message, index) => {
+      const who = message.role === "admin" ? "管理员" : "用户";
+      lines.push(`${index + 1}. ${who}: ${escapeCqCode(message.content)}`);
+    });
+  }
+  return lines.join("\n");
+}
+
 // ── 好友数量查询 ──────────────────────────────────────
 
 const friendCountDefault = (displayName: string, count: number) =>

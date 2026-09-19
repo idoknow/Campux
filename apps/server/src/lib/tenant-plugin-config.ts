@@ -100,6 +100,12 @@ export const tenantPluginConfigSchema = z.object({
       appKey: "",
       endpoint: "",
     }),
+  // 意见反馈：开启后投稿页顶部出现入口；提交后发到审核群。
+  feedback: z
+    .object({
+      enabled: z.boolean(),
+    })
+    .default({ enabled: false }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -121,6 +127,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
     appKey: "",
     endpoint: "",
   },
+  feedback: { enabled: false },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {
