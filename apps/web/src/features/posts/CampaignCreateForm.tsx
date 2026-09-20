@@ -48,15 +48,25 @@ export function CampaignCreateForm({
 
   async function onCoverChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-    setCover(await readDataUrl(file));
+    try {
+      setCover(await readDataUrl(file));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "封面读取失败");
+    }
   }
 
   async function onOptionImageChange(index: number, event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-    const dataUrl = await readDataUrl(file);
-    setOptions((current) => current.map((entry, i) => (i === index ? { ...entry, dataUrl } : entry)));
+    try {
+      const dataUrl = await readDataUrl(file);
+      setOptions((current) => current.map((entry, i) => (i === index ? { ...entry, dataUrl } : entry)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "选项图片读取失败");
+    }
   }
 
   function updateOption(index: number, patch: Partial<OptionForm>) {
@@ -119,7 +129,8 @@ export function CampaignCreateForm({
           {cover ? (
             <div className="flex items-center gap-2 rounded border border-slate-200 p-2">
               <img src={cover} alt="" className="h-14 w-14 rounded object-cover" />
-              <Button size="sm" variant="ghost" onClick={() => setCover(null)}>更换封面</Button>
+              <Button size="sm" variant="ghost" onClick={() => { coverInputRef.current?.click(); }}>更换封面</Button>
+              <Button size="sm" variant="ghost" onClick={() => setCover(null)}>移除</Button>
             </div>
           ) : (
             <Button size="sm" variant="outline" onClick={() => coverInputRef.current?.click()}>选择封面（可选）</Button>

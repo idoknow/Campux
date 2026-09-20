@@ -321,6 +321,15 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
       if (used + body.count > campaign.votesPerPerson) {
         throw { status: 409, message: `你本竞选最多共投 ${campaign.votesPerPerson} 票` };
       }
+      // 未开启叠加时：同一选项最多 1 票（与详情页文案一致）
+      if (!campaign.allowStackOnOption) {
+        if (existing) {
+          throw { status: 409, message: "该竞选每个选项最多投 1 票" };
+        }
+        if (body.count > 1) {
+          throw { status: 409, message: "该竞选未开启同一选项叠加，请逐个选项各投 1 票" };
+        }
+      }
       await transaction.campaignOption.update({ where: { id: option.id }, data: { voteTotal: { increment: body.count } } });
       if (existing) {
         return transaction.campaignVote.update({ where: { id: existing.id }, data: { count: existing.count + body.count } });
