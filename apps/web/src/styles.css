@@ -180,6 +180,13 @@
     @apply font-sans;
   }
 
+  /* vaul 在 Drawer 外侧用 ::after 延伸背景（absolute + height:200%）。
+     若 Drawer 自身是 overflow-y-auto，该层会被计入 scrollHeight，
+     手机端划到底后还能划出大片空白且容易卡住无法回滚。 */
+  [data-vaul-drawer]::after {
+    content: none;
+  }
+
   ::selection {
     background-color: oklch(0.85 0.06 250 / 0.4);
     color: inherit;
