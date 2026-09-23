@@ -45,7 +45,7 @@ OAuth 应用按校园墙隔离。需要有对应校园墙的管理员权限。
 1. 进入 Campux Web 后台，并切换到要开放 OAuth 登录的校园墙。
 2. 打开 OAuth 应用管理区域。
 3. 先启用 OAuth 服务。
-4. 新建 OAuth 应用，填写应用名称、描述、回调地址，并勾选允许的 scope（一般 `profile` 即可）。
+4. 新建 OAuth 应用，填写应用名称、描述、回调地址和 scope。
 5. 保存后复制 `Client ID` 和 `Client Secret`。
 
 `Client Secret` 只在创建或重置密钥时显示一次。请立即复制到外部应用的服务端环境变量或密钥管理系统中，不要提交到代码仓库。
@@ -94,7 +94,7 @@ http://localhost:3000/auth/campux/callback
 | Token URL | `https://campux.example.com/oauth/token` |
 | UserInfo URL | `https://campux.example.com/oauth/userinfo` |
 | Redirect URI / Callback URL | 外部应用自己的回调地址 |
-| Scope | `profile`（常用）；需要墙信息时再加上 `tenant` |
+| Scope | `profile` 或 `profile tenant` |
 | Response Type | `code` |
 | Grant Type | `authorization_code`，需要刷新时使用 `refresh_token` |
 | PKCE | 推荐开启，默认使用 `S256` |
@@ -102,10 +102,8 @@ http://localhost:3000/auth/campux/callback
 
 Campux 支持的 scope：
 
-- `profile`：基础用户信息（`sub` / QQ 号 / 显示名）。
-- `tenant`：当前校园墙信息（`tenant_id` / `tenant_name` / `tenant_slug`）。
-
-**scope 必须是 OAuth 应用里勾选过的。** 应用只勾了 `profile` 时，授权请求写 `profile tenant` 会返回 `不支持的 scope: tenant`。大多数第三方登录（如校内 OJ）只勾选并请求 `profile` 即可。
+- `profile`：基础用户信息。
+- `tenant`：当前校园墙信息。
 
 如果客户端支持 PKCE，建议启用 `S256`。Campux 默认要求 PKCE，不建议使用 `plain`，除非你明确在服务端设置里允许。
 
@@ -116,7 +114,7 @@ Campux 支持的 scope：
 外部应用把用户跳转到 Campux：
 
 ```text
-https://campux.example.com/oauth/authorize?response_type=code&client_id=CLIENT_ID&redirect_uri=https%3A%2F%2Fdemo.example.com%2Fauth%2Fcampux%2Fcallback&scope=profile&state=RANDOM_STATE&code_challenge=CODE_CHALLENGE&code_challenge_method=S256
+https://campux.example.com/oauth/authorize?response_type=code&client_id=CLIENT_ID&redirect_uri=https%3A%2F%2Fdemo.example.com%2Fauth%2Fcampux%2Fcallback&scope=profile%20tenant&state=RANDOM_STATE&code_challenge=CODE_CHALLENGE&code_challenge_method=S256
 ```
 
 参数说明：
@@ -166,7 +164,7 @@ grant_type=authorization_code&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&co
   "token_type": "Bearer",
   "expires_in": 86400,
   "refresh_token": "...",
-  "scope": "profile"
+  "scope": "profile tenant"
 }
 ```
 
@@ -190,7 +188,7 @@ Authorization: Bearer ACCESS_TOKEN
   "tenant_id": "tenant_id",
   "tenant_name": "示例校园墙",
   "tenant_slug": "example",
-  "scope": "profile",
+  "scope": "profile tenant",
   "client_id": "CLIENT_ID"
 }
 ```
@@ -240,7 +238,6 @@ token=ACCESS_TOKEN&client_id=CLIENT_ID&client_secret=CLIENT_SECRET
 | `redirect_uri 未在应用中注册` | 授权请求中的回调地址没有登记 | 把外部应用回调地址加入 Campux OAuth 应用 |
 | `redirect_uri mismatch` | 换 token 时的 `redirect_uri` 和授权时不一致 | 确保两处完全相同 |
 | `PKCE code_challenge 是必需的` | 服务端或应用要求 PKCE，但授权请求没带 challenge | 客户端启用 PKCE S256 |
-| `不支持的 scope: xxx` | 请求的 scope 不在该 OAuth 应用勾选的允许列表里 | 创建/编辑应用时勾上该 scope，或授权时只请求已勾选的 scope（常见：只用 `profile`） |
 | `invalid_client` | Client ID/Secret 缺失或错误 | 重新复制 Client ID，必要时重置 Client Secret |
 | `invalid_grant` | 授权码过期、已使用、错误或 PKCE verifier 不匹配 | 重新发起授权流程，并检查 PKCE 实现 |
 
