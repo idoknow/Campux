@@ -8,8 +8,15 @@
  * 凭证（appid/appkey/endpoint）与开关、可用的登录方式都是租户级配置
  * （tenant_metadata.plugin_config.aggregateLogin），由「插件设置」页维护。
  *
- * state 用紧凑 HMAC 签名（承载 provider/returnTo），并限制其长度，兼容聚合服务端
- * 对 state 的长度限制；回调时验签 + 校验有效期，防 CSRF / 开放重定向。
+ * ── state / CSRF 模型（重要）────────────────────────────────────────────
+ * 部分聚合站（如 login.mapay.cn）在 act=login 返回的授权 URL 上自带自己的 state，
+ * 并依赖它原样回传到聚合站 return.php 才能把第三方回调转回我们的 redirect_uri，
+ * 因此 Campux 绝不能覆盖授权 URL 上的 state。
+ *
+ * Campux 自己的防 CSRF / 回跳凭证改走 HttpOnly cookie（签名负载 = provider +
+ * returnTo + 过期 + nonce）：发起登录时种下，callback 时要求 cookie 与会话匹配。
+ * 这同时修复了旧实现的登录 CSRF：旧签名 state 任何浏览器都可重放，攻击者可把
+ * 自己的第三方身份绑到受害者账号（SameSite=Lax 挡不住顶级 GET 导航）。
  */
 
 import type { FastifyInstance } from "fastify";
@@ -27,6 +34,7 @@ import { prisma } from "../lib/prisma";
 import {
   AGGREGATE_OAUTH_LOGIN_TYPES,
   exchangeAggregateOauthCode,
+  extractAggregateLoginUrlState,
   fetchAggregateLoginUrl,
   getAggregateOauthLoginTypesOrDefault,
   normalizeAggregateEndpoint,
@@ -38,6 +46,8 @@ import { findManagementHostByRequest, findTenantByRequestHost } from "../lib/ten
 import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
 
 const AGGREGATE_STATE_TTL_MS = 10 * 60 * 1000;
+const AGGREGATE_STATE_COOKIE = "campux_agg_oauth";
+const AGGREGATE_STATE_COOKIE_PATH = "/api/auth/aggregate-login/";
 
 interface AggregateStatePayload {
   /** 常量，区分其他签名用途。 */
@@ -132,9 +142,10 @@ const loginUrlQuerySchema = z.object({
   returnTo: z.string().max(1024).optional(),
 });
 
+/** 聚合站 return.php 转回时携带 code（文档 Step3；type 可能出现，仅透传日志用）。 */
 const callbackQuerySchema = z.object({
   code: z.string().trim().min(1),
-  state: z.string().trim().min(1),
+  type: z.string().trim().min(1).optional(),
 });
 
 const unbindBodySchema = z.object({
@@ -161,6 +172,22 @@ function assertAggregateReady(plugin: { enabled: boolean; loginTypes: string[]; 
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "聚合登录接口地址配置错误");
   }
+}
+
+function buildAggregateStateCookie(token: string, maxAgeSeconds: number): string {
+  const parts = [
+    `${AGGREGATE_STATE_COOKIE}=${encodeURIComponent(token)}`,
+    `Path=${AGGREGATE_STATE_COOKIE_PATH}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`,
+    process.env.NODE_ENV === "production" ? "Secure" : null,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join("; ");
+}
+
+function clearAggregateStateCookie(): string {
+  return buildAggregateStateCookie("", 0);
 }
 
 export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: CampuxConfig) {
@@ -204,7 +231,7 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
     if (returnTo) {
       statePayload.r = returnTo;
     }
-    const state = signAggregateState(statePayload);
+    const signedState = signAggregateState(statePayload);
 
     const managementHost = await findManagementHostByRequest(request);
     const scheme = "https:";
@@ -212,6 +239,7 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
     const redirectUri = `${scheme}//${host}/api/auth/aggregate-login/callback`;
 
     let loginUrl: string;
+    let providerState: string | undefined;
     try {
       const result = await fetchAggregateLoginUrl(
         {
@@ -223,34 +251,49 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
         redirectUri,
       );
       loginUrl = result.url;
+      // 聚合站返回的授权 URL 可能自带它自己的 state（供其 return.php 回调会话用）。
+      providerState = extractAggregateLoginUrlState(loginUrl);
     } catch (error) {
       app.log.warn({ err: error, queryType: query.type, endpoint: plugin.endpoint }, "aggregate login-url fetch failed");
       const detail = error instanceof Error && error.message.trim() ? error.message : "聚合登录授权地址获取失败";
       return reply.code(502).send({ message: detail });
     }
 
-    // 聚合服务不管理 state（文档 act=login 无此参数）：state 由我们附加到授权 URL
-    // 上，经第三方平台（OAuth2 state 原样回传）带回 callback 完成 CSRF 校验。
-    let urlWithState: string;
-    try {
-      const parsed = new URL(loginUrl);
-      parsed.searchParams.set("state", state);
-      parsed.hash = "";
-      urlWithState = parsed.toString();
-    } catch {
-      const separator = loginUrl.includes("?") ? "&" : "?";
-      urlWithState = `${loginUrl}${separator}state=${encodeURIComponent(state)}`;
+    // Campux 的防 CSRF state 走 HttpOnly cookie（见文件头说明）；授权 URL 上的
+    // state 属于聚合站，绝不能覆盖，否则聚合站无法把第三方回调转回我们。
+    reply.header("Set-Cookie", buildAggregateStateCookie(signedState, Math.ceil(AGGREGATE_STATE_TTL_MS / 1000)));
+    if (providerState) {
+      app.log.info({ queryType: query.type }, "aggregate login-url: preserving provider-owned state");
     }
 
-    return { url: urlWithState };
+    return { url: loginUrl };
   });
 
-  // ─── 第三方回调：处理登录 / 绑定 ────────────────────────────────────────
+  // ─── 第三方回调（聚合站 return.php 转回）：处理登录 / 绑定 ───────────────
   app.get("/api/auth/aggregate-login/callback", async (request, reply) => {
     const query = callbackQuerySchema.parse(request.query);
-    const state = parseAggregateState(query.state);
+    const cookieHeader = request.headers.cookie ?? "";
+    const cookieMatch = cookieHeader
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${AGGREGATE_STATE_COOKIE}=`));
+    let stateToken = "";
+    if (cookieMatch) {
+      const rawValue = cookieMatch.slice(AGGREGATE_STATE_COOKIE.length + 1);
+      // 畸形编码（如裸 %）不应导致 500：当作无 cookie 处理，走统一的 400 分支。
+      try {
+        stateToken = decodeURIComponent(rawValue);
+      } catch {
+        stateToken = "";
+      }
+    }
+    const state = stateToken ? parseAggregateState(stateToken) : null;
+    // 立即清掉一次性 cookie，无论后续成败。
+    reply.header("Set-Cookie", clearAggregateStateCookie());
     if (!state || !isAggregateLoginType(state.p)) {
-      return reply.code(400).send({ message: "无效或过期的登录请求，请重新发起" });
+      return reply
+        .code(400)
+        .send({ message: "无效或过期的登录请求，请回到登录页重新发起（登录请求与浏览器会话绑定，链接无法转交他人）" });
     }
     const tenant = await findTenantByRequestHost(request);
     if (!tenant) {
@@ -327,8 +370,18 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
         data: buildIdentityCreate(session.user.id, provider, providerUserId, name, avatar),
         skipDuplicates: true,
       });
-      app.log.info(`[aggregate] bound ${provider} ${providerUserId} -> user ${session.user.id} (created=${created.count})`);
-      // 竞态下另一请求已声称该身份：以「绑定到当前用户」为准做幂等，仍回跳。
+      if (created.count === 0) {
+        // 并发竞态：另一请求已创建该身份。复核归属：仍归当前用户则按幂等成功处理，否则明确报错。
+        const raced = await prisma.oAuthIdentity.findUnique({
+          where: { provider_providerUserId: { provider, providerUserId } },
+        });
+        if (!raced || raced.userId !== session.user.id) {
+          return reply.code(409).send({ message: "该第三方身份已被其他账号绑定" });
+        }
+      } else {
+        app.log.info(`[aggregate] bound ${provider} ${providerUserId} -> user ${session.user.id} (created=${created.count})`);
+      }
+      // 竞态/成功绑定后按「绑定到当前用户」做幂等，仍回跳。
       if (state.r) {
         const returnPath = normalizeReturnPath(state.r);
         const to = returnPath ?? "/";

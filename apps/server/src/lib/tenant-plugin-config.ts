@@ -198,6 +198,14 @@ export function maskAggregateAppKey(config: TenantPluginConfig): TenantPluginCon
   };
 }
 
+/** 段级别脱敏：对 aggregateLogin 配置段本身（非完整配置）脱敏 AppKey，供审计日志等使用。 */
+export function maskAggregateLoginSection<T extends { appKey?: string }>(section: T): T {
+  if (section && typeof section === "object" && section.appKey) {
+    return { ...section, appKey: AGGREGATE_APPKEY_MASK };
+  }
+  return section;
+}
+
 /** 保存方向：若组件提交的 AppKey 仍是掩码占位符，说明未改动，用库中原值替换，避免把掩码写回。 */
 export function restoreAggregateAppKey(submitted: TenantPluginConfig, existing: TenantPluginConfig): TenantPluginConfig {
   const appKey = submitted.aggregateLogin.appKey;

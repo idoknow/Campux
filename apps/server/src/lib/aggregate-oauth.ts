@@ -1,8 +1,9 @@
 /**
  * 聚合登录协议客户端。
  *
- * 对接第三方聚合登录的 OAuth 协议（以 https://a.idcfx.net 为例，act=login / act=callback）：
- *   act=login    换取第三方授权跳转 URL（QQ/微信/微信/支付宝/抖音/google/twitter/飞书等）
+ * 对接第三方聚合登录的 OAuth 协议（以 https://a.idcfx.net / https://login.mapay.cn 为例，
+ * act=login / act=callback）：
+ *   act=login    换取第三方授权跳转 URL（QQ/微信/支付宝/抖音/google/twitter/飞书等）
  *   act=callback 用 code 换取用户信息（social_uid / nickname / faceimg 等）
  *
  * 设计对齐 VoiceHub 的 aggregateOAuthStrategy：回调返回的完整用户信息以
@@ -179,7 +180,25 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
-/** 获取第三方授权跳转 URL（act=login）。聚合服务不管理 state，由调用方在授权 URL 上附加。 */
+/**
+ * 从聚合站返回的授权跳转 URL 中提取并剥离它自己的 state（部分聚合站如 login.mapay.cn
+ * 会在 redirect_uri 指向自身 return.php 时生成 state 做回调会话校验，该值必须原样保留，
+ * 不可覆盖，否则聚合站无法把第三方回调转回我们的 redirect_uri）。
+ */
+export function extractAggregateLoginUrlState(loginUrl: string): string | undefined {
+  try {
+    const parsed = new URL(loginUrl);
+    const value = parsed.searchParams.get("state");
+    if (typeof value === "string" && value) {
+      return value;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 获取第三方授权跳转 URL（act=login）。 */
 export async function fetchAggregateLoginUrl(
   config: AggregateOauthConfig,
   redirectUri: string,
@@ -200,7 +219,17 @@ export async function fetchAggregateLoginUrl(
   if (typeof payload?.url !== "string" || !payload.url) {
     throw new Error("聚合登录返回了无效的授权地址");
   }
-  const result: AggregateOauthLoginUrlResult = { url: payload.url };
+  // 授权地址只允许 http(s)，防止 javascript:/data: 等危险 scheme 被前端直接跳转。
+  let authorizeUrl: URL;
+  try {
+    authorizeUrl = new URL(payload.url);
+  } catch {
+    throw new Error("聚合登录返回了无效的授权地址");
+  }
+  if (authorizeUrl.protocol !== "https:" && authorizeUrl.protocol !== "http:") {
+    throw new Error("聚合登录返回了不允许的授权地址协议");
+  }
+  const result: AggregateOauthLoginUrlResult = { url: authorizeUrl.toString() };
   if (typeof payload?.qrcode === "string" && payload.qrcode) {
     result.qrcode = payload.qrcode;
   }
