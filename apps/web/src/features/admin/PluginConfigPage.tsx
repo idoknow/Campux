@@ -922,6 +922,22 @@ const PLUGINS: PluginDescriptor[] = [
   },
 ];
 
+/**
+ * 插件展示元数据（图标 / 名称 / 简介 / 作者 / 配色）。
+ *
+ * 服务页的关于页需要在不进入管理端的情况下列出插件与作者，这里从配置页同一份
+ * PLUGINS 派生，避免两处各维护一份插件清单而漂移。
+ */
+export const PLUGIN_SHOWCASE = PLUGINS.map(({ id, icon, name, tagline, detailedDescription, author, hint }) => ({
+  id,
+  icon,
+  name,
+  tagline,
+  detailedDescription,
+  author,
+  hint,
+}));
+
 function ensureBotMessageDefaults(config: TenantPluginConfig): TenantPluginConfig {
   const existing = new Map(config.botStylishMessages.messageTypes.map((item) => [item.type, item]));
   const messageTypes: BotMessageTypeConfig[] = BOT_MESSAGE_TYPES.map((entry) => {

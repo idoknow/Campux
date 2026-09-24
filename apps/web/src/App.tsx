@@ -33,7 +33,8 @@ type AppRoute =
   | { kind: "oauth"; search: string }
   | { kind: "campaigns"; filter?: string | undefined; keyword?: string | undefined }
   | { kind: "campaign-detail"; campaignId: string }
-  | { kind: "broadcasts" };
+  | { kind: "broadcasts" }
+  | { kind: "about" };
 
 type SelectTenantResponse = {
   ok: true;
@@ -97,7 +98,7 @@ export function App() {
   const [activeTab, setActiveTabState] = useState<MainTab>(() => {
     const initialRoute = routeFromPath(window.location.pathname);
     if (initialRoute.kind === "tenant") return initialRoute.tab;
-    if (initialRoute.kind === "campaigns" || initialRoute.kind === "campaign-detail" || initialRoute.kind === "broadcasts") return "services";
+    if (initialRoute.kind === "campaigns" || initialRoute.kind === "campaign-detail" || initialRoute.kind === "broadcasts" || initialRoute.kind === "about") return "services";
     return "post";
   });
   const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
@@ -157,7 +158,7 @@ export function App() {
     setRoute(nextRoute);
     if (nextRoute.kind === "tenant") {
       setActiveTabState(nextRoute.tab);
-    } else if (nextRoute.kind === "broadcasts") {
+    } else if (nextRoute.kind === "broadcasts" || nextRoute.kind === "about") {
       setActiveTabState("services");
     }
   }
@@ -309,7 +310,7 @@ export function App() {
       setLocationKey((key) => key + 1);
       if (nextRoute.kind === "tenant") {
         setActiveTabState(nextRoute.tab);
-      } else if (nextRoute.kind === "broadcasts") {
+      } else if (nextRoute.kind === "broadcasts" || nextRoute.kind === "about") {
         setActiveTabState("services");
       }
     };
@@ -849,6 +850,9 @@ function routeFromPath(pathname: string): AppRoute {
   if (normalized === "/services/broadcasts") {
     return { kind: "broadcasts" };
   }
+  if (normalized === "/services/about") {
+    return { kind: "about" };
+  }
 
   // Note: "/posts" (the bare posts path) intentionally resolves without an
   // explicit subTab so the default tab can be role-aware (reviewers land on the
@@ -906,6 +910,9 @@ function pathFromRoute(route: AppRoute) {
   if (route.kind === "broadcasts") {
     return "/services/broadcasts";
   }
+  if (route.kind === "about") {
+    return "/services/about";
+  }
   if (route.kind === "login") {
     return route.returnTo ? buildLoginPathWithReturnTo(route.returnTo) : "/login";
   }
@@ -933,6 +940,9 @@ function pageTitleFromRoute(route: AppRoute, systemRole?: AuthenticatedMe["user"
   }
   if (route.kind === "broadcasts") {
     return "广播通知";
+  }
+  if (route.kind === "about") {
+    return "关于";
   }
   if (route.kind !== "tenant") {
     return "Campux";

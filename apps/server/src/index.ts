@@ -23,6 +23,7 @@ import { registerBatchFlushSweeper, stopBatchFlushSweeper } from "./runtime/publ
 import { startCampaignScheduler } from "./runtime/campaign-scheduler";
 import { registerTelemetryReporter } from "./runtime/telemetry";
 import { prisma } from "./lib/prisma";
+import { registerAboutRoutes } from "./routes/about";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAiRoutes } from "./routes/ai";
 import { registerAuthRoutes } from "./routes/auth";
@@ -109,6 +110,7 @@ registerQZonePostMetricWorker(queue, app.log);
 
 await registerOneBotRoutes(app, oneBot);
 registerHealthRoutes(app, queue);
+registerAboutRoutes(app, config);
 registerSetupRoutes(app);
 registerAuthRoutes(app, config);
 registerAggregateOAuthRoutes(app, config);
