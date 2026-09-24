@@ -389,13 +389,20 @@ export function registerOAuthRoutes(app: FastifyInstance) {
       data: { lastUsedAt: new Date() },
     });
 
+    const scopes = parseScopeList(tokenRecord.scope);
+    const includeTenantClaims = scopes.includes("tenant");
+
     return {
       sub: tokenRecord.user.id,
       name: tokenRecord.user.qqUin.toString(),
       username: tokenRecord.user.displayName ?? tokenRecord.user.qqUin.toString(),
-      tenant_id: tokenRecord.tenant.id,
-      tenant_name: tokenRecord.tenant.name,
-      tenant_slug: tokenRecord.tenant.slug,
+      ...(includeTenantClaims
+        ? {
+            tenant_id: tokenRecord.tenant.id,
+            tenant_name: tokenRecord.tenant.name,
+            tenant_slug: tokenRecord.tenant.slug,
+          }
+        : {}),
       scope: tokenRecord.scope,
       client_id: tokenRecord.client.clientId,
     };

@@ -178,7 +178,19 @@ Host: campux.example.com
 Authorization: Bearer ACCESS_TOKEN
 ```
 
-返回示例：
+返回示例（token scope 为 `profile` 时，不含校园墙字段）：
+
+```json
+{
+  "sub": "user_id",
+  "name": "123456789",
+  "username": "张三",
+  "scope": "profile",
+  "client_id": "CLIENT_ID"
+}
+```
+
+token scope 含 `profile tenant` 时额外返回校园墙字段：
 
 ```json
 {
@@ -200,9 +212,9 @@ Authorization: Bearer ACCESS_TOKEN
 | `sub` | Campux 用户 ID，适合作为外部应用绑定用户的唯一标识 |
 | `name` | 用户 QQ 号字符串 |
 | `username` | 用户显示名；没有显示名时返回 QQ 号 |
-| `tenant_id` | 当前授权所属校园墙 ID |
-| `tenant_name` | 当前授权所属校园墙名称 |
-| `tenant_slug` | 当前授权所属校园墙 slug |
+| `tenant_id` | 当前授权所属校园墙 ID（仅当 token 含 `tenant` scope） |
+| `tenant_name` | 当前授权所属校园墙名称（仅当 token 含 `tenant` scope） |
+| `tenant_slug` | 当前授权所属校园墙 slug（仅当 token 含 `tenant` scope） |
 | `scope` | 本次 token 实际拥有的 scope |
 | `client_id` | 本次授权使用的 OAuth Client ID |
 

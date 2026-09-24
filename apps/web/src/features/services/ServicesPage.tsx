@@ -143,7 +143,7 @@ export function ServicesPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
-      <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24 pr-1 md:pb-6">
         {metadata.enableCampaigns ? (
           <button
             onClick={() => navigateTo("/services/campaigns")}

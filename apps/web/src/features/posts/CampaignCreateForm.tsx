@@ -32,6 +32,8 @@ export function CampaignCreateForm({
   const [busy, setBusy] = useState(false);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const optionInputsRef = useRef<Array<HTMLInputElement | null>>([]);
+  // 递增以作废进行中的封面读取：移除/再次选择后，晚到的 readDataUrl 不得写回。
+  const coverReadSeq = useRef(0);
 
   function readDataUrl(file: File, maxLengthMb = 8): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -48,15 +50,34 @@ export function CampaignCreateForm({
 
   async function onCoverChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-    setCover(await readDataUrl(file));
+    const seq = ++coverReadSeq.current;
+    try {
+      const dataUrl = await readDataUrl(file);
+      if (seq !== coverReadSeq.current) return;
+      setCover(dataUrl);
+    } catch (error) {
+      if (seq !== coverReadSeq.current) return;
+      toast.error(error instanceof Error ? error.message : "封面读取失败");
+    }
+  }
+
+  function removeCover() {
+    coverReadSeq.current += 1;
+    setCover(null);
   }
 
   async function onOptionImageChange(index: number, event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-    const dataUrl = await readDataUrl(file);
-    setOptions((current) => current.map((entry, i) => (i === index ? { ...entry, dataUrl } : entry)));
+    try {
+      const dataUrl = await readDataUrl(file);
+      setOptions((current) => current.map((entry, i) => (i === index ? { ...entry, dataUrl } : entry)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "选项图片读取失败");
+    }
   }
 
   function updateOption(index: number, patch: Partial<OptionForm>) {
@@ -119,7 +140,8 @@ export function CampaignCreateForm({
           {cover ? (
             <div className="flex items-center gap-2 rounded border border-slate-200 p-2">
               <img src={cover} alt="" className="h-14 w-14 rounded object-cover" />
-              <Button size="sm" variant="ghost" onClick={() => setCover(null)}>更换封面</Button>
+              <Button size="sm" variant="ghost" onClick={() => { coverInputRef.current?.click(); }}>更换封面</Button>
+              <Button size="sm" variant="ghost" onClick={removeCover}>移除</Button>
             </div>
           ) : (
             <Button size="sm" variant="outline" onClick={() => coverInputRef.current?.click()}>选择封面（可选）</Button>
