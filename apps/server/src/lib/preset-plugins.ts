@@ -19,7 +19,8 @@ export type PresetPluginId =
   | "anonymousAvatar"
   | "botStylishMessages"
   | "campaigns"
-  | "aggregateLogin";
+  | "aggregateLogin"
+  | "broadcast";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -96,6 +97,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "user:data", "http:route"],
     riskLevel: "medium",
     rationale: "把第三方社交 UID 建立对本地账号的绑定，并用其匹配登录；凭证(appid/appkey)属租户配置，需限制访问。",
+  },
+  {
+    id: "broadcast",
+    name: "campux-plugin-broadcast",
+    version: "1.0.0",
+    description: "广播通知：投稿页发起有时效的校园通知，广播员可手动标记已广播，管理员可下架",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页新增发起入口与服务页管理入口；通知内容、广播计数与作者头像均接入租户与用户数据。",
   },
 ];
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
@@ -10,8 +10,11 @@ import { LoadingBlock } from "@/components/app/utility";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CampaignsPage } from "./CampaignsPage";
+import { AboutPage } from "./AboutPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { OAuthBindingsPanel } from "./OAuthBindingsPanel";
+import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
+import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
 function parseCampaignRoute(pathname: string, search: string) {
@@ -110,6 +113,15 @@ export function ServicesPage({
       />
     );
   }
+  if (window.location.pathname === "/services/broadcasts") {
+    if (!metadata.enableBroadcast) {
+      return <section className="product-surface p-4 text-sm text-slate-500">广播通知插件尚未启用。</section>;
+    }
+    return <BroadcastsPage me={me} metadata={metadata} />;
+  }
+  if (window.location.pathname === "/services/about") {
+    return <AboutPage metadata={metadata} onBack={() => navigateTo("/services")} />;
+  }
 
   function openService(service: TenantMetadata["services"][number]) {
     if (service.url) {
@@ -157,6 +169,21 @@ export function ServicesPage({
             <ChevronRightIcon className="size-5 shrink-0 text-sky-400" />
           </button>
         ) : null}
+        {metadata.enableBroadcast ? (
+          <button
+            onClick={() => navigateTo("/services/broadcasts")}
+            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-orange-200/70 bg-gradient-to-br from-orange-50 via-amber-50 to-rose-100 p-4 text-left shadow-sm transition hover:border-orange-300 hover:shadow-md"
+          >
+            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
+              <BroadcastIcon className="size-7" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-orange-950">广播通知</span>
+              <span className="mt-0.5 block text-xs text-orange-900/60">查看新通知与历史通知，广播员可标记已广播。</span>
+            </span>
+            <ChevronRightIcon className="size-5 shrink-0 text-orange-400" />
+          </button>
+        ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
 
         <section className="product-surface p-4">
@@ -189,6 +216,25 @@ export function ServicesPage({
               ))}
             </ServiceGroup>
           ) : null}
+        </section>
+
+        <section className="product-surface mt-4 p-4">
+          <ServiceGroup title="关于服务" description="Campux 产品信息、开源协议与插件清单。">
+            <button
+              type="button"
+              onClick={() => navigateTo("/services/about")}
+              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-blue">
+                <InfoIcon className="size-5" strokeWidth={2.1} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-950">关于</span>
+                <span className="mt-0.5 block text-sm leading-5 text-slate-600">版本、部署形态、开发者、技术栈与插件信息</span>
+              </span>
+              <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />
+            </button>
+          </ServiceGroup>
         </section>
 
         {activeAction === "profile" ? <ProfilePanel me={me} onSaved={onProfileSaved} /> : null}

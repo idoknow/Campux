@@ -9,6 +9,7 @@ import {
   tenantPluginConfigSchema,
   writeTenantPluginConfig,
   maskAggregateAppKey,
+  maskAggregateLoginSection,
   restoreAggregateAppKey,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
@@ -244,6 +245,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["anonymousAvatar", before.anonymousAvatar, saved.anonymousAvatar],
       ["botStylishMessages", before.botStylishMessages, saved.botStylishMessages],
       ["aggregateLogin", before.aggregateLogin, saved.aggregateLogin],
+      ["broadcast", before.broadcast, saved.broadcast],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
@@ -254,6 +256,9 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
           summary = enabledAfter ? "已启用" : "已禁用";
         }
         diffs.push({ pluginId, enabled: enabledAfter, summary });
+        // 聚合登录段先脱敏再入审计日志，避免明文 appkey 落库（审计可能被读取/导出）。
+        const safeBefore = pluginId === "aggregateLogin" ? maskAggregateLoginSection(beforeValue as Record<string, unknown>) : beforeValue;
+        const safeAfter = pluginId === "aggregateLogin" ? maskAggregateLoginSection(afterValue as Record<string, unknown>) : afterValue;
         await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,
@@ -264,14 +269,15 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
             summary,
             enabledBefore,
             enabledAfter,
-            before: beforeValue,
-            after: afterValue,
+            before: safeBefore,
+            after: safeAfter,
           },
         });
       }
     }
 
-    return { config: saved, changed: diffs };
+    // 响应同样脱敏，避免保存后的明文 appKey 回显到前端/网络日志。
+    return { config: maskAggregateAppKey(saved), changed: diffs };
   });
 
   // 读取插件配置审计日志（最近 N 条 tenant.plugin.* 记录）

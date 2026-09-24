@@ -9,6 +9,7 @@ export const tenantPluginConfigKey = "plugin_config";
 export const BOT_MESSAGE_TYPE_MAX_LENGTH = 10;
 export const ANONYMOUS_AVATAR_MAX_COUNT = 20;
 export const COLOR_PRESET_MAX_COUNT = 10;
+export const BROADCAST_PRESET_MAX_COUNT = 5;
 
 const colorPresetSchema = z.object({
   value: z.string().min(1).max(40),
@@ -80,6 +81,24 @@ export const tenantPluginConfigSchema = z.object({
       maxActivePerUser: z.number().int().min(1).max(50),
     })
     .default({ enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 }),
+  // 广播通知：开启后投稿页顶部出现「广播通知」胶囊与服务页入口。
+  // quickPresets 是管理员配置的「快选生效时长」，发帖人点一下即可按当前时间推算结束时间；
+  // 通知本身落 TenantBroadcast 表，不在本配置里持久化。
+  broadcast: z
+    .object({
+      enabled: z.boolean(),
+      quickPresets: z
+        .array(
+          z.object({
+            label: z.string().min(1).max(24),
+            // 自当前时刻起算的分钟数，必须为正且不超过 7 天
+            minutes: z.number().int().min(1).max(10080),
+          }),
+        )
+        .max(BROADCAST_PRESET_MAX_COUNT)
+        .default([]),
+    })
+    .default({ enabled: false, quickPresets: [] }),
   // 聚合登录：把第三方平台（QQ/微信/支付宝等）身份绑定到已有账号后，用该身份直接登录。
   // 凭证（appid/appkey/endpoint）放在本配置里（租户级）；未绑定的第三方身份不自动建号，
   // 而是引导先登录已有账号完成绑定（严格「只做第三方登录、不涉及注册」）。
@@ -114,6 +133,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   anonymousAvatar: { enabled: false, items: [] },
   botStylishMessages: { enabled: false, messageTypes: [] },
   campaigns: { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 },
+  broadcast: { enabled: false, quickPresets: [] },
   aggregateLogin: {
     enabled: false,
     loginTypes: [],
@@ -189,6 +209,14 @@ export function maskAggregateAppKey(config: TenantPluginConfig): TenantPluginCon
       appKey: AGGREGATE_APPKEY_MASK,
     },
   };
+}
+
+/** 段级别脱敏：对 aggregateLogin 配置段本身（非完整配置）脱敏 AppKey，供审计日志等使用。 */
+export function maskAggregateLoginSection<T extends { appKey?: string }>(section: T): T {
+  if (section && typeof section === "object" && section.appKey) {
+    return { ...section, appKey: AGGREGATE_APPKEY_MASK };
+  }
+  return section;
 }
 
 /** 保存方向：若组件提交的 AppKey 仍是掩码占位符，说明未改动，用库中原值替换，避免把掩码写回。 */

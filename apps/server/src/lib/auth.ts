@@ -276,8 +276,9 @@ export async function requireTenantContext(request: FastifyRequest, reply: Fasti
 
 const roleRank: Record<TenantRole, number> = {
   submitter: 1,
-  reviewer: 2,
-  admin: 3,
+  broadcaster: 2,
+  reviewer: 3,
+  admin: 4,
 };
 
 export function hasTenantRole(actualRole: TenantRole, requiredRole: TenantRole) {

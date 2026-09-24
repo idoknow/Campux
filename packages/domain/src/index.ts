@@ -43,7 +43,7 @@ export type TenantStatus = z.infer<typeof tenantStatusSchema>;
 export const systemRoleSchema = z.enum(["operations_admin", "system_operator"]);
 export type SystemRole = z.infer<typeof systemRoleSchema>;
 
-export const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
+export const tenantRoleSchema = z.enum(["submitter", "broadcaster", "reviewer", "admin"]);
 export type TenantRole = z.infer<typeof tenantRoleSchema>;
 
 export const postStatusSchema = z.enum([

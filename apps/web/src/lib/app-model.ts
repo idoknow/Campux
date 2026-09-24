@@ -55,6 +55,8 @@ export const defaultMetadata: TenantMetadata = {
   allowAnonymousCampaign: false,
   maxActiveCampaignsPerUser: 0,
   enableAggregateLogin: false,
+  enableBroadcast: false,
+  broadcastQuickPresets: [],
 };
 
 export const navItems = [
@@ -67,12 +69,14 @@ export const navItems = [
 
 const roleRank: Record<TenantRole, number> = {
   submitter: 1,
-  reviewer: 2,
-  admin: 3,
+  broadcaster: 2,
+  reviewer: 3,
+  admin: 4,
 };
 
 export const roleLabels: Record<TenantRole, string> = {
   submitter: "用户",
+  broadcaster: "广播员",
   reviewer: "审核员",
   admin: "管理员",
 };

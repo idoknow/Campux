@@ -8,7 +8,7 @@ const registerSchema = z.object({
   userQqUin: z.string().min(1),
   displayName: z.string().min(1).max(80).optional(),
   password: z.string().min(6).default("campux123"),
-  role: z.enum(["submitter", "reviewer", "admin"]).default("submitter"),
+  role: z.enum(["submitter", "broadcaster", "reviewer", "admin"]).default("submitter"),
 });
 
 const reviewCommandSchema = z.object({

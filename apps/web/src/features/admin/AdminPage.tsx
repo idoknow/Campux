@@ -226,7 +226,7 @@ const managementTabsTriggerClassName = "product-tabs-trigger after:hidden";
 
 function readMemberRoleQuery(): "all" | TenantRole {
   const role = readQueryParam("role");
-  return role === "submitter" || role === "reviewer" || role === "admin" ? role : "all";
+  return role === "submitter" || role === "broadcaster" || role === "reviewer" || role === "admin" ? role : "all";
 }
 
 function readMemberSortQuery(): MemberSort {
@@ -258,7 +258,7 @@ function banListPreferencesKey(tenantId: string) {
 }
 
 function isTenantRoleFilter(value: unknown): value is "all" | TenantRole {
-  return value === "all" || value === "submitter" || value === "reviewer" || value === "admin";
+  return value === "all" || value === "submitter" || value === "broadcaster" || value === "reviewer" || value === "admin";
 }
 
 function isMemberListPreferences(value: unknown): value is MemberListPreferences {
@@ -1412,6 +1412,7 @@ function UsersPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+              <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem>
               <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
               <SelectItem value="admin">{roleLabels.admin}</SelectItem>
             </SelectContent>
@@ -1434,6 +1435,7 @@ function UsersPanel({
               <SelectContent>
                 <SelectItem value="all">全部身份</SelectItem>
                 <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem>
                 <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
                 <SelectItem value="admin">{roleLabels.admin}</SelectItem>
               </SelectContent>

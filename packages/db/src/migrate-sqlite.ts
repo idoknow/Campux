@@ -22,6 +22,7 @@ const LAST_PUBLISH_STARTED_AT_MIGRATION_NAME = "20260724090000_add_bot_last_publ
 const REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME = "20260815120000_add_bot_review_queue_reminder_at_all";
 const VOTING_CAMPAIGNS_MIGRATION_NAME = "20260906120000_add_voting_campaigns";
 const CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME = "20260906150000_add_campaign_admin_only";
+const BROADCAST_NOTIFICATIONS_MIGRATION_NAME = "20260924120000_add_broadcast_notifications";
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
 const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
@@ -380,6 +381,113 @@ function applyVotingCampaignsSqliteMigration(
 }
 
 /**
+ * 广播通知的 SQLite 增量迁移：为老库补 Tenant 编号列与 TenantBroadcast /
+ * TenantBroadcastVersion 两张新表（全新库由刷新后的 baseline 自带，迁移会幂等跳过）。
+ * 与 Campaign 系列一致：SQLite 不建 enum，TenantRole 仍为 TEXT，由应用层校验取值。
+ */
+function applyBroadcastNotificationsSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const tenantTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'Tenant'`)
+    .get() as { present: number } | null;
+  if (!tenantTable) return;
+
+  if (doneNames.has(BROADCAST_NOTIFICATIONS_MIGRATION_NAME)) {
+    skipped.push(BROADCAST_NOTIFICATIONS_MIGRATION_NAME);
+    return;
+  }
+
+  const hasDisplayColumn =
+    db
+      .query(`SELECT 1 AS present FROM pragma_table_info('Tenant') WHERE name = 'nextBroadcastDisplayId'`)
+      .get() !== null;
+  const hasBroadcastTable =
+    db
+      .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantBroadcast'`)
+      .get() !== null;
+  const hasVersionTable =
+    db
+      .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantBroadcastVersion'`)
+      .get() !== null;
+
+  logger.info({ migration: BROADCAST_NOTIFICATIONS_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasDisplayColumn) {
+      db.exec(`ALTER TABLE "Tenant" ADD COLUMN "nextBroadcastDisplayId" INTEGER NOT NULL DEFAULT 1`);
+    }
+    if (!hasBroadcastTable) {
+      db.exec(
+        `CREATE TABLE "TenantBroadcast" (
+           "id" TEXT NOT NULL PRIMARY KEY,
+           "tenantId" TEXT NOT NULL,
+           "displayId" INTEGER NOT NULL,
+           "authorId" TEXT NOT NULL,
+           "content" TEXT NOT NULL,
+           "endsAt" DATETIME NOT NULL,
+           "broadcastCount" INTEGER NOT NULL DEFAULT 0,
+           "modified" BOOLEAN NOT NULL DEFAULT false,
+           "removedAt" DATETIME,
+           "removedById" TEXT,
+           "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+           "updatedAt" DATETIME NOT NULL,
+           CONSTRAINT "TenantBroadcast_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+           CONSTRAINT "TenantBroadcast_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+         )`,
+      );
+      db.exec(`CREATE UNIQUE INDEX "TenantBroadcast_tenantId_displayId_key" ON "TenantBroadcast"("tenantId", "displayId")`);
+      db.exec(`CREATE INDEX "TenantBroadcast_tenantId_endsAt_idx" ON "TenantBroadcast"("tenantId", "endsAt")`);
+      db.exec(`CREATE INDEX "TenantBroadcast_tenantId_authorId_idx" ON "TenantBroadcast"("tenantId", "authorId")`);
+    }
+    if (!hasVersionTable) {
+      db.exec(
+        `CREATE TABLE "TenantBroadcastVersion" (
+           "id" TEXT NOT NULL PRIMARY KEY,
+           "broadcastId" TEXT NOT NULL,
+           "version" INTEGER NOT NULL,
+           "content" TEXT NOT NULL,
+           "changedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+           "endsAt" DATETIME NOT NULL,
+           "broadcastCount" INTEGER NOT NULL DEFAULT 0,
+           "changedById" TEXT NOT NULL,
+           CONSTRAINT "TenantBroadcastVersion_broadcastId_fkey" FOREIGN KEY ("broadcastId") REFERENCES "TenantBroadcast" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+           CONSTRAINT "TenantBroadcastVersion_changedById_fkey" FOREIGN KEY ("changedById") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+         )`,
+      );
+      db.exec(`CREATE UNIQUE INDEX "TenantBroadcastVersion_broadcastId_version_key" ON "TenantBroadcastVersion"("broadcastId", "version")`);
+      db.exec(`CREATE INDEX "TenantBroadcastVersion_broadcastId_idx" ON "TenantBroadcastVersion"("broadcastId")`);
+    }
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`ALTER TABLE "Tenant" ADD COLUMN "nextBroadcastDisplayId" INTEGER NOT NULL DEFAULT 1`),
+        BROADCAST_NOTIFICATIONS_MIGRATION_NAME,
+      ],
+    );
+    const violations = db.query("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error(`sqlite migration introduced ${violations.length} foreign-key violation(s)`);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(BROADCAST_NOTIFICATIONS_MIGRATION_NAME);
+  applied.push(BROADCAST_NOTIFICATIONS_MIGRATION_NAME);
+  logger.info({ migration: BROADCAST_NOTIFICATIONS_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
+/**
  * 应用 SQLite baseline 建库脚本及后续增量迁移（幂等）。
  *
  * @param baselineSql 内嵌的建库 DDL（sqlite-baseline.sql 文本）
@@ -442,7 +550,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -462,6 +570,7 @@ export function applySqliteBaseline(
     applyReviewQueueReminderAtAllSqliteMigration(db, doneNames, applied, skipped, logger);
     applyVotingCampaignsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyCampaignAdminOnlySqliteMigration(db, doneNames, applied, skipped, logger);
+    applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

@@ -56,6 +56,7 @@ const statusDescriptions: Record<TenantStatus, string> = {
 
 const roleLabels: Record<TenantRole, string> = {
   submitter: "用户",
+  broadcaster: "广播员",
   reviewer: "审核员",
   admin: "管理员",
 };
@@ -79,6 +80,7 @@ const userRoleFilters: Array<{ value: SystemUserRoleFilter; label: string }> = [
   { value: "operations_admin", label: "运营管理员" },
   { value: "system_operator", label: "系统运维" },
   { value: "admin", label: "管理员" },
+  { value: "broadcaster", label: "广播员" },
   { value: "reviewer", label: "审核员" },
   { value: "submitter", label: "用户" },
 ];
@@ -98,6 +100,7 @@ function opsUserPreferencesKey(mode: OpsPanelMode) {
 
 function isSystemUserRoleFilter(value: unknown): value is SystemUserRoleFilter {
   return value === "submitter"
+    || value === "broadcaster"
     || value === "reviewer"
     || value === "admin"
     || value === "operations_admin"
@@ -1337,6 +1340,7 @@ ${impact}`)) {
                     </>
                   ) : null}
                   <SelectItem value="submitter">用户</SelectItem>
+                  <SelectItem value="broadcaster">广播员</SelectItem>
                   <SelectItem value="reviewer">审核员</SelectItem>
                   <SelectItem value="admin">管理员</SelectItem>
                 </SelectContent>

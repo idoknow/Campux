@@ -157,7 +157,7 @@ async function seedUser(db: Prisma.TransactionClient, {
   email: string;
   displayName: string;
   systemRole?: "operations_admin" | "system_operator";
-  memberships: Array<{ tenantId: string; role: "submitter" | "reviewer" | "admin" }>;
+  memberships: Array<{ tenantId: string; role: "submitter" | "broadcaster" | "reviewer" | "admin" }>;
   isTestAccount?: boolean;
 }) {
   const user = await db.user.upsert({

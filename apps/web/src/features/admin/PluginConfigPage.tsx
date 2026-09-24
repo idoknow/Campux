@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from "react";
 import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
-import type { BotMessageTypeConfig, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
+import type { BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { filterPluginAuditLogs } from "./plugin-audit-log-filter";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { BroadcastIcon } from "../broadcast/BroadcastIcon";
 
 type PluginIconProps = { className?: string };
 
@@ -84,7 +85,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -150,6 +151,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   botStylishMessages: "campux-plugin-bot-stylish-messages",
   campaigns: "campux-plugin-campaigns",
   aggregateLogin: "campux-plugin-aggregate-login",
+  broadcast: "campux-plugin-broadcast",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -532,6 +534,67 @@ function BotStylishPanel({ config, onChange, busy }: { config: TenantPluginConfi
 }
 
 
+// 与后端 tenantPluginConfigSchema 的 BROADCAST_PRESET_MAX_COUNT 保持一致。
+const BROADCAST_PRESET_MAX = 5;
+
+function BroadcastPresetEditor({ values, disabled, onChange }: { values: PluginBroadcastPreset[]; disabled?: boolean; onChange: (next: PluginBroadcastPreset[]) => void }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-slate-900">快选生效时长</p>
+          <p className="text-xs text-slate-500">发帖人点一下即按当前时刻推算结束时间（最多 5 个）。</p>
+        </div>
+        <Button size="sm" variant="outline" disabled={disabled || values.length >= BROADCAST_PRESET_MAX} onClick={() => onChange([...values, { label: "", minutes: 60 }])}>
+          + 新增预设
+        </Button>
+      </div>
+      {values.length === 0 ? (
+        <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">
+          暂未配置，发帖人只能手动选择日期与时间。
+        </div>
+      ) : (
+        <div className="grid gap-2">
+          {values.map((preset, index) => (
+            <div key={index} className="grid grid-cols-[1fr_112px_40px] items-center gap-2 rounded-md border border-slate-200 bg-white p-2">
+              <Input value={preset.label} placeholder="名称，如「半小时内」" disabled={disabled} onChange={(event) => onChange(values.map((item, itemIndex) => (itemIndex === index ? { ...item, label: event.target.value } : item)))} />
+              <div className="flex items-center gap-1">
+                <Input type="number" min={1} max={10080} value={preset.minutes} disabled={disabled} onChange={(event) => onChange(values.map((item, itemIndex) => (itemIndex === index ? { ...item, minutes: Number(event.target.value) } : item)))} />
+                <span className="text-xs text-slate-400">分钟</span>
+              </div>
+              <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onChange(values.filter((_, itemIndex) => itemIndex !== index))}>删除</Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BroadcastPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  const setBroadcast = (patch: Partial<TenantPluginConfig["broadcast"]>) => {
+    onChange({ ...config, broadcast: { ...config.broadcast, ...patch } });
+  };
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，投稿页顶部会多出「广播通知」胶囊，服务页出现广播通知入口。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <BroadcastPresetEditor
+          values={config.broadcast.quickPresets}
+          disabled={busy}
+          onChange={(quickPresets) => setBroadcast({ quickPresets })}
+        />
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        通知内容在投稿页填写，时效结束时间最长 7 天；
+        「已广播」与「违规删除」按钮由管理员在用户管理中授予「广播员」身份的用户使用。
+      </div>
+    </div>
+  );
+}
+
 const BOT_MESSAGE_TYPES: Array<{ type: string; label: string; description: string }> = [
   { type: "submissionSuccess", label: "投稿成功", description: "用户私聊投稿完成后，机器人反馈的语句。支持 {id} 占位符。" },
   { type: "reviewApproved", label: "审核通过", description: "稿件通过审核后发送给作者的语句。支持 {id}。" },
@@ -819,7 +882,61 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, aggregateLogin: { ...config.aggregateLogin, enabled: value } }),
     render: (config, onChange, busy) => <AggregateLoginPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "broadcast",
+    icon: BroadcastIcon,
+    name: "广播通知",
+    tagline: "Broadcast",
+    description: "投稿页发起有时效的广播通知，广播员可标记已广播",
+    detailedDescription:
+      "本插件在投稿页顶部新增「广播通知」胶囊，让任意用户发起一条有明确时效的校园广播；广播员（或审核员、管理员）在服务页手动登记已广播，并把广播次数记上。\n\n" +
+      "发起流程：\n" +
+      "· 在投稿页顶部胶囊中切换到「广播通知」，填写通知内容与时效结束时间。\n" +
+      "· 时效结束时间最短晚于当前时间 5 分钟，最长 7 天；未选择或超限会提示且不提交。\n" +
+      "· 草稿按校园墙隔离自动保存到浏览器本地（localStorage），刷新后可继续编辑。\n" +
+      "· 点击「发布通知」即生效，无需审核，立即出现在服务页的广播通知列表。\n\n" +
+      "服务页 → 广播通知：\n" +
+      "· 两个胶囊：新通知（尚未过时效）与历史通知（已过期），历史通知支持搜索。\n" +
+      "· 新通知按三色排序：未通知（红）→ 已修改（橙）→ 已通知（绿），同色组内按结束时间近的排前。\n" +
+      "· 历史通知按发出时间从新到旧。\n" +
+      "· 通知卡片展示：通知者头像、通知内容、发出时间、结束时间、广播次数。\n\n" +
+      "角色与操作：\n" +
+      "· 「已广播」：广播员、审核员、管理员可点，弹窗确认后广播次数 +1；未通知的卡片显示「未通知」。\n" +
+      "· 「违规删除」：广播员、审核员、管理员可点，需二次确认，删除后通知永久移除。\n" +
+      "· 修改：只有通知发出者本人可在时效结束前修改内容与时效结束时间；修改后卡片变橙色，并追加一条历史版本。\n" +
+      "· 历史版本：可查看每一版的发出/修改时间、结束时间与当版广播次数。\n\n" +
+      "身份设置：\n" +
+      "· 广播员是独立于审核员/管理员之外的新身份，不拥有稿件审核能力。\n" +
+      "· 管理员在「管理 → 用户管理」中把用户身份改为「广播员」。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "新增身份组「广播员」，用于标记已广播与违规删除。",
+    accent: "from-orange-500 to-rose-500",
+    bgTint: "bg-orange-50 text-orange-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页与服务页新增广播入口；通知内容、广播计数与作者头像均接入租户与用户数据。",
+    enabled: (config) => config.broadcast.enabled,
+    setEnabled: (config, value) => ({ ...config, broadcast: { ...config.broadcast, enabled: value } }),
+    render: (config, onChange, busy) => <BroadcastPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
+
+/**
+ * 插件展示元数据（图标 / 名称 / 简介 / 作者 / 配色）。
+ *
+ * 服务页的关于页需要在不进入管理端的情况下列出插件与作者，这里从配置页同一份
+ * PLUGINS 派生，避免两处各维护一份插件清单而漂移。
+ */
+export const PLUGIN_SHOWCASE = PLUGINS.map(({ id, icon, name, tagline, detailedDescription, author, hint }) => ({
+  id,
+  icon,
+  name,
+  tagline,
+  detailedDescription,
+  author,
+  hint,
+}));
 
 function ensureBotMessageDefaults(config: TenantPluginConfig): TenantPluginConfig {
   const existing = new Map(config.botStylishMessages.messageTypes.map((item) => [item.type, item]));
@@ -878,6 +995,10 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       appId: "",
       appKey: "",
       endpoint: "",
+    },
+    broadcast: {
+      enabled: false,
+      quickPresets: [],
     },
   };
 }
