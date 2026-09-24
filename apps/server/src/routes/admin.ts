@@ -24,7 +24,7 @@ import { listPersonalQqChannels, listPersonalQqGuilds } from "../runtime/persona
 import { BotWorkflowError } from "../lib/bot-workflows";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
-const roleSchema = z.enum(["submitter", "reviewer", "admin"]);
+const roleSchema = z.enum(["submitter", "broadcaster", "reviewer", "admin"]);
 
 const memberParamsSchema = z.object({
   id: z.string().min(1),
@@ -167,7 +167,7 @@ const memberSortSchema = z.enum([
 
 const memberQuerySchema = paginationQuerySchema.extend({
   q: z.string().max(80).optional(),
-  role: z.enum(["all", "submitter", "reviewer", "admin"]).default("all"),
+  role: z.enum(["all", "submitter", "broadcaster", "reviewer", "admin"]).default("all"),
   sort: memberSortSchema.default("joined_asc"),
 });
 

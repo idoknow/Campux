@@ -45,8 +45,8 @@ const systemSettingsPatchSchema = z.object({
   managementHost: z.string().max(255).nullable().optional(),
 });
 
-const tenantRoleSchema = z.enum(["submitter", "reviewer", "admin"]);
-const platformAssignableRoleSchema = z.enum(["operations_admin", "system_operator", "submitter", "reviewer", "admin"]);
+const tenantRoleSchema = z.enum(["submitter", "broadcaster", "reviewer", "admin"]);
+const platformAssignableRoleSchema = z.enum(["operations_admin", "system_operator", "submitter", "broadcaster", "reviewer", "admin"]);
 
 const userMembershipCreateSchema = z.object({
   tenantId: z.string().min(1).optional(),

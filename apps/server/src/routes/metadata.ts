@@ -149,6 +149,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     allowAnonymousCampaign: false,
     maxActiveCampaignsPerUser: 0,
     enableAggregateLogin: false,
+    enableBroadcast: false,
+    broadcastQuickPresets: [] as Array<{ label: string; minutes: number }>,
   };
 }
 
@@ -232,6 +234,11 @@ async function readPublicMetadata(tenantId: string) {
       : 0;
     // 聚合登录：未启用时服务页的「第三方登录」入口隐藏。
     metadata.enableAggregateLogin = pluginConfig.aggregateLogin.enabled;
+    // 广播通知：未启用时投稿页顶部胶囊与服务页入口隐藏；快选时长仅在该插件开启时透出。
+    metadata.enableBroadcast = pluginConfig.broadcast.enabled;
+    metadata.broadcastQuickPresets = pluginConfig.broadcast.enabled
+      ? pluginConfig.broadcast.quickPresets.map((preset) => ({ ...preset }))
+      : [];
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

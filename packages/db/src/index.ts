@@ -40,6 +40,8 @@ export type {
   PostStatus,
   SystemRole,
   Tenant,
+  TenantBroadcast,
+  TenantBroadcastVersion,
   TenantMembership,
   TenantRole,
   User,

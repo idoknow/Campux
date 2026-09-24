@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 import { CampaignCreateForm } from "./CampaignCreateForm";
+import { BroadcastCreateForm } from "@/features/broadcast/BroadcastCreateForm";
 
 export function PostPage({
   busy,
@@ -26,6 +27,7 @@ export function PostPage({
   postFont,
   anonymous,
   anonymousAvatar,
+  selectedTenant,
   pendingAttachments,
   onPostTextChange,
   onAnonymousChange,
@@ -67,7 +69,7 @@ export function PostPage({
   const bgColors = metadata.availableBgColors ?? [];
   const textColors = metadata.availableTextColors ?? [];
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
-  const [postMode, setPostMode] = useState<"post" | "campaign">("post");
+  const [postMode, setPostMode] = useState<"post" | "campaign" | "broadcast">("post");
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
@@ -78,6 +80,13 @@ export function PostPage({
       onAnonymousAvatarChange("");
     }
   }, [anonymous]);
+
+  // 插件未开启时强制回投稿模式，避免胶囊隐藏后表单还留在广播视图。
+  useEffect(() => {
+    if (!metadata.enableBroadcast && postMode === "broadcast") {
+      setPostMode("post");
+    }
+  }, [metadata.enableBroadcast, postMode]);
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     if (!canAcceptAttachmentSelection(busy, event.clipboardData.items.length)) {
@@ -115,23 +124,39 @@ export function PostPage({
           <p className="min-w-0 whitespace-pre-wrap break-words">{metadata.banner}</p>
         </div>
       ) : null}
-      {metadata.enableCampaigns ? (
-        <div className="mb-3 flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-sm">
+      {metadata.enableCampaigns || metadata.enableBroadcast ? (
+        <div className="mb-3 flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-sm">
           <button
             className={`rounded-full px-3 py-1.5 ${postMode === "post" ? "bg-slate-900 text-white" : "text-slate-600"}`}
             onClick={() => setPostMode("post")}
           >
             投稿
           </button>
-          <button
-            className={`rounded-full px-3 py-1.5 ${postMode === "campaign" ? "bg-slate-900 text-white" : "text-slate-600"}`}
-            onClick={() => setPostMode("campaign")}
-          >
-            发起竞选
-          </button>
+          {metadata.enableCampaigns ? (
+            <button
+              className={`rounded-full px-3 py-1.5 ${postMode === "campaign" ? "bg-slate-900 text-white" : "text-slate-600"}`}
+              onClick={() => setPostMode("campaign")}
+            >
+              发起竞选
+            </button>
+          ) : null}
+          {metadata.enableBroadcast ? (
+            <button
+              className={`rounded-full px-3 py-1.5 ${postMode === "broadcast" ? "bg-slate-900 text-white" : "text-slate-600"}`}
+              onClick={() => setPostMode("broadcast")}
+            >
+              广播通知
+            </button>
+          ) : null}
         </div>
       ) : null}
-      {metadata.enableCampaigns && postMode === "campaign" ? (
+      {metadata.enableBroadcast && postMode === "broadcast" ? (
+        <BroadcastCreateForm
+          tenantId={selectedTenant.id}
+          metadata={metadata}
+          onSuccess={() => setPostMode("post")}
+        />
+      ) : metadata.enableCampaigns && postMode === "campaign" ? (
         <CampaignCreateForm
           metadata={metadata}
           onSuccess={() => {

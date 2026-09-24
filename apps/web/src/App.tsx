@@ -32,7 +32,8 @@ type AppRoute =
   | { kind: "tenants" | "ops" }
   | { kind: "oauth"; search: string }
   | { kind: "campaigns"; filter?: string | undefined; keyword?: string | undefined }
-  | { kind: "campaign-detail"; campaignId: string };
+  | { kind: "campaign-detail"; campaignId: string }
+  | { kind: "broadcasts" };
 
 type SelectTenantResponse = {
   ok: true;
@@ -96,7 +97,7 @@ export function App() {
   const [activeTab, setActiveTabState] = useState<MainTab>(() => {
     const initialRoute = routeFromPath(window.location.pathname);
     if (initialRoute.kind === "tenant") return initialRoute.tab;
-    if (initialRoute.kind === "campaigns" || initialRoute.kind === "campaign-detail") return "services";
+    if (initialRoute.kind === "campaigns" || initialRoute.kind === "campaign-detail" || initialRoute.kind === "broadcasts") return "services";
     return "post";
   });
   const [metadata, setMetadata] = useState<TenantMetadata>(defaultMetadata);
@@ -156,6 +157,8 @@ export function App() {
     setRoute(nextRoute);
     if (nextRoute.kind === "tenant") {
       setActiveTabState(nextRoute.tab);
+    } else if (nextRoute.kind === "broadcasts") {
+      setActiveTabState("services");
     }
   }
 
@@ -306,6 +309,8 @@ export function App() {
       setLocationKey((key) => key + 1);
       if (nextRoute.kind === "tenant") {
         setActiveTabState(nextRoute.tab);
+      } else if (nextRoute.kind === "broadcasts") {
+        setActiveTabState("services");
       }
     };
     window.addEventListener("popstate", syncRoute);
@@ -841,6 +846,9 @@ function routeFromPath(pathname: string): AppRoute {
       ? { kind: "campaigns", filter, keyword }
       : { kind: "campaigns" };
   }
+  if (normalized === "/services/broadcasts") {
+    return { kind: "broadcasts" };
+  }
 
   // Note: "/posts" (the bare posts path) intentionally resolves without an
   // explicit subTab so the default tab can be role-aware (reviewers land on the
@@ -895,6 +903,9 @@ function pathFromRoute(route: AppRoute) {
   if (route.kind === "campaign-detail") {
     return `/services/campaigns/${encodeURIComponent(route.campaignId)}`;
   }
+  if (route.kind === "broadcasts") {
+    return "/services/broadcasts";
+  }
   if (route.kind === "login") {
     return route.returnTo ? buildLoginPathWithReturnTo(route.returnTo) : "/login";
   }
@@ -919,6 +930,9 @@ function pageTitleFromRoute(route: AppRoute, systemRole?: AuthenticatedMe["user"
   }
   if (route.kind === "oauth") {
     return "OAuth 授权";
+  }
+  if (route.kind === "broadcasts") {
+    return "广播通知";
   }
   if (route.kind !== "tenant") {
     return "Campux";

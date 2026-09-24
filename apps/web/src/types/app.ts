@@ -3,7 +3,7 @@ import type { TenantSummary } from "@campux/domain";
 export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
 export type PostsTab = "mine" | "review" | "published";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "pluginConfig";
-export type TenantRole = "submitter" | "reviewer" | "admin";
+export type TenantRole = "submitter" | "broadcaster" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
 
 export type OAuthServerSettings = {
@@ -144,6 +144,10 @@ export type TenantMetadata = {
   maxActiveCampaignsPerUser: number;
   /** 聚合登录插件是否启用；关闭时服务页「第三方登录」入口隐藏 */
   enableAggregateLogin: boolean;
+  /** 广播通知插件是否启用；关闭时投稿页顶部胶囊与服务页入口隐藏 */
+  enableBroadcast: boolean;
+  /** 广播通知快选生效时长（插件配置下发）；发帖人点一下即可按当前时刻推算结束时间 */
+  broadcastQuickPresets: Array<{ label: string; minutes: number }>;
 };
 
 export type BotMessageTypeConfig = {
@@ -207,7 +211,55 @@ export type TenantPluginConfig = {
     appKey: string;
     endpoint: string;
   };
+  /** 广播通知插件：开关 + 快选生效时长 */
+  broadcast: {
+    enabled: boolean;
+    quickPresets: PluginBroadcastPreset[];
+  };
 };
+
+export type PluginBroadcastPreset = {
+  /** 管理员填写的展示名，如「半小时内」 */
+  label: string;
+  /** 自当前时刻起算的分钟数 */
+  minutes: number;
+};
+/** 广播通知：投稿页发起，有明确时效结束时间 */
+export type BroadcastItem = {
+  id: string;
+  displayId: number;
+  content: string;
+  endsAt: string;
+  broadcastCount: number;
+  /** 发出后作者改过内容：卡片橙色，排在未广播之后已广播之前 */
+  modified: boolean;
+  createdAt: string;
+  updatedAt: string;
+  author: { displayName: string | null; qqUin: string } | null;
+};
+
+/** 广播通知历史版本快照 */
+export type BroadcastVersion = {
+  id: string;
+  version: number;
+  content: string;
+  /** 本次发出（首发）或修改的时间 */
+  changedAt: string;
+  endsAt: string;
+  broadcastCount: number;
+  changedBy: { displayName: string | null; qqUin: string } | null;
+};
+
+export type BroadcastListResponse = {
+  items: BroadcastItem[];
+  now: string;
+  pagination: { page: number; limit: number; total: number };
+};
+
+export type BroadcastVersionListResponse = {
+  versions: BroadcastVersion[];
+};
+
 export type PostAttachment = {
   kind: "image";
   key: string;

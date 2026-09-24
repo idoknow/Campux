@@ -16,6 +16,7 @@ enum TenantStatus {
 
 enum TenantRole {
   submitter
+  broadcaster
   reviewer
   admin
 }
@@ -73,6 +74,7 @@ model Tenant {
   themeColor     String             @default("#e0574f")
   nextPostDisplayId Int                @default(1)
   nextCampaignDisplayId Int            @default(1)
+  nextBroadcastDisplayId Int            @default(1)
   readyAt        DateTime?
   archiveWarningAt DateTime?
   createdAt      DateTime           @default(now())
@@ -85,6 +87,7 @@ model Tenant {
   oauthAccessTokens OAuthAccessToken[]
   posts          Post[]
   campaigns      Campaign[]
+  broadcasts     TenantBroadcast[]
   postTags       PostTag[]
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
@@ -109,6 +112,8 @@ model User {
   memberships TenantMembership[]
   posts       Post[]
   campaigns   Campaign[]
+  broadcasts  TenantBroadcast[]
+  broadcastVersionChanges TenantBroadcastVersion[]
   sessions    AccountSession[]
   campaignVotes CampaignVote[]
   oauthAuthorizationCodes OAuthAuthorizationCode[]
@@ -116,6 +121,50 @@ model User {
   auditLogs   AuditLog[]
   postFollows PostFollow[]
   oauthIdentities OAuthIdentity[]
+}
+
+// 广播通知：投稿页发起，有明确时效结束时间（最长 7 天）。
+// broadcastCount 由广播员（或审核员/管理员）点击「已广播」记账，每点一次 +1；
+// 被修改后内容变更，历史版本连同当时的广播次数落到 TenantBroadcastVersion。
+model TenantBroadcast {
+  id           String   @id @default(uuid())
+  tenantId     String
+  displayId    Int
+  authorId     String
+  content      String
+  endsAt       DateTime
+  broadcastCount Int    @default(0)
+  // 发出后作者改过内容即置为 modified：卡片显示橙色、排在未广播之后已广播之前。
+  modified     Boolean  @default(false)
+  removedAt    DateTime?
+  removedById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author       User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  versions     TenantBroadcastVersion[]
+
+  @@unique([tenantId, displayId])
+  @@index([tenantId, endsAt])
+  @@index([tenantId, authorId])
+}
+
+// 广播通知历史版本：每次「发布」或「修改」追加一条快照。
+model TenantBroadcastVersion {
+  id             String          @id @default(uuid())
+  broadcastId    String
+  version        Int
+  content        String
+  // 本次发出或修改的时间（首发等于广播的 createdAt）。
+  changedAt      DateTime        @default(now())
+  endsAt         DateTime
+  broadcastCount Int             @default(0)
+  changedById    String
+  broadcast      TenantBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  changedBy      User            @relation(fields: [changedById], references: [id])
+
+  @@unique([broadcastId, version])
+  @@index([broadcastId])
 }
 
 // 第三方聚合登录绑定：把第三方平台的社交 UID 关联到本地账号。

@@ -1,7 +1,8 @@
-type TenantRole = "submitter" | "reviewer" | "admin";
+type TenantRole = "submitter" | "broadcaster" | "reviewer" | "admin";
 
 const membershipRoleLabels: Record<TenantRole, string> = {
   submitter: "投稿用户",
+  broadcaster: "广播员",
   reviewer: "审核员",
   admin: "管理员",
 };

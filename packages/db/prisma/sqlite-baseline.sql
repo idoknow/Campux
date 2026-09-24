@@ -8,6 +8,7 @@ CREATE TABLE "Tenant" (
     "themeColor" TEXT NOT NULL DEFAULT '#e0574f',
     "nextPostDisplayId" INTEGER NOT NULL DEFAULT 1,
     "nextCampaignDisplayId" INTEGER NOT NULL DEFAULT 1,
+    "nextBroadcastDisplayId" INTEGER NOT NULL DEFAULT 1,
     "readyAt" DATETIME,
     "archiveWarningAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -26,6 +27,38 @@ CREATE TABLE "User" (
     "isTestAccount" BOOLEAN NOT NULL DEFAULT false,
     "systemRole" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
+CREATE TABLE "TenantBroadcast" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "displayId" INTEGER NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "endsAt" DATETIME NOT NULL,
+    "broadcastCount" INTEGER NOT NULL DEFAULT 0,
+    "modified" BOOLEAN NOT NULL DEFAULT false,
+    "removedAt" DATETIME,
+    "removedById" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "TenantBroadcast_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "TenantBroadcast_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "TenantBroadcastVersion" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "broadcastId" TEXT NOT NULL,
+    "version" INTEGER NOT NULL,
+    "content" TEXT NOT NULL,
+    "changedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "endsAt" DATETIME NOT NULL,
+    "broadcastCount" INTEGER NOT NULL DEFAULT 0,
+    "changedById" TEXT NOT NULL,
+    CONSTRAINT "TenantBroadcastVersion_broadcastId_fkey" FOREIGN KEY ("broadcastId") REFERENCES "TenantBroadcast" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "TenantBroadcastVersion_changedById_fkey" FOREIGN KEY ("changedById") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -509,6 +542,21 @@ CREATE UNIQUE INDEX "User_qqUin_key" ON "User"("qqUin");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE INDEX "TenantBroadcast_tenantId_endsAt_idx" ON "TenantBroadcast"("tenantId", "endsAt");
+
+-- CreateIndex
+CREATE INDEX "TenantBroadcast_tenantId_authorId_idx" ON "TenantBroadcast"("tenantId", "authorId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TenantBroadcast_tenantId_displayId_key" ON "TenantBroadcast"("tenantId", "displayId");
+
+-- CreateIndex
+CREATE INDEX "TenantBroadcastVersion_broadcastId_idx" ON "TenantBroadcastVersion"("broadcastId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TenantBroadcastVersion_broadcastId_version_key" ON "TenantBroadcastVersion"("broadcastId", "version");
 
 -- CreateIndex
 CREATE INDEX "OAuthIdentity_userId_idx" ON "OAuthIdentity"("userId");

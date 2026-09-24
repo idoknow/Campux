@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { CampaignsPage } from "./CampaignsPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { OAuthBindingsPanel } from "./OAuthBindingsPanel";
+import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
+import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
 function parseCampaignRoute(pathname: string, search: string) {
@@ -110,6 +112,12 @@ export function ServicesPage({
       />
     );
   }
+  if (window.location.pathname === "/services/broadcasts") {
+    if (!metadata.enableBroadcast) {
+      return <section className="product-surface p-4 text-sm text-slate-500">广播通知插件尚未启用。</section>;
+    }
+    return <BroadcastsPage me={me} metadata={metadata} />;
+  }
 
   function openService(service: TenantMetadata["services"][number]) {
     if (service.url) {
@@ -155,6 +163,21 @@ export function ServicesPage({
               <span className="mt-0.5 block text-xs text-sky-900/60">浏览正在进行的投票竞选，查看排名或参与投票。</span>
             </span>
             <ChevronRightIcon className="size-5 shrink-0 text-sky-400" />
+          </button>
+        ) : null}
+        {metadata.enableBroadcast ? (
+          <button
+            onClick={() => navigateTo("/services/broadcasts")}
+            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-orange-200/70 bg-gradient-to-br from-orange-50 via-amber-50 to-rose-100 p-4 text-left shadow-sm transition hover:border-orange-300 hover:shadow-md"
+          >
+            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
+              <BroadcastIcon className="size-7" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-orange-950">广播通知</span>
+              <span className="mt-0.5 block text-xs text-orange-900/60">查看新通知与历史通知，广播员可标记已广播。</span>
+            </span>
+            <ChevronRightIcon className="size-5 shrink-0 text-orange-400" />
           </button>
         ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
