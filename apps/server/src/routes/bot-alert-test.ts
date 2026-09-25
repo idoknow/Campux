@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireReadyTenant } from "../lib/auth";
+import { prisma } from "../lib/prisma";
 import { sendBotAlertEmail } from "../lib/bot-alert-email";
+import { readTenantPluginConfig, BOT_ALERT_PASS_MASK } from "../lib/tenant-plugin-config";
 
 const testEmailSchema = z.object({
   smtpHost: z.string().min(1),
@@ -17,8 +19,16 @@ export function registerBotAlertTestRoutes(app: FastifyInstance) {
     const context = await requireReadyTenant(request, reply, "admin");
     const body = testEmailSchema.parse(request.body);
 
+    // GET/PATCH 响应里的 smtpPass 是掩码占位符；若提交值仍是掩码，说明管理员未改动，
+    // 用库中保存的真实密码替换，避免把掩码字符串当凭证发送。
+    let smtpPass = body.smtpPass;
+    if (smtpPass === BOT_ALERT_PASS_MASK) {
+      const stored = await readTenantPluginConfig(prisma, context.selectedTenant.id);
+      smtpPass = stored.botAlert.smtpPass;
+    }
+
     const result = await sendBotAlertEmail(
-      { ...body, enabled: true },
+      { ...body, smtpPass, enabled: true },
       {
         subject: "测试",
         text: "这是一封 Campux Bot 异常通知测试邮件。收到此邮件说明 SMTP 配置正确。",

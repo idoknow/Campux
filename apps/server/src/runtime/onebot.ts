@@ -3796,7 +3796,11 @@ export class OneBotRuntime {
       return String(d.message_id);
     }
     if (d.data && typeof d.data === "object") {
-      return this.extractMessageId(d.data);
+      // 嵌套里有可用 ID 才返回；否则继续走本层的 real_id 回退。
+      const nested = this.extractMessageId(d.data);
+      if (nested !== null) {
+        return nested;
+      }
     }
     if (d.real_id !== undefined && d.real_id !== null) {
       return String(d.real_id);

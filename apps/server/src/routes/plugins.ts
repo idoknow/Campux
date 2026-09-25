@@ -84,6 +84,17 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, next);
       const beforeEnabled = before[presetId].enabled;
       if (beforeEnabled !== enabled) {
+        // 状态变更同样先脱敏再入审计日志：botAlert.smtpPass / aggregateLogin.appKey 不落明文。
+        const safeBefore = presetId === "aggregateLogin"
+          ? maskAggregateLoginSection(before[presetId] as Record<string, unknown>)
+          : presetId === "botAlert"
+            ? maskBotAlertSection(before[presetId] as Record<string, unknown>)
+            : before[presetId];
+        const safeAfter = presetId === "aggregateLogin"
+          ? maskAggregateLoginSection(saved[presetId] as Record<string, unknown>)
+          : presetId === "botAlert"
+            ? maskBotAlertSection(saved[presetId] as Record<string, unknown>)
+            : saved[presetId];
         await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,
@@ -94,8 +105,8 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
             summary: enabled ? "已启用" : "已禁用",
             enabledBefore: beforeEnabled,
             enabledAfter: enabled,
-            before: before[presetId],
-            after: saved[presetId],
+            before: safeBefore,
+            after: safeAfter,
           },
         });
       }
@@ -223,8 +234,8 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
   app.get("/api/admin/plugins/settings", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "admin");
     const config = await readTenantPluginConfig(prisma, context.selectedTenant.id);
-    // 聚合登录 AppKey 只写回，不回显明文（避免出现在响应/审计）。
-    return { config: maskAggregateAppKey(config) };
+    // 敏感凭证只写回，不回显明文（避免出现在响应/网络日志）。
+    return { config: maskBotAlertPass(maskAggregateAppKey(config)) };
   });
 
   // 保存插件配置
