@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from "react";
 import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
-import type { BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
+import type { AdminMember, BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig, TenantRole } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { filterPluginAuditLogs } from "./plugin-audit-log-filter";
@@ -12,6 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { roleLabels } from "@/lib/app-model";
 import { BroadcastIcon } from "../broadcast/BroadcastIcon";
 import { GraduationIcon } from "../graduation/GraduationIcon";
 
@@ -1087,6 +1090,8 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [activeTab, setActiveTab] = useState<"config" | "info" | "log">("config");
+  const [broadcasterMigration, setBroadcasterMigration] = useState<Array<{ member: AdminMember; nextRole: TenantRole }> | null>(null);
+  const [migrationBusy, setMigrationBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // 预设插件启用集合：来自 /api/admin/plugins 的 registry status。
@@ -1174,32 +1179,63 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     }
   }, [activeId]);
 
+  async function applyPluginStatus(registryName: string, nextStatus: "enabled" | "disabled") {
+    await api(`/api/admin/plugins/${encodeURIComponent(registryName)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    const nextSet = new Set(enabledPresetNames);
+    if (nextStatus === "disabled") nextSet.delete(registryName);
+    else nextSet.add(registryName);
+    setEnabledPresetNames(nextSet);
+    // 预设插件的启用状态也写入 plugin_config.<id>.enabled，重拉一次配置，
+    // 避免本地 config state 里的旧 enabled 在下次「保存」时把开启状态覆盖回禁用。
+    void loadConfig();
+    // 启停会改变插件透出的租户元数据（如 enableBroadcast），通知父级刷新，
+    // 否则管理页「用户」面板的角色选项不会立即跟随开关状态。
+    try { await onSaved?.(); } catch { /* 元数据刷新失败不影响插件启停 */ }
+    toast.success(nextStatus === "disabled" ? "已禁用插件" : "已启用插件");
+    void refreshAuditLog();
+  }
+
   async function togglePlugin(pluginId: PluginId) {
     const registryName = PRESET_NAME_BY_ID[pluginId];
     const isEnabled = enabledPresetNames.has(registryName);
     const nextStatus: "enabled" | "disabled" = isEnabled ? "disabled" : "enabled";
     setTogglingName(registryName);
     try {
-      await api(`/api/admin/plugins/${encodeURIComponent(registryName)}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      const nextSet = new Set(enabledPresetNames);
-      if (isEnabled) nextSet.delete(registryName);
-      else nextSet.add(registryName);
-      setEnabledPresetNames(nextSet);
-      // 预设插件的启用状态也写入 plugin_config.<id>.enabled，重拉一次配置，
-      // 避免本地 config state 里的旧 enabled 在下次「保存」时把开启状态覆盖回禁用。
-      void loadConfig();
-      // 启停会改变插件透出的租户元数据（如 enableBroadcast），通知父级刷新，
-      // 否则管理页「用户」面板的角色选项不会立即跟随开关状态。
-      try { await onSaved?.(); } catch { /* 元数据刷新失败不影响插件启停 */ }
-      toast.success(isEnabled ? "已禁用插件" : "已启用插件");
-      void refreshAuditLog();
+      // 关闭广播通知前：若墙内仍有广播员，先弹窗逐人迁移身份；
+      // 未修改的广播员在确认后统一改为「用户」，再真正关闭插件。
+      if (pluginId === "broadcast" && nextStatus === "disabled") {
+        const data = await api<{ members: AdminMember[] }>("/api/admin/members?role=broadcaster&limit=50");
+        if (data.members.length > 0) {
+          setBroadcasterMigration(data.members.map((member) => ({ member, nextRole: "submitter" as const })));
+          return;
+        }
+      }
+      await applyPluginStatus(registryName, nextStatus);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "插件启停失败");
     } finally {
       setTogglingName(null);
+    }
+  }
+
+  async function confirmBroadcasterMigration() {
+    if (!broadcasterMigration) return;
+    setMigrationBusy(true);
+    try {
+      await Promise.all(
+        broadcasterMigration.map(({ member, nextRole }) =>
+          api(`/api/admin/members/${member.id}`, { method: "PATCH", body: JSON.stringify({ role: nextRole }) }),
+        ),
+      );
+      setBroadcasterMigration(null);
+      await applyPluginStatus(PRESET_NAME_BY_ID.broadcast, "disabled");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "广播员身份修改失败");
+    } finally {
+      setMigrationBusy(false);
     }
   }
 
@@ -1413,6 +1449,40 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
           )}
         </CardContent>
       </Card>
+      <Dialog open={broadcasterMigration !== null} onOpenChange={(open) => { if (!open && !migrationBusy) setBroadcasterMigration(null); }}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>关闭广播通知前，请处理广播员身份</DialogTitle>
+            <DialogDescription>
+              当前有 {broadcasterMigration?.length ?? 0} 名广播员。可为每人选择新身份；保持默认不修改的广播员，确认后会改为「{roleLabels.submitter}」。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {broadcasterMigration?.map(({ member, nextRole }) => (
+              <div key={member.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 p-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">{member.user.displayName ?? member.user.qqUin}</p>
+                  <p className="text-xs text-slate-500">QQ {member.user.qqUin}</p>
+                </div>
+                <Select value={nextRole} onValueChange={(role) => setBroadcasterMigration((current) => current?.map((entry) => entry.member.id === member.id ? { ...entry, nextRole: role as TenantRole } : entry) ?? null)}>
+                  <SelectTrigger className="w-28 bg-white font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                    <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
+                    <SelectItem value="admin">{roleLabels.admin}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={migrationBusy} onClick={() => setBroadcasterMigration(null)}>取消</Button>
+            <Button disabled={migrationBusy} onClick={() => void confirmBroadcasterMigration()}>{migrationBusy ? "处理中…" : "确认并关闭插件"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
