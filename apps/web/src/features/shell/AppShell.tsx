@@ -1,5 +1,5 @@
 import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostsTab, TenantMetadata } from "@/types/app";
-import type { NavItem } from "@/lib/app-model";
+import { canAccess, type NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
 import { PostPage } from "@/features/posts/PostPage";
 import { PostsPage } from "@/features/posts/PostsPage";
@@ -154,25 +154,29 @@ export function AppShell({
               <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
             </TabsContent>
 
-            <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
-              <StatsPage tenantId={me.currentTenant.id} loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
-            </TabsContent>
+            {canAccess(me.currentMembership.role, "reviewer") ? (
+              <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+                <StatsPage tenantId={me.currentTenant.id} loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
+              </TabsContent>
+            ) : null}
 
-            <TabsContent value="admin" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
-              <AdminPage
-                activeTab={adminTab}
-                currentUserId={me.user.id}
-                selectedTenant={me.currentTenant}
-                metadata={metadata}
-                detailTarget={adminUserDetailTarget}
-                onDetailTargetConsumed={onAdminUserDetailTargetConsumed}
-                onTabChange={onAdminTabChange}
-                onOpenPostDetail={onOpenPostDetailFromAdmin}
-                onSaved={async () => {
-                  await Promise.all([onRefreshMe(), onRefreshTenantData()]);
-                }}
-              />
-            </TabsContent>
+            {canAccess(me.currentMembership.role, "admin") ? (
+              <TabsContent value="admin" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+                <AdminPage
+                  activeTab={adminTab}
+                  currentUserId={me.user.id}
+                  selectedTenant={me.currentTenant}
+                  metadata={metadata}
+                  detailTarget={adminUserDetailTarget}
+                  onDetailTargetConsumed={onAdminUserDetailTargetConsumed}
+                  onTabChange={onAdminTabChange}
+                  onOpenPostDetail={onOpenPostDetailFromAdmin}
+                  onSaved={async () => {
+                    await Promise.all([onRefreshMe(), onRefreshTenantData()]);
+                  }}
+                />
+              </TabsContent>
+            ) : null}
           </main>
         </div>
       </div>
