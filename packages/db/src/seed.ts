@@ -57,6 +57,8 @@ const services = [
 ];
 
 async function seedTenant(db: Prisma.TransactionClient, tenant: (typeof tenants)[number]) {
+  // 本地 dev 种子脚本：直接把 readyAt 写死为当前时间，让测试账号可以绕过首次引导向导
+  // 直接进入投稿/服务页；否则 requireReadyTenant 会因 readyAt=null 拒所有操作动作（409）。
   await db.tenant.upsert({
     where: { id: tenant.id },
     update: {
@@ -64,6 +66,7 @@ async function seedTenant(db: Prisma.TransactionClient, tenant: (typeof tenants)
       name: tenant.name,
       status: "active",
       themeColor: tenant.themeColor,
+      readyAt: new Date(),
     },
     create: {
       id: tenant.id,
@@ -72,6 +75,7 @@ async function seedTenant(db: Prisma.TransactionClient, tenant: (typeof tenants)
       status: "active",
       themeColor: tenant.themeColor,
       nextPostDisplayId: 1,
+      readyAt: new Date(),
     },
   });
 

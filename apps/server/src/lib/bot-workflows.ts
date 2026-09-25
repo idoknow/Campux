@@ -795,6 +795,73 @@ export async function reviewCampaignViaBot({
   };
 }
 
+export async function reviewGraduationViaBot({
+  queue: _queue,
+  botQqUin,
+  groupId,
+  operatorQqUin,
+  displayId,
+  action,
+  comment,
+}: {
+  queue: RuntimeQueue;
+  botQqUin: string;
+  groupId?: string | null | undefined;
+  operatorQqUin: string;
+  displayId: number;
+  action: "approve" | "reject";
+  comment?: string | null | undefined;
+}) {
+  void _queue;
+  const bot = await findEnabledBot(botQqUin);
+  assertReviewGroup(bot, groupId);
+  const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+
+  const record = await prisma.userGraduation.findFirst({
+    where: { tenantId: bot.tenantId, displayId },
+  });
+  if (!record) {
+    throw new BotWorkflowError(`毕业去向 #${displayId} 不存在`, 404);
+  }
+  if (record.status !== "pending_approval") {
+    throw new BotWorkflowError(`毕业去向 #${displayId} 当前不是待审核状态`, 409);
+  }
+  if (action === "reject" && !comment?.trim()) {
+    throw new BotWorkflowError("拒绝必须填写理由", 400);
+  }
+
+  const reviewed = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    const nextStatus = action === "approve" ? "approved" : "rejected";
+    const updated = await transaction.userGraduation.update({
+      where: { id: record.id },
+      data: {
+        status: nextStatus,
+        rejectReason: action === "reject" ? comment!.trim() : null,
+        reviewedById: operator.id,
+        reviewedAt: new Date(),
+      },
+    });
+    await transaction.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: operator.id,
+      action: `bot.review.graduation.${action === "approve" ? "approve" : "reject"}`,
+      targetType: "graduation",
+      targetId: record.id,
+      detail: {
+        displayId,
+        groupId: groupId ?? null,
+        comment: comment?.trim() || null,
+      },
+    }, transaction);
+    return updated;
+  });
+  if (!reviewed.active) {
+    throw new BotWorkflowError("校园墙当前不可用", 409);
+  }
+  return { bot, operator: serializeUser(operator), graduation: reviewed.value };
+}
+
 async function markBotSeen(botId: string) {
   await prisma.botAccount.update({
     where: {

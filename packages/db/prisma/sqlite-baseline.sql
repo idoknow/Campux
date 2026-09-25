@@ -9,6 +9,7 @@ CREATE TABLE "Tenant" (
     "nextPostDisplayId" INTEGER NOT NULL DEFAULT 1,
     "nextCampaignDisplayId" INTEGER NOT NULL DEFAULT 1,
     "nextBroadcastDisplayId" INTEGER NOT NULL DEFAULT 1,
+    "nextGraduationDisplayId" INTEGER NOT NULL DEFAULT 1,
     "readyAt" DATETIME,
     "archiveWarningAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -115,6 +116,26 @@ CREATE TABLE "TenantMembership" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "TenantMembership_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "TenantMembership_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "UserGraduation" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "displayId" INTEGER NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "graduationYear" INTEGER NOT NULL,
+    "classYear" INTEGER NOT NULL,
+    "education" TEXT NOT NULL,
+    "destination" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending_approval',
+    "rejectReason" TEXT,
+    "reviewedById" TEXT,
+    "reviewedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "UserGraduation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "UserGraduation_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -609,6 +630,24 @@ CREATE INDEX "TenantMembership_userId_idx" ON "TenantMembership"("userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TenantMembership_tenantId_userId_key" ON "TenantMembership"("tenantId", "userId");
+
+-- CreateIndex
+CREATE INDEX "UserGraduation_tenantId_status_idx" ON "UserGraduation"("tenantId", "status");
+
+-- CreateIndex
+CREATE INDEX "UserGraduation_tenantId_graduationYear_idx" ON "UserGraduation"("tenantId", "graduationYear");
+
+-- CreateIndex
+CREATE INDEX "UserGraduation_tenantId_classYear_idx" ON "UserGraduation"("tenantId", "classYear");
+
+-- CreateIndex
+CREATE INDEX "UserGraduation_tenantId_destination_idx" ON "UserGraduation"("tenantId", "destination");
+
+-- CreateIndex
+CREATE INDEX "UserGraduation_tenantId_authorId_idx" ON "UserGraduation"("tenantId", "authorId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "UserGraduation_tenantId_displayId_key" ON "UserGraduation"("tenantId", "displayId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TenantMetadata_tenantId_key_key" ON "TenantMetadata"("tenantId", "key");

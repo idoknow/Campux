@@ -13,13 +13,15 @@ function Switch({
   // Radix Switch 会渲染 position:absolute 的隐藏 checkbox；若祖先全是 static，
   // 该 input 以 ICB 为包含块，逃出 overflow 裁剪并把 document 撑高（多出滚动条）。
   // 用 relative 包一层作为包含块并裁剪。
+  // 注意：聚焦环用 box-shadow（ring-3）而非 after 伪元素——inset 伪元素会制造
+  // 布局溢出，在 overflow-y-auto 容器（如插件列表）里产生横向滚动条。
   return (
     <span className="relative inline-flex shrink-0" data-slot="switch-wrap">
       <SwitchPrimitive.Root
         data-slot="switch"
         data-size={size}
         className={cn(
-          "peer group/switch relative inline-flex shrink-0 items-center rounded-full border border-transparent transition-all outline-none after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:bg-primary data-unchecked:bg-input dark:data-unchecked:bg-input/80 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+          "peer group/switch relative inline-flex shrink-0 items-center rounded-full border border-transparent transition-all outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:bg-primary data-unchecked:bg-input dark:data-unchecked:bg-input/80 data-disabled:cursor-not-allowed data-disabled:opacity-50",
           className
         )}
         {...props}

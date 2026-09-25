@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from "react";
 import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
-import type { BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig } from "@/types/app";
+import type { AdminMember, BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig, TenantRole } from "@/types/app";
 import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { filterPluginAuditLogs } from "./plugin-audit-log-filter";
@@ -13,7 +13,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { roleLabels } from "@/lib/app-model";
 import { BroadcastIcon } from "../broadcast/BroadcastIcon";
+import { GraduationIcon } from "../graduation/GraduationIcon";
 
 type PluginIconProps = { className?: string };
 
@@ -87,6 +91,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
 }
 
 type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "graduation";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -155,6 +160,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   broadcast: "campux-plugin-broadcast",
   feedback: "campux-plugin-feedback",
   botAlert: "campux-plugin-bot-alert",
+  graduation: "campux-plugin-graduation",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -693,6 +699,23 @@ function BroadcastPanel({ config, onChange, busy }: { config: TenantPluginConfig
   );
 }
 
+function GraduationPanel({ busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，投稿页顶部会多出「毕业去向」胶囊，服务页新增毕业生去向入口（用户/学校/时间/搜索四视图）。
+        提交后进入审核队列，审核员可手动通过或驳回。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        入学年份（级）与毕业年份（届）均由投稿人在表单里自行填写，本插件无需配置年限换算规则。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        审核群命令：#毕业通过 &lt;编号&gt; / #毕业拒绝 &lt;理由&gt; &lt;编号&gt;；网页端在「服务页 → 毕业生去向 → 待审核」处理。
+      </div>
+    </div>
+  );
+}
+
 const BOT_MESSAGE_TYPES: Array<{ type: string; label: string; description: string }> = [
   { type: "submissionSuccess", label: "投稿成功", description: "用户私聊投稿完成后，机器人反馈的语句。支持 {id} 占位符。" },
   { type: "reviewApproved", label: "审核通过", description: "稿件通过审核后发送给作者的语句。支持 {id}。" },
@@ -1057,6 +1080,41 @@ const PLUGINS: PluginDescriptor[] = [
     render: (config: TenantPluginConfig, onChange: (next: TenantPluginConfig) => void, busy: boolean) => (
       <BotAlertPanel config={config} onChange={onChange} busy={busy} />
     ),
+    id: "graduation",
+    icon: GraduationIcon,
+    name: "毕业去向",
+    tagline: "Graduation",
+    description: "投稿页自填级/届与学历，审核通过后进入服务页四视图统计",
+    detailedDescription:
+      "本插件让毕业生在投稿页提交自己的毕业信息：入学年份（级）、毕业年份（届）、毕业时学历（如读高中毕业就是高中学历）、毕业去向（学校/单位全称）；提交后进入审核队列，审核员在审核群或网页端手动通过/驳回。\n\n" +
+      "投稿页：\n" +
+      "· 顶部胶囊新增「毕业去向」选项，选择后展示表单。\n" +
+      "· 入学年份（级）与毕业年份（届）均由投稿人自行填写，不做任何自动换算；毕业年份早于入学年份时不允许提交。\n" +
+      "· 毕业时学历自由填写（提供初中/高中/大专/本科等常用项快捷填入），如中专、职高、专升本也可直接输入。\n" +
+      "· 每个用户在同一校园墙内仅允许一份「待审核 + 已通过」的记录（驳回后可重新提交）。\n\n" +
+      "审核流程：\n" +
+      "· 提交后自动推送审核群，包含届/级、学历、去向与作者名。\n" +
+      "· 审核群命令：#毕业通过 <编号> / #毕业拒绝 <理由> <编号>。\n" +
+      "· 网页端在「服务页 → 毕业生去向 → 待审核」展示「通过」与「驳回」两个按钮，驳回需填写理由。\n\n" +
+      "服务页 → 毕业生去向：\n" +
+      "· 用户列表：头像 + 姓名 + QQ，点击展开详情（入学年/毕业年/学历/去向）；顶部显示已填写人数。\n" +
+      "· 学校列表：聚合展示每个学校的人数，点击展开具体人员。\n" +
+      "· 时间视图：可按届/级/提交时间排序，可升/降序，可筛选指定年份。\n" +
+      "· 搜索：支持 QQ 号 / 用户名 / 学校名关键词模糊匹配。\n\n" +
+      "管理：\n" +
+      "· 插件仅有开关，无需配置年限换算规则；级与届都由投稿人自己填。\n" +
+      "· 插件禁用后，投稿页胶囊与服务页入口同时隐藏；已有数据不受影响。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "级与届均由投稿人自填；审核群命令与网页审核双通道。",
+    accent: "from-violet-500 to-pink-500",
+    bgTint: "bg-violet-50 text-violet-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页与服务页新增毕业去向入口；毕业信息（届/级/学历/去向）与作者 QQ 关联，仅供审核员统计查阅。",
+    enabled: (config) => config.graduation.enabled,
+    setEnabled: (config, value) => ({ ...config, graduation: { ...config.graduation, enabled: value } }),
+    render: (config, onChange, busy) => <GraduationPanel config={config} onChange={onChange} busy={busy} />,
   },
 ];
 
@@ -1149,6 +1207,8 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       smtpPass: "",
       fromEmail: "",
       toEmails: [],
+    graduation: {
+      enabled: false,
     },
   };
 }
@@ -1178,6 +1238,8 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [activeTab, setActiveTab] = useState<"config" | "info" | "log">("config");
+  const [broadcasterMigration, setBroadcasterMigration] = useState<Array<{ member: AdminMember; nextRole: TenantRole }> | null>(null);
+  const [migrationBusy, setMigrationBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // 预设插件启用集合：来自 /api/admin/plugins 的 registry status。
@@ -1265,29 +1327,63 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     }
   }, [activeId]);
 
+  async function applyPluginStatus(registryName: string, nextStatus: "enabled" | "disabled") {
+    await api(`/api/admin/plugins/${encodeURIComponent(registryName)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    const nextSet = new Set(enabledPresetNames);
+    if (nextStatus === "disabled") nextSet.delete(registryName);
+    else nextSet.add(registryName);
+    setEnabledPresetNames(nextSet);
+    // 预设插件的启用状态也写入 plugin_config.<id>.enabled，重拉一次配置，
+    // 避免本地 config state 里的旧 enabled 在下次「保存」时把开启状态覆盖回禁用。
+    void loadConfig();
+    // 启停会改变插件透出的租户元数据（如 enableBroadcast），通知父级刷新，
+    // 否则管理页「用户」面板的角色选项不会立即跟随开关状态。
+    try { await onSaved?.(); } catch { /* 元数据刷新失败不影响插件启停 */ }
+    toast.success(nextStatus === "disabled" ? "已禁用插件" : "已启用插件");
+    void refreshAuditLog();
+  }
+
   async function togglePlugin(pluginId: PluginId) {
     const registryName = PRESET_NAME_BY_ID[pluginId];
     const isEnabled = enabledPresetNames.has(registryName);
     const nextStatus: "enabled" | "disabled" = isEnabled ? "disabled" : "enabled";
     setTogglingName(registryName);
     try {
-      await api(`/api/admin/plugins/${encodeURIComponent(registryName)}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      const nextSet = new Set(enabledPresetNames);
-      if (isEnabled) nextSet.delete(registryName);
-      else nextSet.add(registryName);
-      setEnabledPresetNames(nextSet);
-      // 预设插件的启用状态也写入 plugin_config.<id>.enabled，重拉一次配置，
-      // 避免本地 config state 里的旧 enabled 在下次「保存」时把开启状态覆盖回禁用。
-      void loadConfig();
-      toast.success(isEnabled ? "已禁用插件" : "已启用插件");
-      void refreshAuditLog();
+      // 关闭广播通知前：若墙内仍有广播员，先弹窗逐人迁移身份；
+      // 未修改的广播员在确认后统一改为「用户」，再真正关闭插件。
+      if (pluginId === "broadcast" && nextStatus === "disabled") {
+        const data = await api<{ members: AdminMember[] }>("/api/admin/members?role=broadcaster&limit=50");
+        if (data.members.length > 0) {
+          setBroadcasterMigration(data.members.map((member) => ({ member, nextRole: "submitter" as const })));
+          return;
+        }
+      }
+      await applyPluginStatus(registryName, nextStatus);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "插件启停失败");
     } finally {
       setTogglingName(null);
+    }
+  }
+
+  async function confirmBroadcasterMigration() {
+    if (!broadcasterMigration) return;
+    setMigrationBusy(true);
+    try {
+      await Promise.all(
+        broadcasterMigration.map(({ member, nextRole }) =>
+          api(`/api/admin/members/${member.id}`, { method: "PATCH", body: JSON.stringify({ role: nextRole }) }),
+        ),
+      );
+      setBroadcasterMigration(null);
+      await applyPluginStatus(PRESET_NAME_BY_ID.broadcast, "disabled");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "广播员身份修改失败");
+    } finally {
+      setMigrationBusy(false);
     }
   }
 
@@ -1501,6 +1597,40 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
           )}
         </CardContent>
       </Card>
+      <Dialog open={broadcasterMigration !== null} onOpenChange={(open) => { if (!open && !migrationBusy) setBroadcasterMigration(null); }}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>关闭广播通知前，请处理广播员身份</DialogTitle>
+            <DialogDescription>
+              当前有 {broadcasterMigration?.length ?? 0} 名广播员。可为每人选择新身份；保持默认不修改的广播员，确认后会改为「{roleLabels.submitter}」。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {broadcasterMigration?.map(({ member, nextRole }) => (
+              <div key={member.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 p-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">{member.user.displayName ?? member.user.qqUin}</p>
+                  <p className="text-xs text-slate-500">QQ {member.user.qqUin}</p>
+                </div>
+                <Select value={nextRole} onValueChange={(role) => setBroadcasterMigration((current) => current?.map((entry) => entry.member.id === member.id ? { ...entry, nextRole: role as TenantRole } : entry) ?? null)}>
+                  <SelectTrigger className="w-28 bg-white font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                    <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
+                    <SelectItem value="admin">{roleLabels.admin}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={migrationBusy} onClick={() => setBroadcasterMigration(null)}>取消</Button>
+            <Button disabled={migrationBusy} onClick={() => void confirmBroadcasterMigration()}>{migrationBusy ? "处理中…" : "确认并关闭插件"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

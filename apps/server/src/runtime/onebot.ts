@@ -15,6 +15,7 @@ import {
   registerUserViaBot,
   requireBotTenantRole,
   reviewCampaignViaBot,
+  reviewGraduationViaBot,
   reviewPostViaBot,
   resetPasswordViaBot,
 } from "../lib/bot-workflows";
@@ -253,6 +254,10 @@ const reviewHelp = [
   "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
   "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
   "#解封 <QQ号> 或 unban <QQ号>",
+  "#投票通过 <竞选编号>",
+  "#投票拒绝 <理由> <竞选编号>",
+  "#毕业通过 <毕业去向编号>",
+  "#毕业拒绝 <理由> <毕业去向编号>",
   "#好友数",
   "#登录 或 #刷新qzone cookies",
   "#扫码登录",
@@ -2605,6 +2610,44 @@ export class OneBotRuntime {
     }
   }
 
+  // 毕业去向相关通知：新记录进入审核队列、审核通过/驳回。
+  async notifyNewGraduation(graduationId: string) {
+    const record = await prisma.userGraduation.findUnique({
+      where: { id: graduationId },
+      include: { author: true },
+    });
+    if (!record) return;
+    const bots = await prisma.botAccount.findMany({
+      where: { tenantId: record.tenantId, enabled: true, reviewGroupId: { not: null } },
+      orderBy: { createdAt: "asc" },
+    });
+    const authorName = record.author.displayName ?? record.author.qqUin.toString();
+    const text = `毕业去向 #${record.displayId} 待审核：${authorName} 提交 ${record.graduationYear} 届（${record.classYear} 级）· ${record.education} · ${record.destination}。可用 #毕业通过 ${record.displayId} 或 #毕业拒绝 <理由> ${record.displayId} 处理。`;
+    for (const bot of bots) {
+      if (!bot.reviewGroupId) continue;
+      const status = this.getBotConnectionStatus(bot.qqUin.toString());
+      if (!status.online) continue;
+      try {
+        await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId, text);
+      } catch (error) {
+        this.logger.warn({ botId: bot.id, error }, "failed to notify review group for graduation");
+      }
+    }
+    void this.sendPrivateMessageViaTenantBots(record.tenantId, record.author.qqUin, `你提交的毕业去向 #${record.displayId} 已进入审核队列。`);
+  }
+
+  async notifyGraduationReviewed(graduationId: string, status: "approved" | "rejected", reason?: string | null) {
+    const record = await prisma.userGraduation.findUnique({
+      where: { id: graduationId },
+      include: { author: true },
+    });
+    if (!record) return;
+    const message = status === "approved"
+      ? `你提交的毕业去向 #${record.displayId} 已通过审核。`
+      : (reason ? `你提交的毕业去向 #${record.displayId} 未通过审核。理由：${reason}` : `你提交的毕业去向 #${record.displayId} 未通过审核。`);
+    void this.sendPrivateMessageViaTenantBots(record.tenantId, record.author.qqUin, message);
+  }
+
   private async handleGroupMessage(event: OneBotMessageEvent) {
     const botQqUin = normalizeId(event.self_id);
     const groupId = normalizeId(event.group_id);
@@ -2708,6 +2751,53 @@ export class OneBotRuntime {
         });
         await this.sendGroupMessage(botQqUin, groupId, `竞选 #${result.campaign.displayId} 已拒绝`);
         this.notifyCampaignRejected(result.campaign.id, comment).catch(() => undefined);
+        return;
+      }
+
+      // 毕业去向审核：#毕业通过 <编号> / #毕业拒绝 <理由> <编号>
+      if (command.name === "毕业通过") {
+        const displayId = parseDisplayId(command.args);
+        if (!displayId) {
+          await this.sendGroupMessage(botQqUin, groupId, "用法：#毕业通过 <毕业去向编号>");
+          return;
+        }
+        const result = await reviewGraduationViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          displayId,
+          action: "approve",
+        });
+        await this.sendGroupMessage(botQqUin, groupId, `毕业去向 #${result.graduation.displayId} 已通过`);
+        this.notifyGraduationReviewed(result.graduation.id, "approved").catch(() => undefined);
+        return;
+      }
+
+      if (command.name === "毕业拒绝") {
+        const args = command.args.trim();
+        const tailMatch = args.match(/^(.*?)\s+(\d+)\s*$/);
+        if (!tailMatch || !tailMatch[1] || !tailMatch[2]) {
+          await this.sendGroupMessage(botQqUin, groupId, "用法：#毕业拒绝 <理由> <毕业去向编号>");
+          return;
+        }
+        const comment = tailMatch[1].trim();
+        if (!comment) {
+          await this.sendGroupMessage(botQqUin, groupId, "拒绝必须填写理由");
+          return;
+        }
+        const displayId = Number(tailMatch[2]);
+        const result = await reviewGraduationViaBot({
+          queue: this.queue,
+          botQqUin,
+          groupId,
+          operatorQqUin,
+          displayId,
+          action: "reject",
+          comment,
+        });
+        await this.sendGroupMessage(botQqUin, groupId, `毕业去向 #${result.graduation.displayId} 已拒绝`);
+        this.notifyGraduationReviewed(result.graduation.id, "rejected", comment).catch(() => undefined);
         return;
       }
 

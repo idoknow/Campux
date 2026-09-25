@@ -1117,6 +1117,8 @@ export function AdminPage({
                   setMemberPage(page);
                   writeQueryParams({ member_page: page > 1 ? page : null, page: null });
                 }}
+                currentUserId={currentUserId}
+                enableBroadcast={metadata.enableBroadcast}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
                 onRoleChange={(member, role) => void updateMemberRole(member, role)}
@@ -1362,6 +1364,8 @@ function UsersPanel({
   form,
   busy,
   loading,
+  currentUserId,
+  enableBroadcast,
   onKeywordChange,
   onRoleFilterChange,
   onSortChange,
@@ -1381,6 +1385,8 @@ function UsersPanel({
   form: MemberForm;
   busy: boolean;
   loading: boolean;
+  currentUserId: string;
+  enableBroadcast: boolean;
   onKeywordChange: (value: string) => void;
   onRoleFilterChange: (value: "all" | TenantRole) => void;
   onSortChange: (value: MemberSort) => void;
@@ -1412,7 +1418,7 @@ function UsersPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
-              <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem>
+              {enableBroadcast ? <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem> : null}
               <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
               <SelectItem value="admin">{roleLabels.admin}</SelectItem>
             </SelectContent>
@@ -1480,13 +1486,17 @@ function UsersPanel({
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {member.user.systemRole === "operations_admin" && currentUserId !== member.user.id ? (
+                  <Badge variant="outline" title="运营管理员的墙内管理员身份受平台保护，只有系统运维或本人可以变更">运营管理员</Badge>
+                ) : null}
                 <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                  <Select value={member.role} onValueChange={(role) => onRoleChange(member, role as TenantRole)}>
+                  <Select value={member.role} onValueChange={(role) => onRoleChange(member, role as TenantRole)} disabled={member.user.systemRole === "operations_admin" && currentUserId !== member.user.id}>
                     <SelectTrigger className="bg-white font-bold">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                      {enableBroadcast || member.role === "broadcaster" ? <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem> : null}
                       <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
                       <SelectItem value="admin">{roleLabels.admin}</SelectItem>
                     </SelectContent>

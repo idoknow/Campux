@@ -150,6 +150,8 @@ export type TenantMetadata = {
   broadcastQuickPresets: Array<{ label: string; minutes: number }>;
   enableFeedback: boolean;
   enableBotAlert: boolean;
+  /** 毕业去向插件是否启用；关闭时投稿页顶部胶囊与服务页入口隐藏 */
+  enableGraduation: boolean;
 };
 
 export type BotMessageTypeConfig = {
@@ -230,6 +232,10 @@ export type TenantPluginConfig = {
     smtpPass: string;
     fromEmail: string;
     toEmails: string[];
+  };
+  /** 毕业去向插件：开关 */
+  graduation: {
+    enabled: boolean;
   };
 };
 

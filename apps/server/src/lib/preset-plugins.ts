@@ -23,6 +23,7 @@ export type PresetPluginId =
   | "broadcast"
   | "feedback"
   | "botAlert";
+  | "graduation";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -126,6 +127,13 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "tenant:data"],
     riskLevel: "medium",
     rationale: "开启后检测到 QZone 登录态失效且自动刷新失败时，向配置的邮箱发送通知；需读写插件配置与租户数据。",
+    id: "graduation",
+    name: "campux-plugin-graduation",
+    version: "1.0.0",
+    description: "毕业去向：投稿页填写届/级与学历，提交毕业去向，审核通过后进入服务页四视图统计",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页与服务页新增毕业去向入口；毕业信息（届/级/学历/去向）与作者 QQ 关联，仅供审核员统计查阅。",
   },
 ];
 

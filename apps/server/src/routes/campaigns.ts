@@ -319,7 +319,16 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
       });
       const used = totalVoted._sum.count ?? 0;
       if (used + body.count > campaign.votesPerPerson) {
-        throw { status: 409, message: `你本竞选最多共投 ${campaign.votesPerPerson} 票` };
+        throw { statusCode: 409, message: `你本竞选最多共投 ${campaign.votesPerPerson} 票` };
+      }
+      // 未开启叠加时：同一选项最多 1 票（与详情页文案一致）
+      if (!campaign.allowStackOnOption) {
+        if (existing) {
+          throw { statusCode: 409, message: "该竞选每个选项最多投 1 票" };
+        }
+        if (body.count > 1) {
+          throw { statusCode: 409, message: "该竞选未开启同一选项叠加，请逐个选项各投 1 票" };
+        }
       }
       await transaction.campaignOption.update({ where: { id: option.id }, data: { voteTotal: { increment: body.count } } });
       if (existing) {
@@ -425,9 +434,10 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
 }
 
 function statusOf(error: unknown): number {
-  if (error && typeof error === "object" && "status" in error) {
-    const status = (error as { status?: unknown }).status;
-    if (typeof status === "number" && Number.isFinite(status)) return status;
+  if (error && typeof error === "object") {
+    const record = error as { status?: unknown; statusCode?: unknown };
+    const candidate = typeof record.statusCode === "number" ? record.statusCode : record.status;
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
   }
   return 400;
 }

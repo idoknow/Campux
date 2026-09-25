@@ -153,6 +153,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     broadcastQuickPresets: [] as Array<{ label: string; minutes: number }>,
     enableFeedback: false,
     enableBotAlert: false,
+    enableGraduation: false,
   };
 }
 
@@ -245,6 +246,8 @@ async function readPublicMetadata(tenantId: string) {
     metadata.enableFeedback = pluginConfig.feedback.enabled;
     // Bot 异常通知：仅暴露启用状态给管理端。
     metadata.enableBotAlert = pluginConfig.botAlert.enabled;
+    // 毕业去向：未启用时投稿页顶部胶囊与服务页入口隐藏。
+    metadata.enableGraduation = pluginConfig.graduation.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }
