@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   LastTenantAdminRemovalError,
+  OperationsAdminAdminRoleProtectedError,
   TenantAdminRequiredError,
   TransactionSerializationRetriesExhaustedError,
   assertTenantActivationAllowed,
+  assertTenantAdminMembershipRemovalAllowed,
+  assertTenantAdminRoleChangeAllowed,
   assertTenantMembershipRemovalAllowed,
   assertTenantMembershipRoleChangeAllowed,
   buildTenantAdminUserIds,
@@ -94,6 +97,83 @@ describe("assertTenantMembershipRoleChangeAllowed", () => {
       currentRole: "admin",
       nextRole: "admin",
       adminCount: 1,
+    })).not.toThrow();
+  });
+});
+
+describe("assertTenantAdminRoleChangeAllowed / assertTenantAdminMembershipRemovalAllowed", () => {
+  const base = {
+    actorUserId: "actor-1",
+    targetUserId: "ops-admin-1",
+    targetSystemRole: "operations_admin" as const,
+    adminCount: 2,
+  };
+
+  test("rejects a peer admin demoting an operations admin", () => {
+    expect(() => assertTenantAdminRoleChangeAllowed({
+      ...base,
+      actorSystemRole: null,
+      currentRole: "admin",
+      nextRole: "submitter",
+    })).toThrow(OperationsAdminAdminRoleProtectedError);
+    expect(() => assertTenantAdminMembershipRemovalAllowed({
+      ...base,
+      actorSystemRole: null,
+      role: "admin",
+    })).toThrow(OperationsAdminAdminRoleProtectedError);
+  });
+
+  test("rejects another operations admin demoting an operations admin", () => {
+    expect(() => assertTenantAdminRoleChangeAllowed({
+      ...base,
+      actorSystemRole: "operations_admin",
+      currentRole: "admin",
+      nextRole: "submitter",
+    })).toThrow(OperationsAdminAdminRoleProtectedError);
+  });
+
+  test("allows a system operator to demote or remove an operations admin", () => {
+    expect(() => assertTenantAdminRoleChangeAllowed({
+      ...base,
+      actorSystemRole: "system_operator",
+      currentRole: "admin",
+      nextRole: "submitter",
+    })).not.toThrow();
+    expect(() => assertTenantAdminMembershipRemovalAllowed({
+      ...base,
+      actorSystemRole: "system_operator",
+      role: "admin",
+    })).not.toThrow();
+  });
+
+  test("allows the operations admin to change their own admin membership", () => {
+    expect(() => assertTenantAdminRoleChangeAllowed({
+      ...base,
+      actorUserId: "ops-admin-1",
+      actorSystemRole: "operations_admin",
+      currentRole: "admin",
+      nextRole: "submitter",
+    })).not.toThrow();
+  });
+
+  test("still rejects demoting the last admin regardless of platform identity", () => {
+    expect(() => assertTenantAdminRoleChangeAllowed({
+      ...base,
+      adminCount: 1,
+      actorSystemRole: "system_operator",
+      currentRole: "admin",
+      nextRole: "submitter",
+    })).toThrow(LastTenantAdminRemovalError);
+  });
+
+  test("allows peer admins to demote non-operations-admin members", () => {
+    expect(() => assertTenantAdminRoleChangeAllowed({
+      ...base,
+      targetUserId: "plain-admin-1",
+      targetSystemRole: null,
+      actorSystemRole: null,
+      currentRole: "admin",
+      nextRole: "submitter",
     })).not.toThrow();
   });
 });

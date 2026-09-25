@@ -38,6 +38,9 @@ export function tenantAdminInvariantErrorResponse(error: unknown) {
   if (error instanceof TransactionSerializationRetriesExhaustedError) {
     return { statusCode: 409 as const, code: "TENANT_ADMIN_CONCURRENT_UPDATE", message: error.message };
   }
+  if (error instanceof OperationsAdminAdminRoleProtectedError) {
+    return { statusCode: 403 as const, code: "OPERATIONS_ADMIN_PROTECTED", message: error.message };
+  }
   return null;
 }
 
@@ -75,6 +78,60 @@ export function assertTenantMembershipRoleChangeAllowed(options: {
 }) {
   if (options.currentRole === "admin" && options.nextRole !== "admin") {
     assertTenantMembershipRemovalAllowed({ role: options.currentRole, adminCount: options.adminCount });
+  }
+}
+
+export const OPERATIONS_ADMIN_ADMIN_ROLE_PROTECTED_MESSAGE = "运营管理员在该校园墙内的管理员身份受平台保护，只有系统运维或本人可以变更";
+
+export class OperationsAdminAdminRoleProtectedError extends Error {
+  constructor() {
+    super(OPERATIONS_ADMIN_ADMIN_ROLE_PROTECTED_MESSAGE);
+    this.name = "OperationsAdminAdminRoleProtectedError";
+  }
+}
+
+function isProtectedOperationsAdminDemotion(options: {
+  actorSystemRole: string | null;
+  actorUserId: string;
+  targetUserId: string;
+  targetSystemRole: string | null;
+}) {
+  return (
+    options.targetSystemRole === "operations_admin" &&
+    options.actorSystemRole !== "system_operator" &&
+    options.actorUserId !== options.targetUserId
+  );
+}
+
+export function assertTenantAdminRoleChangeAllowed(options: {
+  actorSystemRole: string | null;
+  actorUserId: string;
+  targetUserId: string;
+  targetSystemRole: string | null;
+  currentRole: TenantRole;
+  nextRole: TenantRole;
+  adminCount: number;
+}) {
+  const demotingAdmin = options.currentRole === "admin" && options.nextRole !== "admin";
+  if (demotingAdmin) {
+    assertTenantMembershipRemovalAllowed({ role: options.currentRole, adminCount: options.adminCount });
+  }
+  if (demotingAdmin && isProtectedOperationsAdminDemotion(options)) {
+    throw new OperationsAdminAdminRoleProtectedError();
+  }
+}
+
+export function assertTenantAdminMembershipRemovalAllowed(options: {
+  actorSystemRole: string | null;
+  actorUserId: string;
+  targetUserId: string;
+  targetSystemRole: string | null;
+  role: TenantRole;
+  adminCount: number;
+}) {
+  assertTenantMembershipRemovalAllowed({ role: options.role, adminCount: options.adminCount });
+  if (options.role === "admin" && isProtectedOperationsAdminDemotion(options)) {
+    throw new OperationsAdminAdminRoleProtectedError();
   }
 }
 

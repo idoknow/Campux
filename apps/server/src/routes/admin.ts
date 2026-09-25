@@ -4,7 +4,7 @@ import { Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import {
-  assertTenantMembershipRoleChangeAllowed,
+  assertTenantAdminRoleChangeAllowed,
   isTransactionSerializationFailure,
   retryTransactionSerializationFailures,
   tenantAdminInvariantErrorResponse,
@@ -375,7 +375,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
             const adminCount = await tx.tenantMembership.count({
               where: { tenantId: context.selectedTenant.id, role: "admin" },
             });
-            assertTenantMembershipRoleChangeAllowed({
+            assertTenantAdminRoleChangeAllowed({
+              actorSystemRole: context.user.systemRole,
+              actorUserId: context.user.id,
+              targetUserId: user.id,
+              targetSystemRole: user.systemRole,
               currentRole: existingMembership.role,
               nextRole: body.role,
               adminCount,
@@ -442,6 +446,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
               id: params.id,
               tenantId: context.selectedTenant.id,
             },
+            include: { user: true },
           });
           if (!member) {
             return null;
@@ -451,7 +456,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
             const adminCount = await tx.tenantMembership.count({
               where: { tenantId: context.selectedTenant.id, role: "admin" },
             });
-            assertTenantMembershipRoleChangeAllowed({
+            assertTenantAdminRoleChangeAllowed({
+              actorSystemRole: context.user.systemRole,
+              actorUserId: context.user.id,
+              targetUserId: member.user.id,
+              targetSystemRole: member.user.systemRole,
               currentRole: member.role,
               nextRole: body.role,
               adminCount,

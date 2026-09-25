@@ -7,8 +7,8 @@ import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import {
   assertTenantActivationAllowed,
-  assertTenantMembershipRemovalAllowed,
-  assertTenantMembershipRoleChangeAllowed,
+  assertTenantAdminMembershipRemovalAllowed,
+  assertTenantAdminRoleChangeAllowed,
   buildTenantAdminUserIds,
   isTransactionSerializationFailure,
   retryTransactionSerializationFailures,
@@ -888,7 +888,11 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             const adminCount = await tx.tenantMembership.count({
               where: { tenantId: tenant.id, role: "admin" },
             });
-            assertTenantMembershipRoleChangeAllowed({
+            assertTenantAdminRoleChangeAllowed({
+              actorSystemRole: context.user.systemRole,
+              actorUserId: context.user.id,
+              targetUserId: user.id,
+              targetSystemRole: user.systemRole,
               currentRole: existingMembership.role,
               nextRole: tenantRole,
               adminCount,
@@ -971,7 +975,11 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             const adminCount = await tx.tenantMembership.count({
               where: { tenantId: existingMembership.tenantId, role: "admin" },
             });
-            assertTenantMembershipRemovalAllowed({
+            assertTenantAdminMembershipRemovalAllowed({
+              actorSystemRole: context.user.systemRole,
+              actorUserId: context.user.id,
+              targetUserId: existingMembership.user.id,
+              targetSystemRole: existingMembership.user.systemRole,
               role: existingMembership.role,
               adminCount,
             });
