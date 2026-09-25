@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS, IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB, isDefaultFont } from "@campux/domain";
-import { ChevronDownIcon, ImagePlusIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { ChevronDownIcon, ImagePlusIcon, LightbulbIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { canAcceptAttachmentSelection } from "@/lib/attachment-upload-state";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
@@ -62,6 +64,9 @@ export function PostPage({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [attachmentToRemove, setAttachmentToRemove] = useState<PendingAttachment | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const svgAvatars = metadata.availableAvatars.length > 0
     ? metadata.availableAvatars
     : (builtInSvgAvatarFilenames ?? []).map((filename) => ({ id: filename, svg: `/api/svg/${encodeURIComponent(filename)}`, label: filename.replace(/\.svg$/, "") }));
@@ -115,9 +120,52 @@ export function PostPage({
     onSubmit();
   }
 
+  async function submitFeedback() {
+    const content = feedbackText.trim();
+    if (!content) {
+      toast.error("请输入反馈内容");
+      return;
+    }
+    setFeedbackBusy(true);
+    try {
+      const result = await api<{ ok: boolean; id?: string; message?: string }>("/api/feedback", {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      if (result.message) {
+        toast.warning(result.message);
+      } else {
+        toast.success("意见已提交，会尽快在审核群处理");
+      }
+      setFeedbackText("");
+      setFeedbackOpen(false);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "提交失败，请稍后再试");
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto px-4 py-4 pb-24 md:pb-6">
       {loading ? <LoadingBlock title="正在加载校园墙配置..." /> : null}
+      {metadata.enableFeedback ? (
+        <div className="mb-3">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-sky-300 bg-sky-100 px-3 py-2.5 text-left text-sm text-slate-900 transition hover:border-sky-400 hover:bg-sky-200/70 dark:border-sky-500/60 dark:bg-sky-950/80 dark:text-sky-100 dark:hover:bg-sky-900"
+            onClick={() => setFeedbackOpen(true)}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <LightbulbIcon className="size-4 shrink-0 text-sky-700 dark:text-sky-300" strokeWidth={2.3} />
+              <span className="min-w-0 truncate font-bold tracking-wide">意见反馈</span>
+            </span>
+            <span className="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-200">
+              提建议
+            </span>
+          </button>
+        </div>
+      ) : null}
       {metadata.banner ? (
         <div className="mb-3 flex min-h-9 items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900">
           <MegaphoneIcon className="mt-0.5 size-4 shrink-0" strokeWidth={2.3} />
@@ -450,6 +498,41 @@ export function PostPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {metadata.enableFeedback ? (
+        <Dialog open={feedbackOpen} onOpenChange={(open) => {
+          if (!feedbackBusy) {
+            setFeedbackOpen(open);
+          }
+        }}>
+          <DialogContent className="w-[min(420px,calc(100vw-32px))]">
+            <DialogHeader>
+              <DialogTitle>意见反馈</DialogTitle>
+              <DialogDescription>对校园墙的建议或问题会发送到审核群，与稿件投稿分开处理。</DialogDescription>
+            </DialogHeader>
+            <div className="px-5">
+              <Textarea
+                value={feedbackText}
+                maxLength={500}
+                placeholder="例如：希望增加匿名投稿入口 / 某个功能不好用…"
+                className="min-h-28 resize-none"
+                disabled={feedbackBusy}
+                onChange={(event) => setFeedbackText(event.target.value)}
+              />
+              <p className="mt-1 text-right text-xs text-slate-400">{feedbackText.length}/500</p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" disabled={feedbackBusy} onClick={() => setFeedbackOpen(false)}>
+                取消
+              </Button>
+              <Button disabled={feedbackBusy || feedbackText.trim().length === 0} onClick={() => void submitFeedback()}>
+                {feedbackBusy ? <LoaderIcon className="animate-spin" data-icon="inline-start" /> : null}
+                提交意见
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
       </>
       )}
     </div>

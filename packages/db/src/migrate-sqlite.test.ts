@@ -32,10 +32,12 @@ describe("applySqliteBaseline", () => {
     const dbPath = join(dir, "test.db");
     const url = `file:${dbPath}`;
     try {
-      // first run applies
+      // first run applies baseline; incremental names that are already embedded
+      // in a fresh product baseline are recorded as skipped.
       const r1 = applySqliteBaseline(BASELINE, url, silentLogger);
       expect(r1.applied).toEqual(["0_sqlite_baseline"]);
-      expect(r1.skipped).toEqual([]);
+      expect(r1.skipped).toContain("20260909000000_add_personal_qq_token");
+      expect(r1.skipped).toContain("20260913120000_add_campaign_tables_sqlite");
 
       // tables exist
       const db = new Database(dbPath);
@@ -46,19 +48,22 @@ describe("applySqliteBaseline", () => {
       expect(tables).toContain("Gadget");
       expect(tables).toContain("_prisma_migrations");
 
-      // bookkeeping recorded with a checksum
+      // bookkeeping: baseline row plus embedded incremental migration names
       const mig = db
         .query(`SELECT migration_name, checksum FROM "_prisma_migrations"`)
         .all() as Array<{ migration_name: string; checksum: string }>;
-      expect(mig).toHaveLength(1);
-      expect(mig[0]!.migration_name).toBe("0_sqlite_baseline");
-      expect(mig[0]!.checksum).toMatch(/^[0-9a-f]{64}$/);
+      const baselineRow = mig.find((row) => row.migration_name === "0_sqlite_baseline");
+      expect(baselineRow).toBeTruthy();
+      expect(baselineRow!.checksum).toMatch(/^[0-9a-f]{64}$/);
+      // 0_sqlite_baseline + 10 embedded migration names
+      expect(mig).toHaveLength(11);
+      expect(new Set(mig.map((row) => row.migration_name)).size).toBe(mig.length);
       db.close();
 
       // second run skips (idempotent)
       const r2 = applySqliteBaseline(BASELINE, url, silentLogger);
       expect(r2.applied).toEqual([]);
-      expect(r2.skipped).toEqual(["0_sqlite_baseline"]);
+      expect(r2.skipped).toContain("0_sqlite_baseline");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

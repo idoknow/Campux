@@ -151,6 +151,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableAggregateLogin: false,
     enableBroadcast: false,
     broadcastQuickPresets: [] as Array<{ label: string; minutes: number }>,
+    enableFeedback: false,
+    enableBotAlert: false,
   };
 }
 
@@ -239,6 +241,10 @@ async function readPublicMetadata(tenantId: string) {
     metadata.broadcastQuickPresets = pluginConfig.broadcast.enabled
       ? pluginConfig.broadcast.quickPresets.map((preset) => ({ ...preset }))
       : [];
+    // 意见反馈：未启用时投稿页顶部入口隐藏。
+    metadata.enableFeedback = pluginConfig.feedback.enabled;
+    // Bot 异常通知：仅暴露启用状态给管理端。
+    // Bot 异常通知：仅暴露启用状态给管理端。
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

@@ -362,6 +362,22 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     try {
       member = await retryTransactionSerializationFailures(
         () => prisma.$transaction(async (tx) => {
+          // Hierarchy: system_operator > operations_admin > tenant admin.
+          // A tenant admin must not demote/modify a user with a higher system role.
+          const targetSystemRole = user.systemRole;
+          const actorSystemRole = context.user.systemRole;
+          const systemRank: Record<string, number> = {
+            system_operator: 3,
+            operations_admin: 2,
+          };
+          const targetRank = systemRank[targetSystemRole ?? ""] ?? 0;
+          const actorRank = systemRank[actorSystemRole ?? ""] ?? 0;
+          if (targetRank > actorRank) {
+            return reply.code(403).send({
+              message: "权限不足：无法修改比自己级别更高的成员",
+            });
+          }
+
           const existingMembership = await tx.tenantMembership.findUnique({
             where: {
               tenantId_userId: {
@@ -442,9 +458,26 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
               id: params.id,
               tenantId: context.selectedTenant.id,
             },
+            include: { user: true },
           });
           if (!member) {
             return null;
+          }
+
+          // Hierarchy: system_operator > operations_admin > tenant admin.
+          // A tenant admin must not demote/remove a user with a higher system role.
+          const targetSystemRole = member.user.systemRole;
+          const actorSystemRole = context.user.systemRole;
+          const systemRank: Record<string, number> = {
+            system_operator: 3,
+            operations_admin: 2,
+          };
+          const targetRank = systemRank[targetSystemRole ?? ""] ?? 0;
+          const actorRank = systemRank[actorSystemRole ?? ""] ?? 0;
+          if (targetRank > actorRank) {
+            return reply.code(403).send({
+              message: "权限不足：无法修改比自己级别更高的成员",
+            });
           }
 
           if (member.role === "admin" && body.role !== "admin") {

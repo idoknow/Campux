@@ -18,8 +18,14 @@ export function resolveEffectiveTenantMembership(options: {
   tenantId: string;
   memberships: TenantAccessMembership[];
 }): TenantAccessMembership | SyntheticSystemOperatorMembership | null {
+  // System operators always get synthetic admin access to any wall,
+  // regardless of whether they have a real (possibly lower-role) membership.
+  const synthetic = syntheticSystemOperatorMembership(options.userId, options.tenantId, options.systemRole);
+  if (synthetic) {
+    return synthetic;
+  }
   return options.memberships.find((membership) => membership.tenantId === options.tenantId)
-    ?? syntheticSystemOperatorMembership(options.userId, options.tenantId, options.systemRole);
+    ?? null;
 }
 
 export function syntheticSystemOperatorMembership(userId: string, tenantId: string, systemRole: SystemRole | null): SyntheticSystemOperatorMembership | null {

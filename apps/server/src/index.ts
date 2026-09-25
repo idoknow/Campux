@@ -44,6 +44,8 @@ import { registerSvgRoutes } from "./routes/svg";
 import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
 import { registerPluginRoutes } from "./routes/plugins";
+import { registerFeedbackRoutes } from "./routes/feedback";
+import { registerBotAlertTestRoutes } from "./routes/bot-alert-test";
 import { runDatabaseMigrations } from "./lib/migrations";
 import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
 import { registerTenantLifecycleScheduler } from "./runtime/tenant-lifecycle";
@@ -129,6 +131,8 @@ registerSvgRoutes(app);
 registerStatsRoutes(app);
 registerSystemRoutes(app, queue, config, oneBot);
 registerPluginRoutes(app, pluginRegistry);
+registerFeedbackRoutes(app, oneBot);
+registerBotAlertTestRoutes(app);
 
 // 通知所有插件路由已注册完毕
 await pluginRegistry.readyAll();

@@ -246,6 +246,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["botStylishMessages", before.botStylishMessages, saved.botStylishMessages],
       ["aggregateLogin", before.aggregateLogin, saved.aggregateLogin],
       ["broadcast", before.broadcast, saved.broadcast],
+      ["feedback", before.feedback, saved.feedback],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {

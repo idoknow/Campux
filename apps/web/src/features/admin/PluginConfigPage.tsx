@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { BroadcastIcon } from "../broadcast/BroadcastIcon";
 
 type PluginIconProps = { className?: string };
@@ -85,7 +86,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -152,6 +153,8 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   campaigns: "campux-plugin-campaigns",
   aggregateLogin: "campux-plugin-aggregate-login",
   broadcast: "campux-plugin-broadcast",
+  feedback: "campux-plugin-feedback",
+  botAlert: "campux-plugin-bot-alert",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -168,6 +171,99 @@ const PERMISSION_LABELS: Record<PluginPermission, string> = {
   "tenant:data": "访问租户数据",
   "user:data": "访问用户数据",
 };
+
+function FeedbackIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <path d="M128 192c0-35.3 28.7-64 64-64h640c35.3 0 64 28.7 64 64v448c0 35.3-28.7 64-64 64H384l-160 128V704H192c-35.3 0-64-28.7-64-64V192z" fill="#7DD3FC" />
+      <path d="M320 352h384v64H320v-64zm0 128h256v64H320v-64z" fill="#0369A1" opacity=".85" />
+    </svg>
+  );
+}
+
+function FeedbackPanel() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，投稿页最上方会出现「意见反馈」入口。意见会先保存；墙号在线且已开启审核群通知时会同步到审核群，否则仅保存并提示通知失败。
+      </div>
+    </div>
+  );
+}
+
+function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  const alert = config.botAlert;
+  const set = (patch: Partial<TenantPluginConfig["botAlert"]>) => {
+    onChange({ ...config, botAlert: { ...alert, ...patch } });
+  };
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，当 QZone 登录态失效且自动刷新失败时，向收件邮箱发送异常通知。请先配置 SMTP 服务器与收件邮箱。
+      </div>
+      <div className="grid gap-3">
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          SMTP 服务器
+          <Input value={alert.smtpHost} disabled={busy} placeholder="smtp.example.com" onChange={(e) => set({ smtpHost: e.target.value })} />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          SMTP 端口
+          <Input type="number" value={alert.smtpPort} disabled={busy} onChange={(e) => set({ smtpPort: Number(e.target.value) || 465 })} />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          发件邮箱
+          <Input value={alert.fromEmail} disabled={busy} placeholder="bot@example.com" onChange={(e) => set({ fromEmail: e.target.value })} />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          邮箱账号
+          <Input value={alert.smtpUser} disabled={busy} onChange={(e) => set({ smtpUser: e.target.value })} />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          邮箱密码/授权码
+          <Input type="password" value={alert.smtpPass} disabled={busy} onChange={(e) => set({ smtpPass: e.target.value })} />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          收件邮箱（多个用逗号分隔，最多 20 个）
+          <Textarea
+            value={alert.toEmails.join(",")}
+            disabled={busy}
+            placeholder="admin1@example.com, admin2@example.com"
+            className="min-h-16"
+            onChange={(e) => set({ toEmails: e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20) })}
+          />
+        </label>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !alert.smtpHost || !alert.smtpUser || !alert.smtpPass || !alert.fromEmail || alert.toEmails.length === 0}
+            onClick={async () => {
+              try {
+                const res = await api<{ ok: boolean; message: string }>("/api/admin/plugins/bot-alert/test", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    smtpHost: alert.smtpHost,
+                    smtpPort: alert.smtpPort,
+                    smtpUser: alert.smtpUser,
+                    smtpPass: alert.smtpPass,
+                    fromEmail: alert.fromEmail,
+                    toEmails: alert.toEmails,
+                  }),
+                });
+                toast.success(res.message || "测试邮件已发送");
+              } catch (caught) {
+                toast.error(caught instanceof Error ? caught.message : "测试发送失败");
+              }
+            }}
+          >
+            发送测试邮件
+          </Button>
+          <span className="text-xs text-slate-400">发送一封标题为「测试」的邮件验证配置</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function MarkdownRenderPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
@@ -920,6 +1016,46 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, broadcast: { ...config.broadcast, enabled: value } }),
     render: (config, onChange, busy) => <BroadcastPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "feedback" as const,
+    icon: FeedbackIcon,
+    name: "意见反馈",
+    tagline: "Feedback",
+    description: "投稿页顶部意见反馈入口，提交后通知审核群",
+    detailedDescription: "开启后投稿页最上方出现意见反馈入口。意见先保存到站点，墙号在线且已开启审核群通知时同步到审核群。通知失败时意见仍已保存。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "开启即可用；通知发到审核群。",
+    accent: "from-sky-500 to-cyan-500",
+    bgTint: "bg-sky-50 text-sky-700",
+    role: "admin" as const,
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium" as const,
+    rationale: "开启后用户可提交文字意见并通知审核群。",
+    enabled: (config: TenantPluginConfig) => config.feedback.enabled,
+    setEnabled: (config: TenantPluginConfig, value: boolean) => ({ ...config, feedback: { ...config.feedback, enabled: value } }),
+    render: () => null,
+  },
+  {
+    id: "botAlert" as const,
+    icon: BotIcon,
+    name: "Bot 异常通知",
+    tagline: "Alert",
+    description: "登录态失效自动刷新失败时，邮件通知管理员",
+    detailedDescription: "开启后，当 QZone 登录态失效且自动刷新失败时，向配置的邮箱发送异常通知。管理员可配置 SMTP 服务器、端口、发件邮箱、密码，以及多个收件邮箱。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "配置 SMTP 后开启即可用。",
+    accent: "from-rose-500 to-orange-500",
+    bgTint: "bg-rose-50 text-rose-700",
+    role: "admin" as const,
+    required: ["config:read", "db:read", "db:write", "tenant:data"],
+    riskLevel: "medium" as const,
+    rationale: "开启后登录态失效自动刷新失败时邮件通知管理员；需读写插件配置与租户数据。",
+    enabled: (config: TenantPluginConfig) => config.botAlert.enabled,
+    setEnabled: (config: TenantPluginConfig, value: boolean) => ({ ...config, botAlert: { ...config.botAlert, enabled: value } }),
+    render: (config: TenantPluginConfig, onChange: (next: TenantPluginConfig) => void, busy: boolean) => (
+      <BotAlertPanel config={config} onChange={onChange} busy={busy} />
+    ),
+  },
 ];
 
 /**
@@ -999,6 +1135,18 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     broadcast: {
       enabled: false,
       quickPresets: [],
+    },
+    feedback: {
+      enabled: metadata.enableFeedback ?? false,
+    },
+    botAlert: {
+      enabled: metadata.enableBotAlert ?? false,
+      smtpHost: "",
+      smtpPort: 465,
+      smtpUser: "",
+      smtpPass: "",
+      fromEmail: "",
+      toEmails: [],
     },
   };
 }
