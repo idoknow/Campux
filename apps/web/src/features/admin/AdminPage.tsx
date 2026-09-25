@@ -1118,6 +1118,7 @@ export function AdminPage({
                   writeQueryParams({ member_page: page > 1 ? page : null, page: null });
                 }}
                 currentUserId={currentUserId}
+                enableBroadcast={metadata.enableBroadcast}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
                 onRoleChange={(member, role) => void updateMemberRole(member, role)}
@@ -1364,6 +1365,7 @@ function UsersPanel({
   busy,
   loading,
   currentUserId,
+  enableBroadcast,
   onKeywordChange,
   onRoleFilterChange,
   onSortChange,
@@ -1384,6 +1386,7 @@ function UsersPanel({
   busy: boolean;
   loading: boolean;
   currentUserId: string;
+  enableBroadcast: boolean;
   onKeywordChange: (value: string) => void;
   onRoleFilterChange: (value: "all" | TenantRole) => void;
   onSortChange: (value: MemberSort) => void;
@@ -1415,7 +1418,7 @@ function UsersPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
-              <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem>
+              {enableBroadcast ? <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem> : null}
               <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
               <SelectItem value="admin">{roleLabels.admin}</SelectItem>
             </SelectContent>
@@ -1493,6 +1496,7 @@ function UsersPanel({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="submitter">{roleLabels.submitter}</SelectItem>
+                      {enableBroadcast || member.role === "broadcaster" ? <SelectItem value="broadcaster">{roleLabels.broadcaster}</SelectItem> : null}
                       <SelectItem value="reviewer">{roleLabels.reviewer}</SelectItem>
                       <SelectItem value="admin">{roleLabels.admin}</SelectItem>
                     </SelectContent>
