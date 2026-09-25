@@ -14,6 +14,7 @@ import {
   restoreBotAlertPass,
   maskBotAlertSection,
   maskBotAlertPass,
+  BOT_ALERT_PASS_MASK,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
 import { z } from "zod";
@@ -246,6 +247,16 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       return reply.code(400).send({ message: "插件配置格式不正确" });
     }
     const before = await readTenantPluginConfig(prisma, context.selectedTenant.id);
+    // 提交的 smtpPass 仍是掩码时，只允许在 SMTP 连接信息（host/port/user）不变的情况下
+    // 沿用库中密码；否则拒绝保存，避免把已存储的凭证配到新的服务器/账号上。
+    if (
+      parsed.data.botAlert.smtpPass === BOT_ALERT_PASS_MASK &&
+      (parsed.data.botAlert.smtpHost !== before.botAlert.smtpHost ||
+        parsed.data.botAlert.smtpPort !== before.botAlert.smtpPort ||
+        parsed.data.botAlert.smtpUser !== before.botAlert.smtpUser)
+    ) {
+      return reply.code(400).send({ message: "SMTP 服务器信息已修改，请重新输入 SMTP 授权码" });
+    }
     // 聚合登录 AppKey 若仍是掩码占位符则保留库中原值，避免把占位符写回导致凭证失效。
     const toSave = restoreBotAlertPass(restoreAggregateAppKey(parsed.data, before), before);
     const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, toSave);

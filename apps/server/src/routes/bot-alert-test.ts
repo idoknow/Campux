@@ -24,6 +24,15 @@ export function registerBotAlertTestRoutes(app: FastifyInstance) {
     let smtpPass = body.smtpPass;
     if (smtpPass === BOT_ALERT_PASS_MASK) {
       const stored = await readTenantPluginConfig(prisma, context.selectedTenant.id);
+      // 掩码密码只允许配对已保存的 SMTP 连接信息；请求改了 host/port/user 时拒绝，
+      // 避免把已存储的授权码发送到别的服务器。
+      if (
+        body.smtpHost !== stored.botAlert.smtpHost ||
+        body.smtpPort !== stored.botAlert.smtpPort ||
+        body.smtpUser !== stored.botAlert.smtpUser
+      ) {
+        return reply.code(400).send({ message: "SMTP 服务器信息与已保存配置不一致，请输入新的 SMTP 授权码" });
+      }
       smtpPass = stored.botAlert.smtpPass;
     }
 
