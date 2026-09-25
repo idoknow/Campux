@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
@@ -93,6 +93,15 @@ export function ServicesPage({
   const { accountServices, campusServices } = buildServiceEntries(metadata.services);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
+  const panelsRef = useRef<HTMLDivElement>(null);
+
+  // 账户设置/第三方登录的按钮点击后，对应面板渲染在页面底部；
+  // 自动平滑滚动过去，避免面板出现在视口外。
+  useEffect(() => {
+    if (activeAction) {
+      panelsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [activeAction]);
 
   if (campaignRoute && campaignRoute.view === "detail") {
     return (
@@ -260,10 +269,12 @@ export function ServicesPage({
           </ServiceGroup>
         </section>
 
-        {activeAction === "profile" ? <ProfilePanel me={me} onSaved={onProfileSaved} /> : null}
-        {activeAction === "password" ? <PasswordPanel onDone={(message) => toast.success(message)} /> : null}
-        {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
-        {activeAction === "oauth-bindings" ? <OAuthBindingsPanel /> : null}
+        <div ref={panelsRef}>
+          {activeAction === "profile" ? <ProfilePanel me={me} onSaved={onProfileSaved} /> : null}
+          {activeAction === "password" ? <PasswordPanel onDone={(message) => toast.success(message)} /> : null}
+          {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
+          {activeAction === "oauth-bindings" ? <OAuthBindingsPanel /> : null}
+        </div>
       </div>
     </div>
   );
