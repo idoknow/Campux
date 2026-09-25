@@ -2622,7 +2622,9 @@ export class OneBotRuntime {
       orderBy: { createdAt: "asc" },
     });
     const authorName = record.author.displayName ?? record.author.qqUin.toString();
-    const text = `毕业去向 #${record.displayId} 待审核：${authorName} 提交 ${record.graduationYear} 届（${record.classYear} 级）· ${record.education} · ${record.destination}。可用 #毕业通过 ${record.displayId} 或 #毕业拒绝 <理由> ${record.displayId} 处理。`;
+    // 用户可控字段先转义 CQ 码并压平换行，防止注入 [CQ:...] 段或伪造指令行。
+    const singleLine = (value: string) => escapeCqCode(value).replace(/\r?\n/g, " ");
+    const text = `毕业去向 #${record.displayId} 待审核：${singleLine(authorName)} 提交 ${record.graduationYear} 届（${record.classYear} 级）· ${singleLine(record.education)} · ${singleLine(record.destination)}。可用 #毕业通过 ${record.displayId} 或 #毕业拒绝 <理由> ${record.displayId} 处理。`;
     for (const bot of bots) {
       if (!bot.reviewGroupId) continue;
       const status = this.getBotConnectionStatus(bot.qqUin.toString());

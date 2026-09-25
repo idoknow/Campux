@@ -164,11 +164,15 @@ export function registerGraduationRoutes(app: FastifyInstance, _config: unknown,
   });
 
   // 用户列表视图：全部/待审核；只列已通过的用于毕业生名单。
+  // 非审核员一律只返回已通过记录，避免普通成员读取他人待审/驳回记录及作者身份。
   app.get("/api/graduations", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
     const query = listQuerySchema.parse(request.query);
+    const isReviewer = hasTenantRole(context.selectedMembership.role, "reviewer");
     const where: Record<string, unknown> = { tenantId: context.selectedTenant.id };
-    if (query.onlyApproved === "true") where.status = "approved";
+    if (!isReviewer) {
+      where.status = "approved";
+    } else if (query.onlyApproved === "true") where.status = "approved";
     else if (query.onlyApproved === "false") where.status = "pending_approval";
     else if (query.filter === "pending") where.status = "pending_approval";
     else where.status = "approved"; // 「all」视图默认看已通过记录
@@ -237,30 +241,41 @@ export function registerGraduationRoutes(app: FastifyInstance, _config: unknown,
       baseWhere[query.yearType] = query.year;
     }
 
-    // 年度汇总：把 by 字段的取值当「年」来 group，取 count；排序在 JS 侧完成
-    // （groupBy 的 orderBy 要求字段必须出现在 by 中，动态键无法通过 Prisma 泛型校验）。
-    const groups = await prisma.userGraduation.groupBy({
-      by: [query.by === "createdAt" ? "graduationYear" : query.by],
-      where: baseWhere,
-      _count: { id: true },
-    });
-    const yearTotals = groups
-      .map((group: Record<string, unknown> & { _count: { id: number } }) => {
-        const yearValue = group[query.by === "createdAt" ? "graduationYear" : query.by] as number;
-        return {
-          year: yearValue,
-          count: group._count.id,
-        };
-      })
-      .sort((left: { year: number }, right: { year: number }) => (query.order === "asc" ? left.year - right.year : right.year - left.year));
-
+    // 年度汇总：「级/届」视图按对应字段 group 取 count；「提交时间」视图明细行按提交时间
+    // 排序，年度汇总按提交年份在 JS 侧聚合（groupBy 无法提取日期字段中的年份）。
     const rows = await prisma.userGraduation.findMany({
       where: baseWhere,
       include: { author: { select: { displayName: true, qqUin: true, email: true } } },
       orderBy: {
-        [query.by === "createdAt" ? "graduationYear" : query.by]: query.order,
+        [query.by === "createdAt" ? "createdAt" : query.by]: query.order,
       },
     });
+
+    let yearTotals: Array<{ year: number; count: number }>;
+    if (query.by === "createdAt") {
+      const counts = new Map<number, number>();
+      for (const row of rows) {
+        const year = (row.createdAt as Date).getUTCFullYear();
+        counts.set(year, (counts.get(year) ?? 0) + 1);
+      }
+      yearTotals = Array.from(counts, ([year, count]) => ({ year, count })).sort((left, right) =>
+        query.order === "asc" ? left.year - right.year : right.year - left.year,
+      );
+    } else {
+      const groups = await prisma.userGraduation.groupBy({
+        by: [query.by],
+        where: baseWhere,
+        _count: { id: true },
+      });
+      yearTotals = groups
+        .map((group: Record<string, unknown> & { _count: { id: number } }) => ({
+          year: group[query.by] as number,
+          count: group._count.id,
+        }))
+        .sort((left: { year: number }, right: { year: number }) =>
+          query.order === "asc" ? left.year - right.year : right.year - left.year,
+        );
+    }
 
     return {
       totals: yearTotals,
@@ -293,7 +308,7 @@ export function registerGraduationRoutes(app: FastifyInstance, _config: unknown,
     return { items: (rows as unknown as Row[]).map(toListItem) };
   });
 
-  // 单个记录详情：审核员用
+  // 单个记录详情：审核员可看全部；普通成员仅限已通过记录或本人提交的记录。
   app.get("/api/graduations/:id", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
     const params = paramsSchema.parse(request.params);
@@ -302,6 +317,12 @@ export function registerGraduationRoutes(app: FastifyInstance, _config: unknown,
       include: { author: { select: { displayName: true, qqUin: true, email: true } } },
     });
     if (!record) return reply.code(404).send({ message: "毕业记录不存在" });
+    const isReviewer = hasTenantRole(context.selectedMembership.role, "reviewer");
+    const isOwner = record.authorId === context.user.id;
+    if (!isReviewer && !isOwner && record.status !== "approved") {
+      // 不区分 403/404，避免枚举他人待审记录的存在性。
+      return reply.code(404).send({ message: "毕业记录不存在" });
+    }
     return toListItem(record as unknown as Row);
   });
 

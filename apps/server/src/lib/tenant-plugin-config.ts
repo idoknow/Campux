@@ -279,3 +279,18 @@ export function restoreBotAlertPass(submitted: TenantPluginConfig, existing: Ten
   }
   return submitted;
 }
+
+// 审计读取兜底：历史明细行可能在脱敏修复前写入了明文凭证，读取端点返回 detail 前
+// 对 before/after 段做再脱敏，保证 aggregateLogin.appKey / botAlert.smtpPass 不回显。
+export function maskAuditDetailSections<T>(detail: T): T {
+  if (!detail || typeof detail !== "object") return detail;
+  const source = detail as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...source };
+  for (const key of ["before", "after"]) {
+    const section = result[key];
+    if (section && typeof section === "object") {
+      result[key] = maskBotAlertSection(maskAggregateLoginSection(section as Record<string, unknown>));
+    }
+  }
+  return result as T;
+}

@@ -14,7 +14,9 @@ import {
   restoreBotAlertPass,
   maskBotAlertSection,
   maskBotAlertPass,
+  maskAuditDetailSections,
   BOT_ALERT_PASS_MASK,
+  AGGREGATE_APPKEY_MASK,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
 import { z } from "zod";
@@ -225,7 +227,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         pluginName,
         operator: row.actor?.displayName ?? (row.actor?.qqUin != null ? String(row.actor.qqUin) : null),
         detail: detailText,
-        metadata: (row.detail as Record<string, unknown> | null) ?? null,
+        metadata: maskAuditDetailSections((row.detail as Record<string, unknown> | null) ?? null),
       };
     });
 
@@ -257,6 +259,15 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
     ) {
       return reply.code(400).send({ message: "SMTP 服务器信息已修改，请重新输入 SMTP 授权码" });
     }
+    // 提交的 appKey 仍是掩码时，只允许在 endpoint/appId 不变的情况下沿用库中密钥；
+    // 否则拒绝保存，避免把已存储的 appKey 发往新的认证服务器。
+    if (
+      parsed.data.aggregateLogin.appKey === AGGREGATE_APPKEY_MASK &&
+      (parsed.data.aggregateLogin.endpoint !== before.aggregateLogin.endpoint ||
+        parsed.data.aggregateLogin.appId !== before.aggregateLogin.appId)
+    ) {
+      return reply.code(400).send({ message: "聚合登录服务器信息已修改，请重新输入 AppKey" });
+    }
     // 聚合登录 AppKey 若仍是掩码占位符则保留库中原值，避免把占位符写回导致凭证失效。
     const toSave = restoreBotAlertPass(restoreAggregateAppKey(parsed.data, before), before);
     const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, toSave);
@@ -273,6 +284,8 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["broadcast", before.broadcast, saved.broadcast],
       ["feedback", before.feedback, saved.feedback],
       ["botAlert", before.botAlert, saved.botAlert],
+      ["campaigns", before.campaigns, saved.campaigns],
+      ["graduation", before.graduation, saved.graduation],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
@@ -342,7 +355,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         createdAt: entry.createdAt.toISOString(),
         action: entry.action,
         targetId: entry.targetId,
-        detail: entry.detail ?? null,
+        detail: maskAuditDetailSections(entry.detail ?? null),
         actor: entry.actor ? { displayName: entry.actor.displayName, qqUin: entry.actor.qqUin.toString() } : null,
       })),
     };
