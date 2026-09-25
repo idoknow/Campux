@@ -148,12 +148,23 @@ export function GraduationsPage({ me }: { me: AuthenticatedMe }) {
   useEffect(() => {
     if (view !== "pending" || !canReview) return;
     let cancelled = false;
-    setLoading(true);
-    api<{ items: GraduationItem[] }>("/api/graduations/pending")
-      .then((res) => { if (!cancelled) setItems(res.items); })
-      .catch((error) => toast.error(error instanceof Error ? error.message : "加载失败"))
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    // 审核可能发生在其他入口（如审核群），已打开的队列不会自动感知；
+    // 用定时轮询 + 窗口焦点回归重取，保证已审核的毕业不再留在队列里。
+    const load = () => {
+      setLoading(true);
+      api<{ items: GraduationItem[] }>("/api/graduations/pending")
+        .then((res) => { if (!cancelled) setItems(res.items); })
+        .catch((error) => toast.error(error instanceof Error ? error.message : "加载失败"))
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+    load();
+    const timer = setInterval(load, 30_000);
+    window.addEventListener("focus", load);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener("focus", load);
+    };
   }, [view, canReview]);
 
   async function reload() {
