@@ -992,16 +992,16 @@ export class OneBotRuntime {
   }
 
   async sendTenantReviewNotification(tenantId: string, message: unknown): Promise<{ ok: boolean; messageId: string | null }> {
-    const bot = await this.findTenantReviewNotificationBot(tenantId);
-    if (!bot) {
-      return { ok: false, messageId: null };
-    }
     try {
+      const bot = await this.findTenantReviewNotificationBot(tenantId);
+      if (!bot) {
+        return { ok: false, messageId: null };
+      }
       const messageId = await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId!, message);
       return { ok: true, messageId };
     } catch (error) {
       this.logger.warn(
-        { error, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId },
+        { error, tenantId },
         "failed to send tenant review notification",
       );
       return { ok: false, messageId: null };

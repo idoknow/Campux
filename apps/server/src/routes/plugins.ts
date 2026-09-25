@@ -13,6 +13,7 @@ import {
   restoreAggregateAppKey,
   restoreBotAlertPass,
   maskBotAlertSection,
+  maskBotAlertPass,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
 import { z } from "zod";
@@ -261,8 +262,16 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         }
         diffs.push({ pluginId, enabled: enabledAfter, summary });
         // 聚合登录段先脱敏再入审计日志，避免明文 appkey 落库（审计可能被读取/导出）。
-        const safeBefore = pluginId === "aggregateLogin" ? maskAggregateLoginSection(beforeValue as Record<string, unknown>) : beforeValue;
-        const safeAfter = pluginId === "aggregateLogin" ? maskAggregateLoginSection(afterValue as Record<string, unknown>) : afterValue;
+        const safeBefore = pluginId === "aggregateLogin"
+          ? maskAggregateLoginSection(beforeValue as Record<string, unknown>)
+          : pluginId === "botAlert"
+            ? maskBotAlertSection(beforeValue as Record<string, unknown>)
+            : beforeValue;
+        const safeAfter = pluginId === "aggregateLogin"
+          ? maskAggregateLoginSection(afterValue as Record<string, unknown>)
+          : pluginId === "botAlert"
+            ? maskBotAlertSection(afterValue as Record<string, unknown>)
+            : afterValue;
         await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,
@@ -281,7 +290,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
     }
 
     // 响应同样脱敏，避免保存后的明文 appKey 回显到前端/网络日志。
-    return { config: maskAggregateAppKey(saved), changed: diffs };
+    return { config: maskBotAlertPass(maskAggregateAppKey(saved)), changed: diffs };
   });
 
   // 读取插件配置审计日志（最近 N 条 tenant.plugin.* 记录）
