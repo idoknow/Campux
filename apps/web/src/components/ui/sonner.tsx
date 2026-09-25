@@ -1,9 +1,33 @@
-import { Toaster as Sonner } from "sonner";
+import { useEffect } from "react";
+import { Toaster as Sonner, toast } from "sonner";
 import type { ToasterProps } from "sonner";
 import { useTheme } from "@/features/theme/theme";
 
 function Toaster(props: ToasterProps) {
   const { resolvedTheme } = useTheme();
+
+  // sonner 2.x 的 Toaster/Toast 没有 onClick 属性，用事件委托实现：
+  // 点击 error/warning toast 即复制其文本（右上角报错提示点一下可复制）。
+  useEffect(() => {
+    function handleClick(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const toastEl = target.closest("[data-sonner-toast]") as HTMLElement | null;
+      if (!toastEl) return;
+      const type = toastEl.getAttribute("data-type");
+      if (type !== "error" && type !== "warning") return;
+      // 关闭 / 操作按钮的点击不触发复制
+      if (target.closest("[data-button]")) return;
+      const text = (toastEl.textContent ?? "").trim();
+      if (!text) return;
+      void navigator.clipboard
+        .writeText(text)
+        .then(() => toast.success("报错内容已复制"))
+        .catch(() => undefined);
+    }
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, []);
 
   return (
     <Sonner
