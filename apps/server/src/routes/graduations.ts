@@ -237,20 +237,22 @@ export function registerGraduationRoutes(app: FastifyInstance, _config: unknown,
       baseWhere[query.yearType] = query.year;
     }
 
-    // 年度汇总：把 by 字段的取值当「年」来 group，取 count + 明细数组（按 order 排序）
+    // 年度汇总：把 by 字段的取值当「年」来 group，取 count；排序在 JS 侧完成
+    // （groupBy 的 orderBy 要求字段必须出现在 by 中，动态键无法通过 Prisma 泛型校验）。
     const groups = await prisma.userGraduation.groupBy({
       by: [query.by === "createdAt" ? "graduationYear" : query.by],
       where: baseWhere,
       _count: { id: true },
-      orderBy: [{ [query.by === "createdAt" ? "graduationYear" : query.by]: query.order }],
     });
-    const yearTotals = groups.map((group: Record<string, unknown> & { _count: { id: number } }) => {
-      const yearValue = group[query.by === "createdAt" ? "graduationYear" : query.by] as number;
-      return {
-        year: yearValue,
-        count: group._count.id,
-      };
-    });
+    const yearTotals = groups
+      .map((group: Record<string, unknown> & { _count: { id: number } }) => {
+        const yearValue = group[query.by === "createdAt" ? "graduationYear" : query.by] as number;
+        return {
+          year: yearValue,
+          count: group._count.id,
+        };
+      })
+      .sort((left: { year: number }, right: { year: number }) => (query.order === "asc" ? left.year - right.year : right.year - left.year));
 
     const rows = await prisma.userGraduation.findMany({
       where: baseWhere,
