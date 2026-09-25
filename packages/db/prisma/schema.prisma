@@ -65,6 +65,13 @@ enum CampaignStatus {
   taken_down
 }
 
+// 毕业去向状态：用户提交后待审核，通过则永久记录，驳回则不可见。
+enum UserGraduationStatus {
+  pending_approval
+  approved
+  rejected
+}
+
 model Tenant {
   id             String             @id @default(uuid())
   slug           String             @unique
@@ -75,6 +82,7 @@ model Tenant {
   nextPostDisplayId Int                @default(1)
   nextCampaignDisplayId Int            @default(1)
   nextBroadcastDisplayId Int            @default(1)
+  nextGraduationDisplayId Int           @default(1)
   readyAt        DateTime?
   archiveWarningAt DateTime?
   createdAt      DateTime           @default(now())
@@ -88,6 +96,7 @@ model Tenant {
   posts          Post[]
   campaigns      Campaign[]
   broadcasts     TenantBroadcast[]
+  graduations    UserGraduation[]
   postTags       PostTag[]
   botAccounts    BotAccount[]
   publishTargets PublishTarget[]
@@ -114,6 +123,7 @@ model User {
   campaigns   Campaign[]
   broadcasts  TenantBroadcast[]
   broadcastVersionChanges TenantBroadcastVersion[]
+  graduations UserGraduation[]
   sessions    AccountSession[]
   campaignVotes CampaignVote[]
   oauthAuthorizationCodes OAuthAuthorizationCode[]
@@ -230,6 +240,36 @@ model TenantMembership {
 
   @@unique([tenantId, userId])
   @@index([userId])
+}
+
+// 毕业去向：投稿页填写入学年份（级）或毕业年份（届）之一（另一项由前端自动推算），
+// 加上毕业时学历（初中/高中/本科等）与毕业去向（学校全称或单位名称）。
+// 提交后进入审核队列，审核群与网页端均可「通过 / 驳回」；
+// 通过后计入服务页的毕业生去向统计视图（用户/学校/时间/搜索）。
+model UserGraduation {
+  id            String                @id @default(uuid())
+  tenantId      String
+  displayId     Int
+  authorId      String
+  graduationYear Int                  // 届（毕业年份）
+  classYear     Int                   // 级（入学年份）
+  education     String                // 初中 / 高中 / 本科 / 硕士 / 博士 / 其他…
+  destination   String                // 毕业去向（学校/单位全称，用户自填）
+  status        UserGraduationStatus  @default(pending_approval)
+  rejectReason  String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  tenant        Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author        User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, displayId])
+  @@index([tenantId, status])
+  @@index([tenantId, graduationYear])
+  @@index([tenantId, classYear])
+  @@index([tenantId, destination])
+  @@index([tenantId, authorId])
 }
 
 model TenantMetadata {

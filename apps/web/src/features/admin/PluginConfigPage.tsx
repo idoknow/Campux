@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { BroadcastIcon } from "../broadcast/BroadcastIcon";
+import { GraduationIcon } from "../graduation/GraduationIcon";
 
 type PluginIconProps = { className?: string };
 
@@ -85,7 +86,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "graduation";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -152,6 +153,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   campaigns: "campux-plugin-campaigns",
   aggregateLogin: "campux-plugin-aggregate-login",
   broadcast: "campux-plugin-broadcast",
+  graduation: "campux-plugin-graduation",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -595,6 +597,23 @@ function BroadcastPanel({ config, onChange, busy }: { config: TenantPluginConfig
   );
 }
 
+function GraduationPanel({ busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，投稿页顶部会多出「毕业去向」胶囊，服务页新增毕业生去向入口（用户/学校/时间/搜索四视图）。
+        提交后进入审核队列，审核员可手动通过或驳回。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        入学年份（级）与毕业年份（届）均由投稿人在表单里自行填写，本插件无需配置年限换算规则。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        审核群命令：#毕业通过 &lt;编号&gt; / #毕业拒绝 &lt;理由&gt; &lt;编号&gt;；网页端在「服务页 → 毕业生去向 → 待审核」处理。
+      </div>
+    </div>
+  );
+}
+
 const BOT_MESSAGE_TYPES: Array<{ type: string; label: string; description: string }> = [
   { type: "submissionSuccess", label: "投稿成功", description: "用户私聊投稿完成后，机器人反馈的语句。支持 {id} 占位符。" },
   { type: "reviewApproved", label: "审核通过", description: "稿件通过审核后发送给作者的语句。支持 {id}。" },
@@ -920,6 +939,43 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, broadcast: { ...config.broadcast, enabled: value } }),
     render: (config, onChange, busy) => <BroadcastPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "graduation",
+    icon: GraduationIcon,
+    name: "毕业去向",
+    tagline: "Graduation",
+    description: "投稿页自填级/届与学历，审核通过后进入服务页四视图统计",
+    detailedDescription:
+      "本插件让毕业生在投稿页提交自己的毕业信息：入学年份（级）、毕业年份（届）、毕业时学历（如读高中毕业就是高中学历）、毕业去向（学校/单位全称）；提交后进入审核队列，审核员在审核群或网页端手动通过/驳回。\n\n" +
+      "投稿页：\n" +
+      "· 顶部胶囊新增「毕业去向」选项，选择后展示表单。\n" +
+      "· 入学年份（级）与毕业年份（届）均由投稿人自行填写，不做任何自动换算；毕业年份早于入学年份时不允许提交。\n" +
+      "· 毕业时学历自由填写（提供初中/高中/大专/本科等常用项快捷填入），如中专、职高、专升本也可直接输入。\n" +
+      "· 每个用户在同一校园墙内仅允许一份「待审核 + 已通过」的记录（驳回后可重新提交）。\n\n" +
+      "审核流程：\n" +
+      "· 提交后自动推送审核群，包含届/级、学历、去向与作者名。\n" +
+      "· 审核群命令：#毕业通过 <编号> / #毕业拒绝 <理由> <编号>。\n" +
+      "· 网页端在「服务页 → 毕业生去向 → 待审核」展示「通过」与「驳回」两个按钮，驳回需填写理由。\n\n" +
+      "服务页 → 毕业生去向：\n" +
+      "· 用户列表：头像 + 姓名 + QQ，点击展开详情（入学年/毕业年/学历/去向）；顶部显示已填写人数。\n" +
+      "· 学校列表：聚合展示每个学校的人数，点击展开具体人员。\n" +
+      "· 时间视图：可按届/级/提交时间排序，可升/降序，可筛选指定年份。\n" +
+      "· 搜索：支持 QQ 号 / 用户名 / 学校名关键词模糊匹配。\n\n" +
+      "管理：\n" +
+      "· 插件仅有开关，无需配置年限换算规则；级与届都由投稿人自己填。\n" +
+      "· 插件禁用后，投稿页胶囊与服务页入口同时隐藏；已有数据不受影响。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "级与届均由投稿人自填；审核群命令与网页审核双通道。",
+    accent: "from-violet-500 to-pink-500",
+    bgTint: "bg-violet-50 text-violet-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页与服务页新增毕业去向入口；毕业信息（届/级/学历/去向）与作者 QQ 关联，仅供审核员统计查阅。",
+    enabled: (config) => config.graduation.enabled,
+    setEnabled: (config, value) => ({ ...config, graduation: { ...config.graduation, enabled: value } }),
+    render: (config, onChange, busy) => <GraduationPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
 
 /**
@@ -999,6 +1055,9 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     broadcast: {
       enabled: false,
       quickPresets: [],
+    },
+    graduation: {
+      enabled: false,
     },
   };
 }

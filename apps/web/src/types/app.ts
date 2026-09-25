@@ -148,6 +148,8 @@ export type TenantMetadata = {
   enableBroadcast: boolean;
   /** 广播通知快选生效时长（插件配置下发）；发帖人点一下即可按当前时刻推算结束时间 */
   broadcastQuickPresets: Array<{ label: string; minutes: number }>;
+  /** 毕业去向插件是否启用；关闭时投稿页顶部胶囊与服务页入口隐藏 */
+  enableGraduation: boolean;
 };
 
 export type BotMessageTypeConfig = {
@@ -215,6 +217,10 @@ export type TenantPluginConfig = {
   broadcast: {
     enabled: boolean;
     quickPresets: PluginBroadcastPreset[];
+  };
+  /** 毕业去向插件：开关 */
+  graduation: {
+    enabled: boolean;
   };
 };
 

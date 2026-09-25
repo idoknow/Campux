@@ -20,7 +20,8 @@ export type PresetPluginId =
   | "botStylishMessages"
   | "campaigns"
   | "aggregateLogin"
-  | "broadcast";
+  | "broadcast"
+  | "graduation";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -106,6 +107,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
     riskLevel: "medium",
     rationale: "开启后投稿页新增发起入口与服务页管理入口；通知内容、广播计数与作者头像均接入租户与用户数据。",
+  },
+  {
+    id: "graduation",
+    name: "campux-plugin-graduation",
+    version: "1.0.0",
+    description: "毕业去向：投稿页填写届/级与学历，提交毕业去向，审核通过后进入服务页四视图统计",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后投稿页与服务页新增毕业去向入口；毕业信息（届/级/学历/去向）与作者 QQ 关联，仅供审核员统计查阅。",
   },
 ];
 

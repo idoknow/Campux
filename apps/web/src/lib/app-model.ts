@@ -57,6 +57,7 @@ export const defaultMetadata: TenantMetadata = {
   enableAggregateLogin: false,
   enableBroadcast: false,
   broadcastQuickPresets: [],
+  enableGraduation: false,
 };
 
 export const navItems = [

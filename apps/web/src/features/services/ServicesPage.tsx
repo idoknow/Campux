@@ -15,6 +15,8 @@ import { CampaignDetailPage } from "./CampaignDetailPage";
 import { OAuthBindingsPanel } from "./OAuthBindingsPanel";
 import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
 import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
+import { GraduationsPage } from "@/features/graduation/GraduationsPage";
+import { GraduationIcon } from "@/features/graduation/GraduationIcon";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
 function parseCampaignRoute(pathname: string, search: string) {
@@ -119,6 +121,12 @@ export function ServicesPage({
     }
     return <BroadcastsPage me={me} metadata={metadata} />;
   }
+  if (window.location.pathname === "/services/graduations") {
+    if (!metadata.enableGraduation) {
+      return <section className="product-surface p-4 text-sm text-slate-500">毕业去向插件尚未启用。</section>;
+    }
+    return <GraduationsPage me={me} />;
+  }
   if (window.location.pathname === "/services/about") {
     return <AboutPage metadata={metadata} onBack={() => navigateTo("/services")} />;
   }
@@ -182,6 +190,21 @@ export function ServicesPage({
               <span className="mt-0.5 block text-xs text-orange-900/60">查看新通知与历史通知，广播员可标记已广播。</span>
             </span>
             <ChevronRightIcon className="size-5 shrink-0 text-orange-400" />
+          </button>
+        ) : null}
+        {metadata.enableGraduation ? (
+          <button
+            onClick={() => navigateTo("/services/graduations")}
+            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-violet-200/70 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-pink-100 p-4 text-left shadow-sm transition hover:border-violet-300 hover:shadow-md"
+          >
+            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
+              <GraduationIcon className="size-7" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-violet-950">毕业生去向</span>
+              <span className="mt-0.5 block text-xs text-violet-900/60">用户/学校/时间四视图，支持搜索与待审核队列。</span>
+            </span>
+            <ChevronRightIcon className="size-5 shrink-0 text-violet-400" />
           </button>
         ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}

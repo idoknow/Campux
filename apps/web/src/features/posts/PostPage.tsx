@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PostRulesAction } from "./PostRulesAction";
 import { CampaignCreateForm } from "./CampaignCreateForm";
 import { BroadcastCreateForm } from "@/features/broadcast/BroadcastCreateForm";
+import { GraduationCreateForm } from "@/features/graduation/GraduationCreateForm";
 
 export function PostPage({
   busy,
@@ -69,7 +70,7 @@ export function PostPage({
   const bgColors = metadata.availableBgColors ?? [];
   const textColors = metadata.availableTextColors ?? [];
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
-  const [postMode, setPostMode] = useState<"post" | "campaign" | "broadcast">("post");
+  const [postMode, setPostMode] = useState<"post" | "campaign" | "broadcast" | "graduation">("post");
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
@@ -81,12 +82,15 @@ export function PostPage({
     }
   }, [anonymous]);
 
-  // 插件未开启时强制回投稿模式，避免胶囊隐藏后表单还留在广播视图。
+  // 插件未开启时强制回投稿模式，避免胶囊隐藏后表单还留在广播/毕业视图。
   useEffect(() => {
     if (!metadata.enableBroadcast && postMode === "broadcast") {
       setPostMode("post");
     }
-  }, [metadata.enableBroadcast, postMode]);
+    if (!metadata.enableGraduation && postMode === "graduation") {
+      setPostMode("post");
+    }
+  }, [metadata.enableBroadcast, metadata.enableGraduation, postMode]);
 
   function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     if (!canAcceptAttachmentSelection(busy, event.clipboardData.items.length)) {
@@ -124,7 +128,7 @@ export function PostPage({
           <p className="min-w-0 whitespace-pre-wrap break-words">{metadata.banner}</p>
         </div>
       ) : null}
-      {metadata.enableCampaigns || metadata.enableBroadcast ? (
+      {metadata.enableCampaigns || metadata.enableBroadcast || metadata.enableGraduation ? (
         <div className="mb-3 flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-sm">
           <button
             className={`rounded-full px-3 py-1.5 ${postMode === "post" ? "bg-slate-900 text-white" : "text-slate-600"}`}
@@ -148,12 +152,25 @@ export function PostPage({
               广播通知
             </button>
           ) : null}
+          {metadata.enableGraduation ? (
+            <button
+              className={`rounded-full px-3 py-1.5 ${postMode === "graduation" ? "bg-slate-900 text-white" : "text-slate-600"}`}
+              onClick={() => setPostMode("graduation")}
+            >
+              毕业去向
+            </button>
+          ) : null}
         </div>
       ) : null}
       {metadata.enableBroadcast && postMode === "broadcast" ? (
         <BroadcastCreateForm
           tenantId={selectedTenant.id}
           metadata={metadata}
+          onSuccess={() => setPostMode("post")}
+        />
+      ) : metadata.enableGraduation && postMode === "graduation" ? (
+        <GraduationCreateForm
+          tenantId={selectedTenant.id}
           onSuccess={() => setPostMode("post")}
         />
       ) : metadata.enableCampaigns && postMode === "campaign" ? (

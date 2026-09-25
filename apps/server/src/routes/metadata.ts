@@ -151,6 +151,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableAggregateLogin: false,
     enableBroadcast: false,
     broadcastQuickPresets: [] as Array<{ label: string; minutes: number }>,
+    enableGraduation: false,
   };
 }
 
@@ -239,6 +240,8 @@ async function readPublicMetadata(tenantId: string) {
     metadata.broadcastQuickPresets = pluginConfig.broadcast.enabled
       ? pluginConfig.broadcast.quickPresets.map((preset) => ({ ...preset }))
       : [];
+    // 毕业去向：未启用时投稿页顶部胶囊与服务页入口隐藏。
+    metadata.enableGraduation = pluginConfig.graduation.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

@@ -99,6 +99,13 @@ export const tenantPluginConfigSchema = z.object({
         .default([]),
     })
     .default({ enabled: false, quickPresets: [] }),
+  // 毕业去向：开启后投稿页顶部出现「毕业」胶囊与服务页入口；
+  // 入学年份（级）与毕业年份（届）均由用户在投稿页自行填写，审核通过后计入服务页统计。
+  graduation: z
+    .object({
+      enabled: z.boolean(),
+    })
+    .default({ enabled: false }),
   // 聚合登录：把第三方平台（QQ/微信/支付宝等）身份绑定到已有账号后，用该身份直接登录。
   // 凭证（appid/appkey/endpoint）放在本配置里（租户级）；未绑定的第三方身份不自动建号，
   // 而是引导先登录已有账号完成绑定（严格「只做第三方登录、不涉及注册」）。
@@ -134,6 +141,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   botStylishMessages: { enabled: false, messageTypes: [] },
   campaigns: { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 },
   broadcast: { enabled: false, quickPresets: [] },
+  graduation: { enabled: false },
   aggregateLogin: {
     enabled: false,
     loginTypes: [],
