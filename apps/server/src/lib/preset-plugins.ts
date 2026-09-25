@@ -22,7 +22,7 @@ export type PresetPluginId =
   | "aggregateLogin"
   | "broadcast"
   | "feedback"
-  | "botAlert";
+  | "botAlert"
   | "graduation";
 
 export interface PresetPluginEntry {
@@ -127,6 +127,8 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "tenant:data"],
     riskLevel: "medium",
     rationale: "开启后检测到 QZone 登录态失效且自动刷新失败时，向配置的邮箱发送通知；需读写插件配置与租户数据。",
+  },
+  {
     id: "graduation",
     name: "campux-plugin-graduation",
     version: "1.0.0",

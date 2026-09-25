@@ -90,8 +90,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert";
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "graduation";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -1080,6 +1079,8 @@ const PLUGINS: PluginDescriptor[] = [
     render: (config: TenantPluginConfig, onChange: (next: TenantPluginConfig) => void, busy: boolean) => (
       <BotAlertPanel config={config} onChange={onChange} busy={busy} />
     ),
+  },
+  {
     id: "graduation",
     icon: GraduationIcon,
     name: "毕业去向",
@@ -1207,6 +1208,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       smtpPass: "",
       fromEmail: "",
       toEmails: [],
+    },
     graduation: {
       enabled: false,
     },

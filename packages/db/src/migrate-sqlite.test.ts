@@ -36,10 +36,20 @@ describe("applySqliteBaseline", () => {
       // in a fresh product baseline are recorded as skipped.
       const r1 = applySqliteBaseline(BASELINE, url, silentLogger);
       expect(r1.applied).toEqual(["0_sqlite_baseline"]);
-      expect(r1.skipped).toContain("20260909000000_add_personal_qq_token");
-      expect(r1.skipped).toContain("20260913120000_add_campaign_tables_sqlite");
-      expect(r1.skipped).toContain("20260913140000_add_tenant_feedback");
-      expect(r1.skipped).toContain("20260913160000_add_tenant_feedback_messages");
+      const embeddedMigrations = [
+        "20260713120000_auto_register_on_first_private_message",
+        "20260724090000_add_bot_last_publish_started_at",
+        "20260815120000_add_bot_review_queue_reminder_at_all",
+        "20260906120000_add_voting_campaigns",
+        "20260906150000_add_campaign_admin_only",
+        "20260924120000_add_broadcast_notifications",
+        "20260913140000_add_tenant_feedback",
+        "20260913160000_add_tenant_feedback_messages",
+        "20260925120000_add_user_graduation",
+      ];
+      for (const name of embeddedMigrations) {
+        expect(r1.skipped).toContain(name);
+      }
 
       // tables exist
       const db = new Database(dbPath);
@@ -50,15 +60,15 @@ describe("applySqliteBaseline", () => {
       expect(tables).toContain("Gadget");
       expect(tables).toContain("_prisma_migrations");
 
-      // bookkeeping: baseline row plus embedded incremental migration names
+      // bookkeeping: baseline row plus all embedded incremental migration names
       const mig = db
         .query(`SELECT migration_name, checksum FROM "_prisma_migrations"`)
         .all() as Array<{ migration_name: string; checksum: string }>;
       const baselineRow = mig.find((row) => row.migration_name === "0_sqlite_baseline");
       expect(baselineRow).toBeTruthy();
       expect(baselineRow!.checksum).toMatch(/^[0-9a-f]{64}$/);
-      // 0_sqlite_baseline + 10 embedded migration names
-      expect(mig).toHaveLength(11);
+      // 0_sqlite_baseline + 9 embedded migration names
+      expect(mig).toHaveLength(10);
       expect(new Set(mig.map((row) => row.migration_name)).size).toBe(mig.length);
       db.close();
 

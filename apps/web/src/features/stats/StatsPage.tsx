@@ -87,10 +87,10 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
   }
 
   useEffect(() => {
+    setStats(null);
     if (currentRole !== "reviewer" && currentRole !== "admin") {
       return;
     }
-    setStats(null);
     void refreshStats(rangeDays);
   }, [rangeDays, tenantId, currentRole]);
 
