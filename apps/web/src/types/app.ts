@@ -1,7 +1,7 @@
 import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
-export type PostsTab = "mine" | "review" | "published";
+export type PostsTab = "mine" | "review" | "published" | "feedback";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "pluginConfig";
 export type TenantRole = "submitter" | "broadcaster" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
@@ -148,6 +148,8 @@ export type TenantMetadata = {
   enableBroadcast: boolean;
   /** 广播通知快选生效时长（插件配置下发）；发帖人点一下即可按当前时刻推算结束时间 */
   broadcastQuickPresets: Array<{ label: string; minutes: number }>;
+  enableFeedback: boolean;
+  enableBotAlert: boolean;
   /** 毕业去向插件是否启用；关闭时投稿页顶部胶囊与服务页入口隐藏 */
   enableGraduation: boolean;
 };
@@ -217,6 +219,19 @@ export type TenantPluginConfig = {
   broadcast: {
     enabled: boolean;
     quickPresets: PluginBroadcastPreset[];
+  };
+  /** 意见反馈插件 */
+  feedback: {
+    enabled: boolean;
+  };
+  botAlert: {
+    enabled: boolean;
+    smtpHost: string;
+    smtpPort: number;
+    smtpUser: string;
+    smtpPass: string;
+    fromEmail: string;
+    toEmails: string[];
   };
   /** 毕业去向插件：开关 */
   graduation: {
@@ -923,4 +938,25 @@ export type AuditLogItem = {
     qqUin: string;
     displayName: string | null;
   } | null;
+};
+
+export type FeedbackMessageItem = {
+  id: string;
+  role: "user" | "admin";
+  authorLabel: string | null;
+  content: string;
+  createdAt: string;
+};
+
+export type FeedbackItem = {
+  id: string;
+  content: string;
+  createdAt: string;
+  author: {
+    id: string;
+    displayName: string | null;
+    qqUin: string;
+  };
+  canViewIdentity: boolean;
+  messages: FeedbackMessageItem[];
 };

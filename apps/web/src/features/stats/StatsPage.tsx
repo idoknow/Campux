@@ -88,8 +88,11 @@ export function StatsPage({ tenantId, loading, currentRole, onOpenUserDetail }: 
 
   useEffect(() => {
     setStats(null);
+    if (currentRole !== "reviewer" && currentRole !== "admin") {
+      return;
+    }
     void refreshStats(rangeDays);
-  }, [rangeDays, tenantId]);
+  }, [rangeDays, tenantId, currentRole]);
 
   useEffect(() => {
     setRangeDays(readStatsListPreferences(tenantId).rangeDays);

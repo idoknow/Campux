@@ -842,7 +842,7 @@ export class OneBotRuntime {
       await this.resumeWaitingPublishAttemptsForBot(bot.id);
       return result;
     } catch (error) {
-      const errorMessage = toErrorMessage(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       this.qzoneProtocolAutoRefreshFailures.set(bot.id, {
         failedAt: Date.now(),
         error: errorMessage,
@@ -860,7 +860,37 @@ export class OneBotRuntime {
           cooldownMs: qzoneProtocolAutoRefreshFailureCooldownMs,
         },
       });
+      // Bot 异常通知：登录态失效且自动刷新失败时邮件通知管理员
+      void this.sendBotAlertEmail(bot, reason, errorMessage).catch((dispatchError) => {
+        this.logger.warn({ error: dispatchError, botId: bot.id }, "failed to dispatch bot alert email");
+      });
       throw error;
+    }
+  }
+
+  private async sendBotAlertEmail(
+    bot: { id: string; tenantId: string; displayName: string | null; qqUin: bigint },
+    reason: string,
+    error: string,
+  ) {
+    const { readTenantPluginConfig } = await import("../lib/tenant-plugin-config");
+    const { sendBotAlertEmail: sendEmail, formatBotAlertEmail } = await import("../lib/bot-alert-email");
+    const pluginConfig = await readTenantPluginConfig(prisma, bot.tenantId);
+    const alertConfig = pluginConfig.botAlert;
+    if (!alertConfig.enabled || alertConfig.toEmails.length === 0) {
+      return;
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId }, select: { name: true } });
+    const email = formatBotAlertEmail({
+      tenantName: tenant?.name ?? "未知校园墙",
+      botName: bot.displayName || `QQ ${bot.qqUin}`,
+      botQqUin: bot.qqUin.toString(),
+      reason,
+      error,
+    });
+    const result = await sendEmail(alertConfig, email);
+    if (!result.ok) {
+      this.logger.warn({ error: result.error, botId: bot.id }, "failed to send bot alert email");
     }
   }
 
@@ -954,18 +984,28 @@ export class OneBotRuntime {
   }
 
   async sendGroupMessage(botQqUin: string, groupId: string | bigint, message: unknown) {
-    await this.callAction(botQqUin, "send_group_msg", {
+    const data = await this.callAction(botQqUin, "send_group_msg", {
       group_id: Number(groupId),
       message,
     });
+    return this.extractMessageId(data);
   }
 
-  async sendTenantReviewNotification(tenantId: string, message: unknown) {
-    const bot = await this.findTenantReviewNotificationBot(tenantId);
-    if (!bot) {
-      return;
+  async sendTenantReviewNotification(tenantId: string, message: unknown): Promise<{ ok: boolean; messageId: string | null }> {
+    try {
+      const bot = await this.findTenantReviewNotificationBot(tenantId);
+      if (!bot) {
+        return { ok: false, messageId: null };
+      }
+      const messageId = await this.sendGroupMessage(bot.qqUin.toString(), bot.reviewGroupId!, message);
+      return { ok: true, messageId };
+    } catch (error) {
+      this.logger.warn(
+        { error, tenantId },
+        "failed to send tenant review notification",
+      );
+      return { ok: false, messageId: null };
     }
-    await this.sendBotReviewGroupMessage(bot, message, "failed to send tenant review notification");
   }
 
   private async findTenantReviewNotificationBot(tenantId: string) {
@@ -1669,6 +1709,7 @@ export class OneBotRuntime {
       const generalStylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled));
     } catch (error) {
+      this.logger.warn({ error }, "private message handler failed");
       await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
     }
   }
@@ -1805,6 +1846,7 @@ export class OneBotRuntime {
       try {
         staged = await this.stagePrivatePostAttachments(bot, event, permit);
       } catch (error) {
+        this.logger.warn({ error }, "stage private post attachments failed");
         await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
         return false;
       }
@@ -2464,7 +2506,7 @@ export class OneBotRuntime {
               },
             });
           },
-          { isolationLevel: TransactionIsolationLevel.Serializable },
+          { isolationLevel: TransactionIsolationLevel.Serializable, maxWait: 15_000, timeout: 60_000 },
         );
         break;
       } catch (error) {
@@ -2580,7 +2622,9 @@ export class OneBotRuntime {
       orderBy: { createdAt: "asc" },
     });
     const authorName = record.author.displayName ?? record.author.qqUin.toString();
-    const text = `毕业去向 #${record.displayId} 待审核：${authorName} 提交 ${record.graduationYear} 届（${record.classYear} 级）· ${record.education} · ${record.destination}。可用 #毕业通过 ${record.displayId} 或 #毕业拒绝 <理由> ${record.displayId} 处理。`;
+    // 用户可控字段先转义 CQ 码并压平换行，防止注入 [CQ:...] 段或伪造指令行。
+    const singleLine = (value: string) => escapeCqCode(value).replace(/\r?\n/g, " ");
+    const text = `毕业去向 #${record.displayId} 待审核：${singleLine(authorName)} 提交 ${record.graduationYear} 届（${record.classYear} 级）· ${singleLine(record.education)} · ${singleLine(record.destination)}。可用 #毕业通过 ${record.displayId} 或 #毕业拒绝 <理由> ${record.displayId} 处理。`;
     for (const bot of bots) {
       if (!bot.reviewGroupId) continue;
       const status = this.getBotConnectionStatus(bot.qqUin.toString());
@@ -3106,6 +3150,7 @@ export class OneBotRuntime {
 
       await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
     } catch (error) {
+      this.logger.warn({ error, botQqUin, groupId }, "review group command handler failed");
       await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
     }
   }
@@ -3745,11 +3790,22 @@ export class OneBotRuntime {
   }
 
   private extractMessageId(data: unknown): string | null {
-    if (data && typeof data === "object") {
-      const d = data as Record<string, unknown>;
-      if (d.message_id !== undefined) {
-        return String(d.message_id);
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+    const d = data as Record<string, unknown>;
+    if (d.message_id !== undefined && d.message_id !== null) {
+      return String(d.message_id);
+    }
+    if (d.data && typeof d.data === "object") {
+      // 嵌套里有可用 ID 才返回；否则继续走本层的 real_id 回退。
+      const nested = this.extractMessageId(d.data);
+      if (nested !== null) {
+        return nested;
       }
+    }
+    if (d.real_id !== undefined && d.real_id !== null) {
+      return String(d.real_id);
     }
     return null;
   }
@@ -4275,8 +4331,22 @@ function extractCookiesFromActionData(data: unknown) {
 }
 
 function toErrorMessage(error: unknown) {
-  if (error instanceof Error) {
+  if (error instanceof BotWorkflowError) {
     return error.message;
+  }
+  if (error instanceof Error) {
+    const message = error.message;
+    // Dependency/driver failures: same user-facing copy as unexpected errors.
+    if (
+      message.includes("Transaction API error")
+      || message.includes("expired transaction")
+      || message.includes("Invalid `prisma.")
+      || message.includes("Connection")
+    ) {
+      return "系统繁忙，请稍后再试";
+    }
+    // Unexpected Error: do not leak internals into QQ chats; callers should log.
+    return "系统繁忙，请稍后再试";
   }
   return "Bot 命令处理失败";
 }

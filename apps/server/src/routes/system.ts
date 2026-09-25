@@ -971,6 +971,22 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           }
           assertCanManageTenant(context, existingMembership.tenantId, reply);
 
+          // Hierarchy: system_operator > operations_admin > tenant admin.
+          // An operations_admin must not remove a system_operator.
+          const targetSystemRole = existingMembership.user.systemRole;
+          const actorSystemRole = context.user.systemRole;
+          const systemRank: Record<string, number> = {
+            system_operator: 3,
+            operations_admin: 2,
+          };
+          const targetRank = systemRank[targetSystemRole ?? ""] ?? 0;
+          const actorRank = systemRank[actorSystemRole ?? ""] ?? 0;
+          if (targetRank > actorRank) {
+            return reply.code(403).send({
+              message: "权限不足：无法移除比自己级别更高的成员",
+            });
+          }
+
           if (existingMembership.role === "admin") {
             const adminCount = await tx.tenantMembership.count({
               where: { tenantId: existingMembership.tenantId, role: "admin" },

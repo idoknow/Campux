@@ -143,6 +143,7 @@ export function AppShell({
                 mineLoading={dataLoading}
                 autoFollowOwnPosts={me.user.autoFollowOwnPosts}
                 enableMarkdownRender={metadata.enableMarkdownRender}
+                enableFeedback={metadata.enableFeedback}
                 onMinePageChange={onPostsPageChange}
                 onTabChange={onPostsTabChange}
                 onRefresh={onRefreshTenantData}

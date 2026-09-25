@@ -83,6 +83,8 @@ const pluginEnabledFlags: Record<ShowcasePlugin["id"], (metadata: TenantMetadata
   campaigns: (metadata) => metadata.enableCampaigns,
   aggregateLogin: (metadata) => metadata.enableAggregateLogin,
   broadcast: (metadata) => metadata.enableBroadcast,
+  feedback: (metadata) => metadata.enableFeedback,
+  botAlert: (metadata) => metadata.enableBotAlert,
   graduation: (metadata) => metadata.enableGraduation,
 };
 

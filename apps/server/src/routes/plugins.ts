@@ -11,6 +11,12 @@ import {
   maskAggregateAppKey,
   maskAggregateLoginSection,
   restoreAggregateAppKey,
+  restoreBotAlertPass,
+  maskBotAlertSection,
+  maskBotAlertPass,
+  maskAuditDetailSections,
+  BOT_ALERT_PASS_MASK,
+  AGGREGATE_APPKEY_MASK,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
 import { z } from "zod";
@@ -81,6 +87,17 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, next);
       const beforeEnabled = before[presetId].enabled;
       if (beforeEnabled !== enabled) {
+        // 状态变更同样先脱敏再入审计日志：botAlert.smtpPass / aggregateLogin.appKey 不落明文。
+        const safeBefore = presetId === "aggregateLogin"
+          ? maskAggregateLoginSection(before[presetId] as Record<string, unknown>)
+          : presetId === "botAlert"
+            ? maskBotAlertSection(before[presetId] as Record<string, unknown>)
+            : before[presetId];
+        const safeAfter = presetId === "aggregateLogin"
+          ? maskAggregateLoginSection(saved[presetId] as Record<string, unknown>)
+          : presetId === "botAlert"
+            ? maskBotAlertSection(saved[presetId] as Record<string, unknown>)
+            : saved[presetId];
         await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,
@@ -91,8 +108,8 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
             summary: enabled ? "已启用" : "已禁用",
             enabledBefore: beforeEnabled,
             enabledAfter: enabled,
-            before: before[presetId],
-            after: saved[presetId],
+            before: safeBefore,
+            after: safeAfter,
           },
         });
       }
@@ -210,7 +227,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         pluginName,
         operator: row.actor?.displayName ?? (row.actor?.qqUin != null ? String(row.actor.qqUin) : null),
         detail: detailText,
-        metadata: (row.detail as Record<string, unknown> | null) ?? null,
+        metadata: maskAuditDetailSections((row.detail as Record<string, unknown> | null) ?? null),
       };
     });
 
@@ -220,8 +237,8 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
   app.get("/api/admin/plugins/settings", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "admin");
     const config = await readTenantPluginConfig(prisma, context.selectedTenant.id);
-    // 聚合登录 AppKey 只写回，不回显明文（避免出现在响应/审计）。
-    return { config: maskAggregateAppKey(config) };
+    // 敏感凭证只写回，不回显明文（避免出现在响应/网络日志）。
+    return { config: maskBotAlertPass(maskAggregateAppKey(config)) };
   });
 
   // 保存插件配置
@@ -232,8 +249,27 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       return reply.code(400).send({ message: "插件配置格式不正确" });
     }
     const before = await readTenantPluginConfig(prisma, context.selectedTenant.id);
+    // 提交的 smtpPass 仍是掩码时，只允许在 SMTP 连接信息（host/port/user）不变的情况下
+    // 沿用库中密码；否则拒绝保存，避免把已存储的凭证配到新的服务器/账号上。
+    if (
+      parsed.data.botAlert.smtpPass === BOT_ALERT_PASS_MASK &&
+      (parsed.data.botAlert.smtpHost !== before.botAlert.smtpHost ||
+        parsed.data.botAlert.smtpPort !== before.botAlert.smtpPort ||
+        parsed.data.botAlert.smtpUser !== before.botAlert.smtpUser)
+    ) {
+      return reply.code(400).send({ message: "SMTP 服务器信息已修改，请重新输入 SMTP 授权码" });
+    }
+    // 提交的 appKey 仍是掩码时，只允许在 endpoint/appId 不变的情况下沿用库中密钥；
+    // 否则拒绝保存，避免把已存储的 appKey 发往新的认证服务器。
+    if (
+      parsed.data.aggregateLogin.appKey === AGGREGATE_APPKEY_MASK &&
+      (parsed.data.aggregateLogin.endpoint !== before.aggregateLogin.endpoint ||
+        parsed.data.aggregateLogin.appId !== before.aggregateLogin.appId)
+    ) {
+      return reply.code(400).send({ message: "聚合登录服务器信息已修改，请重新输入 AppKey" });
+    }
     // 聚合登录 AppKey 若仍是掩码占位符则保留库中原值，避免把占位符写回导致凭证失效。
-    const toSave = restoreAggregateAppKey(parsed.data, before);
+    const toSave = restoreBotAlertPass(restoreAggregateAppKey(parsed.data, before), before);
     const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, toSave);
 
     // 按插件维度逐项写入审计日志，便于管理员追溯单个插件的配置变更
@@ -246,6 +282,10 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["botStylishMessages", before.botStylishMessages, saved.botStylishMessages],
       ["aggregateLogin", before.aggregateLogin, saved.aggregateLogin],
       ["broadcast", before.broadcast, saved.broadcast],
+      ["feedback", before.feedback, saved.feedback],
+      ["botAlert", before.botAlert, saved.botAlert],
+      ["campaigns", before.campaigns, saved.campaigns],
+      ["graduation", before.graduation, saved.graduation],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
@@ -257,8 +297,16 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         }
         diffs.push({ pluginId, enabled: enabledAfter, summary });
         // 聚合登录段先脱敏再入审计日志，避免明文 appkey 落库（审计可能被读取/导出）。
-        const safeBefore = pluginId === "aggregateLogin" ? maskAggregateLoginSection(beforeValue as Record<string, unknown>) : beforeValue;
-        const safeAfter = pluginId === "aggregateLogin" ? maskAggregateLoginSection(afterValue as Record<string, unknown>) : afterValue;
+        const safeBefore = pluginId === "aggregateLogin"
+          ? maskAggregateLoginSection(beforeValue as Record<string, unknown>)
+          : pluginId === "botAlert"
+            ? maskBotAlertSection(beforeValue as Record<string, unknown>)
+            : beforeValue;
+        const safeAfter = pluginId === "aggregateLogin"
+          ? maskAggregateLoginSection(afterValue as Record<string, unknown>)
+          : pluginId === "botAlert"
+            ? maskBotAlertSection(afterValue as Record<string, unknown>)
+            : afterValue;
         await writeAuditLog({
           tenantId: context.selectedTenant.id,
           actorId: context.user.id,
@@ -277,7 +325,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
     }
 
     // 响应同样脱敏，避免保存后的明文 appKey 回显到前端/网络日志。
-    return { config: maskAggregateAppKey(saved), changed: diffs };
+    return { config: maskBotAlertPass(maskAggregateAppKey(saved)), changed: diffs };
   });
 
   // 读取插件配置审计日志（最近 N 条 tenant.plugin.* 记录）
@@ -307,7 +355,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
         createdAt: entry.createdAt.toISOString(),
         action: entry.action,
         targetId: entry.targetId,
-        detail: entry.detail ?? null,
+        detail: maskAuditDetailSections(entry.detail ?? null),
         actor: entry.actor ? { displayName: entry.actor.displayName, qqUin: entry.actor.qqUin.toString() } : null,
       })),
     };

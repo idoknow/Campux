@@ -23,6 +23,8 @@ const REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME = "20260815120000_add_bot_revi
 const VOTING_CAMPAIGNS_MIGRATION_NAME = "20260906120000_add_voting_campaigns";
 const CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME = "20260906150000_add_campaign_admin_only";
 const BROADCAST_NOTIFICATIONS_MIGRATION_NAME = "20260924120000_add_broadcast_notifications";
+const TENANT_FEEDBACK_MIGRATION_NAME = "20260913140000_add_tenant_feedback";
+const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedback_messages";
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
@@ -579,6 +581,136 @@ function applyUserGraduationSqliteMigration(
  * @param baselineSql 内嵌的建库 DDL（sqlite-baseline.sql 文本）
  * @param databaseUrl 形如 `file:./data/campux.db`
  */
+
+/**
+ * TenantFeedback:意见反馈存档表。老库缺表时补建。
+ */
+function applyTenantFeedbackSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const tenantTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'Tenant'`)
+    .get() as { present: number } | null;
+  if (!tenantTable) return;
+
+  if (doneNames.has(TENANT_FEEDBACK_MIGRATION_NAME)) {
+    skipped.push(TENANT_FEEDBACK_MIGRATION_NAME);
+    return;
+  }
+
+  const table = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantFeedback'`)
+    .get() as { present: number } | null;
+  const hasTable = table !== null;
+
+  logger.info({ migration: TENANT_FEEDBACK_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasTable) {
+      db.exec(`CREATE TABLE "TenantFeedback" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "tenantId" TEXT NOT NULL,
+        "authorId" TEXT NOT NULL,
+        "content" TEXT NOT NULL,
+        "groupMessageId" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "TenantFeedback_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "TenantFeedback_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+      db.exec(`CREATE INDEX "TenantFeedback_tenantId_createdAt_idx" ON "TenantFeedback"("tenantId", "createdAt")`);
+      db.exec(`CREATE INDEX "TenantFeedback_tenantId_authorId_createdAt_idx" ON "TenantFeedback"("tenantId", "authorId", "createdAt")`);
+    }
+    // 修复已有 TenantFeedback 表：补 groupMessageId 列与索引
+    if (hasTable) {
+      const groupCol = db
+        .query(`SELECT 1 AS present FROM pragma_table_info('TenantFeedback') WHERE name = 'groupMessageId'`)
+        .get() as { present: number } | null;
+      if (!groupCol) {
+        db.exec(`ALTER TABLE "TenantFeedback" ADD COLUMN "groupMessageId" TEXT`);
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS "TenantFeedback_tenantId_groupMessageId_idx" ON "TenantFeedback"("tenantId", "groupMessageId")`);
+    }
+    const checksumSeed = hasTable ? "create-tenant-feedback-present" : "create-tenant-feedback-missing";
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [randomUUID(), checksumOf(checksumSeed), TENANT_FEEDBACK_MIGRATION_NAME],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  doneNames.add(TENANT_FEEDBACK_MIGRATION_NAME);
+  applied.push(TENANT_FEEDBACK_MIGRATION_NAME);
+  logger.info({ migration: TENANT_FEEDBACK_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
+/**
+ * TenantFeedback.groupMessageId + TenantFeedbackMessage:意见对话。
+ */
+function applyTenantFeedbackMessagesSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const feedbackTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantFeedback'`)
+    .get() as { present: number } | null;
+  if (!feedbackTable) return;
+
+  if (doneNames.has(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME)) {
+    skipped.push(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME);
+    return;
+  }
+
+  const messageTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'TenantFeedbackMessage'`)
+    .get() as { present: number } | null;
+  const hasMessageTable = messageTable !== null;
+
+  logger.info({ migration: TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasMessageTable) {
+      db.exec(`CREATE TABLE "TenantFeedbackMessage" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "feedbackId" TEXT NOT NULL,
+        "tenantId" TEXT NOT NULL,
+        "role" TEXT NOT NULL,
+        "authorId" TEXT,
+        "authorLabel" TEXT,
+        "content" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "TenantFeedbackMessage_feedbackId_fkey" FOREIGN KEY ("feedbackId") REFERENCES "TenantFeedback" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+      db.exec(`CREATE INDEX "TenantFeedbackMessage_feedbackId_createdAt_idx" ON "TenantFeedbackMessage"("feedbackId", "createdAt")`);
+      db.exec(`CREATE INDEX "TenantFeedbackMessage_tenantId_createdAt_idx" ON "TenantFeedbackMessage"("tenantId", "createdAt")`);
+    }
+    const checksumSeed = hasMessageTable ? "feedback-messages-present" : "feedback-messages-created";
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [randomUUID(), checksumOf(checksumSeed), TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  doneNames.add(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME);
+  applied.push(TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME);
+  logger.info({ migration: TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 export function applySqliteBaseline(
   baselineSql: string,
   databaseUrl: string,
@@ -636,7 +768,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -656,6 +788,8 @@ export function applySqliteBaseline(
     applyReviewQueueReminderAtAllSqliteMigration(db, doneNames, applied, skipped, logger);
     applyVotingCampaignsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyCampaignAdminOnlySqliteMigration(db, doneNames, applied, skipped, logger);
+    applyTenantFeedbackSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyTenantFeedbackMessagesSqliteMigration(db, doneNames, applied, skipped, logger);
     applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };

@@ -126,6 +126,24 @@ export const tenantPluginConfigSchema = z.object({
       appKey: "",
       endpoint: "",
     }),
+  // 意见反馈：开启后投稿页顶部出现入口；提交后发到审核群。
+  feedback: z
+    .object({
+      enabled: z.boolean(),
+    })
+    .default({ enabled: false }),
+  // Bot 异常通知：登录态失效且自动刷新失败时，向配置的邮箱发送通知。
+  botAlert: z
+    .object({
+      enabled: z.boolean(),
+      smtpHost: z.string().max(255).default(""),
+      smtpPort: z.number().int().min(1).max(65535).default(465),
+      smtpUser: z.string().max(255).default(""),
+      smtpPass: z.string().max(255).default(""),
+      fromEmail: z.string().max(255).default(""),
+      toEmails: z.array(z.string().max(255)).max(20).default([]),
+    })
+    .default({ enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -149,6 +167,8 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
     appKey: "",
     endpoint: "",
   },
+  feedback: { enabled: false },
+  botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {
@@ -237,4 +257,40 @@ export function restoreAggregateAppKey(submitted: TenantPluginConfig, existing: 
     };
   }
   return submitted;
+}
+
+export const BOT_ALERT_PASS_MASK = "••••••••";
+
+export function maskBotAlertPass(config: TenantPluginConfig): TenantPluginConfig {
+  if (!config.botAlert.smtpPass) return config;
+  return { ...config, botAlert: { ...config.botAlert, smtpPass: BOT_ALERT_PASS_MASK } };
+}
+
+export function maskBotAlertSection<T extends { smtpPass?: string }>(section: T): T {
+  if (section && typeof section === "object" && section.smtpPass) {
+    return { ...section, smtpPass: BOT_ALERT_PASS_MASK };
+  }
+  return section;
+}
+
+export function restoreBotAlertPass(submitted: TenantPluginConfig, existing: TenantPluginConfig): TenantPluginConfig {
+  if (submitted.botAlert.smtpPass === BOT_ALERT_PASS_MASK) {
+    return { ...submitted, botAlert: { ...submitted.botAlert, smtpPass: existing.botAlert.smtpPass } };
+  }
+  return submitted;
+}
+
+// 审计读取兜底：历史明细行可能在脱敏修复前写入了明文凭证，读取端点返回 detail 前
+// 对 before/after 段做再脱敏，保证 aggregateLogin.appKey / botAlert.smtpPass 不回显。
+export function maskAuditDetailSections<T>(detail: T): T {
+  if (!detail || typeof detail !== "object") return detail;
+  const source = detail as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...source };
+  for (const key of ["before", "after"]) {
+    const section = result[key];
+    if (section && typeof section === "object") {
+      result[key] = maskBotAlertSection(maskAggregateLoginSection(section as Record<string, unknown>));
+    }
+  }
+  return result as T;
 }
