@@ -43,24 +43,24 @@ type ServiceAction = "profile" | "password" | "rules" | "oauth-bindings" | "";
 
 const servicePalettes = [
   {
-    shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35",
+    shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10",
     icon: "product-accent-blue",
   },
   {
-    shell: "border-slate-200 bg-white hover:border-green-200 hover:bg-green-50/35",
+    shell: "border-slate-200 bg-white hover:border-green-200 hover:bg-green-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-green-500/50 dark:hover:bg-green-500/10",
     icon: "product-accent-green",
   },
   {
-    shell: "border-slate-200 bg-white hover:border-amber-200 hover:bg-amber-50/35",
+    shell: "border-slate-200 bg-white hover:border-amber-200 hover:bg-amber-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-amber-500/50 dark:hover:bg-amber-500/10",
     icon: "product-accent-amber",
   },
   {
-    shell: "border-slate-200 bg-white hover:border-rose-200 hover:bg-rose-50/35",
+    shell: "border-slate-200 bg-white hover:border-rose-200 hover:bg-rose-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-rose-500/50 dark:hover:bg-rose-500/10",
     icon: "product-accent-rose",
   },
 ];
 const defaultServicePalette = {
-  shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35",
+  shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10",
   icon: "product-accent-blue",
 };
 
@@ -227,7 +227,7 @@ export function ServicesPage({
                 <span className="block text-sm font-semibold text-slate-950">第三方登录</span>
                 <span className="mt-0.5 block text-sm leading-5 text-slate-600">绑定 QQ/微信/支付宝等，登录后可一键扫码登录</span>
               </span>
-              <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />
+              <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             </button>
             ) : null}
           </ServiceGroup>
@@ -255,7 +255,7 @@ export function ServicesPage({
                 <span className="block text-sm font-semibold text-slate-950">关于</span>
                 <span className="mt-0.5 block text-sm leading-5 text-slate-600">版本、部署形态、开发者、技术栈与插件信息</span>
               </span>
-              <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />
+              <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             </button>
           </ServiceGroup>
         </section>
@@ -282,7 +282,7 @@ function ServiceGroup({ title, description, children }: { title: string; descrip
   return (
     <div className="mt-5 first:mt-0">
       <div className="mb-2">
-        <h2 className="text-sm font-semibold text-slate-950">{title}</h2>
+        <h2 className="text-sm font-semibold text-slate-950 dark:text-slate-100">{title}</h2>
         <p className="mt-0.5 text-xs leading-5 text-slate-500">{description}</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">{children}</div>
@@ -300,10 +300,10 @@ function ServiceTile({ service, index, compact = false, onOpen }: { service: Ten
         <Icon className="size-5" strokeWidth={2.1} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-slate-950">{service.title}</span>
-        <span className="mt-0.5 block text-sm leading-5 text-slate-600">{service.description ?? "校园服务"}</span>
+        <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">{service.title}</span>
+        <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">{service.description ?? "校园服务"}</span>
       </span>
-      {service.url ? <ExternalLinkIcon className="size-4 shrink-0 text-slate-400" /> : <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />}
+      {service.url ? <ExternalLinkIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" /> : <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />}
     </button>
   );
 }

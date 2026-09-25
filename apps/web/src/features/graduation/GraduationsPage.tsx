@@ -39,7 +39,8 @@ type TimelineOrder = "asc" | "desc";
 type YearType = "graduationYear" | "classYear";
 
 function qqAvatar(qqUin: string) {
-  return `https://q.qlogo.cn/g?b=qq&nk=${qqUin}&s=64`;
+  // 与全站其他 QQ 头像一致：q1 子域 + no-referrer 防盗链，否则请求带 Referer 会被 qlogo CDN 拒绝。
+  return `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(qqUin)}&s=100`;
 }
 
 function initials(name: string | null | undefined) {
@@ -56,26 +57,8 @@ const VIEW_TABS: Array<{ key: View; label: string; icon: typeof UsersIcon }> = [
   { key: "map", label: "地图", icon: MapIcon },
 ];
 
-const STATUS_STYLE: Record<GraduationItem["status"], string> = {
-  pending_approval: "bg-amber-50 text-amber-700 ring-amber-200",
-  approved: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  rejected: "bg-rose-50 text-rose-700 ring-rose-200",
-};
-
-const STATUS_LABEL: Record<GraduationItem["status"], string> = {
-  pending_approval: "待审核",
-  approved: "已通过",
-  rejected: "已驳回",
-};
-
-function StatusChip({ status }: { status: GraduationItem["status"] }) {
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${STATUS_STYLE[status]}`}>
-      <span className="inline-block size-1.5 rounded-full bg-current opacity-70" />
-      {STATUS_LABEL[status]}
-    </span>
-  );
-}
+// 各视图按用途只展示单一状态的记录（用户列表/学校/时间/搜索均为已通过，待审核视图为待审核），
+// 卡片上不再重复展示状态徽章。
 
 export function GraduationsPage({ me }: { me: AuthenticatedMe }) {
   const canReview = me.currentMembership ? canAccess(me.currentMembership.role, "reviewer") : false;
@@ -261,24 +244,24 @@ export function GraduationsPage({ me }: { me: AuthenticatedMe }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-28 pt-5 pr-2 md:pb-8">
         {/* 顶部渐变横幅 */}
-        <div className="relative overflow-hidden rounded-2xl border border-violet-200/60 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-pink-100 p-6 shadow-sm">
-          <div aria-hidden className="pointer-events-none absolute -right-6 -top-8 size-40 rounded-full bg-violet-300/20 blur-2xl" />
-          <div aria-hidden className="pointer-events-none absolute -bottom-10 right-24 size-32 rounded-full bg-pink-300/20 blur-2xl" />
+        <div className="relative overflow-hidden rounded-2xl border border-violet-200/60 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-pink-100 p-6 shadow-sm dark:border-violet-500/30 dark:from-violet-950 dark:via-fuchsia-950 dark:to-pink-950">
+          <div aria-hidden className="pointer-events-none absolute -right-6 -top-8 size-40 rounded-full bg-violet-300/20 blur-2xl dark:bg-violet-500/10" />
+          <div aria-hidden className="pointer-events-none absolute -bottom-10 right-24 size-32 rounded-full bg-pink-300/20 blur-2xl dark:bg-pink-500/10" />
           <div className="relative flex flex-wrap items-center gap-4">
-            <span className="grid size-14 shrink-0 place-items-center rounded-xl border border-white bg-white/70 shadow-sm">
+            <span className="grid size-14 shrink-0 place-items-center rounded-xl border border-white bg-white/70 shadow-sm dark:border-white/15 dark:bg-white/10">
               <GraduationIcon className="size-8" />
             </span>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-lg font-black tracking-tight text-violet-950">毕业生去向</h1>
-              <p className="mt-1 truncate text-xs leading-5 text-violet-900/60">
+              <h1 className="truncate text-lg font-black tracking-tight text-violet-950 dark:text-violet-100">毕业生去向</h1>
+              <p className="mt-1 truncate text-xs leading-5 text-violet-900/60 dark:text-violet-200/70">
                 校友们的毕业去向一目了然：按人、按校、按届，随时搜索。
               </p>
             </div>
             {statBadge ? (
-              <div className="flex shrink-0 items-center gap-2 rounded-xl border border-white/80 bg-white/70 px-3 py-2 shadow-sm backdrop-blur">
-                <statBadge.icon className="size-4 text-violet-600" />
-                <span className="text-2xl font-black leading-none text-violet-700">{statBadge.value}</span>
-                <span className="text-xs font-medium text-violet-900/60">{statBadge.label}</span>
+              <div className="flex shrink-0 items-center gap-2 rounded-xl border border-white/80 bg-white/70 px-3 py-2 shadow-sm backdrop-blur dark:border-white/15 dark:bg-white/10">
+                <statBadge.icon className="size-4 text-violet-600 dark:text-violet-300" />
+                <span className="text-2xl font-black leading-none text-violet-700 dark:text-violet-100">{statBadge.value}</span>
+                <span className="text-xs font-medium text-violet-900/60 dark:text-violet-200/70">{statBadge.label}</span>
               </div>
             ) : null}
           </div>
@@ -573,7 +556,7 @@ function GraduationCard({ item, onApprove, onReject }: {
     <div className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-violet-200 hover:shadow-md">
       <div className="flex items-start gap-4">
         <Avatar className="size-11 shrink-0 ring-2 ring-violet-100">
-          <AvatarImage src={item.author?.qqUin ? qqAvatar(item.author.qqUin) : undefined} alt="" />
+          <AvatarImage src={item.author?.qqUin ? qqAvatar(item.author.qqUin) : undefined} alt="" referrerPolicy="no-referrer" loading="lazy" />
           <AvatarFallback className="bg-gradient-to-br from-violet-100 to-fuchsia-100 font-semibold text-violet-700">
             {initials(item.author?.displayName)}
           </AvatarFallback>
@@ -583,7 +566,6 @@ function GraduationCard({ item, onApprove, onReject }: {
             <span className="text-sm font-bold text-slate-950">{item.author?.displayName ?? "未命名用户"}</span>
             <span className="font-mono text-xs text-slate-500">{item.author?.qqUin ?? "—"}</span>
             <span className="text-[11px] text-slate-300">#{item.displayId}</span>
-            <StatusChip status={item.status} />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2.5 text-xs text-slate-600 sm:grid-cols-4">
             <div>
