@@ -33,10 +33,9 @@ export async function sendBotAlertEmail(
         user: config.smtpUser.trim(),
         pass: config.smtpPass,
       },
-      // 部分 SMTP 需要放宽 TLS 校验
-      tls: {
-        rejectUnauthorized: false,
-      },
+      greetingTimeout: 10_000,
+      connectionTimeout: 15_000,
+      socketTimeout: 30_000,
     });
 
     // 验证连接
@@ -65,6 +64,14 @@ export async function sendBotAlertEmail(
   }
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function formatBotAlertEmail(input: {
   tenantName: string;
   botName: string;
@@ -84,10 +91,10 @@ export function formatBotAlertEmail(input: {
   const html = `
     <h2>Campux Bot 异常通知</h2>
     <table style="border-collapse:collapse">
-      <tr><td style="padding:4px 12px;font-weight:bold">校园墙</td><td>${input.tenantName}</td></tr>
-      <tr><td style="padding:4px 12px;font-weight:bold">墙号</td><td>${input.botName}（QQ ${input.botQqUin}）</td></tr>
-      <tr><td style="padding:4px 12px;font-weight:bold">触发原因</td><td>${input.reason}</td></tr>
-      <tr><td style="padding:4px 12px;font-weight:bold">错误信息</td><td><pre style="white-space:pre-wrap">${input.error}</pre></td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold">校园墙</td><td>${escapeHtml(input.tenantName)}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold">墙号</td><td>${escapeHtml(input.botName)}（QQ ${escapeHtml(input.botQqUin)}）</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold">触发原因</td><td>${escapeHtml(input.reason)}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold">错误信息</td><td><pre style="white-space:pre-wrap">${escapeHtml(input.error)}</pre></td></tr>
     </table>
     <p>请尽快登录墙号重新扫码或手动刷新 QZone cookies。</p>
   `;

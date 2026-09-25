@@ -244,7 +244,7 @@ async function readPublicMetadata(tenantId: string) {
     // 意见反馈：未启用时投稿页顶部入口隐藏。
     metadata.enableFeedback = pluginConfig.feedback.enabled;
     // Bot 异常通知：仅暴露启用状态给管理端。
-    // Bot 异常通知：仅暴露启用状态给管理端。
+    metadata.enableBotAlert = pluginConfig.botAlert.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

@@ -359,6 +359,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     }
 
     let member;
+    let authDenied = false;
     try {
       member = await retryTransactionSerializationFailures(
         () => prisma.$transaction(async (tx) => {
@@ -373,9 +374,8 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           const targetRank = systemRank[targetSystemRole ?? ""] ?? 0;
           const actorRank = systemRank[actorSystemRole ?? ""] ?? 0;
           if (targetRank > actorRank) {
-            return reply.code(403).send({
-              message: "权限不足：无法修改比自己级别更高的成员",
-            });
+            authDenied = true;
+            return null;
           }
 
           const existingMembership = await tx.tenantMembership.findUnique({
@@ -426,6 +426,13 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         return reply.code(response.statusCode).send({ code: response.code, message: response.message });
       }
       throw error;
+    }
+
+    if (authDenied) {
+      return reply.code(403).send({ message: "权限不足：无法修改比自己级别更高的成员" });
+    }
+    if (!member) {
+      return reply.code(404).send({ message: "成员不存在" });
     }
 
     await writeAuditLog({

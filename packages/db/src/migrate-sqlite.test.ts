@@ -38,6 +38,8 @@ describe("applySqliteBaseline", () => {
       expect(r1.applied).toEqual(["0_sqlite_baseline"]);
       expect(r1.skipped).toContain("20260909000000_add_personal_qq_token");
       expect(r1.skipped).toContain("20260913120000_add_campaign_tables_sqlite");
+      expect(r1.skipped).toContain("20260913140000_add_tenant_feedback");
+      expect(r1.skipped).toContain("20260913160000_add_tenant_feedback_messages");
 
       // tables exist
       const db = new Database(dbPath);

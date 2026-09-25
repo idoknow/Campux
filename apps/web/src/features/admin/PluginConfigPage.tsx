@@ -193,6 +193,8 @@ function FeedbackPanel() {
 
 function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   const alert = config.botAlert;
+  const [portText, setPortText] = useState(String(alert.smtpPort));
+  const [toEmailsText, setToEmailsText] = useState(alert.toEmails.join(","));
   const set = (patch: Partial<TenantPluginConfig["botAlert"]>) => {
     onChange({ ...config, botAlert: { ...alert, ...patch } });
   };
@@ -208,7 +210,7 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
         </label>
         <label className="grid gap-1 text-xs font-semibold text-slate-600">
           SMTP 端口
-          <Input type="number" value={alert.smtpPort} disabled={busy} onChange={(e) => set({ smtpPort: Number(e.target.value) || 465 })} />
+          <Input type="number" value={portText} disabled={busy} onChange={(e) => setPortText(e.target.value)} onBlur={() => set({ smtpPort: Number(portText) || 465 })} />
         </label>
         <label className="grid gap-1 text-xs font-semibold text-slate-600">
           发件邮箱
@@ -225,11 +227,11 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
         <label className="grid gap-1 text-xs font-semibold text-slate-600">
           收件邮箱（多个用逗号分隔，最多 20 个）
           <Textarea
-            value={alert.toEmails.join(",")}
+            value={toEmailsText}
             disabled={busy}
             placeholder="admin1@example.com, admin2@example.com"
             className="min-h-16"
-            onChange={(e) => set({ toEmails: e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20) })}
+            onChange={(e) => setToEmailsText(e.target.value)} onBlur={() => set({ toEmails: toEmailsText.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20) })}
           />
         </label>
         <div className="flex items-center gap-2">
@@ -1033,7 +1035,7 @@ const PLUGINS: PluginDescriptor[] = [
     rationale: "开启后用户可提交文字意见并通知审核群。",
     enabled: (config: TenantPluginConfig) => config.feedback.enabled,
     setEnabled: (config: TenantPluginConfig, value: boolean) => ({ ...config, feedback: { ...config.feedback, enabled: value } }),
-    render: () => null,
+    render: () => <FeedbackPanel />,
   },
   {
     id: "botAlert" as const,

@@ -250,3 +250,24 @@ export function restoreAggregateAppKey(submitted: TenantPluginConfig, existing: 
   }
   return submitted;
 }
+
+export const BOT_ALERT_PASS_MASK = "••••••••";
+
+export function maskBotAlertPass(config: TenantPluginConfig): TenantPluginConfig {
+  if (!config.botAlert.smtpPass) return config;
+  return { ...config, botAlert: { ...config.botAlert, smtpPass: BOT_ALERT_PASS_MASK } };
+}
+
+export function maskBotAlertSection<T extends { smtpPass?: string }>(section: T): T {
+  if (section && typeof section === "object" && section.smtpPass) {
+    return { ...section, smtpPass: BOT_ALERT_PASS_MASK };
+  }
+  return section;
+}
+
+export function restoreBotAlertPass(submitted: TenantPluginConfig, existing: TenantPluginConfig): TenantPluginConfig {
+  if (submitted.botAlert.smtpPass === BOT_ALERT_PASS_MASK) {
+    return { ...submitted, botAlert: { ...submitted.botAlert, smtpPass: existing.botAlert.smtpPass } };
+  }
+  return submitted;
+}

@@ -498,7 +498,8 @@ export function PostPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
+      </>
+      )}
       {metadata.enableFeedback ? (
         <Dialog open={feedbackOpen} onOpenChange={(open) => {
           if (!feedbackBusy) {
@@ -533,8 +534,6 @@ export function PostPage({
           </DialogContent>
         </Dialog>
       ) : null}
-      </>
-      )}
     </div>
   );
 }

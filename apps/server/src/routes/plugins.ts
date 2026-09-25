@@ -11,6 +11,8 @@ import {
   maskAggregateAppKey,
   maskAggregateLoginSection,
   restoreAggregateAppKey,
+  restoreBotAlertPass,
+  maskBotAlertSection,
   type TenantPluginConfig,
 } from "../lib/tenant-plugin-config";
 import { z } from "zod";
@@ -233,7 +235,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
     }
     const before = await readTenantPluginConfig(prisma, context.selectedTenant.id);
     // 聚合登录 AppKey 若仍是掩码占位符则保留库中原值，避免把占位符写回导致凭证失效。
-    const toSave = restoreAggregateAppKey(parsed.data, before);
+    const toSave = restoreBotAlertPass(restoreAggregateAppKey(parsed.data, before), before);
     const saved = await writeTenantPluginConfig(prisma, context.selectedTenant.id, toSave);
 
     // 按插件维度逐项写入审计日志，便于管理员追溯单个插件的配置变更
@@ -247,6 +249,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["aggregateLogin", before.aggregateLogin, saved.aggregateLogin],
       ["broadcast", before.broadcast, saved.broadcast],
       ["feedback", before.feedback, saved.feedback],
+      ["botAlert", before.botAlert, saved.botAlert],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {

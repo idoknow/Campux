@@ -42,6 +42,17 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
     const displayName = context.user.displayName?.trim() || "未设置昵称";
     const qqUin = context.user.qqUin != null ? context.user.qqUin.toString() : "未知";
 
+    const recentSubmission = await prisma.tenantFeedback.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        authorId: context.user.id,
+        createdAt: { gte: new Date(Date.now() - 60_000) },
+      },
+    });
+    if (recentSubmission) {
+      return reply.code(429).send({ message: "提交过于频繁，请 60 秒后再试" });
+    }
+
     const saved = await prisma.tenantFeedback.create({
       data: {
         tenantId: context.selectedTenant.id,
@@ -84,6 +95,13 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
 
     // Feedback is already durable. Partial success avoids 503 retries that
     // would insert a duplicate row when only the review-group notify fails.
+    if (notified.messageId) {
+      await prisma.tenantFeedback.update({
+        where: { id: saved.id },
+        data: { groupMessageId: notified.messageId },
+      });
+    }
+
     if (!notified.ok) {
       return reply.code(202).send({
         ok: true,

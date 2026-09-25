@@ -856,7 +856,9 @@ export class OneBotRuntime {
         },
       });
       // Bot 异常通知：登录态失效且自动刷新失败时邮件通知管理员
-      await this.sendBotAlertEmail(bot, reason, errorMessage).catch(() => undefined);
+      void this.sendBotAlertEmail(bot, reason, errorMessage).catch((dispatchError) => {
+        this.logger.warn({ error: dispatchError, botId: bot.id }, "failed to dispatch bot alert email");
+      });
       throw error;
     }
   }

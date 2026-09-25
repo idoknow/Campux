@@ -538,6 +538,16 @@ function applyTenantFeedbackSqliteMigration(
       db.exec(`CREATE INDEX "TenantFeedback_tenantId_createdAt_idx" ON "TenantFeedback"("tenantId", "createdAt")`);
       db.exec(`CREATE INDEX "TenantFeedback_tenantId_authorId_createdAt_idx" ON "TenantFeedback"("tenantId", "authorId", "createdAt")`);
     }
+    // 修复已有 TenantFeedback 表：补 groupMessageId 列与索引
+    if (hasTable) {
+      const groupCol = db
+        .query(`SELECT 1 AS present FROM pragma_table_info('TenantFeedback') WHERE name = 'groupMessageId'`)
+        .get() as { present: number } | null;
+      if (!groupCol) {
+        db.exec(`ALTER TABLE "TenantFeedback" ADD COLUMN "groupMessageId" TEXT`);
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS "TenantFeedback_tenantId_groupMessageId_idx" ON "TenantFeedback"("tenantId", "groupMessageId")`);
+    }
     const checksumSeed = hasTable ? "create-tenant-feedback-present" : "create-tenant-feedback-missing";
     db.run(
       `INSERT INTO "_prisma_migrations"
