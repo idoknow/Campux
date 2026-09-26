@@ -41,6 +41,8 @@ import {
   normalizeEnableFontSelection,
   enableAnonymousAvatarSelectionKey,
   normalizeEnableAnonymousAvatarSelection,
+  followedPostCommentNotifyEnabledKey,
+  normalizeFollowedPostCommentNotifyEnabled,
 } from "../lib/tenant-metadata";
 import { maxImageMaxSizeMb, minImageMaxSizeMb, normalizeImageMaxSizeMb } from "../lib/image-upload-policy";
 
@@ -65,6 +67,7 @@ const publicMetadataKeys = [
   enableMarkdownRenderKey,
   enableFontSelectionKey,
   enableAnonymousAvatarSelectionKey,
+  followedPostCommentNotifyEnabledKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -97,6 +100,7 @@ const patchMetadataSchema = z.object({
   enableMarkdownRender: z.boolean().optional(),
   enableFontSelection: z.boolean().optional(),
   enableAnonymousAvatarSelection: z.boolean().optional(),
+  followedPostCommentNotifyEnabled: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -137,6 +141,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableMarkdownRender: normalizeEnableMarkdownRender(record[enableMarkdownRenderKey]),
     enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
     enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
+    followedPostCommentNotifyEnabled: normalizeFollowedPostCommentNotifyEnabled(record[followedPostCommentNotifyEnabledKey]),
     availableFonts: [] as string[],
     availableBgColors: [] as Array<{ value: string; label: string; hex: string }>,
     availableTextColors: [] as Array<{ value: string; label: string; hex: string }>,
@@ -456,6 +461,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.enableAnonymousAvatarSelection !== undefined) {
       updates.push({ key: enableAnonymousAvatarSelectionKey, value: body.enableAnonymousAvatarSelection });
+    }
+    if (body.followedPostCommentNotifyEnabled !== undefined) {
+      updates.push({ key: followedPostCommentNotifyEnabledKey, value: body.followedPostCommentNotifyEnabled });
     }
 
     await prisma.$transaction(

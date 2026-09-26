@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { prisma } from "../lib/prisma";
 import { tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import { readFollowedPostCommentNotifyDisabledTenantIds } from "../lib/tenant-metadata";
 
 /**
  * Pushes an abbreviated "new comments" digest to users who followed their own
@@ -110,6 +111,18 @@ type FollowDigestRow = {
 };
 
 /**
+ * 墙面设置里可关闭「关注稿件评论通知」。关闭后整墙停止推送（含定时与手动），
+ * 且不推进 lastPushedAt 基线，重新开启后下一轮补推关闭期间的新增评论。
+ */
+async function filterFollowerDigestsByNotifySwitch<T extends { post: { tenantId: string } }>(follows: T[]): Promise<T[]> {
+  const disabledTenantIds = await readFollowedPostCommentNotifyDisabledTenantIds(prisma);
+  if (disabledTenantIds.size === 0) {
+    return follows;
+  }
+  return follows.filter((follow) => !disabledTenantIds.has(follow.post.tenantId));
+}
+
+/**
  * Sends (or advances the marker for) a single follow's comment digest. Returns
  * true only when a message was actually delivered. Shared by the twice-daily
  * scheduler and the manual single-post push endpoint so both behave identically.
@@ -153,7 +166,7 @@ async function processFollowDigest(follow: FollowDigestRow, caller: CommentDiges
 
 export async function pushFollowedPostCommentDigests(caller: CommentDigestSender, logger: FastifyBaseLogger, now: Date = new Date()) {
   const slotStart = currentSlotStart(now);
-  const follows = await prisma.postFollow.findMany({
+  const follows = await filterFollowerDigestsByNotifySwitch(await prisma.postFollow.findMany({
     where: {
       OR: [{ lastPushedAt: null }, { lastPushedAt: { lt: slotStart } }],
       post: {
@@ -162,7 +175,7 @@ export async function pushFollowedPostCommentDigests(caller: CommentDigestSender
       },
     },
     include: followDigestInclude,
-  });
+  }));
 
   let pushed = 0;
   let spacingIndex = 0;
@@ -188,7 +201,7 @@ export async function pushFollowedPostCommentDigests(caller: CommentDigestSender
  * double-report the same comments.
  */
 export async function pushFollowedPostCommentDigestForPost(postId: string, caller: CommentDigestSender, logger: FastifyBaseLogger, now: Date = new Date()) {
-  const follows = await prisma.postFollow.findMany({
+  const follows = await filterFollowerDigestsByNotifySwitch(await prisma.postFollow.findMany({
     where: {
       postId,
       post: {
@@ -197,7 +210,7 @@ export async function pushFollowedPostCommentDigestForPost(postId: string, calle
       },
     },
     include: followDigestInclude,
-  });
+  }));
 
   let pushed = 0;
   let spacingIndex = 0;

@@ -14,6 +14,7 @@ import { writeAuditLog } from "../lib/audit";
 import { buildUserContainsSearch, findUserIdsByContainsSearch } from "../lib/user-search";
 import { defaultPublishIntervalSeconds, enqueueAttempt, resumePublishAttemptsWaitingForCookies, schedulePublishAttempt } from "../runtime/publishing";
 import { pushFollowedPostCommentDigestForPost } from "../runtime/followed-post-comments";
+import { readTenantFollowedPostCommentNotifyEnabled } from "../lib/tenant-metadata";
 import type { OneBotRuntime } from "../runtime/onebot";
 import type { RuntimeQueue } from "../runtime/queue";
 import { qzoneCookieDomain, refreshQZoneCookiesViaBot } from "../lib/bot-workflows";
@@ -1464,6 +1465,11 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
 
     if (!oneBot) {
       return reply.code(503).send({ message: "OneBot 运行时不可用" });
+    }
+
+    const notifyEnabled = await readTenantFollowedPostCommentNotifyEnabled(prisma, context.selectedTenant.id);
+    if (!notifyEnabled) {
+      return reply.code(400).send({ message: "墙面设置中已关闭「关注稿件评论通知」，开启后才能推送摘要" });
     }
 
     const result = await pushFollowedPostCommentDigestForPost(post.id, oneBot, app.log);
