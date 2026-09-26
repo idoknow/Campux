@@ -21,10 +21,8 @@ const CQ_CODE_GLOBAL_RE = /\[CQ:([a-zA-Z0-9_-]+)((?:,[^,\]]*)*)\]/g;
 
 /** 去掉 CQ 码，只留可读文本（snowluma 字符串形态 / raw_message）。 */
 export function stripCqCodes(input: string): string {
-  // 只去掉 CQ 码并压缩连续空白，不 trim 掉正文首尾空格（指令解析层会再 trim）
-  return input
-    .replace(CQ_CODE_GLOBAL_RE, "")
-    .replace(/[ \t]{2,}/g, " ");
+  // 只去掉 CQ 码，不压缩正文空白（有意空格/制表符应原样保留；指令解析层会再 trim）
+  return input.replace(CQ_CODE_GLOBAL_RE, "");
 }
 
 /** 从 CQ 字符串解析出 image 段（snowluma 字符串形态）。 */
@@ -152,7 +150,11 @@ export function extractOneBotImageSegments(message: unknown) {
     return [];
   }
 
-  return message.filter((segment): segment is OneBotMessageSegment => {
+  const fromStrings = message
+    .filter((segment): segment is string => typeof segment === "string")
+    .flatMap((segment) => parseCqImageSegments(segment));
+
+  const fromObjects = message.filter((segment): segment is OneBotMessageSegment => {
     if (typeof segment === "string") {
       return false;
     }
@@ -161,6 +163,8 @@ export function extractOneBotImageSegments(message: unknown) {
     }
     return (segment as OneBotMessageSegment).type === "image";
   });
+
+  return [...fromStrings, ...fromObjects];
 }
 
 /**
@@ -196,7 +200,8 @@ export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
     // snowluma 等实现可能把 text 放 data.text / data.content，或把整段写成字符串
     const texts = message.map((segment) => {
       if (typeof segment === "string") {
-        return segment;
+        // 裸字符串段也可能带 [CQ:...]，需剥离后再作文本
+        return stripCqCodes(segment);
       }
       const item = segment as OneBotMessageSegment;
       if (item?.type === "text") {

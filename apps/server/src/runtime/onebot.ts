@@ -1770,24 +1770,30 @@ export class OneBotRuntime {
           return;
         }
         const result = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
-          const updated = await transaction.post.update({
-            where: { id: post.id },
-            data: {
-              status: "cancelled",
-              logs: {
-                create: {
-                  tenantId: bot.tenantId,
-                  actorId: user.id,
-                  oldStatus: post.status,
-                  newStatus: "cancelled",
-                  comment: reason ? `用户取消：${reason}` : "用户取消",
-                },
-              },
-            },
+          // 事务内按期望状态条件更新，避免与审核/发布并发时覆盖状态
+          const updated = await transaction.post.updateMany({
+            where: { id: post.id, status: "pending_approval" },
+            data: { status: "cancelled" },
           });
-          return updated;
+          if (updated.count > 0) {
+            await transaction.postLog.create({
+              data: {
+                tenantId: bot.tenantId,
+                postId: post.id,
+                actorId: user.id,
+                oldStatus: "pending_approval",
+                newStatus: "cancelled",
+                comment: reason ? `用户取消：${reason}` : "用户取消",
+              },
+            });
+          }
+          return { id: post.id, count: updated.count };
         });
         if (!result.active) throw new BotWorkflowError("校园墙已暂停或归档", 409);
+        if (result.value.count === 0) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，取消未生效。`);
+          return;
+        }
         this.notifyPostCancelled(result.value.id).catch(() => undefined);
         await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 已取消。`);
         return;
@@ -1808,26 +1814,34 @@ export class OneBotRuntime {
         return;
       }
       const result = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
-        const updated = await transaction.post.update({
-          where: { id: post.id },
+        // 事务内按期望状态条件更新，避免与审核/撤回流程并发时覆盖状态
+        const updated = await transaction.post.updateMany({
+          where: { id: post.id, status: "published" },
           data: {
             status: "pending_recall",
             recallIgnored: false,
             recallIgnoredAt: null,
-            logs: {
-              create: {
-                tenantId: bot.tenantId,
-                actorId: user.id,
-                oldStatus: post.status,
-                newStatus: "pending_recall",
-                comment: `用户申请撤回：${reason || "对话指令申请"}`,
-              },
-            },
           },
         });
-        return updated;
+        if (updated.count > 0) {
+          await transaction.postLog.create({
+            data: {
+              tenantId: bot.tenantId,
+              postId: post.id,
+              actorId: user.id,
+              oldStatus: "published",
+              newStatus: "pending_recall",
+              comment: `用户申请撤回：${reason || "对话指令申请"}`,
+            },
+          });
+        }
+        return { id: post.id, count: updated.count };
       });
       if (!result.active) throw new BotWorkflowError("校园墙已暂停或归档", 409);
+      if (result.value.count === 0) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，撤回未生效。`);
+        return;
+      }
       this.notifyPostRecallRequested(result.value.id).catch(() => undefined);
       await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`);
     } catch (error) {

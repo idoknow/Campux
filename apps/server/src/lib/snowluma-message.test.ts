@@ -90,3 +90,21 @@ describe("snowluma CQ 码字符串形态", () => {
     expect(segs.length).toBe(1);
   });
 });
+
+describe("review fixes: CQ 字符串段与正文空白", () => {
+  test("数组内裸字符串段也会剥离 CQ（review #2）", () => {
+    const text = extractOneBotPlainText(["[CQ:at,qq=1] #投稿 字符串段"]).trim();
+    expect(text).toBe("#投稿 字符串段");
+    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: true })).toBe("字符串段");
+  });
+
+  test("数组内字符串段里的 CQ:image 仍可提取（review #2）", () => {
+    const segs = extractOneBotImageSegments(["[CQ:image,file=z.jpg]", { type: "image", data: { file: "a.jpg" } }]);
+    expect(segs.length).toBe(2);
+  });
+
+  test("stripCqCodes 不压缩正文连续空白（review #3）", () => {
+    expect(extractOneBotPlainText("[CQ:image,file=x.jpg]你好  世界")).toBe("你好  世界");
+    expect(extractOneBotPlainText([{ type: "text", data: { text: "a  b\tc" } }])).toBe("a  b\tc");
+  });
+});
