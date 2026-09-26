@@ -275,7 +275,6 @@ export class OneBotRuntime {
   private readonly interactionFence = new TenantInteractionGenerationFence();
   private readonly connections = new Set<OneBotConnection>();
   private readonly pendingActions = new Map<string, PendingAction>();
-  private readonly botStylishMessageCache = new Map<string, Record<string, string[]> | null>();
   private readonly privateAutoReplyAt = new Map<string, number>();
   private readonly privateForwardBuffers = new Map<string, PrivateForwardBuffer>();
   private readonly privatePostAggregateBuffers = new Map<string, PrivatePostAggregateBuffer>();
@@ -327,7 +326,6 @@ export class OneBotRuntime {
           mapping[entry.type] = entry.messages;
         }
       }
-      this.botStylishMessageCache.set(tenantId, mapping);
       setBotCustomStylishMessages(mapping);
       return baseEnabled && config.botStylishMessages.enabled;
     } catch {
@@ -508,7 +506,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     await this.sendTenantReviewNotification(post.tenantId, formatPostCancelled(post.displayId, stylishEnabled));
   }
 
@@ -534,7 +532,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const message = formatRecallRequestNotification(
       post.displayId,
       post.author.displayName ?? "未命名用户",
@@ -557,7 +555,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const groupSuffix = opts?.skipAuthor ? "\n（静默撤回，未通知作者）" : "";
     await this.sendTenantReviewNotification(post.tenantId, formatPostRecalledGroup(post.displayId, targetCount, stylishEnabled) + groupSuffix);
 
@@ -593,7 +591,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     await this.sendTenantReviewNotification(post.tenantId, formatRecallRejectedNotification(post.displayId, reason, stylishEnabled));
 
     const bots = await prisma.botAccount.findMany({
@@ -622,7 +620,7 @@ export class OneBotRuntime {
       return;
     }
     const failed = results.filter((result) => !result.ok);
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const message = formatRecallFailedNotification(post.displayId, failed.map((r) => ({
       targetName: r.targetName,
       qzoneTid: r.qzoneTid,
@@ -653,7 +651,7 @@ export class OneBotRuntime {
         createdAt: "asc",
       },
     });
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const message = status === "approved"
       ? formatReviewApproved(post.displayId, stylishEnabled)
       : formatReviewRejected(post.displayId, comment?.trim() || "审核拒绝", stylishEnabled);
@@ -685,7 +683,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     if (!target) {
       await this.sendTenantReviewNotification(post.tenantId, formatPublishSuccess(post.displayId, externalId, stylishEnabled));
       return;
@@ -713,7 +711,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const lines = [
       formatPublishFailed(post.displayId, !!options?.needsLogin, stylishEnabled),
       target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
@@ -748,7 +746,7 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, post.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const lines = [
       formatPublishWaiting(post.displayId, stylishEnabled),
       target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
@@ -771,7 +769,7 @@ export class OneBotRuntime {
     if (!bot || !bot.reviewGroupId) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     await this.sendGroupMessage(
       bot.qqUin.toString(),
       bot.reviewGroupId,
@@ -903,7 +901,7 @@ export class OneBotRuntime {
     if (!bot || !bot.reviewGroupId) {
       return;
     }
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     await this.sendGroupMessage(
       bot.qqUin.toString(),
       bot.reviewGroupId,
@@ -1373,7 +1371,7 @@ export class OneBotRuntime {
           const createdAccess = !result.alreadyHadTenantAccess;
           let noticeSent = false;
           if (createdAccess) {
-            const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+            const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
             const message = formatFirstPrivateMessageRegistrationNotice(result, loginUrl, stylishEnabled);
             if (message) {
               await this.sendPrivateMessage(botQqUin, userQqUin, message);
@@ -1673,7 +1671,7 @@ export class OneBotRuntime {
 
         // 保留原有自动回复
         if (!registrationGuidanceHandled && this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
-          const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+          const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
           await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(stylishEnabled)).catch(() => undefined);
         }
         return;
@@ -1683,7 +1681,7 @@ export class OneBotRuntime {
         if (registrationGuidanceHandled) {
           return;
         }
-        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+        const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
         await this.sendPrivateMessage(botQqUin, userQqUin, formatRegisterAlready(loginUrl, stylishEnabled));
         return;
       }
@@ -1698,7 +1696,7 @@ export class OneBotRuntime {
         if (!reset.shouldAnnounce) {
           return;
         }
-        const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+        const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
         await this.sendPrivateMessage(botQqUin, userQqUin, formatResetPassword(reset.result.password, stylishEnabled));
         return;
       }
@@ -1706,7 +1704,7 @@ export class OneBotRuntime {
       if (registrationGuidanceHandled) {
         return;
       }
-      const generalStylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      const generalStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled));
     } catch (error) {
       this.logger.warn({ error }, "private message handler failed");
@@ -1993,7 +1991,7 @@ export class OneBotRuntime {
 
     const { post } = result;
     this.privatePostPendingConfirms.delete(draftKey);
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
   }
 
@@ -2320,7 +2318,7 @@ export class OneBotRuntime {
     const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
-      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
       const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
       if (!undone) {
@@ -2333,7 +2331,7 @@ export class OneBotRuntime {
 
     const pendingConfirm = this.privatePostPendingConfirms.get(draftKey);
     if (pendingConfirm) {
-      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       await this.popPrivatePostHistoryEntry(draftKey, pendingConfirm, stylishEnabled);
       await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, pendingConfirm.aiIntakeEnabled));
       return;
@@ -2345,7 +2343,7 @@ export class OneBotRuntime {
       return;
     }
 
-    const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+    const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
     const undone = await this.popPrivatePostHistoryEntry(draftKey, draft, stylishEnabled);
     if (!undone) {
@@ -2687,7 +2685,7 @@ export class OneBotRuntime {
     }
 
     try {
-      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, bot.tenantId);
+      const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
 
       if (command.name === "全部通过") {
         const result = await approveAllPendingPostsViaBot({
@@ -3341,7 +3339,7 @@ export class OneBotRuntime {
       }
     }
     if (this.shouldSendPrivateAutoReply(buffer.bot.id, buffer.userQqUin, buffer.bot.userMessageReplyCooldownSeconds)) {
-      const stylishEnabled = await readTenantBotStylishMessagesEnabled(prisma, buffer.tenantId);
+      const stylishEnabled = await this.resolveStylishEnabled(buffer.tenantId);
       if (!this.interactionFence.isCurrent(permit)) {
         return;
       }

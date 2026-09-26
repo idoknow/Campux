@@ -51,10 +51,6 @@ export function setBotCustomStylishMessages(messages: Record<string, string[]> |
   customStylishMessages = messages;
 }
 
-export function getBotCustomStylishMessages(): Record<string, string[]> | null {
-  return customStylishMessages;
-}
-
 export function readCustomStylishMessages(type: string): string[] | undefined {
   const pool = customStylishMessages?.[type];
   if (!pool || pool.length === 0) return undefined;
