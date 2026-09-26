@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostModeText, parsePrivatePostStartText } from "./private-posting";
+import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePostRecallOrCancelCommand, parsePrivatePostModeText, parsePrivatePostStartText } from "./private-posting";
 
 describe("private posting command parsing", () => {
   test("parses English hash start command", () => {
@@ -64,13 +64,11 @@ describe("private posting command parsing", () => {
     expect(parsePrivatePostStartText("#投稿", ["发帖"])).toBe("");
   });
 
-  test("disables start commands when AI intake is enabled", () => {
+  test("keeps explicit start commands when AI intake is enabled (issue 163)", () => {
     const options = { extraKeywords: ["发帖"], aiIntakeEnabled: true };
-    expect(parsePrivatePostStartText("#投稿 正文", options)).toBeNull();
-    expect(parsePrivatePostStartText("＃投稿 正文", options)).toBeNull();
-    expect(parsePrivatePostStartText("#发帖 正文", options)).toBeNull();
-    expect(parsePrivatePostStartText("投稿", options)).toBeNull();
-    expect(parsePrivatePostStartText("墙墙投稿", options)).toBeNull();
+    expect(parsePrivatePostStartText("#投稿 正文", options)).toBe("正文");
+    expect(parsePrivatePostStartText("＃投稿 正文", options)).toBe("正文");
+    expect(parsePrivatePostStartText("#发帖 正文", options)).toBe("正文");
   });
 
   test("keeps start commands enabled when AI intake is disabled", () => {
@@ -106,5 +104,48 @@ describe("onebot message helpers", () => {
         { type: "image", data: { url: "https://example.com/a.png" } },
       ]),
     ).toHaveLength(2);
+  });
+});
+
+describe("parsePostRecallOrCancelCommand (issue 162)", () => {
+  test("parses cancel by display id", () => {
+    expect(parsePostRecallOrCancelCommand("#取消 123")).toEqual({ action: "cancel", displayId: 123, reason: "" });
+    expect(parsePostRecallOrCancelCommand("#取消 #123")).toEqual({ action: "cancel", displayId: 123, reason: "" });
+    expect(parsePostRecallOrCancelCommand("#取消投稿 45")).toEqual({ action: "cancel", displayId: 45, reason: "" });
+  });
+
+  test("parses recall with optional reason", () => {
+    expect(parsePostRecallOrCancelCommand("#撤回 9")).toEqual({ action: "recall", displayId: 9, reason: "" });
+    expect(parsePostRecallOrCancelCommand("#撤回 内容有误 10")).toEqual({ action: "recall", displayId: 10, reason: "内容有误" });
+    expect(parsePostRecallOrCancelCommand("#撤回 发错了 202")).toEqual({ action: "recall", displayId: 202, reason: "发错了" });
+    expect(parsePostRecallOrCancelCommand("#撤销 7")).toEqual({ action: "recall", displayId: 7, reason: "" });
+  });
+
+  test("rejects draft-only commands without display id", () => {
+    expect(parsePostRecallOrCancelCommand("#取消")).toBeNull();
+    expect(parsePostRecallOrCancelCommand("#撤回")).toBeNull();
+    expect(parsePostRecallOrCancelCommand("#撤回上一条")).toBeNull();
+    expect(parsePostRecallOrCancelCommand("#结束")).toBeNull();
+  });
+
+  test("rejects when trailing token is not a numeric id", () => {
+    expect(parsePostRecallOrCancelCommand("#撤回 有误")).toBeNull();
+  });
+});
+
+describe("extractOneBotPlainText snowluma compatibility (issue 164)", () => {
+  test("reads text from data.content as well as data.text", () => {
+    expect(extractOneBotPlainText([{ type: "text", data: { content: "你好" } }])).toBe("你好");
+    expect(extractOneBotPlainText([{ type: "text", data: { text: "你好" } }])).toBe("你好");
+  });
+
+  test("accepts bare string segments and single text object", () => {
+    expect(extractOneBotPlainText(["你好", "世界"])).toContain("你好");
+    expect(extractOneBotPlainText({ type: "text", data: { text: "hi" } })).toBe("hi");
+  });
+
+  test("falls back to raw_message when no text segment", () => {
+    expect(extractOneBotPlainText([{ type: "image", data: { file: "x" } }], "[CQ:image,file=x]")).toContain("CQ:image");
+    expect(extractOneBotPlainText(undefined, "raw")).toBe("raw");
   });
 });

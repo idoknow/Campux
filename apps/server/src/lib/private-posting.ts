@@ -25,13 +25,7 @@ export type PrivatePostStartParseOptions = {
 export function parsePrivatePostStartText(input: string, options?: PrivatePostStartParseOptions | string[] | undefined) {
   const trimmed = input.trim();
   const extraKeywords = Array.isArray(options) ? options : options?.extraKeywords;
-  const aiIntakeEnabled = Array.isArray(options) ? false : options?.aiIntakeEnabled === true;
-
-  if (aiIntakeEnabled) {
-    return null;
-  }
-
-  // 默认支持 #投稿（也可不带 # 前缀走下面兜底）
+  // AI 语义收稿只负责自由文本；显式 #投稿 / #关键词 指令始终生效（议题 #163）。
   const defaultMatch = matchKeyword(trimmed, "投稿");
   if (defaultMatch !== null) return defaultMatch;
 
@@ -62,6 +56,35 @@ export function isPrivatePostCancelText(input: string) {
 
 export function isPrivatePostUndoText(input: string) {
   return /^(?:#|＃)(?:撤回|撤回上一条|撤回上一步)\s*$/.test(input.trim());
+}
+
+/**
+ * 解析「按编号取消/撤回已提交稿件」指令（议题 #162）。
+ * - `#取消 123`：取消待审核稿件
+ * - `#撤回 123` / `#撤回 理由 123`：对已发布稿件发起撤回
+ * 编号必须出现在末尾，避免与草稿流的 `#取消` / `#撤回`（无编号）冲突。
+ */
+export function parsePostRecallOrCancelCommand(input: string): { action: "cancel" | "recall"; displayId: number; reason: string } | null {
+  const trimmed = input.trim();
+  const match = trimmed.match(/^(?:#|＃)(取消|撤回|取消投稿|撤回投稿|撤销)\s+(.+?)\s*$/);
+  if (!match) {
+    return null;
+  }
+  const actionWord = match[1]!;
+  const rest = match[2]!.trim();
+  // 支持「理由 123」「#123」「123」
+  const tail = rest.match(/(?:^|#|\s)(\d{1,9})\s*$/);
+  if (!tail) {
+    return null;
+  }
+  const displayId = Number(tail[1]);
+  if (!Number.isFinite(displayId) || displayId <= 0) {
+    return null;
+  }
+  let reason = rest.slice(0, tail.index).trim();
+  reason = reason.replace(/^#\s*/, "").trim();
+  const action = actionWord.startsWith("撤") || actionWord === "撤销" ? "recall" : "cancel";
+  return { action, displayId, reason };
 }
 
 export function parsePrivatePostModeText(input: string) {
@@ -109,13 +132,17 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
   }
 
   return message.filter((segment): segment is OneBotMessageSegment => {
+    if (typeof segment === "string") {
+      return stripZeroWidthChars(segment).trim().length > 0;
+    }
     if (!segment || typeof segment !== "object") {
       return false;
     }
     const seg = segment as OneBotMessageSegment;
     // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
     if (seg.type === "text") {
-      const t = stripZeroWidthChars(String(seg.data?.text ?? "")).trim();
+      const data = seg.data ?? {};
+      const t = stripZeroWidthChars(String(data.text ?? data.content ?? "")).trim();
       return t.length > 0;
     }
     return true;
@@ -124,17 +151,33 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
 
 export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
   if (Array.isArray(message)) {
-    return message
-      .map((segment) => {
-        const item = segment as OneBotMessageSegment;
-        return item.type === "text" ? String(item.data?.text ?? "") : "";
-      })
-      .filter(Boolean)
-      .join("\n");
+    // snowluma 等实现可能把 text 放 data.text / data.content，或把整段写成字符串
+    const texts = message.map((segment) => {
+      if (typeof segment === "string") {
+        return segment;
+      }
+      const item = segment as OneBotMessageSegment;
+      if (item?.type === "text") {
+        const data = item.data ?? {};
+        return String(data.text ?? data.content ?? "");
+      }
+      return "";
+    }).filter(Boolean);
+    if (texts.length > 0) {
+      return texts.join("\n");
+    }
   }
 
   if (typeof message === "string") {
     return message;
+  }
+
+  if (message && typeof message === "object" && !Array.isArray(message)) {
+    const item = message as OneBotMessageSegment;
+    if (item.type === "text") {
+      const data = item.data ?? {};
+      return String(data.text ?? data.content ?? "");
+    }
   }
 
   return rawMessage ?? "";
