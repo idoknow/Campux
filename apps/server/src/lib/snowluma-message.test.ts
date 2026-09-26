@@ -3,6 +3,7 @@ import {
   extractOneBotImageSegments,
   extractOneBotMessageSegments,
   extractOneBotPlainText,
+  splitCqStringSegment,
   parsePostRecallOrCancelCommand,
   parsePrivatePostStartText,
   isPrivatePostCancelText,
@@ -81,13 +82,13 @@ describe("snowluma CQ 码字符串形态", () => {
     expect(parsePostRecallOrCancelCommand(text)).toEqual({ action: "recall", displayId: 7, reason: "" });
   });
 
-  test("段过滤：字符串段里的 CQ-only 不进转发正文", () => {
+  test("段过滤：字符串段拆分后 face 等非文本段保留，空白 text 滤掉", () => {
     const segs = extractOneBotMessageSegments([
       "[CQ:face,id=1]",
       { type: "text", data: { content: "实际内容" } },
     ]);
-    // 字符串段若只是 CQ 码应被滤掉；纯文本段保留
-    expect(segs.length).toBe(1);
+    // face 会规范成非文本段（转发需要），纯空白 text 仍滤掉
+    expect(segs.map((s) => s.type)).toEqual(["face", "text"]);
   });
 });
 
@@ -113,8 +114,8 @@ describe("自审修复：段类型规范化与图片顺序", () => {
   test("裸字符串段会被规范成 text 段，不再是裸 string", () => {
     const segs = extractOneBotMessageSegments(["[CQ:at,qq=1] #投稿 正文", { type: "image", data: { file: "a.jpg" } }]);
     expect(segs.every((s) => typeof s === "object" && typeof (s as { type?: string }).type === "string")).toBe(true);
-    expect(segs[0]?.type).toBe("text");
-    expect(segs[1]?.type).toBe("image");
+    // 字符串段拆分后 at 是独立段，其后才是 text，再是对象 image
+    expect(segs.map((s) => s.type)).toEqual(["at", "text", "image"]);
   });
 
   test("字符串段 CQ:image 与对象 image 段保持原始顺序", () => {
@@ -128,5 +129,27 @@ describe("自审修复：段类型规范化与图片顺序", () => {
       "second.jpg",
       "third.jpg",
     ]);
+  });
+});
+
+describe("二审修复：字符串段拆分与撤回理由长度", () => {
+  test("字符串段拆成 image+text，转发不丢图", () => {
+    const segs = splitCqStringSegment("[CQ:image,file=a.jpg]正文");
+    expect(segs).toEqual([
+      { type: "image", data: { file: "a.jpg" } },
+      { type: "text", data: { text: "正文" } },
+    ]);
+  });
+
+  test("字符串段拆分保留 at/reply 等非图片段", () => {
+    const segs = splitCqStringSegment("[CQ:at,qq=1] 你好");
+    expect(segs[0]?.type).toBe("at");
+    expect(segs[1]?.type).toBe("text");
+  });
+
+  test("extractOneBotMessageSegments 用拆分结果", () => {
+    const segs = extractOneBotMessageSegments(["[CQ:image,file=x.jpg]看图"]);
+    expect(segs.map((s) => s.type)).toEqual(["image", "text"]);
+    expect(segs[1]?.data?.text).toBe("看图");
   });
 });

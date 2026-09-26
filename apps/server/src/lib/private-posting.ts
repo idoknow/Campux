@@ -44,6 +44,52 @@ export function parseCqImageSegments(input: string): OneBotMessageSegment[] {
   return segments;
 }
 
+/**
+ * 把 snowluma 字符串段拆成规范消息段：
+ * `[CQ:image,...]文字` → image + text，避免转发时丢图或正文里残留裸 CQ。
+ */
+export function splitCqStringSegment(input: string): OneBotMessageSegment[] {
+  const out: OneBotMessageSegment[] = [];
+  const re = /\[CQ:([a-zA-Z0-9_-]+)((?:,[^,\]]*)*)\]/g;
+  let last = 0;
+  for (const match of input.matchAll(re)) {
+    const index = match.index ?? 0;
+    const text = input.slice(last, index);
+    if (text) {
+      out.push({ type: "text", data: { text } });
+    }
+    const type = match[1] ?? "";
+    const body = match[2] ?? "";
+    const data: Record<string, unknown> = {};
+    for (const part of body.split(",")) {
+      if (!part) continue;
+      const eq = part.indexOf("=");
+      if (eq <= 0) continue;
+      const key = part.slice(0, eq).trim();
+      if (key) data[key] = part.slice(eq + 1);
+    }
+    if (type === "image") {
+      out.push({ type: "image", data });
+    } else if (type === "text") {
+      const textValue = String(data.text ?? data.content ?? "");
+      if (textValue) out.push({ type: "text", data: { text: textValue } });
+    } else {
+      out.push({ type, data });
+    }
+    last = index + match[0].length;
+  }
+  const tail = input.slice(last);
+  if (tail) {
+    out.push({ type: "text", data: { text: tail } });
+  }
+  return out.filter((seg) => {
+    if (seg.type === "text") {
+      return String(seg.data?.text ?? "").trim().length > 0;
+    }
+    return true;
+  });
+}
+
 /** 字符串段是否「只有 CQ 码」或空白，不应作为转发正文。 */
 function isCqOnlyStringSegment(value: string): boolean {
   return stripCqCodes(value).trim().length === 0;
@@ -176,11 +222,7 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
   // 字符串段规范化成 text 段，避免下游按 seg.type 分支时拿到裸字符串
   return message.flatMap((segment): OneBotMessageSegment[] => {
     if (typeof segment === "string") {
-      const s = stripZeroWidthChars(segment);
-      if (s.trim().length === 0 || isCqOnlyStringSegment(s)) {
-        return [];
-      }
-      return [{ type: "text", data: { text: s } }];
+      return splitCqStringSegment(segment);
     }
     if (!segment || typeof segment !== "object") {
       return [];

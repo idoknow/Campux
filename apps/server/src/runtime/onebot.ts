@@ -1782,7 +1782,7 @@ export class OneBotRuntime {
                 actorId: user.id,
                 oldStatus: "pending_approval",
                 newStatus: "cancelled",
-                comment: reason ? `用户取消：${reason}` : "用户取消",
+                comment: reason ? `用户取消：${clampReason(reason)}` : "用户取消",
               },
             });
           }
@@ -1830,7 +1830,7 @@ export class OneBotRuntime {
               actorId: user.id,
               oldStatus: "published",
               newStatus: "pending_recall",
-              comment: `用户申请撤回：${reason || "对话指令申请"}`,
+              comment: `用户申请撤回：${reason ? clampReason(reason) : "对话指令申请"}`,
             },
           });
         }
@@ -4503,6 +4503,11 @@ function extractCookiesFromActionData(data: unknown) {
     }
   }
   throw new BotWorkflowError("协议端没有返回 cookies 数据", 502);
+}
+
+function clampReason(reason: string) {
+  // 与 Web API recallRequestSchema.max(500) 对齐，避免超长理由写入日志
+  return reason.length > 500 ? reason.slice(0, 500) : reason;
 }
 
 function toErrorMessage(error: unknown) {
