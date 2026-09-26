@@ -144,6 +144,12 @@ export const tenantPluginConfigSchema = z.object({
       toEmails: z.array(z.string().max(255)).max(20).default([]),
     })
     .default({ enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] }),
+  // 那年今日：开启后投稿页顶部出现「那年今日」胶囊，展示历史上同一月同一日的已发布稿件。
+  todayInHistory: z
+    .object({
+      enabled: z.boolean(),
+    })
+    .default({ enabled: false }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -169,6 +175,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   },
   feedback: { enabled: false },
   botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
+  todayInHistory: { enabled: false },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {

@@ -145,6 +145,7 @@ export function AppShell({
                 enableMarkdownRender={metadata.enableMarkdownRender}
                 enableFeedback={metadata.enableFeedback}
                 enableGraduation={metadata.enableGraduation}
+                enableTodayInHistory={metadata.enableTodayInHistory}
                 onMinePageChange={onPostsPageChange}
                 onTabChange={onPostsTabChange}
                 onRefresh={onRefreshTenantData}

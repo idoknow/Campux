@@ -60,7 +60,8 @@ export const defaultMetadata: TenantMetadata = {
   enableFeedback: false,
   enableBotAlert: false,
   enableGraduation: false,
-};
+  enableTodayInHistory: false,
+  };
 
 export const navItems = [
   { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },

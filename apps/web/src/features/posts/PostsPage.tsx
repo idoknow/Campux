@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import type { GraduationItem } from "@/features/graduation/GraduationReview";
 import { GraduationCapIcon } from "lucide-react";
 import { GraduationPendingReview, GraduationRejectDialog, useGraduationReviewQueue } from "@/features/graduation/GraduationReview";
+import { TodayInHistoryPanel } from "./TodayInHistoryPanel";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import type { AssignedPostTag, FeedbackItem, FeedbackMessageItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
@@ -264,6 +265,7 @@ export function PostsPage({
   enableMarkdownRender,
   enableFeedback,
   enableGraduation,
+  enableTodayInHistory,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -279,6 +281,7 @@ export function PostsPage({
   enableMarkdownRender?: boolean;
   enableFeedback?: boolean;
   enableGraduation?: boolean;
+  enableTodayInHistory?: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -287,6 +290,7 @@ export function PostsPage({
   const canReview = canAccess(currentRole, "reviewer");
   const isAdmin = canAccess(currentRole, "admin");
   const showFeedbackTab = Boolean(enableFeedback);
+  const showHistoryTab = Boolean(enableTodayInHistory);
   const [pendingRecallPosts, setPendingRecallPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPosts, setReviewPosts] = useState<ReviewPostItem[]>([]);
   const [reviewPagination, setReviewPagination] = useState<Pagination>(() => defaultPagination());
@@ -365,10 +369,11 @@ export function PostsPage({
     const allowed: PostsTab[] = ["mine", "published"];
     if (canReview) allowed.push("review");
     if (showFeedbackTab) allowed.push("feedback");
+    if (showHistoryTab) allowed.push("history");
     if (!allowed.includes(activeTab)) {
       onTabChange(canReview ? "review" : "mine");
     }
-  }, [activeTab, canReview, showFeedbackTab, onTabChange]);
+  }, [activeTab, canReview, showFeedbackTab, showHistoryTab, onTabChange]);
 
   useEffect(() => {
     // Tenant switch invalidates any in-flight feedback list for the old wall.
@@ -977,6 +982,11 @@ export function PostsPage({
                 意见
               </TabsTrigger>
             ) : null}
+            {showHistoryTab ? (
+              <TabsTrigger value="history" className={postTabsTriggerClassName}>
+                那年今日
+              </TabsTrigger>
+            ) : null}
           </TabsList>
           <div className="flex items-center gap-3">
             <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-500" title="开启后，你的每条稿件发布成功时会自动关注其评论，新评论每 12 小时私信提醒你">
@@ -1113,6 +1123,19 @@ export function PostsPage({
             </>
           )}
         </TabsContent>
+        {showHistoryTab ? (
+          <TabsContent value="history" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+            <TodayInHistoryPanel
+              renderItem={(item) => (
+                <PublishedFeedCard
+                  item={item}
+                  canViewIdentity={canReview}
+                  onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
+                />
+              )}
+            />
+          </TabsContent>
+        ) : null}
         {showFeedbackTab ? (
           <TabsContent value="feedback" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
             <div className="mb-3 flex items-center justify-between gap-2">

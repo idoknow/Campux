@@ -23,7 +23,8 @@ export type PresetPluginId =
   | "broadcast"
   | "feedback"
   | "botAlert"
-  | "graduation";
+  | "graduation"
+  | "todayInHistory";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -136,6 +137,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
     riskLevel: "medium",
     rationale: "开启后投稿页与服务页新增毕业去向入口；毕业信息（届/级/学历/去向）与作者 QQ 关联，仅供审核员统计查阅。",
+  },
+  {
+    id: "todayInHistory",
+    name: "campux-plugin-today-in-history",
+    version: "1.0.0",
+    description: "那年今日：投稿页胶囊展示历史上同一月同一日的已发布稿件，按年份倒序分组",
+    required: ["config:read", "db:read", "tenant:data", "user:data"],
+    riskLevel: "low",
+    rationale: "开启后投稿页新增那年今日入口，仅读取已发布稿件并按年月日筛选，不写入任何数据。",
   },
 ];
 

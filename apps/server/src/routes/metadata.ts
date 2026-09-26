@@ -154,6 +154,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableFeedback: false,
     enableBotAlert: false,
     enableGraduation: false,
+    enableTodayInHistory: false,
   };
 }
 
@@ -248,6 +249,8 @@ async function readPublicMetadata(tenantId: string) {
     metadata.enableBotAlert = pluginConfig.botAlert.enabled;
     // 毕业去向：未启用时投稿页顶部胶囊与服务页入口隐藏。
     metadata.enableGraduation = pluginConfig.graduation.enabled;
+    // 那年今日：未启用时投稿页顶部胶囊隐藏。
+    metadata.enableTodayInHistory = pluginConfig.todayInHistory.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

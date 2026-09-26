@@ -1,7 +1,7 @@
 import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
-export type PostsTab = "mine" | "review" | "published" | "feedback";
+export type PostsTab = "mine" | "review" | "published" | "feedback" | "history";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "pluginConfig";
 export type TenantRole = "submitter" | "broadcaster" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
@@ -152,6 +152,8 @@ export type TenantMetadata = {
   enableBotAlert: boolean;
   /** 毕业去向插件是否启用；关闭时投稿页顶部胶囊与服务页入口隐藏 */
   enableGraduation: boolean;
+  /** 那年今日插件是否启用；关闭时投稿页顶部胶囊隐藏 */
+  enableTodayInHistory: boolean;
 };
 
 export type BotMessageTypeConfig = {
@@ -235,6 +237,10 @@ export type TenantPluginConfig = {
   };
   /** 毕业去向插件：开关 */
   graduation: {
+    enabled: boolean;
+  };
+  /** 那年今日插件：开关 */
+  todayInHistory: {
     enabled: boolean;
   };
 };

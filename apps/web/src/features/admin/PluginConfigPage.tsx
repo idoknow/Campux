@@ -90,7 +90,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -160,6 +160,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   feedback: "campux-plugin-feedback",
   botAlert: "campux-plugin-bot-alert",
   graduation: "campux-plugin-graduation",
+  todayInHistory: "campux-plugin-today-in-history",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -706,6 +707,33 @@ function BroadcastPanel({ config, onChange, busy }: { config: TenantPluginConfig
   );
 }
 
+function TodayInHistoryIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className}>
+      <path d="M511.512381 521.264762m-458.849524 0a458.849524 458.849524 0 1 0 917.699048 0 458.849524 458.849524 0 1 0-917.699048 0Z" fill="#FF7396" />
+      <path d="M511.512381 521.264762m-291.596191 0a291.59619 291.59619 0 1 0 583.192381 0 291.59619 291.59619 0 1 0-583.192381 0Z" fill="#FFC800" />
+      <path d="M511.512381 278.430476c134.095238 0 242.834286 108.739048 242.834286 242.834286s-108.739048 242.834286-242.834286 242.834286-242.834286-108.739048-242.834286-242.834286c0-134.095238 108.739048-242.834286 242.834286-242.834286m0-48.761905c-160.914286 0-291.59619 130.681905-291.596191 291.596191s130.681905 291.59619 291.596191 291.59619 291.59619-130.681905 291.59619-291.59619-130.681905-291.59619-291.59619-291.596191z" fill="#D84475" />
+      <path d="M320.365714 487.619048c-1.950476 0-3.900952-0.487619-5.851428-0.975238-10.24-2.925714-16.091429-14.140952-13.165715-24.380953 1.462857-3.900952 2.438095-8.289524 3.900953-12.190476 8.289524-23.405714 20.48-45.348571 36.571428-64.853333 6.826667-8.289524 19.017143-9.752381 27.306667-2.925715 8.289524 6.826667 9.752381 19.017143 2.925714 27.306667-13.165714 16.091429-22.918095 34.133333-29.744762 53.150476-0.975238 3.413333-2.438095 6.826667-3.413333 10.24-2.438095 9.264762-10.24 14.628571-18.529524 14.628572zM430.08 360.350476c-7.314286 0-14.628571-4.388571-17.554286-11.215238-4.388571-9.752381-0.487619-21.455238 9.264762-25.843809 8.777143-4.388571 18.041905-7.801905 27.794286-10.727619 10.24-3.413333 21.455238 2.438095 24.380952 12.678095 3.413333 10.24-2.438095 21.455238-12.678095 24.380952-7.801905 2.438095-15.60381 5.36381-22.918095 8.777143-2.925714 1.462857-5.851429 1.950476-8.289524 1.950476z" fill="#FFFFFF" />
+      <path d="M511.512381 1004.495238h-2.438095c-129.219048-0.487619-250.148571-51.687619-340.845715-143.36-90.697143-91.672381-140.434286-213.577143-139.946666-342.308571 0-13.653333 11.215238-24.380952 24.380952-24.380953 13.653333 0 24.380952 11.215238 24.380953 24.380953-0.487619 116.053333 43.885714 225.28 125.805714 307.687619s190.659048 128.24381 306.712381 128.731428h2.438095c115.078095 0 223.817143-44.373333 305.737143-125.805714 82.407619-81.432381 128.24381-190.659048 128.731428-306.712381 0.975238-239.420952-192.609524-435.44381-432.518095-436.906667h-2.438095c-110.201905 0-215.527619 41.447619-295.984762 116.540953-10.727619 10.727619-27.794286 12.190476-39.497143 2.438095-7.801905-6.339048-11.702857-16.091429-10.24-26.331429l9.264762-130.681904c0.975238-13.653333 12.678095-23.405714 25.84381-22.430477 13.653333 0.975238 23.405714 12.678095 22.430476 25.84381l-5.851429 85.820952C301.348571 73.142857 404.23619 38.034286 511.512381 38.034286h2.438095c266.24 1.462857 482.255238 219.428571 480.792381 485.668571-0.487619 129.219048-51.687619 250.148571-143.36 340.845714-91.184762 90.209524-211.626667 139.946667-339.870476 139.946667z" fill="#D84475" />
+      <path d="M414.47619 599.771429c-7.801905 0-15.11619-3.413333-19.99238-10.24-7.801905-11.215238-4.87619-26.331429 5.851428-34.133334l87.771429-61.44 65.340952-129.706666c5.851429-12.190476 20.48-17.066667 32.670476-10.727619 12.190476 5.851429 17.066667 20.48 10.727619 32.670476l-67.779047 135.070476c-1.950476 3.413333-4.388571 6.826667-7.801905 9.264762l-93.135238 64.853333c-3.900952 2.925714-8.777143 4.388571-13.653334 4.388572z" fill="#D84475" />
+    </svg>
+  );
+}
+
+function TodayInHistoryPanel({ busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  void busy;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，投稿页顶部会多出「那年今日」胶囊，展示历史上同一月同一日发布的稿件，按年份倒序分组。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        数据来自本校园墙的已发布稿件，仅读取不写入；日期按校园墙所在时区（Asia/Shanghai）的日历日判定。
+      </div>
+    </div>
+  );
+}
+
 function GraduationPanel({ busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   return (
     <div className="space-y-4">
@@ -1125,6 +1153,35 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, graduation: { ...config.graduation, enabled: value } }),
     render: (config, onChange, busy) => <GraduationPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "todayInHistory",
+    icon: TodayInHistoryIcon,
+    name: "那年今日",
+    tagline: "History",
+    description: "投稿页胶囊展示历史上同一月同一日的已发布稿件，按年份倒序分组",
+    detailedDescription:
+      "本插件在投稿页顶部新增「那年今日」胶囊，点击后展示本校园墙历史上同一月同一日发布过的稿件，按年份从近到远分组，每个年份以大字标出。\n\n" +
+      "投稿页：\n" +
+      "· 顶部胶囊新增「那年今日」选项，选择后展示历史稿件列表。\n" +
+      "· 年份倒序排列：先显示最近一年同日的稿件，再往前一年，直到没有更多数据。\n" +
+      "· 支持批量发布稿件与独立发布稿件，图片与文字同时展示。\n\n" +
+      "数据口径：\n" +
+      "· 仅统计已发布状态且属于当前校园墙的稿件。\n" +
+      "· 日期按校园墙所在时区（Asia/Shanghai）的日历日判定；稿件发布时刻取稿件最近一次更新时间或批次冲洗时间。\n\n" +
+      "管理：\n" +
+      "· 插件仅有开关，无需配置其他项；禁用后投稿页胶囊隐藏，已有数据不受影响。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "仅读取已发布稿件，无写入操作。",
+    accent: "from-rose-500 to-amber-500",
+    bgTint: "bg-rose-50 text-rose-700",
+    role: "admin",
+    required: ["config:read", "db:read", "tenant:data", "user:data"],
+    riskLevel: "low",
+    rationale: "开启后投稿页新增那年今日入口，仅读取已发布稿件并按年月日筛选，不写入任何数据。",
+    enabled: (config) => config.todayInHistory.enabled,
+    setEnabled: (config, value) => ({ ...config, todayInHistory: { ...config.todayInHistory, enabled: value } }),
+    render: (config, onChange, busy) => <TodayInHistoryPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
 
 /**
@@ -1218,6 +1275,9 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       toEmails: [],
     },
     graduation: {
+      enabled: false,
+    },
+    todayInHistory: {
       enabled: false,
     },
   };

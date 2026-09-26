@@ -57,6 +57,7 @@ const postsTabPaths: Record<PostsTab, string> = {
   review: "/posts/review",
   published: "/posts/published",
   feedback: "/posts/feedback",
+  history: "/posts/history",
 };
 
 const adminTabPaths: Record<AdminTab, string> = {
@@ -81,6 +82,7 @@ const postsTabTitles: Record<PostsTab, string> = {
   review: "审核稿件",
   published: "已发布",
   feedback: "意见",
+  history: "那年今日",
 };
 
 const adminTabTitles: Record<AdminTab, string> = {
