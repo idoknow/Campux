@@ -1749,7 +1749,6 @@ export class OneBotRuntime {
     displayId: number;
     reason: string;
   }) {
-    const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     try {
       const user = await prisma.user.findUnique({ where: { qqUin: BigInt(userQqUin) } });
       if (!user) {

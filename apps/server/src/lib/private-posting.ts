@@ -150,21 +150,18 @@ export function extractOneBotImageSegments(message: unknown) {
     return [];
   }
 
-  const fromStrings = message
-    .filter((segment): segment is string => typeof segment === "string")
-    .flatMap((segment) => parseCqImageSegments(segment));
-
-  const fromObjects = message.filter((segment): segment is OneBotMessageSegment => {
+  // 保持消息内原始顺序（字符串段里的 CQ:image 与对象 image 段交错时不能打乱）
+  return message.flatMap((segment) => {
     if (typeof segment === "string") {
-      return false;
+      return parseCqImageSegments(segment);
     }
     if (!segment || typeof segment !== "object") {
-      return false;
+      return [] as OneBotMessageSegment[];
     }
-    return (segment as OneBotMessageSegment).type === "image";
+    return (segment as OneBotMessageSegment).type === "image"
+      ? [segment as OneBotMessageSegment]
+      : [] as OneBotMessageSegment[];
   });
-
-  return [...fromStrings, ...fromObjects];
 }
 
 /**
@@ -176,22 +173,26 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
     return [];
   }
 
-  return message.filter((segment): segment is OneBotMessageSegment => {
+  // 字符串段规范化成 text 段，避免下游按 seg.type 分支时拿到裸字符串
+  return message.flatMap((segment): OneBotMessageSegment[] => {
     if (typeof segment === "string") {
       const s = stripZeroWidthChars(segment);
-      return s.trim().length > 0 && !isCqOnlyStringSegment(s);
+      if (s.trim().length === 0 || isCqOnlyStringSegment(s)) {
+        return [];
+      }
+      return [{ type: "text", data: { text: s } }];
     }
     if (!segment || typeof segment !== "object") {
-      return false;
+      return [];
     }
     const seg = segment as OneBotMessageSegment;
     // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
     if (seg.type === "text") {
       const data = seg.data ?? {};
       const t = stripZeroWidthChars(String(data.text ?? data.content ?? "")).trim();
-      return t.length > 0;
+      return t.length > 0 ? [seg] : [];
     }
-    return true;
+    return [seg];
   });
 }
 

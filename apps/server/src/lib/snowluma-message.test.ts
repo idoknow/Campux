@@ -108,3 +108,25 @@ describe("review fixes: CQ 字符串段与正文空白", () => {
     expect(extractOneBotPlainText([{ type: "text", data: { text: "a  b\tc" } }])).toBe("a  b\tc");
   });
 });
+
+describe("自审修复：段类型规范化与图片顺序", () => {
+  test("裸字符串段会被规范成 text 段，不再是裸 string", () => {
+    const segs = extractOneBotMessageSegments(["[CQ:at,qq=1] #投稿 正文", { type: "image", data: { file: "a.jpg" } }]);
+    expect(segs.every((s) => typeof s === "object" && typeof (s as { type?: string }).type === "string")).toBe(true);
+    expect(segs[0]?.type).toBe("text");
+    expect(segs[1]?.type).toBe("image");
+  });
+
+  test("字符串段 CQ:image 与对象 image 段保持原始顺序", () => {
+    const segs = extractOneBotImageSegments([
+      { type: "image", data: { file: "first.jpg" } },
+      "[CQ:image,file=second.jpg]",
+      { type: "image", data: { file: "third.jpg" } },
+    ]);
+    expect(segs.map((s) => String(s.data?.file ?? s.data?.url ?? ""))).toEqual([
+      "first.jpg",
+      "second.jpg",
+      "third.jpg",
+    ]);
+  });
+});
