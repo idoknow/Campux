@@ -17,6 +17,79 @@ function matchKeyword(input: string, keyword: string): string | null {
   return input.slice(prefix.length).trimStart();
 }
 
+const CQ_CODE_GLOBAL_RE = /\[CQ:([a-zA-Z0-9_-]+)((?:,[^,\]]*)*)\]/g;
+
+/** 去掉 CQ 码，只留可读文本（snowluma 字符串形态 / raw_message）。 */
+export function stripCqCodes(input: string): string {
+  // 只去掉 CQ 码，不压缩正文空白（有意空格/制表符应原样保留；指令解析层会再 trim）
+  return input.replace(CQ_CODE_GLOBAL_RE, "");
+}
+
+/** 从 CQ 字符串解析出 image 段（snowluma 字符串形态）。 */
+export function parseCqImageSegments(input: string): OneBotMessageSegment[] {
+  const segments: OneBotMessageSegment[] = [];
+  for (const match of input.matchAll(/\[CQ:image((?:,[^,\]]*)*)\]/gi)) {
+    const data: Record<string, unknown> = {};
+    const body = match[1] ?? "";
+    for (const part of body.split(",")) {
+      if (!part) continue;
+      const eq = part.indexOf("=");
+      if (eq <= 0) continue;
+      const key = part.slice(0, eq).trim();
+      const value = part.slice(eq + 1);
+      if (key) data[key] = value;
+    }
+    segments.push({ type: "image", data });
+  }
+  return segments;
+}
+
+/**
+ * 把 snowluma 字符串段拆成规范消息段：
+ * `[CQ:image,...]文字` → image + text，避免转发时丢图或正文里残留裸 CQ。
+ */
+export function splitCqStringSegment(input: string): OneBotMessageSegment[] {
+  const out: OneBotMessageSegment[] = [];
+  const re = /\[CQ:([a-zA-Z0-9_-]+)((?:,[^,\]]*)*)\]/g;
+  let last = 0;
+  for (const match of input.matchAll(re)) {
+    const index = match.index ?? 0;
+    const text = input.slice(last, index);
+    if (text) {
+      out.push({ type: "text", data: { text } });
+    }
+    const type = match[1] ?? "";
+    const body = match[2] ?? "";
+    const data: Record<string, unknown> = {};
+    for (const part of body.split(",")) {
+      if (!part) continue;
+      const eq = part.indexOf("=");
+      if (eq <= 0) continue;
+      const key = part.slice(0, eq).trim();
+      if (key) data[key] = part.slice(eq + 1);
+    }
+    if (type === "image") {
+      out.push({ type: "image", data });
+    } else if (type === "text") {
+      const textValue = String(data.text ?? data.content ?? "");
+      if (textValue) out.push({ type: "text", data: { text: textValue } });
+    } else {
+      out.push({ type, data });
+    }
+    last = index + match[0].length;
+  }
+  const tail = input.slice(last);
+  if (tail) {
+    out.push({ type: "text", data: { text: tail } });
+  }
+  return out.filter((seg) => {
+    if (seg.type === "text") {
+      return String(seg.data?.text ?? "").trim().length > 0;
+    }
+    return true;
+  });
+}
+
 export type PrivatePostStartParseOptions = {
   extraKeywords?: string[] | undefined;
   aiIntakeEnabled?: boolean | undefined;
@@ -25,13 +98,7 @@ export type PrivatePostStartParseOptions = {
 export function parsePrivatePostStartText(input: string, options?: PrivatePostStartParseOptions | string[] | undefined) {
   const trimmed = input.trim();
   const extraKeywords = Array.isArray(options) ? options : options?.extraKeywords;
-  const aiIntakeEnabled = Array.isArray(options) ? false : options?.aiIntakeEnabled === true;
-
-  if (aiIntakeEnabled) {
-    return null;
-  }
-
-  // 默认支持 #投稿（也可不带 # 前缀走下面兜底）
+  // AI 语义收稿只负责自由文本；显式 #投稿 / #关键词 指令始终生效（议题 #163）。
   const defaultMatch = matchKeyword(trimmed, "投稿");
   if (defaultMatch !== null) return defaultMatch;
 
@@ -64,6 +131,35 @@ export function isPrivatePostUndoText(input: string) {
   return /^(?:#|＃)(?:撤回|撤回上一条|撤回上一步)\s*$/.test(input.trim());
 }
 
+/**
+ * 解析「按编号取消/撤回已提交稿件」指令（议题 #162）。
+ * - `#取消 123`：取消待审核稿件
+ * - `#撤回 123` / `#撤回 理由 123`：对已发布稿件发起撤回
+ * 编号必须出现在末尾，避免与草稿流的 `#取消` / `#撤回`（无编号）冲突。
+ */
+export function parsePostRecallOrCancelCommand(input: string): { action: "cancel" | "recall"; displayId: number; reason: string } | null {
+  const trimmed = input.trim();
+  const match = trimmed.match(/^(?:#|＃)(取消|撤回|取消投稿|撤回投稿|撤销)\s+(.+?)\s*$/);
+  if (!match) {
+    return null;
+  }
+  const actionWord = match[1]!;
+  const rest = match[2]!.trim();
+  // 支持「理由 123」「#123」「123」
+  const tail = rest.match(/(?:^|#|\s)(\d{1,9})\s*$/);
+  if (!tail) {
+    return null;
+  }
+  const displayId = Number(tail[1]);
+  if (!Number.isFinite(displayId) || displayId <= 0) {
+    return null;
+  }
+  let reason = rest.slice(0, tail.index).trim();
+  reason = reason.replace(/^#\s*/, "").trim();
+  const action = actionWord.startsWith("撤") || actionWord === "撤销" ? "recall" : "cancel";
+  return { action, displayId, reason };
+}
+
 export function parsePrivatePostModeText(input: string) {
   const match = input.trim().match(/^(?:#|＃)(匿名|实名)(?:投稿)?\s*$/);
   if (!match) {
@@ -87,15 +183,25 @@ export function parsePrivatePostConfirmText(input: string) {
 }
 
 export function extractOneBotImageSegments(message: unknown) {
+  if (typeof message === "string") {
+    // snowluma 字符串形态：从 CQ:image 解析
+    return parseCqImageSegments(message);
+  }
   if (!Array.isArray(message)) {
     return [];
   }
 
-  return message.filter((segment): segment is OneBotMessageSegment => {
-    if (!segment || typeof segment !== "object") {
-      return false;
+  // 保持消息内原始顺序（字符串段里的 CQ:image 与对象 image 段交错时不能打乱）
+  return message.flatMap((segment) => {
+    if (typeof segment === "string") {
+      return parseCqImageSegments(segment);
     }
-    return (segment as OneBotMessageSegment).type === "image";
+    if (!segment || typeof segment !== "object") {
+      return [] as OneBotMessageSegment[];
+    }
+    return (segment as OneBotMessageSegment).type === "image"
+      ? [segment as OneBotMessageSegment]
+      : [] as OneBotMessageSegment[];
   });
 }
 
@@ -108,34 +214,57 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
     return [];
   }
 
-  return message.filter((segment): segment is OneBotMessageSegment => {
+  // 字符串段拆成规范段（text/image/at…），避免下游拿到裸 string 或丢失内嵌图片
+  return message.flatMap((segment): OneBotMessageSegment[] => {
+    if (typeof segment === "string") {
+      return splitCqStringSegment(segment);
+    }
     if (!segment || typeof segment !== "object") {
-      return false;
+      return [];
     }
     const seg = segment as OneBotMessageSegment;
     // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
     if (seg.type === "text") {
-      const t = stripZeroWidthChars(String(seg.data?.text ?? "")).trim();
-      return t.length > 0;
+      const data = seg.data ?? {};
+      const t = stripZeroWidthChars(String(data.text ?? data.content ?? "")).trim();
+      return t.length > 0 ? [seg] : [];
     }
-    return true;
+    return [seg];
   });
 }
 
 export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
   if (Array.isArray(message)) {
-    return message
-      .map((segment) => {
-        const item = segment as OneBotMessageSegment;
-        return item.type === "text" ? String(item.data?.text ?? "") : "";
-      })
-      .filter(Boolean)
-      .join("\n");
+    // snowluma 等实现可能把 text 放 data.text / data.content，或把整段写成字符串
+    const texts = message.map((segment) => {
+      if (typeof segment === "string") {
+        // 裸字符串段也可能带 [CQ:...]，需剥离后再作文本
+        return stripCqCodes(segment);
+      }
+      const item = segment as OneBotMessageSegment;
+      if (item?.type === "text") {
+        const data = item.data ?? {};
+        return stripCqCodes(String(data.text ?? data.content ?? ""));
+      }
+      return "";
+    }).filter(Boolean);
+    if (texts.length > 0) {
+      return texts.join("\n");
+    }
   }
 
   if (typeof message === "string") {
-    return message;
+    // snowluma CQ 字符串：去掉 [CQ:...] 后得到可读文本 / 可解析指令
+    return stripCqCodes(message);
   }
 
-  return rawMessage ?? "";
+  if (message && typeof message === "object" && !Array.isArray(message)) {
+    const item = message as OneBotMessageSegment;
+    if (item.type === "text") {
+      const data = item.data ?? {};
+      return stripCqCodes(String(data.text ?? data.content ?? ""));
+    }
+  }
+
+  return typeof rawMessage === "string" ? stripCqCodes(rawMessage) : (rawMessage ?? "");
 }

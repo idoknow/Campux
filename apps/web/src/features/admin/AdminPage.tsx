@@ -2324,7 +2324,7 @@ function AdminAiSettingsPanel({
                 onChange={(event) => onFormChange({ ...form, postTriggerKeywordsText: event.target.value })}
                 placeholder="每行一个关键词，如 发帖、吐槽、表白"
               />
-              <span className="text-xs text-muted-foreground">发送 #关键词 即可开始对话投稿。默认 #投稿 始终生效。</span>
+              <span className="text-xs text-muted-foreground">发送 #关键词 即可开始对话投稿。默认 #投稿 始终生效；开启 AI 后显式指令仍优先于语义识别。</span>
             </label>
           </div>
 
