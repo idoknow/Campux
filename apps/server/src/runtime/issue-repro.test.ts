@@ -4,6 +4,7 @@ import {
   extractOneBotPlainText,
   isPrivatePostCancelText,
   isPrivatePostUndoText,
+  parseCqImageSegments,
   parsePostRecallOrCancelCommand,
   parsePrivatePostStartText,
 } from "../lib/private-posting";
@@ -110,7 +111,8 @@ describe("issue #164 复现：snowluma 消息形态", () => {
 
   test("单对象 message 与 raw_message 回退", () => {
     expect(extractOneBotPlainText({ type: "text", data: { text: "hello" } })).toBe("hello");
-    expect(extractOneBotPlainText([{ type: "image", data: { file: "a.jpg" } }], "[CQ:image,file=a.jpg]")).toContain("CQ:image");
+    expect(extractOneBotPlainText([{ type: "image", data: { file: "a.jpg" } }], "[CQ:image,file=a.jpg]")).toBe("");
+    expect(parseCqImageSegments("[CQ:image,file=a.jpg]").length).toBe(1);
   });
 
   test("段过滤仍能去掉空白 text 段", () => {

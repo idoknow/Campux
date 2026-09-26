@@ -145,7 +145,7 @@ describe("extractOneBotPlainText snowluma compatibility (issue 164)", () => {
   });
 
   test("falls back to raw_message when no text segment", () => {
-    expect(extractOneBotPlainText([{ type: "image", data: { file: "x" } }], "[CQ:image,file=x]")).toContain("CQ:image");
+    expect(extractOneBotPlainText([{ type: "image", data: { file: "x" } }], "[CQ:image,file=x]")).toBe("");
     expect(extractOneBotPlainText(undefined, "raw")).toBe("raw");
   });
 });

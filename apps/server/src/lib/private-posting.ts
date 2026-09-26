@@ -17,6 +17,40 @@ function matchKeyword(input: string, keyword: string): string | null {
   return input.slice(prefix.length).trimStart();
 }
 
+const CQ_CODE_GLOBAL_RE = /\[CQ:([a-zA-Z0-9_-]+)((?:,[^,\]]*)*)\]/g;
+
+/** 去掉 CQ 码，只留可读文本（snowluma 字符串形态 / raw_message）。 */
+export function stripCqCodes(input: string): string {
+  // 只去掉 CQ 码并压缩连续空白，不 trim 掉正文首尾空格（指令解析层会再 trim）
+  return input
+    .replace(CQ_CODE_GLOBAL_RE, "")
+    .replace(/[ \t]{2,}/g, " ");
+}
+
+/** 从 CQ 字符串解析出 image 段（snowluma 字符串形态）。 */
+export function parseCqImageSegments(input: string): OneBotMessageSegment[] {
+  const segments: OneBotMessageSegment[] = [];
+  for (const match of input.matchAll(/\[CQ:image((?:,[^,\]]*)*)\]/gi)) {
+    const data: Record<string, unknown> = {};
+    const body = match[1] ?? "";
+    for (const part of body.split(",")) {
+      if (!part) continue;
+      const eq = part.indexOf("=");
+      if (eq <= 0) continue;
+      const key = part.slice(0, eq).trim();
+      const value = part.slice(eq + 1);
+      if (key) data[key] = value;
+    }
+    segments.push({ type: "image", data });
+  }
+  return segments;
+}
+
+/** 字符串段是否「只有 CQ 码」或空白，不应作为转发正文。 */
+function isCqOnlyStringSegment(value: string): boolean {
+  return stripCqCodes(value).trim().length === 0;
+}
+
 export type PrivatePostStartParseOptions = {
   extraKeywords?: string[] | undefined;
   aiIntakeEnabled?: boolean | undefined;
@@ -110,11 +144,18 @@ export function parsePrivatePostConfirmText(input: string) {
 }
 
 export function extractOneBotImageSegments(message: unknown) {
+  if (typeof message === "string") {
+    // snowluma 字符串形态：从 CQ:image 解析
+    return parseCqImageSegments(message);
+  }
   if (!Array.isArray(message)) {
     return [];
   }
 
   return message.filter((segment): segment is OneBotMessageSegment => {
+    if (typeof segment === "string") {
+      return false;
+    }
     if (!segment || typeof segment !== "object") {
       return false;
     }
@@ -133,7 +174,8 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
 
   return message.filter((segment): segment is OneBotMessageSegment => {
     if (typeof segment === "string") {
-      return stripZeroWidthChars(segment).trim().length > 0;
+      const s = stripZeroWidthChars(segment);
+      return s.trim().length > 0 && !isCqOnlyStringSegment(s);
     }
     if (!segment || typeof segment !== "object") {
       return false;
@@ -159,7 +201,7 @@ export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
       const item = segment as OneBotMessageSegment;
       if (item?.type === "text") {
         const data = item.data ?? {};
-        return String(data.text ?? data.content ?? "");
+        return stripCqCodes(String(data.text ?? data.content ?? ""));
       }
       return "";
     }).filter(Boolean);
@@ -169,16 +211,17 @@ export function extractOneBotPlainText(message: unknown, rawMessage?: string) {
   }
 
   if (typeof message === "string") {
-    return message;
+    // snowluma CQ 字符串：去掉 [CQ:...] 后得到可读文本 / 可解析指令
+    return stripCqCodes(message);
   }
 
   if (message && typeof message === "object" && !Array.isArray(message)) {
     const item = message as OneBotMessageSegment;
     if (item.type === "text") {
       const data = item.data ?? {};
-      return String(data.text ?? data.content ?? "");
+      return stripCqCodes(String(data.text ?? data.content ?? ""));
     }
   }
 
-  return rawMessage ?? "";
+  return typeof rawMessage === "string" ? stripCqCodes(rawMessage) : (rawMessage ?? "");
 }
