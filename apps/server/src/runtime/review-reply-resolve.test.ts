@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractDisplayIdFromReviewText, isAllowedReplySender, readQuotedReplyPayload } from "./review-reply-resolve";
+import { extractDisplayIdFromReviewText, readQuotedReplyPayload } from "./review-reply-resolve";
 
 describe("extractDisplayIdFromReviewText", () => {
   const reviewText = [
@@ -25,20 +25,6 @@ describe("extractDisplayIdFromReviewText", () => {
 
   test("无编号时返回 null", () => {
     expect(extractDisplayIdFromReviewText("随便聊聊")).toBeNull();
-  });
-});
-
-describe("isAllowedReplySender", () => {
-  test("sender 缺失时允许继续解析", () => {
-    expect(isAllowedReplySender(null, "10001")).toBe(true);
-  });
-
-  test("sender 是本 bot 时允许", () => {
-    expect(isAllowedReplySender("10001", "10001")).toBe(true);
-  });
-
-  test("sender 是其他用户时拒绝", () => {
-    expect(isAllowedReplySender("20002", "10001")).toBe(false);
   });
 });
 

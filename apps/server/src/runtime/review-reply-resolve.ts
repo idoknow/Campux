@@ -6,16 +6,6 @@ export function extractDisplayIdFromReviewText(text: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-/**
- * 判断 get_msg 返回的发送者是否允许用于引用解析。
- * - sender 缺失（部分 OneBot 实现不返回）→ 允许继续解析
- * - sender 明确且不是本 bot → 拒绝
- */
-export function isAllowedReplySender(senderId: string | null, botQqUin: string): boolean {
-  if (!senderId) return true;
-  return senderId === botQqUin;
-}
-
 export type QuotedReplyPayload = {
   /** 被引用消息的发送者 QQ（无法识别时为 null） */
   senderId: string | null;

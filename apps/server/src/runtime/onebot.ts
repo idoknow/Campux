@@ -2672,8 +2672,9 @@ export class OneBotRuntime {
     const quotedBotRow = quotedSenderId && quotedSenderId !== botQqUin
       ? await this.findBotAccountByQqUin(quotedSenderId).catch(() => null)
       : null;
-    // 被引用消息来自任意已登记墙号（含其他租户）：用于多墙号被同时 @ 时的去重路由。
-    const quotedBotSenderQqUin = quotedSenderId !== null && (quotedSenderId === botQqUin || quotedBotRow)
+    // 被引用消息来自本墙号自身或同租户墙号时，才作为多墙号被同时 @ 的去重路由依据；
+    // 跨租户墙号的消息不劫持当前租户的 @ 路由，避免 # 命令被错误租户的墙号执行。
+    const quotedBotSenderQqUin = quotedSenderId !== null && (quotedSenderId === botQqUin || quotedBotRow?.tenantId === bot.tenantId)
       ? quotedSenderId
       : null;
 
@@ -3554,15 +3555,18 @@ export class OneBotRuntime {
 
   /**
    * 从预取的被引用消息解析稿件编号。
-   * 发送者是本墙号或同租户其他墙号（如另一墙号发的审核通知）时允许解析；
-   * 普通用户消息拒绝，防止伪造「编号：#x」诱导误审。
+   * 仅接受发送者可识别且为本墙号或同租户其他墙号（如另一墙号发的审核通知）的消息；
+   * 发送者缺失或为普通用户时拒绝，防止伪造「编号：#x」诱导误审。
    */
   private async resolveDisplayIdFromQuotedReply(quoted: QuotedReplyPayload | null, botQqUin: string, tenantId: string): Promise<number | null> {
     if (!quoted || !quoted.text) {
       return null;
     }
     const senderId = quoted.senderId ?? null;
-    if (senderId && senderId !== botQqUin) {
+    if (!senderId) {
+      return null;
+    }
+    if (senderId !== botQqUin) {
       const row = await this.findBotAccountByQqUin(senderId).catch(() => null);
       if (!row || row.tenantId !== tenantId) {
         return null;
