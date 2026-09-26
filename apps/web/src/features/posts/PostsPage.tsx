@@ -26,6 +26,9 @@ import {
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { GraduationItem } from "@/features/graduation/GraduationReview";
+import { GraduationCapIcon } from "lucide-react";
+import { GraduationPendingReview, GraduationRejectDialog, useGraduationReviewQueue } from "@/features/graduation/GraduationReview";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import type { AssignedPostTag, FeedbackItem, FeedbackMessageItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
@@ -260,6 +263,7 @@ export function PostsPage({
   autoFollowOwnPosts,
   enableMarkdownRender,
   enableFeedback,
+  enableGraduation,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -274,6 +278,7 @@ export function PostsPage({
   autoFollowOwnPosts: boolean;
   enableMarkdownRender?: boolean;
   enableFeedback?: boolean;
+  enableGraduation?: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -288,6 +293,8 @@ export function PostsPage({
   const [reviewLoading, setReviewLoading] = useState(false);
   const [pendingRecallLoading, setPendingRecallLoading] = useState(false);
   const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>(() => readReviewListPreferences(tenantId).status);
+  const graduationReview = useGraduationReviewQueue(Boolean(enableGraduation) && canReview);
+  const [graduationRejectTarget, setGraduationRejectTarget] = useState<GraduationItem | null>(null);
   const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("review_page", 1, { min: 1 }));
   const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
@@ -596,6 +603,25 @@ export function PostsPage({
     } finally {
       setApproveAllBusy(false);
     }
+  }
+
+  async function approveGraduation(target: GraduationItem) {
+    try {
+      await api(`/api/graduations/${encodeURIComponent(target.id)}/approve`, { method: "POST" });
+      toast.success(`已通过毕业去向 #${target.displayId}`);
+      graduationReview.reload();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "操作失败");
+    }
+  }
+
+  async function submitGraduationReject(target: GraduationItem, reason: string) {
+    await api(`/api/graduations/${encodeURIComponent(target.id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    toast.success(`已驳回毕业去向 #${target.displayId}`);
+    graduationReview.reload();
   }
 
   async function cancelPost(id: string) {
@@ -1236,6 +1262,24 @@ export function PostsPage({
               </div>
             ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+              {enableGraduation ? (
+                <section className="mb-6 rounded-xl border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <div className="mb-3 flex items-center gap-2">
+                    <GraduationCapIcon className="size-4 text-violet-600 dark:text-violet-300" />
+                    <h3 className="text-sm font-bold text-violet-950 dark:text-violet-100">待审核毕业去向</h3>
+                    <span className="ml-auto text-xs font-medium text-violet-700 dark:text-violet-300">共 {graduationReview.items.length} 条</span>
+                  </div>
+                  {graduationReview.loading && graduationReview.items.length === 0 ? (
+                    <p className="py-6 text-center text-xs font-medium text-slate-500">正在加载待审核毕业去向…</p>
+                  ) : (
+                    <GraduationPendingReview
+                      items={graduationReview.items}
+                      onApprove={(target) => void approveGraduation(target)}
+                      onReject={(target) => setGraduationRejectTarget(target)}
+                    />
+                  )}
+                </section>
+              ) : null}
               <PendingRecallQueue
                 posts={pendingRecallPosts}
                 loading={pendingRecallLoading}
@@ -1273,6 +1317,11 @@ export function PostsPage({
           </TabsContent>
         ) : null}
       </Tabs>
+                <GraduationRejectDialog
+                  target={graduationRejectTarget}
+                  onClose={() => setGraduationRejectTarget(null)}
+                  onSubmit={async (target, reason) => { await submitGraduationReject(target, reason); }}
+                />
       <Dialog open={preview.open} onOpenChange={(open) => setPreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(720px,calc(100vw-32px))]">
           <DialogHeader>
