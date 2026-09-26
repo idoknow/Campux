@@ -90,11 +90,6 @@ export function splitCqStringSegment(input: string): OneBotMessageSegment[] {
   });
 }
 
-/** 字符串段是否「只有 CQ 码」或空白，不应作为转发正文。 */
-function isCqOnlyStringSegment(value: string): boolean {
-  return stripCqCodes(value).trim().length === 0;
-}
-
 export type PrivatePostStartParseOptions = {
   extraKeywords?: string[] | undefined;
   aiIntakeEnabled?: boolean | undefined;
@@ -219,7 +214,7 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
     return [];
   }
 
-  // 字符串段规范化成 text 段，避免下游按 seg.type 分支时拿到裸字符串
+  // 字符串段拆成规范段（text/image/at…），避免下游拿到裸 string 或丢失内嵌图片
   return message.flatMap((segment): OneBotMessageSegment[] => {
     if (typeof segment === "string") {
       return splitCqStringSegment(segment);
