@@ -28,7 +28,7 @@ import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
-import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotStylishMessagesEnabled, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
+import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { setBotCustomStylishMessages } from "../lib/bot-messages";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
@@ -314,10 +314,11 @@ export class OneBotRuntime {
   /**
    * 读取 tenant 的插件配置，把 Bot 多彩消息类型对应的自定义语句表
    * 同步到 bot-messages 模块；消息类型未配置时自动回退到内置语句池。
-   * 同时返回“实际启用”标志（原开关 AND 插件配置里的 enabled）。
+   * 同时返回“实际启用”标志（即插件配置里的 enabled）。
    */
   private async resolveStylishEnabled(tenantId: string): Promise<boolean> {
-    const baseEnabled = await readTenantBotStylishMessagesEnabled(prisma, tenantId);
+    // 多彩消息唯一开关 = 插件配置里的 enabled（旧 TenantMetadata 开关已移除，
+    // 插件配置页是唯一管理入口）。
     try {
       const config = await readTenantPluginConfig(prisma, tenantId);
       const mapping: Record<string, string[]> = {};
@@ -327,10 +328,12 @@ export class OneBotRuntime {
         }
       }
       setBotCustomStylishMessages(mapping);
-      return baseEnabled && config.botStylishMessages.enabled;
+      // 并发注意：自定义语句表是模块级全局，resolve 完成后应紧接着同步调用
+      // format* 函数，中间不得插入 await，否则多租户并发时可能串用他人语句。
+      return config.botStylishMessages.enabled;
     } catch {
       setBotCustomStylishMessages(null);
-      return baseEnabled;
+      return false;
     }
   }
 
