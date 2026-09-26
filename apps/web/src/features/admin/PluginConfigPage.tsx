@@ -208,14 +208,14 @@ function FeedbackPanel() {
 function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   const alert = config.botAlert;
   const [portText, setPortText] = useState(String(alert.smtpPort));
-  const [toEmailsText, setToEmailsText] = useState(alert.toEmails.join(","));
   const set = (patch: Partial<TenantPluginConfig["botAlert"]>) => {
     onChange({ ...config, botAlert: { ...alert, ...patch } });
   };
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-        开启后，当 QZone 登录态失效且自动刷新失败时，向收件邮箱发送异常通知。请先配置 SMTP 服务器与收件邮箱。
+        开启后，当 QZone 登录态失效且自动刷新失败时，向收件邮箱发送异常通知。请先配置 SMTP 服务器与收件邮箱；
+        保存设置前会先发送测试邮件，测试通过后才会保存。
       </div>
       <div className="grid gap-3">
         <label className="grid gap-1 text-xs font-semibold text-slate-600">
@@ -238,16 +238,33 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
           邮箱密码/授权码
           <Input type="password" value={alert.smtpPass} disabled={busy} onChange={(e) => set({ smtpPass: e.target.value })} />
         </label>
-        <label className="grid gap-1 text-xs font-semibold text-slate-600">
-          收件邮箱（多个用逗号分隔，最多 20 个）
-          <Textarea
-            value={toEmailsText}
-            disabled={busy}
-            placeholder="admin1@example.com, admin2@example.com"
-            className="min-h-16"
-            onChange={(e) => setToEmailsText(e.target.value)} onBlur={() => set({ toEmails: toEmailsText.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20) })}
-          />
-        </label>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-slate-600">收件邮箱</p>
+            <Button size="sm" variant="outline" disabled={busy || alert.toEmails.length >= 20} onClick={() => set({ toEmails: [...alert.toEmails, ""] })}>
+              + 新增收件邮箱（{alert.toEmails.length}/20）
+            </Button>
+          </div>
+          {alert.toEmails.length === 0 ? (
+            <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">
+              暂未配置收件邮箱，点击「新增收件邮箱」逐个添加。
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {alert.toEmails.map((email, index) => (
+                <div key={index} className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <Input
+                    value={email}
+                    placeholder={`收件邮箱 ${index + 1}`}
+                    disabled={busy}
+                    onChange={(e) => set({ toEmails: alert.toEmails.map((item, itemIndex) => (itemIndex === index ? e.target.value : item)) })}
+                  />
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => set({ toEmails: alert.toEmails.filter((_, itemIndex) => itemIndex !== index) })}>删除</Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
@@ -1372,7 +1389,27 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   async function save() {
     setBusy(true);
     try {
-      await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(config) });
+      // botAlert 专有门禁：保存设置前必须先通过测试邮件，避免静默保存
+      // 发不出去的 SMTP/收件配置（服务端只校验字段长度，不校验可达性）。
+      let configToSave = config;
+      if (activeId === "botAlert") {
+        // 先丢弃没填完的空行，再拿清理后的收件列表做测试与保存。
+        configToSave = { ...config, botAlert: { ...config.botAlert, toEmails: config.botAlert.toEmails.map((s) => s.trim()).filter(Boolean) } };
+        const test = await api<{ ok: boolean; message: string }>("/api/admin/plugins/bot-alert/test", {
+          method: "POST",
+          body: JSON.stringify({
+            smtpHost: configToSave.botAlert.smtpHost,
+            smtpPort: configToSave.botAlert.smtpPort,
+            smtpUser: configToSave.botAlert.smtpUser,
+            smtpPass: configToSave.botAlert.smtpPass,
+            fromEmail: configToSave.botAlert.fromEmail,
+            toEmails: configToSave.botAlert.toEmails,
+          }),
+        });
+        toast.success(test.message || "测试邮件已发送");
+        setConfig(configToSave);
+      }
+      await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(configToSave) });
       toast.success("插件配置已保存");
       await onSaved?.();
       // 保存可能触发插件启停变化，重新拉一次列表保持侧栏同步。
