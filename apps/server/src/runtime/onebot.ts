@@ -1844,8 +1844,9 @@ export class OneBotRuntime {
       this.notifyPostRecallRequested(result.value.id).catch(() => undefined);
       await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "操作失败";
-      await this.sendPrivateMessage(botQqUin, userQqUin, message).catch(() => undefined);
+      // 只把 BotWorkflowError 的业务文案发给用户，其它错误走通用文案并记日志
+      this.logger.warn({ error, displayId, action }, "private post recall/cancel failed");
+      await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
     }
   }
 
