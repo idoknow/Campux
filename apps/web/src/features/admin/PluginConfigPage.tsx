@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -208,8 +208,27 @@ function FeedbackPanel() {
 function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
   const alert = config.botAlert;
   const [portText, setPortText] = useState(String(alert.smtpPort));
+  // 收件邮箱行使用稳定 id 作为 React key：编辑/删除行时焦点元素不会被复用到别的收件人上。
+  const rowIdRef = useRef(0);
+  const nextRowId = () => ++rowIdRef.current;
+  const [emailRows, setEmailRows] = useState(() => alert.toEmails.map((value) => ({ id: nextRowId(), value })));
+  // 本面板最近写出的 toEmails（JSON 快照）：区分「自己输入引发的 props 变化」与「外部刷新」
+  //（保存清理、重新拉取配置），只有后者才重建行列表。
+  const pushedEmailsRef = useRef<string | null>(null);
+  useEffect(() => {
+    const incoming = JSON.stringify(alert.toEmails);
+    if (pushedEmailsRef.current !== incoming) {
+      setEmailRows(alert.toEmails.map((value) => ({ id: nextRowId(), value })));
+    }
+  }, [alert.toEmails]);
   const set = (patch: Partial<TenantPluginConfig["botAlert"]>) => {
     onChange({ ...config, botAlert: { ...alert, ...patch } });
+  };
+  const updateEmailRows = (rows: Array<{ id: number; value: string }>) => {
+    setEmailRows(rows);
+    const values = rows.map((row) => row.value);
+    pushedEmailsRef.current = JSON.stringify(values);
+    set({ toEmails: values });
   };
   return (
     <div className="space-y-4">
@@ -241,25 +260,25 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
         <div className="space-y-1">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-slate-600">收件邮箱</p>
-            <Button size="sm" variant="outline" disabled={busy || alert.toEmails.length >= 20} onClick={() => set({ toEmails: [...alert.toEmails, ""] })}>
-              + 新增收件邮箱（{alert.toEmails.length}/20）
+            <Button size="sm" variant="outline" disabled={busy || emailRows.length >= 20} onClick={() => updateEmailRows([...emailRows, { id: nextRowId(), value: "" }])}>
+              + 新增收件邮箱（{emailRows.length}/20）
             </Button>
           </div>
-          {alert.toEmails.length === 0 ? (
+          {emailRows.length === 0 ? (
             <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">
               暂未配置收件邮箱，点击「新增收件邮箱」逐个添加。
             </div>
           ) : (
             <div className="grid gap-2">
-              {alert.toEmails.map((email, index) => (
-                <div key={index} className="grid grid-cols-[1fr_auto] items-center gap-2">
+              {emailRows.map((row, index) => (
+                <div key={row.id} className="grid grid-cols-[1fr_auto] items-center gap-2">
                   <Input
-                    value={email}
+                    value={row.value}
                     placeholder={`收件邮箱 ${index + 1}`}
                     disabled={busy}
-                    onChange={(e) => set({ toEmails: alert.toEmails.map((item, itemIndex) => (itemIndex === index ? e.target.value : item)) })}
+                    onChange={(e) => updateEmailRows(emailRows.map((item) => (item.id === row.id ? { ...item, value: e.target.value } : item)))}
                   />
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => set({ toEmails: alert.toEmails.filter((_, itemIndex) => itemIndex !== index) })}>删除</Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateEmailRows(emailRows.filter((item) => item.id !== row.id))}>删除</Button>
                 </div>
               ))}
             </div>
@@ -269,8 +288,14 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
           <Button
             size="sm"
             variant="outline"
-            disabled={busy || !alert.smtpHost || !alert.smtpUser || !alert.smtpPass || !alert.fromEmail || alert.toEmails.length === 0}
+            disabled={busy || !alert.smtpHost || !alert.smtpUser || !alert.smtpPass || !alert.fromEmail || emailRows.length === 0}
             onClick={async () => {
+              // 与保存门禁一致：先丢弃空行，再拿清理后的列表发测试邮件。
+              const cleaned = emailRows.map((row) => row.value.trim()).filter(Boolean);
+              if (cleaned.length === 0) {
+                toast.error("请先填写至少一个收件邮箱");
+                return;
+              }
               try {
                 const res = await api<{ ok: boolean; message: string }>("/api/admin/plugins/bot-alert/test", {
                   method: "POST",
@@ -280,7 +305,7 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
                     smtpUser: alert.smtpUser,
                     smtpPass: alert.smtpPass,
                     fromEmail: alert.fromEmail,
-                    toEmails: alert.toEmails,
+                    toEmails: cleaned,
                   }),
                 });
                 toast.success(res.message || "测试邮件已发送");
@@ -1340,6 +1365,9 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   const [auditLog, setAuditLog] = useState<Array<{ id: string; timestamp: string; action: string; pluginName: string; operator: string | null; detail: string | null; metadata: Record<string, unknown> | null }>>([]);
   const [auditLogLoading, setAuditLogLoading] = useState(false);
   const [logScope, setLogScope] = useState<"all" | "current">("current");
+  // 最近一次已保存/已加载的 botAlert 配置快照（JSON）：save() 用它判断 botAlert
+  // 是否有未测试的修改 —— 无论当前在哪个插件面板，整份 config 是一次性 PATCH 的。
+  const savedBotAlertRef = useRef<string | null>(null);
 
 
   useEffect(() => {
@@ -1357,7 +1385,9 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     setLoading(true);
     try {
       const data = await api<{ config: TenantPluginConfig }>("/api/admin/plugins/settings");
-      setConfig(ensureFontSelectionDefaults(ensureBotMessageDefaults(data.config)));
+      const next = ensureFontSelectionDefaults(ensureBotMessageDefaults(data.config));
+      setConfig(next);
+      savedBotAlertRef.current = JSON.stringify(next.botAlert);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "读取插件配置失败");
     } finally {
@@ -1389,10 +1419,13 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
   async function save() {
     setBusy(true);
     try {
-      // botAlert 专有门禁：保存设置前必须先通过测试邮件，避免静默保存
-      // 发不出去的 SMTP/收件配置（服务端只校验字段长度，不校验可达性）。
+      // botAlert 专有门禁：只要有未测试过的 botAlert 修改（无论当前在哪个面板，
+      // 整份 config 是一次性 PATCH 的），保存前必须先通过测试邮件，避免静默
+      // 保存发不出去的 SMTP/收件配置（服务端只校验字段长度，不校验可达性）。
       let configToSave = config;
-      if (activeId === "botAlert") {
+      const botAlertDirty =
+        savedBotAlertRef.current !== null && config.botAlert !== undefined && JSON.stringify(config.botAlert) !== savedBotAlertRef.current;
+      if (botAlertDirty) {
         // 先丢弃没填完的空行，再拿清理后的收件列表做测试与保存。
         configToSave = { ...config, botAlert: { ...config.botAlert, toEmails: config.botAlert.toEmails.map((s) => s.trim()).filter(Boolean) } };
         const test = await api<{ ok: boolean; message: string }>("/api/admin/plugins/bot-alert/test", {
@@ -1410,6 +1443,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
         setConfig(configToSave);
       }
       await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(configToSave) });
+      savedBotAlertRef.current = JSON.stringify(configToSave.botAlert);
       toast.success("插件配置已保存");
       await onSaved?.();
       // 保存可能触发插件启停变化，重新拉一次列表保持侧栏同步。
