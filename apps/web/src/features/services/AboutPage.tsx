@@ -55,6 +55,7 @@ const developers = [
 const authorGithubLogins: Record<string, string> = {
   MrWoods1692: "MrWoods1692",
   HelloFHZ: "fhzit",
+  haohaoxuedili: "haohaoxuedili",
 };
 
 const techStack = [
