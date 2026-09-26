@@ -128,6 +128,8 @@ export type TenantMetadata = {
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;
   enableAnonymousAvatarSelection: boolean;
+  /** 关注稿件有新评论时是否私信推送摘要（墙面设置开关，默认开启） */
+  followedPostCommentNotifyEnabled: boolean;
   /** 字体选择插件启用的字体 value 白名单（包含 "default"） */
   availableFonts: string[];
   /** 多彩投稿插件启用的背景色预设（未配置时为空数组，投稿页不展示背景色选项） */

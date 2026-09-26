@@ -81,6 +81,7 @@ type TenantSettingsForm = {
   publishAccumulateMaxImages: number;
   publishAccumulateStaleMinutes: number;
   publishLlmSummaryEnabled: boolean;
+  followedPostCommentNotifyEnabled: boolean;
 };
 
 type BanForm = {
@@ -375,7 +376,7 @@ export function AdminPage({
     const nextForm = toForm(selectedTenant, metadata);
     setForm(nextForm);
     setImageMaxSizeDraft(String(nextForm.imageMaxSizeMb));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -557,6 +558,7 @@ export function AdminPage({
           publishAccumulateMaxImages: form.publishAccumulateMaxImages,
           publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
           publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
+          followedPostCommentNotifyEnabled: form.followedPostCommentNotifyEnabled,
         }),
       });
       await onSaved();
@@ -2021,6 +2023,18 @@ function MetadataPanel({
               disabled={busy}
               onCheckedChange={(value) => onFormChange({ ...form, publishLlmSummaryEnabled: value })}
               aria-label="启用说说文字 AI 总结"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div>
+              <p className="text-sm font-medium text-slate-900">关注稿件评论通知</p>
+              <p className="text-xs text-slate-500">开启后，用户关注的稿件有新评论时，会按计划私信推送评论摘要（每天 10:00 / 22:00）。关闭后停止推送，稿件页的「关注评论」仍可使用。</p>
+            </div>
+            <Switch
+              checked={form.followedPostCommentNotifyEnabled}
+              disabled={busy}
+              onCheckedChange={(value) => onFormChange({ ...form, followedPostCommentNotifyEnabled: value })}
+              aria-label="启用关注稿件评论通知"
             />
           </div>
           <label className="grid gap-1 text-sm font-medium md:col-span-2">
@@ -3984,6 +3998,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     publishAccumulateMaxImages: metadata.publishAccumulate.maxImages,
     publishAccumulateStaleMinutes: metadata.publishAccumulate.staleMinutes,
     publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
+    followedPostCommentNotifyEnabled: metadata.followedPostCommentNotifyEnabled,
   };
 }
 

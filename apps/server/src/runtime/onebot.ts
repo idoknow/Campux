@@ -33,7 +33,7 @@ import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { setBotCustomStylishMessages } from "../lib/bot-messages";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 import { lockActiveTenantRuntime, runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
-import { extractDisplayIdFromReviewText, isAllowedReplySender } from "./review-reply-resolve";
+import { extractDisplayIdFromReviewText, readQuotedReplyPayload, type QuotedReplyPayload } from "./review-reply-resolve";
 import {
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
@@ -2664,11 +2664,26 @@ export class OneBotRuntime {
       return;
     }
 
-    let command = parseReviewGroupCommand(extractPlainText(event));
+    const plainText = extractPlainText(event);
+
+    // 引用消息预解析：用于多墙号去重路由与稿件编号解析（命令必须 @ 机器人才生效）。
+    const quoted = await this.fetchQuotedReplyMessage(event, botQqUin, plainText);
+    const quotedSenderId = quoted?.senderId ?? null;
+    const quotedBotRow = quotedSenderId && quotedSenderId !== botQqUin
+      ? await this.findBotAccountByQqUin(quotedSenderId).catch(() => null)
+      : null;
+    // 被引用消息来自本墙号自身或同租户墙号时，才作为多墙号被同时 @ 的去重路由依据；
+    // 跨租户墙号的消息不劫持当前租户的 @ 路由，避免 # 命令被错误租户的墙号执行。
+    const quotedBotSenderQqUin = quotedSenderId !== null && (quotedSenderId === botQqUin || quotedBotRow?.tenantId === bot.tenantId)
+      ? quotedSenderId
+      : null;
+
+    let command = parseReviewGroupCommand(plainText);
 
     // 如果没有以 # 或 / 明确给出命令，但消息是 @ 机器人的短命令（比如 过/拒），支持基于 mention 的快捷命令。
+    // 仅引用而不 @ 时指令不生效。
     if (!command && isMentioningBot(event, botQqUin)) {
-      command = parseReviewGroupShortCommand(extractPlainText(event));
+      command = parseReviewGroupShortCommand(plainText);
     }
 
 
@@ -2683,6 +2698,7 @@ export class OneBotRuntime {
       currentBotQqUin: botQqUin,
       mentionedBotQqUins: readMentionedQqUins(event),
       preferredBotId: await this.findTenantReviewNotificationBot(bot.tenantId).then((candidate) => candidate?.id ?? null),
+      quotedBotSenderQqUin,
     })) {
       return;
     }
@@ -2806,9 +2822,9 @@ export class OneBotRuntime {
 
       if (command.name === "通过") {
         let displayId = parseDisplayId(command.args);
-        // 尝试从引用消息解析稿件编号：仅在操作员 mention 机器人且存在引用时才解析
+        // 尝试从引用消息解析稿件编号：仅在 @机器人 时解析，引用但不 @ 不生效
         if (!displayId && isMentioningBot(event, botQqUin)) {
-          displayId = await this.tryResolveDisplayIdFromReply(event, botQqUin);
+          displayId = await this.resolveDisplayIdFromQuotedReply(quoted, botQqUin, bot.tenantId);
         }
         if (!displayId) {
           await this.sendGroupMessage(botQqUin, groupId, [
@@ -2841,8 +2857,9 @@ export class OneBotRuntime {
             await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
             return;
           }
+          // 引用解析编号仅在 @机器人 时尝试；引用但不 @ 不生效
           const displayIdFromReply = isMentioningBot(event, botQqUin)
-            ? await this.tryResolveDisplayIdFromReply(event, botQqUin)
+            ? await this.resolveDisplayIdFromQuotedReply(quoted, botQqUin, bot.tenantId)
             : null;
           if (!displayIdFromReply) {
             await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
@@ -3513,7 +3530,14 @@ export class OneBotRuntime {
     });
   }
 
-  private async tryResolveDisplayIdFromReply(event: OneBotMessageEvent, botQqUin: string): Promise<number | null> {
+  /**
+   * 取回当前消息引用的被引用消息（get_msg）。
+   * 仅在存在 reply 段且消息文本非空时调用 get_msg；失败或无引用时返回 null。
+   */
+  private async fetchQuotedReplyMessage(event: OneBotMessageEvent, botQqUin: string, plainText: string): Promise<QuotedReplyPayload | null> {
+    if (!plainText.trim()) {
+      return null;
+    }
     try {
       // 只解析真正的 reply 段；不要回退到 event.message_id（那是当前消息，不是被引用的审核通知）。
       const replyId = this.extractReplyMessageId(event);
@@ -3523,39 +3547,49 @@ export class OneBotRuntime {
 
       const data = await this.callAction(botQqUin, "get_msg", { message_id: replyId }).catch(() => null);
       if (!data) return null;
-
-      // 仅当能明确识别发送者且不是本 bot 时才拒绝。
-      // 部分 OneBot 实现（NapCat 等）get_msg 可能不带 sender，此时仍尝试从正文解析编号。
-      const sender = (data as any).sender ?? (data as any).user ?? null;
-      const senderId = sender
-        ? normalizeId(sender.user_id ?? sender.userId ?? sender.uin ?? sender.qq ?? sender.id)
-        : null;
-      if (!isAllowedReplySender(senderId, botQqUin)) {
-        return null;
-      }
-
-      // data may contain `message` (array) or `raw_message` or `message` string
-      let text = "";
-      if (Array.isArray((data as any).message)) {
-        text = (data as any).message
-          .map((seg: any) => {
-            if (seg?.type === "text") return seg?.data?.text ?? "";
-            if (seg?.type === "reply" || seg?.type === "at") return "";
-            return typeof seg?.data?.text === "string" ? seg.data.text : "";
-          })
-          .join("");
-      } else if (typeof (data as any).message === "string") {
-        text = (data as any).message;
-      }
-      if (!text && typeof (data as any).raw_message === "string") {
-        text = (data as any).raw_message;
-      }
-
-      if (!text) return null;
-      return extractDisplayIdFromReviewText(text);
+      return readQuotedReplyPayload(data);
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 从预取的被引用消息解析稿件编号。
+   * 仅接受发送者可识别且为本墙号或同租户其他墙号（如另一墙号发的审核通知）的消息；
+   * 发送者缺失或为普通用户时拒绝，防止伪造「编号：#x」诱导误审。
+   */
+  private async resolveDisplayIdFromQuotedReply(quoted: QuotedReplyPayload | null, botQqUin: string, tenantId: string): Promise<number | null> {
+    if (!quoted || !quoted.text) {
+      return null;
+    }
+    const senderId = quoted.senderId ?? null;
+    if (!senderId) {
+      return null;
+    }
+    if (senderId !== botQqUin) {
+      const row = await this.findBotAccountByQqUin(senderId).catch(() => null);
+      if (!row || row.tenantId !== tenantId) {
+        return null;
+      }
+    }
+    return extractDisplayIdFromReviewText(quoted.text);
+  }
+
+  /** 按 QQ 号查找已登记的墙号账号（任意租户，无论当前是否启用）。 */
+  private async findBotAccountByQqUin(qqUin: string): Promise<{ id: string; tenantId: string } | null> {
+    if (!qqUin) {
+      return null;
+    }
+    return prisma.botAccount.findFirst({
+      where: {
+        platform: "onebot",
+        qqUin: BigInt(qqUin),
+      },
+      select: {
+        id: true,
+        tenantId: true,
+      },
+    });
   }
 
   private async tryResolveQZoneTidFromReply(event: OneBotMessageEvent, botQqUin: string): Promise<string | null> {
@@ -4039,11 +4073,19 @@ export function shouldHandleReviewGroupCommandForBot(input: {
   currentBotQqUin: string;
   mentionedBotQqUins: string[];
   preferredBotId: string | null;
+  /** 被引用消息的发送者是本系统登记的墙号时，传入其 QQ 号；否则传 null */
+  quotedBotSenderQqUin?: string | null;
 }) {
   const mentioned = input.mentionedBotQqUins;
   if (mentioned.length > 0) {
+    // QQ 回复会自动 @ 被引用消息的发送者，叠加手动 @ 另一个墙号时会出现多个被 @ 的墙号；
+    // 此时只让被引用消息所属的墙号处理，避免重复回复与「未解析到稿件编号」误报。
+    if (input.quotedBotSenderQqUin && mentioned.includes(input.quotedBotSenderQqUin)) {
+      return input.quotedBotSenderQqUin === input.currentBotQqUin;
+    }
     return mentioned.includes(input.currentBotQqUin);
   }
+  // 未 @ 任何墙号时，默认由首选审核通知墙号应答（与「通知墙号」设置保持一致）。
   return input.preferredBotId === null || input.preferredBotId === input.currentBotId;
 }
 

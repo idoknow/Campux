@@ -6,12 +6,55 @@ export function extractDisplayIdFromReviewText(text: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+export type QuotedReplyPayload = {
+  /** 被引用消息的发送者 QQ（无法识别时为 null） */
+  senderId: string | null;
+  /** 被引用消息的纯文本内容 */
+  text: string;
+};
+
 /**
- * 判断 get_msg 返回的发送者是否允许用于引用解析。
- * - sender 缺失（部分 OneBot 实现不返回）→ 允许继续解析
- * - sender 明确且不是本 bot → 拒绝
+ * 从 get_msg 返回的数据中提取被引用消息的发送者与纯文本。
+ * 兼容 message 为段数组 / 字符串、raw_message 兜底；reply/at 段不计入文本。
  */
-export function isAllowedReplySender(senderId: string | null, botQqUin: string): boolean {
-  if (!senderId) return true;
-  return senderId === botQqUin;
+export function readQuotedReplyPayload(data: unknown): QuotedReplyPayload | null {
+  if (!data || typeof data !== "object") return null;
+  const payload = data as Record<string, unknown>;
+
+  const sender = (payload.sender ?? payload.user ?? null) as Record<string, unknown> | null;
+  const senderId = sender
+    ? normalizeQuotedSenderId(sender.user_id ?? sender.userId ?? sender.uin ?? sender.qq ?? sender.id)
+    : null;
+
+  let text = "";
+  if (Array.isArray(payload.message)) {
+    text = (payload.message as Array<Record<string, unknown>>)
+      .map((seg) => {
+        if (!seg || typeof seg !== "object") return "";
+        if (seg.type === "reply" || seg.type === "at") return "";
+        const segData = seg.data as Record<string, unknown> | undefined;
+        return typeof segData?.text === "string" ? segData.text : "";
+      })
+      .join("");
+  } else if (typeof payload.message === "string") {
+    text = payload.message;
+  }
+  if (!text && typeof payload.raw_message === "string") {
+    text = payload.raw_message;
+  }
+
+  return { senderId, text };
+}
+
+function normalizeQuotedSenderId(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  return null;
 }

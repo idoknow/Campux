@@ -265,3 +265,50 @@ export async function readTenantEnableAnonymousAvatarSelection(client: MetadataC
   return normalizeEnableAnonymousAvatarSelection(entry?.value);
 }
 
+// 关注稿件有新评论时是否私信推送摘要。默认开启，保持既有行为。
+export const followedPostCommentNotifyEnabledKey = "followed_post_comment_notify_enabled";
+export const followedPostCommentNotifyEnabledDefault = true;
+
+export function normalizeFollowedPostCommentNotifyEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true" || value === "1";
+  return followedPostCommentNotifyEnabledDefault;
+}
+
+export async function readTenantFollowedPostCommentNotifyEnabled(client: MetadataClient, tenantId: string): Promise<boolean> {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: followedPostCommentNotifyEnabledKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizeFollowedPostCommentNotifyEnabled(entry?.value);
+}
+
+/** 返回关闭了「关注稿件评论通知」的租户 id 集合（未配置的租户视为开启）。 */
+export async function readFollowedPostCommentNotifyDisabledTenantIds(client: MetadataClient): Promise<Set<string>> {
+  const entries = await client.tenantMetadata.findMany({
+    where: {
+      key: followedPostCommentNotifyEnabledKey,
+    },
+    select: {
+      tenantId: true,
+      value: true,
+    },
+  });
+
+  const disabled = new Set<string>();
+  for (const entry of entries) {
+    if (!normalizeFollowedPostCommentNotifyEnabled(entry.value)) {
+      disabled.add(entry.tenantId);
+    }
+  }
+  return disabled;
+}
+

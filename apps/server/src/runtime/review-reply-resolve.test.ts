@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractDisplayIdFromReviewText, isAllowedReplySender } from "./review-reply-resolve";
+import { extractDisplayIdFromReviewText, readQuotedReplyPayload } from "./review-reply-resolve";
 
 describe("extractDisplayIdFromReviewText", () => {
   const reviewText = [
@@ -28,16 +28,44 @@ describe("extractDisplayIdFromReviewText", () => {
   });
 });
 
-describe("isAllowedReplySender", () => {
-  test("sender 缺失时允许继续解析", () => {
-    expect(isAllowedReplySender(null, "10001")).toBe(true);
+describe("readQuotedReplyPayload", () => {
+  test("从段数组提取发送者与文本，跳过 reply/at 段", () => {
+    const payload = readQuotedReplyPayload({
+      sender: { user_id: 20002 },
+      message: [
+        { type: "reply", data: { id: "1" } },
+        { type: "at", data: { qq: 20002 } },
+        { type: "text", data: { text: "📮 墙新稿件\n编号：#6810" } },
+      ],
+    });
+    expect(payload).toEqual({ senderId: "20002", text: "📮 墙新稿件\n编号：#6810" });
   });
 
-  test("sender 是本 bot 时允许", () => {
-    expect(isAllowedReplySender("10001", "10001")).toBe(true);
+  test("message 为字符串时直接使用", () => {
+    const payload = readQuotedReplyPayload({
+      sender: { user_id: 20002 },
+      message: "编号：#6810",
+    });
+    expect(payload).toEqual({ senderId: "20002", text: "编号：#6810" });
   });
 
-  test("sender 是其他用户时拒绝", () => {
-    expect(isAllowedReplySender("20002", "10001")).toBe(false);
+  test("message 缺失时回退到 raw_message", () => {
+    const payload = readQuotedReplyPayload({
+      sender: { user_id: 20002 },
+      raw_message: "编号：#42",
+    });
+    expect(payload).toEqual({ senderId: "20002", text: "编号：#42" });
+  });
+
+  test("sender 缺失时 senderId 为 null 仍返回文本", () => {
+    const payload = readQuotedReplyPayload({
+      message: [{ type: "text", data: { text: "编号：#7" } }],
+    });
+    expect(payload).toEqual({ senderId: null, text: "编号：#7" });
+  });
+
+  test("无效输入返回 null", () => {
+    expect(readQuotedReplyPayload(null)).toBeNull();
+    expect(readQuotedReplyPayload("not-an-object")).toBeNull();
   });
 });

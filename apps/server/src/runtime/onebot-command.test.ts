@@ -243,6 +243,68 @@ describe("review group multi-bot routing", () => {
       preferredBotId: null,
     })).toBe(true);
   });
+
+  test("被 @ 的墙号处理命令（即使引用的是其他墙号的消息）", () => {
+    // 审核员引用 2 墙号的通知但手动 @ 了 1 墙号：由被 @ 的墙号处理
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-a",
+      currentBotQqUin: "10000",
+      mentionedBotQqUins: ["10000"],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: "20000",
+    })).toBe(true);
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-b",
+      currentBotQqUin: "20000",
+      mentionedBotQqUins: ["10000"],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: "20000",
+    })).toBe(false);
+  });
+
+  test("QQ 回复自动 @ 被引用墙号叠加手动 @ 时，只由被引用墙号处理", () => {
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-b",
+      currentBotQqUin: "20000",
+      mentionedBotQqUins: ["10000", "20000"],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: "20000",
+    })).toBe(true);
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-a",
+      currentBotQqUin: "10000",
+      mentionedBotQqUins: ["10000", "20000"],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: "20000",
+    })).toBe(false);
+  });
+
+  test("未 @ 时由首选通知墙号处理，引用不改变归属", () => {
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-b",
+      currentBotQqUin: "20000",
+      mentionedBotQqUins: [],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: "10000",
+    })).toBe(true);
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-a",
+      currentBotQqUin: "10000",
+      mentionedBotQqUins: [],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: "10000",
+    })).toBe(false);
+  });
+
+  test("引用普通用户消息时不影响原有路由", () => {
+    expect(shouldHandleReviewGroupCommandForBot({
+      currentBotId: "bot-a",
+      currentBotQqUin: "10000",
+      mentionedBotQqUins: ["10000"],
+      preferredBotId: "bot-b",
+      quotedBotSenderQqUin: null,
+    })).toBe(true);
+  });
 });
 
 describe("private post semantic mode selection", () => {
