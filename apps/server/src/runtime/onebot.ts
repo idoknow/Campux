@@ -1750,11 +1750,8 @@ export class OneBotRuntime {
     reason: string;
   }) {
     try {
-      const user = await prisma.user.findUnique({ where: { qqUin: BigInt(userQqUin) } });
-      if (!user) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, "账号不存在，请先发送 #注册账号。");
-        return;
-      }
+      // 与其它私聊投稿操作一致：校验本墙成员、submitter 角色与封禁状态
+      const { operator: user } = await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
       const post = await prisma.post.findFirst({
         where: { tenantId: bot.tenantId, displayId, authorId: user.id },
       });
