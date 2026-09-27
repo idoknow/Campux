@@ -44,12 +44,12 @@ describe("snowluma CQ 码字符串形态", () => {
     // 修复前：extract 原样返回带 CQ 的字符串，startsWith('#投稿') 失败
     const text = extractOneBotPlainText("[CQ:at,qq=10001] #投稿 雪花CQ形态").trim();
     expect(text).toBe("#投稿 雪花CQ形态");
-    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: true })).toBe("雪花CQ形态");
+    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: false })).toBe("雪花CQ形态");
   });
 
   test("CQ:image 夹杂时正文仍是纯文本", () => {
     const text = extractOneBotPlainText("[CQ:image,file=a.jpg]#投稿 带图正文").trim();
-    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: true })).toBe("带图正文");
+    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: false })).toBe("带图正文");
   });
 
   test("CQ 消息里的 #取消 / #撤回 指令", () => {
@@ -96,7 +96,7 @@ describe("review fixes: CQ 字符串段与正文空白", () => {
   test("数组内裸字符串段也会剥离 CQ（review #2）", () => {
     const text = extractOneBotPlainText(["[CQ:at,qq=1] #投稿 字符串段"]).trim();
     expect(text).toBe("#投稿 字符串段");
-    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: true })).toBe("字符串段");
+    expect(parsePrivatePostStartText(text, { aiIntakeEnabled: false })).toBe("字符串段");
   });
 
   test("数组内字符串段里的 CQ:image 仍可提取（review #2）", () => {

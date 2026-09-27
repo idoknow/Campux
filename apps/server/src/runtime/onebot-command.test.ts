@@ -405,9 +405,8 @@ describe("private post semantic mode selection", () => {
     })).toBe(false);
   });
 
-  test("显式投稿指令在 AI 开启时仍生效 (issue 163)", () => {
-    // 显式指令在 AI 开启时也生效（议题 #163）
-    expect(shouldRunPrivatePostKeywordCommand(true)).toBe(true);
+  test("AI 收稿开启时禁用投稿关键词指令分支", () => {
+    expect(shouldRunPrivatePostKeywordCommand(true)).toBe(false);
     expect(shouldRunPrivatePostKeywordCommand(false)).toBe(true);
   });
 

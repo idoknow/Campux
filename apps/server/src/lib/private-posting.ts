@@ -98,7 +98,13 @@ export type PrivatePostStartParseOptions = {
 export function parsePrivatePostStartText(input: string, options?: PrivatePostStartParseOptions | string[] | undefined) {
   const trimmed = input.trim();
   const extraKeywords = Array.isArray(options) ? options : options?.extraKeywords;
-  // AI 语义收稿只负责自由文本；显式 #投稿 / #关键词 指令始终生效（议题 #163）。
+  const aiIntakeEnabled = Array.isArray(options) ? false : options?.aiIntakeEnabled === true;
+
+  if (aiIntakeEnabled) {
+    return null;
+  }
+
+  // 默认支持 #投稿（也可不带 # 前缀走下面兜底）
   const defaultMatch = matchKeyword(trimmed, "投稿");
   if (defaultMatch !== null) return defaultMatch;
 

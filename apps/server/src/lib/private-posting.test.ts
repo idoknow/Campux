@@ -64,11 +64,13 @@ describe("private posting command parsing", () => {
     expect(parsePrivatePostStartText("#投稿", ["发帖"])).toBe("");
   });
 
-  test("keeps explicit start commands when AI intake is enabled (issue 163)", () => {
+  test("disables start commands when AI intake is enabled", () => {
     const options = { extraKeywords: ["发帖"], aiIntakeEnabled: true };
-    expect(parsePrivatePostStartText("#投稿 正文", options)).toBe("正文");
-    expect(parsePrivatePostStartText("＃投稿 正文", options)).toBe("正文");
-    expect(parsePrivatePostStartText("#发帖 正文", options)).toBe("正文");
+    expect(parsePrivatePostStartText("#投稿 正文", options)).toBeNull();
+    expect(parsePrivatePostStartText("＃投稿 正文", options)).toBeNull();
+    expect(parsePrivatePostStartText("#发帖 正文", options)).toBeNull();
+    expect(parsePrivatePostStartText("投稿", options)).toBeNull();
+    expect(parsePrivatePostStartText("墙墙投稿", options)).toBeNull();
   });
 
   test("keeps start commands enabled when AI intake is disabled", () => {

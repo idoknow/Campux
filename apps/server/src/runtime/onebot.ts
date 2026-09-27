@@ -1812,6 +1812,7 @@ export class OneBotRuntime {
         await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 为批量发布，暂不支持程序撤回，请联系管理员。`);
         return;
       }
+      const recallReason = reason ? clampReason(reason) : "对话指令申请";
       const result = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
         // 事务内按期望状态条件更新，避免与审核/撤回流程并发时覆盖状态
         const updated = await transaction.post.updateMany({
@@ -1830,7 +1831,7 @@ export class OneBotRuntime {
               actorId: user.id,
               oldStatus: "published",
               newStatus: "pending_recall",
-              comment: `用户申请撤回：${reason ? clampReason(reason) : "对话指令申请"}`,
+              comment: `用户申请撤回：${recallReason}`,
             },
           });
         }
@@ -1841,6 +1842,22 @@ export class OneBotRuntime {
         await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，撤回未生效。`);
         return;
       }
+      await writeAuditLog({
+        tenantId: bot.tenantId,
+        actorId: user.id,
+        action: "post.recall.request",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          reason: recallReason,
+        },
+      });
+      this.pluginEvents?.emit({
+        type: "post:recalled",
+        tenantId: bot.tenantId,
+        postId: post.id,
+      });
       this.notifyPostRecallRequested(result.value.id).catch(() => undefined);
       await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`);
     } catch (error) {
@@ -4303,9 +4320,8 @@ export function isPrivatePostAiIntakeActive(configured: boolean, llmAvailable: b
   return configured && llmAvailable;
 }
 
-export function shouldRunPrivatePostKeywordCommand(_aiIntakeEnabled: boolean) {
-  // 显式指令始终生效；AI 语义只处理自由文本（议题 #163）。
-  return true;
+export function shouldRunPrivatePostKeywordCommand(aiIntakeEnabled: boolean) {
+  return !aiIntakeEnabled;
 }
 
 export function resolvePrivatePostSemanticAction(semantic: PrivatePostSemanticResult | undefined) {
