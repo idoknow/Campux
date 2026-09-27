@@ -153,3 +153,29 @@ describe("二审修复：字符串段拆分与撤回理由长度", () => {
     expect(segs[1]?.data?.text).toBe("看图");
   });
 });
+
+describe("review 修复：data.content 规范化与独立字符串 message", () => {
+  test("data.content 文本段规范化出 data.text，转发不丢正文", () => {
+    const segs = extractOneBotMessageSegments([
+      { type: "text", data: { content: "雪花正文" } },
+    ]);
+    expect(segs).toEqual([
+      { type: "text", data: { content: "雪花正文", text: "雪花正文" } },
+    ]);
+    expect(segs[0]?.data?.text).toBe("雪花正文");
+  });
+
+  test("已有 data.text 时保持 text 值，不因 content 覆盖", () => {
+    const segs = extractOneBotMessageSegments([
+      { type: "text", data: { text: "标准文本", content: "另一份" } },
+    ]);
+    expect(segs[0]?.data?.text).toBe("标准文本");
+  });
+
+  test("独立字符串 message 也走 splitCqStringSegment，保留 CQ 图片", () => {
+    const segs = extractOneBotMessageSegments("[CQ:image,file=a.jpg]看图");
+    expect(segs.map((s) => s.type)).toEqual(["image", "text"]);
+    expect(segs[0]?.data?.file).toBe("a.jpg");
+    expect(segs[1]?.data?.text).toBe("看图");
+  });
+});

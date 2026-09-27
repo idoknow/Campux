@@ -216,6 +216,10 @@ export function extractOneBotImageSegments(message: unknown) {
  * 用于转发场景，保留 face、image 等非文本段，以便合并转发时正确渲染表情和图片。
  */
 export function extractOneBotMessageSegments(message: unknown): OneBotMessageSegment[] {
+  if (typeof message === "string") {
+    // snowluma 单字符串 message 与数组内字符串段同样拆分，避免转发丢失内嵌 image/at
+    return splitCqStringSegment(message);
+  }
   if (!Array.isArray(message)) {
     return [];
   }
@@ -232,8 +236,13 @@ export function extractOneBotMessageSegments(message: unknown): OneBotMessageSeg
     // 过滤掉空白纯文本段（只有空格/换行/零宽字符），保留有实际内容的 text 和所有非 text 段
     if (seg.type === "text") {
       const data = seg.data ?? {};
-      const t = stripZeroWidthChars(String(data.text ?? data.content ?? "")).trim();
-      return t.length > 0 ? [seg] : [];
+      const textValue = String(data.text ?? data.content ?? "");
+      const t = stripZeroWidthChars(textValue).trim();
+      if (t.length === 0) {
+        return [];
+      }
+      // 规范化出 data.text，避免只给 data.content 的 snowluma 段在下游转发时丢正文
+      return [{ ...seg, data: { ...data, text: textValue } }];
     }
     return [seg];
   });

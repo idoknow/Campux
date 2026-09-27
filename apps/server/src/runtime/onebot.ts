@@ -1834,6 +1834,18 @@ export class OneBotRuntime {
               comment: `用户申请撤回：${recallReason}`,
             },
           });
+          // 审计与状态变更同事务提交，避免已改状态却缺 post.recall.request 记录
+          await writeAuditLog({
+            tenantId: bot.tenantId,
+            actorId: user.id,
+            action: "post.recall.request",
+            targetType: "post",
+            targetId: post.id,
+            detail: {
+              displayId: post.displayId,
+              reason: recallReason,
+            },
+          }, transaction);
         }
         return { id: post.id, count: updated.count };
       });
@@ -1842,24 +1854,21 @@ export class OneBotRuntime {
         await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，撤回未生效。`);
         return;
       }
-      await writeAuditLog({
-        tenantId: bot.tenantId,
-        actorId: user.id,
-        action: "post.recall.request",
-        targetType: "post",
-        targetId: post.id,
-        detail: {
-          displayId: post.displayId,
-          reason: recallReason,
-        },
-      });
-      this.pluginEvents?.emit({
-        type: "post:recalled",
-        tenantId: bot.tenantId,
-        postId: post.id,
-      });
+      // 已提交：通知/回执/插件副作用失败不得再向用户报“撤回失败”
       this.notifyPostRecallRequested(result.value.id).catch(() => undefined);
-      await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`);
+      await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`).catch((error) => {
+        this.logger.warn({ error, displayId }, "recall success message failed after commit");
+      });
+      try {
+        this.pluginEvents?.emit({
+          type: "post:recalled",
+          tenantId: bot.tenantId,
+          postId: post.id,
+        });
+      } catch (error) {
+        this.logger.warn({ error, displayId }, "post:recalled plugin emit failed");
+      }
+      return;
     } catch (error) {
       // 只把 BotWorkflowError 的业务文案发给用户，其它错误走通用文案并记日志
       this.logger.warn({ error, displayId, action }, "private post recall/cancel failed");
