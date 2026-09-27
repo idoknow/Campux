@@ -84,7 +84,8 @@ export function splitCqStringSegment(input: string): OneBotMessageSegment[] {
   }
   return out.filter((seg) => {
     if (seg.type === "text") {
-      return String(seg.data?.text ?? "").trim().length > 0;
+      // 与对象 text 段一致：零宽字符也算空白，避免只含 \u200b 的段被转发
+      return stripZeroWidthChars(String(seg.data?.text ?? "")).trim().length > 0;
     }
     return true;
   });

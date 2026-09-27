@@ -179,3 +179,21 @@ describe("review 修复：data.content 规范化与独立字符串 message", () 
     expect(segs[1]?.data?.text).toBe("看图");
   });
 });
+
+
+describe("review 修复：通知日志与零宽空白过滤", () => {
+  test("splitCqStringSegment 丢弃仅含零宽字符的 text 段", () => {
+    const segs = splitCqStringSegment("[CQ:image,file=a.jpg]\u200b");
+    expect(segs.map((s) => s.type)).toEqual(["image"]);
+  });
+
+  test("splitCqStringSegment 保留含正文的段，即使夹杂零宽字符", () => {
+    const segs = splitCqStringSegment("正文\u200b\u200b");
+    expect(segs).toEqual([{ type: "text", data: { text: "正文\u200b\u200b" } }]);
+  });
+
+  test("extractOneBotMessageSegments 对字符串段同样过滤零宽空白", () => {
+    const segs = extractOneBotMessageSegments("[CQ:at,qq=1]\u200b");
+    expect(segs.map((s) => s.type)).toEqual(["at"]);
+  });
+});

@@ -1793,7 +1793,9 @@ export class OneBotRuntime {
           await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，取消未生效。`);
           return;
         }
-        this.notifyPostCancelled(result.value.id).catch(() => undefined);
+        this.notifyPostCancelled(result.value.id).catch((error) => {
+          this.logger.warn({ error, displayId }, "notify post cancelled failed");
+        });
         await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 已取消。`);
         return;
       }
@@ -1855,7 +1857,9 @@ export class OneBotRuntime {
         return;
       }
       // 已提交：通知/回执/插件副作用失败不得再向用户报“撤回失败”
-      this.notifyPostRecallRequested(result.value.id).catch(() => undefined);
+      this.notifyPostRecallRequested(result.value.id).catch((error) => {
+        this.logger.warn({ error, displayId }, "notify post recall requested failed");
+      });
       await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`).catch((error) => {
         this.logger.warn({ error, displayId }, "recall success message failed after commit");
       });
