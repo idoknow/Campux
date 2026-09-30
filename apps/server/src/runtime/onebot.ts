@@ -26,7 +26,7 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, type OneBotMessageSegment } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, parsePostRecallOrCancelCommand, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
@@ -1415,6 +1415,21 @@ export class OneBotRuntime {
         return;
       }
 
+      // 按编号取消/撤回已提交稿件（议题 #162）；AI 开启时同样生效
+      const recallCommand = parsePostRecallOrCancelCommand(plainText);
+      if (recallCommand) {
+        this.clearPrivatePostAggregateBuffer(this.getPrivatePostDraftKey(botQqUin, userQqUin));
+        await this.handlePrivatePostRecallOrCancel({
+          bot,
+          botQqUin,
+          userQqUin,
+          action: recallCommand.action,
+          displayId: recallCommand.displayId,
+          reason: recallCommand.reason,
+        });
+        return;
+      }
+
       const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
       const existingPendingMode = this.privatePostPendingModes.get(draftKey);
       const existingPendingConfirm = this.privatePostPendingConfirms.get(draftKey);
@@ -1717,6 +1732,149 @@ export class OneBotRuntime {
 
   private getPrivatePostDraftKey(botQqUin: string, userQqUin: string) {
     return `${botQqUin}:${userQqUin}`;
+  }
+
+  private async handlePrivatePostRecallOrCancel({
+    bot,
+    botQqUin,
+    userQqUin,
+    action,
+    displayId,
+    reason,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+    action: "cancel" | "recall";
+    displayId: number;
+    reason: string;
+  }) {
+    try {
+      // 与其它私聊投稿操作一致：校验本墙成员、submitter 角色与封禁状态
+      const { operator: user } = await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
+      const post = await prisma.post.findFirst({
+        where: { tenantId: bot.tenantId, displayId, authorId: user.id },
+      });
+      if (!post) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, `未找到你名下的稿件 #${displayId}。`);
+        return;
+      }
+
+      if (action === "cancel") {
+        if (post.status !== "pending_approval") {
+          await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 当前不是待审核状态，无法取消。`);
+          return;
+        }
+        const result = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+          // 事务内按期望状态条件更新，避免与审核/发布并发时覆盖状态
+          const updated = await transaction.post.updateMany({
+            where: { id: post.id, status: "pending_approval" },
+            data: { status: "cancelled" },
+          });
+          if (updated.count > 0) {
+            await transaction.postLog.create({
+              data: {
+                tenantId: bot.tenantId,
+                postId: post.id,
+                actorId: user.id,
+                oldStatus: "pending_approval",
+                newStatus: "cancelled",
+                comment: reason ? `用户取消：${clampReason(reason)}` : "用户取消",
+              },
+            });
+          }
+          return { id: post.id, count: updated.count };
+        });
+        if (!result.active) throw new BotWorkflowError("校园墙已暂停或归档", 409);
+        if (result.value.count === 0) {
+          await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，取消未生效。`);
+          return;
+        }
+        this.notifyPostCancelled(result.value.id).catch((error) => {
+          this.logger.warn({ error, displayId }, "notify post cancelled failed");
+        });
+        await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 已取消。`);
+        return;
+      }
+
+      // recall
+      if (post.status === "pending_recall") {
+        await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 已在撤回审核中。`);
+        return;
+      }
+      if (post.status !== "published") {
+        await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 当前不是已发布状态，无法申请撤回。`);
+        return;
+      }
+      const batchItem = await prisma.publishBatchItem.findUnique({ where: { postId: post.id }, select: { id: true } });
+      if (batchItem) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 为批量发布，暂不支持程序撤回，请联系管理员。`);
+        return;
+      }
+      const recallReason = reason ? clampReason(reason) : "对话指令申请";
+      const result = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+        // 事务内按期望状态条件更新，避免与审核/撤回流程并发时覆盖状态
+        const updated = await transaction.post.updateMany({
+          where: { id: post.id, status: "published" },
+          data: {
+            status: "pending_recall",
+            recallIgnored: false,
+            recallIgnoredAt: null,
+          },
+        });
+        if (updated.count > 0) {
+          await transaction.postLog.create({
+            data: {
+              tenantId: bot.tenantId,
+              postId: post.id,
+              actorId: user.id,
+              oldStatus: "published",
+              newStatus: "pending_recall",
+              comment: `用户申请撤回：${recallReason}`,
+            },
+          });
+          // 审计与状态变更同事务提交，避免已改状态却缺 post.recall.request 记录
+          await writeAuditLog({
+            tenantId: bot.tenantId,
+            actorId: user.id,
+            action: "post.recall.request",
+            targetType: "post",
+            targetId: post.id,
+            detail: {
+              displayId: post.displayId,
+              reason: recallReason,
+            },
+          }, transaction);
+        }
+        return { id: post.id, count: updated.count };
+      });
+      if (!result.active) throw new BotWorkflowError("校园墙已暂停或归档", 409);
+      if (result.value.count === 0) {
+        await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 状态已变化，撤回未生效。`);
+        return;
+      }
+      // 已提交：通知/回执/插件副作用失败不得再向用户报“撤回失败”
+      this.notifyPostRecallRequested(result.value.id).catch((error) => {
+        this.logger.warn({ error, displayId }, "notify post recall requested failed");
+      });
+      await this.sendPrivateMessage(botQqUin, userQqUin, `稿件 #${displayId} 撤回申请已提交，等待审核。`).catch((error) => {
+        this.logger.warn({ error, displayId }, "recall success message failed after commit");
+      });
+      try {
+        this.pluginEvents?.emit({
+          type: "post:recalled",
+          tenantId: bot.tenantId,
+          postId: post.id,
+        });
+      } catch (error) {
+        this.logger.warn({ error, displayId }, "post:recalled plugin emit failed");
+      }
+      return;
+    } catch (error) {
+      // 只把 BotWorkflowError 的业务文案发给用户，其它错误走通用文案并记日志
+      this.logger.warn({ error, displayId, action }, "private post recall/cancel failed");
+      await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
+    }
   }
 
   private async resolveCampuxLoginUrl(tenantId: string) {
@@ -4371,6 +4529,11 @@ function extractCookiesFromActionData(data: unknown) {
     }
   }
   throw new BotWorkflowError("协议端没有返回 cookies 数据", 502);
+}
+
+function clampReason(reason: string) {
+  // 与 Web API recallRequestSchema.max(500) 对齐，避免超长理由写入日志
+  return reason.length > 500 ? reason.slice(0, 500) : reason;
 }
 
 function toErrorMessage(error: unknown) {
