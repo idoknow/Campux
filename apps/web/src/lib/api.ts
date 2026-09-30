@@ -3,11 +3,18 @@ import type { PostItem } from "../types/app";
 
 export async function api<T>(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
-  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+  // Action endpoints still need valid JSON when proxies forward an empty POST.
+  const body = options.body == null
+    && options.method?.toUpperCase() === "POST"
+    && (!headers.has("Content-Type") || headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() === "application/json")
+    ? "{}"
+    : options.body;
+  if (body && !(body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(path, {
     ...options,
+    ...(body !== undefined ? { body } : {}),
     credentials: "include",
     headers,
   });
