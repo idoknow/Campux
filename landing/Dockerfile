@@ -5,8 +5,8 @@
 
 FROM nginx:1.27-alpine
 
-# Static landing assets (index.html + logo/og-image/screenshots).
-COPY landing/ /usr/share/nginx/html/
+# Copy only the built static output.
+COPY landing/dist/ /usr/share/nginx/html/
 
 # Serve files, fall back to index.html; gzip text/svg assets.
 RUN printf 'server {\n\
