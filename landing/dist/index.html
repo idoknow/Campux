@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Campux 是开源校园墙运营系统：投稿、审核、Bot、QZone 发布与运维一体化平台。一个实例，统一管理多个校园墙。"
+    />
+    <title>Campux · 开源校园墙运营系统</title>
+    <script>
+      // 提前应用主题，避免亮暗模式闪烁
+      (function () {
+        try {
+          var saved = localStorage.getItem('campux-theme');
+          var dark =
+            saved === 'dark' ||
+            (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-HjObJgEQ.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-D3tbjkvY.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
