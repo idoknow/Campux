@@ -1,6 +1,5 @@
 import { ExternalLink, Github, Heart, MessageCircle } from 'lucide-react';
 import { LINKS, QQ_GROUPS } from '@/lib/campux';
-import { CloudLogo } from './CloudLogo';
 
 /** 页脚链接列数据 */
 const FOOTER_COLUMNS = [
@@ -54,7 +53,7 @@ export function Footer() {
           {/* 左侧品牌区 */}
           <div className="max-w-sm">
             <a href="#top" className="inline-flex items-center gap-2.5">
-              <CloudLogo className="h-7" />
+              <img src="/assets/logo.svg" alt="Campux" className="h-7 w-auto" />
               <span className="font-heading text-lg font-bold text-foreground">
                 Camp<span className="text-primary">ux</span>
               </span>
