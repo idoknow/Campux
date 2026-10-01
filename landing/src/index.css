@@ -1,0 +1,233 @@
+/* stylelint-disable */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design system —— 可爱轻氧 × Campux 品牌蓝
+   品牌主色 #0B8AD6（hsl(201 88% 40%)），圆润、轻盈、留白。
+   All colors MUST be HSL.
+   Heading: Resource Han Rounded (资源圆体) · Body: MiSans */
+
+@font-face {
+  font-family: 'Resource Han Rounded';
+  src: url('https://resource-static.bj.bcebos.com/fonts-skill/ResourceHanRoundedCN-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'MiSans';
+  src: url('https://resource-static.bj.bcebos.com/fonts-skill/MiSans_Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'MiSans';
+  src: url('https://resource-static.bj.bcebos.com/fonts-skill/MiSans_Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'MiSans';
+  src: url('https://resource-static.bj.bcebos.com/fonts-skill/MiSans_Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 1.25rem;
+
+    --background: 204 68% 98%;
+    --foreground: 208 32% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 208 32% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 208 32% 20%;
+
+    --primary: 201 88% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 202 72% 94%;
+    --secondary-foreground: 204 55% 32%;
+
+    --muted: 204 48% 96%;
+    --muted-foreground: 205 16% 42%;
+
+    --accent: 199 82% 94%;
+    --accent-foreground: 202 65% 30%;
+
+    --destructive: 0 75% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 203 36% 88%;
+    --input: 203 32% 86%;
+    --ring: 201 88% 46%;
+
+    /* 轻氧粉彩装饰色（蓝色系协调） */
+    --aqua: 187 86% 68%;
+    --aqua-foreground: 194 56% 28%;
+    --lilac: 250 88% 84%;
+    --lilac-foreground: 250 45% 40%;
+    --mint: 152 62% 44%;
+    --mint-foreground: 0 0% 100%;
+    --butter: 46 96% 66%;
+    --butter-foreground: 38 54% 32%;
+
+    --chart-1: 201 88% 48%;
+    --chart-2: 187 75% 45%;
+    --chart-3: 215 70% 52%;
+    --chart-4: 46 90% 55%;
+    --chart-5: 152 60% 42%;
+
+    --sidebar-background: 204 68% 98%;
+    --sidebar-foreground: 208 32% 20%;
+    --sidebar-primary: 201 88% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 199 82% 94%;
+    --sidebar-accent-foreground: 202 65% 30%;
+    --sidebar-border: 203 36% 88%;
+    --sidebar-ring: 201 88% 46%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(200 85% 44%), hsl(214 84% 40%));
+    --gradient-cta: linear-gradient(135deg, hsl(205 88% 42%), hsl(217 82% 34%));
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%), hsl(204 60% 98%));
+    --gradient-background: radial-gradient(130% 90% at 50% -12%, hsl(200 82% 95%) 0%, hsl(204 55% 98%) 52%, hsl(204 68% 99%) 100%);
+
+    --shadow-card: 0 12px 34px -22px hsl(201 70% 40% / 0.25);
+    --shadow-hover: 0 20px 48px -22px hsl(201 70% 40% / 0.32);
+  }
+
+  .dark {
+    --background: 212 32% 10%;
+    --foreground: 204 38% 93%;
+
+    --card: 211 28% 13%;
+    --card-foreground: 204 38% 93%;
+
+    --popover: 211 28% 13%;
+    --popover-foreground: 204 38% 93%;
+
+    --primary: 199 90% 52%;
+    --primary-foreground: 205 70% 10%;
+
+    --secondary: 211 24% 20%;
+    --secondary-foreground: 204 38% 93%;
+
+    --muted: 211 22% 17%;
+    --muted-foreground: 204 20% 68%;
+
+    --accent: 211 24% 22%;
+    --accent-foreground: 204 38% 93%;
+
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 211 20% 25%;
+    --input: 211 20% 25%;
+    --ring: 199 90% 58%;
+
+    --aqua: 187 55% 58%;
+    --aqua-foreground: 187 90% 92%;
+    --lilac: 250 70% 72%;
+    --lilac-foreground: 250 90% 93%;
+    --mint: 152 55% 52%;
+    --mint-foreground: 152 80% 92%;
+    --butter: 46 70% 60%;
+    --butter-foreground: 46 92% 92%;
+
+    --chart-1: 199 88% 56%;
+    --chart-2: 187 70% 52%;
+    --chart-3: 215 75% 62%;
+    --chart-4: 46 85% 58%;
+    --chart-5: 152 60% 50%;
+
+    --sidebar-background: 212 32% 10%;
+    --sidebar-foreground: 204 38% 93%;
+    --sidebar-primary: 199 90% 52%;
+    --sidebar-primary-foreground: 205 70% 10%;
+    --sidebar-accent: 211 24% 22%;
+    --sidebar-accent-foreground: 204 38% 93%;
+    --sidebar-border: 211 20% 25%;
+    --sidebar-ring: 199 90% 58%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(200 85% 48%), hsl(214 84% 44%));
+    --gradient-cta: linear-gradient(135deg, hsl(205 88% 42%), hsl(217 82% 34%));
+    --gradient-card: linear-gradient(180deg, hsl(211 28% 14%), hsl(211 28% 12%));
+    --gradient-background: radial-gradient(120% 110% at 50% 0%, hsl(212 34% 15%) 0%, hsl(212 32% 10%) 55%, hsl(213 34% 9%) 100%);
+
+    --shadow-card: 0 10px 30px -18px hsl(212 50% 4% / 0.55);
+    --shadow-hover: 0 16px 42px -16px hsl(212 50% 4% / 0.65);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'MiSans', 'HarmonyOS Sans', system-ui, -apple-system, sans-serif;
+    background-image: var(--gradient-background);
+    background-attachment: fixed;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+  }
+
+  /* 尊重系统「减弱动态效果」设置 */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .font-heading {
+    font-family: 'Resource Han Rounded', 'MiSans', 'HarmonyOS Sans', sans-serif;
+  }
+  .gradient-text {
+    background-image: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  /* CTA 白底按钮上的恒定品牌深蓝文字 */
+  .text-brand-deep {
+    color: hsl(201 88% 34%);
+  }
+  /* 云朵柔光网格纹理（工具型产品质感） */
+  .bg-grid-fade {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.55) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.55) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 75%);
+  }
+}

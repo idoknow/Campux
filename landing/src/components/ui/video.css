@@ -1,0 +1,34 @@
+.video-react-paused .video-react-big-play-button.big-play-button-hide {
+    display: block;
+}
+
+.video-react .video-react-big-play-button {
+    width: 48px;
+    height: 40px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    margin-left: -24px !important;
+    margin-top: -20px !important;
+    background: rgba(7, 12, 20, 0.6) !important;
+}
+
+.video-react .video-react-big-play-button:hover {
+    background: rgba(7, 12, 20, 0.8) !important;
+}
+
+.video-react .video-react-big-play-button::before {
+    display: block;
+    content: '';
+    background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAqCAYAAADBNhlmAAAACXBIWXMAACE4AAAhOAFFljFgAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAGVSURBVHgB7ZnhbYMwEIWPqAN0BHcDRiAbdASyQTpB6QRpJyAjdAO8QbsBbNBs4L6TcYtaUADb+H7kk56cgKJ8sX0RHBmNYIwpMBT92w7RWZZ1lBoWQ1rzny/kGbmnVODLc3OdFikpBWZ85mSI9ku7htbY/RqNXT8WtA6FNJCsEUUR2FEYSqSNIRpK0FGSFT2FEg0t6DiSXfojeRJLkFHIybfiYwo6FFKvFd1C0KHIijZL9ueWgo6CFlR8CkFHSTNEUwo6SuTDTFyMSBBkWKwiK1oOT0gRdCj6rXh+LU7QocjOppIqyPCy15IFmUK6oNg9+MNN0BMtWfCCHKQKdsiemwXSBHnWniD2gHzygTuSAYu9Ia8QuwxPSBBkseqvmCOloEYO15pSKfagJlsA+zkdsy1nUCMvkNJLPrSFYEdW7EwriCk4WZlLiCEYRMwRWvBMdjk7CoQT9P2lmlYUwGw8GphN7AbmULJdINZuJjYQnDOL3O33bqn5SOZm+jFEZRI8hsjGDkLkEUNO9taPL3veQ/xlrOEbeloBZoEUypwAAAAASUVORK5CYII=) no-repeat;
+    background-size: contain;
+    width: 15px;
+    height: 16.25px;
+    margin: 0 auto;
+    position: relative;
+}
+
+.h-full > .video-react.video-react-fluid {
+    height: 100%;
+    padding-top: 0 !important;
+    aspect-ratio: 16 / 9;
+}

@@ -1,41 +1,98 @@
-# Campux 官网首页 (campux.top)
+## 介绍
 
-`campux.top` 顶级域名的落地页（landing page），静态 HTML，无构建步骤。
+项目介绍
 
-## 内容来源
+## 目录结构
 
-页面内容来自原 VitePress 文档首页（`docs/index.md` 的 home 布局 + 核心功能表 + 产品截图）。文档首页已改为跳转到 `/intro` 简介页，富内容统一收敛到这里。
-
-## 视觉
-
-遵循产品 UI 风格（见 `DESIGN.md`）：浅灰蓝底、白色卡片、细边框、品牌蓝 `#0190D5` / `#0072D3`，安静的运营工具气质，无营销式重渐变。
-
-## 部署
-
-通过 churros-04 的 Caddy 以静态文件托管（不是 Cloudflare Pages —— 文档站才是 Pages）：
-
-- 文件目录（宿主）：`/opt/docker-data/caddy/caddy/config/site/landing/`，容器内挂载为 `/srv/landing`。
-- Caddy 块：
-  ```
-  campux.top {
-      root * /srv/landing
-      encode gzip zstd
-      try_files {path} {path}/ /index.html
-      file_server
-  }
-  www.campux.top {
-      redir https://campux.top{uri} permanent
-  }
-  ```
-- DNS：`campux.top` / `www.campux.top` A 记录 → `45.137.180.203`（churros-04），Cloudflare 橙云代理。
-
-### 更新页面
-
-改完 `landing/` 后，把文件同步到宿主目录即可（Caddy 静态托管，无需 reload）：
-
-```bash
-cd landing
-tar czf - index.html assets | ssh staging 'tar xzf - -C /opt/docker-data/caddy/caddy/config/site/landing'
+```
+├── README.md # 说明文档
+├── components.json # 组件库配置
+├── index.html # 入口文件
+├── package.json # 包管理
+├── postcss.config.js # postcss 配置
+├── public # 静态资源目录
+│   ├── favicon.png # 图标
+│   └── images # 图片资源
+├── src # 源码目录
+│   ├── App.tsx # 入口文件
+│   ├── components # 组件目录
+│   ├── contexts # 上下文目录
+│   ├── db # 数据库配置目录
+│   ├── hooks # 通用钩子函数目录
+│   ├── index.css # 全局样式
+│   ├── layout # 布局目录
+│   ├── lib # 工具库目录
+│   ├── main.tsx # 入口文件
+│   ├── routes.tsx # 路由配置
+│   ├── pages # 页面目录
+│   ├── services  # 数据库交互目录
+│   ├── types   # 类型定义目录
+├── tsconfig.app.json  # ts 前端配置文件
+├── tsconfig.json # ts 配置文件
+├── tsconfig.node.json # ts node端配置文件
+└── vite.config.ts # vite 配置文件
 ```
 
-资源（logo、截图）从 `docs/public/` 复制而来，更新产品截图时两处保持同步。
+## 技术栈
+
+Vite、TypeScript、React、Supabase
+
+## 本地开发
+
+### 如何在本地编辑代码？
+
+您可以选择 [VSCode](https://code.visualstudio.com/Download) 或者您常用的任何 IDE 编辑器，唯一的要求是安装 Node.js 和 npm.
+
+### 环境要求
+
+```
+# Node.js ≥ 20
+# npm ≥ 10
+例如：
+# node -v   # v20.18.3
+# npm -v    # 10.8.2
+```
+
+具体安装步骤如下：
+
+### 在 Windows 上安装 Node.js
+
+```
+# Step 1: 访问Node.js官网：https://nodejs.org/，点击下载后，会根据你的系统自动选择合适的版本（32位或64位）。
+# Step 2: 运行安装程序：下载完成后，双击运行安装程序。
+# Step 3: 完成安装：按照安装向导完成安装过程。
+# Step 4: 验证安装：在命令提示符（cmd）或IDE终端（terminal）中输入 node -v 和 npm -v 来检查 Node.js 和 npm 是否正确安装。
+```
+
+### 在 macOS 上安装 Node.js
+
+```
+# Step 1: 使用Homebrew安装（推荐方法）：打开终端。输入命令brew install node并回车。如果尚未安装Homebrew，需要先安装Homebrew，
+可以通过在终端中运行如下命令来安装：
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+或者使用官网安装程序：访问Node.js官网。下载macOS的.pkg安装包。打开下载的.pkg文件，按照提示完成安装。
+# Step 2: 验证安装：在命令提示符（cmd）或IDE终端（terminal）中输入 node -v 和 npm -v 来检查 Node.js 和 npm 是否正确安装。
+```
+
+### 安装完后按照如下步骤操作：
+
+```
+# Step 1: 下载代码包
+# Step 2: 解压代码包
+# Step 3: 用IDE打开代码包，进入代码目录
+# Step 4: IDE终端输入命令行，安装依赖：npm i
+# Step 5: IDE终端输入命令行，启动开发服务器：npm run dev -- --host 127.0.0.1
+```
+
+### 如何开发后端服务？
+
+配置环境变量，安装相关依赖
+如需使用数据库，请使用 supabase 官方版本或自行部署开源版本的 Supabase
+
+### 如何配置应用中的三方 API？
+
+具体三方 API 调用方法，请参考帮助文档：[源码导出](https://cloud.baidu.com/doc/MIAODA/s/Xmewgmsq7)，了解更多详细内容。
+
+## 了解更多
+
+您也可以查看帮助文档：[源码导出](https://cloud.baidu.com/doc/MIAODA/s/Xmewgmsq7)，了解更多详细内容。
