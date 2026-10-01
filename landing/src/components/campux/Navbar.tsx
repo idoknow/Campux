@@ -63,7 +63,7 @@ export function Navbar({ theme, onToggleTheme, onHomeClick }: NavbarProps) {
           className={cn(
             'mx-auto flex items-center gap-3 border border-transparent bg-transparent px-3 transition-all duration-500 ease-out md:gap-4',
             scrolled
-              ? 'max-w-2xl rounded-full border-border/60 bg-background/80 py-1.5 pl-4 pr-2 shadow-lg shadow-primary/10 backdrop-blur-xl'
+              ? 'max-w-4xl rounded-full border-border/60 bg-background/80 py-1 pl-3.5 pr-2.5 shadow-lg shadow-primary/10 backdrop-blur-xl'
               : 'max-w-6xl rounded-2xl border-border/50 bg-background/60 py-2.5 pl-5 pr-3.5 shadow-card backdrop-blur-xl md:py-3 md:pl-6 md:pr-5'
           )}
         >
