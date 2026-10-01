@@ -43,22 +43,13 @@ export const QQ_GROUPS = [
 
 /** 界面截图资源 */
 export const IMAGES = {
-  heroReview:
-    'https://miaoda-site-img.cdn.bcebos.com/images/baidu_image_search_869d0228-2b6d-4e13-b49d-161aaa633cd9.jpg',
-  featureSubmission:
-    'https://miaoda-site-img.cdn.bcebos.com/images/baidu_image_search_6e0a217a-c12c-4b80-87ad-897aa8b56e53.jpg',
-  featurePublish:
-    'https://miaoda-site-img.cdn.bcebos.com/images/MiaoTu_04c337fe-3435-487e-817c-eeeecdbb65e2.jpg',
-  featureLogin:
-    'https://miaoda-site-img.cdn.bcebos.com/images/baidu_image_search_d65a9e21-eb40-4ad0-88f4-41b8839d3692.jpg',
-  featureStats:
-    'https://miaoda-image.cdn.bcebos.com/img/corpus/dc454d52f0394431a15210b45a489621.jpg',
-  featureComments:
-    'https://miaoda-site-img.cdn.bcebos.com/images/baidu_image_search_5b98f44b-18a4-487a-8c30-e15a48f1f253.jpg',
-  showcaseDashboard:
-    'https://miaoda-image.cdn.bcebos.com/img/corpus/366848d01da64b8bac588e2205d94943.jpg',
-  showcaseReview:
-    'https://miaoda-site-img.cdn.bcebos.com/images/baidu_image_search_acc3cb85-2cce-412c-8548-3e3b84901380.jpg',
-  showcaseOps:
-    'https://miaoda-site-img.cdn.bcebos.com/images/baidu_image_search_c4add04c-c518-4ff7-9f4b-1409174003c3.jpg',
+  heroReview: '/assets/screenshots/review-board.png',
+  featureSubmission: '/assets/screenshots/features/submission-channels.png',
+  featurePublish: '/assets/screenshots/features/auto-publish.png',
+  featureLogin: '/assets/screenshots/features/auto-login.png',
+  featureStats: '/assets/screenshots/features/stats-charts.png',
+  featureComments: '/assets/screenshots/features/comment-sync.png',
+  showcaseDashboard: '/assets/screenshots/stats-dashboard.png',
+  showcaseReview: '/assets/screenshots/review-board.png',
+  showcaseOps: '/assets/screenshots/ops-panel.png',
 } as const;
