@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils';
 import { LINKS } from '@/lib/campux';
 import type { ThemeMode } from '@/hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
-import { LogoSvg } from './LogoSvg';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -74,7 +73,7 @@ export function Navbar({ theme, onToggleTheme, onHomeClick }: NavbarProps) {
             onClick={onHomeClick}
             className="flex shrink-0 items-center gap-2.5"
           >
-            <LogoSvg className={cn('shrink-0 transition-all duration-500', scrolled ? 'h-5' : 'h-7')} />
+            <img src="/logo.svg" alt="Campux" className={cn('shrink-0 transition-all duration-500', scrolled ? 'h-5' : 'h-7')} />
             <span
               className={cn(
                 'font-heading font-bold tracking-tight text-foreground transition-all duration-500',
@@ -168,7 +167,7 @@ export function Navbar({ theme, onToggleTheme, onHomeClick }: NavbarProps) {
         >
           <SheetHeader className="animate-sheet-item-in border-b border-border p-5">
             <SheetTitle className="flex items-center gap-2.5 text-left font-heading text-lg font-bold">
-              <LogoSvg className="h-6 shrink-0" />
+              <img src="/logo.svg" alt="Campux" className="h-6 shrink-0" />
               <span>
                 Camp<span className="text-primary">ux</span>
               </span>

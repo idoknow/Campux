@@ -1,5 +1,4 @@
 import { ExternalLink, Github, Heart, MessageCircle } from 'lucide-react';
-import { LogoSvg } from './LogoSvg';
 import { LINKS, QQ_GROUPS } from '@/lib/campux';
 
 /** 页脚链接列数据 */
@@ -54,7 +53,7 @@ export function Footer() {
           {/* 左侧品牌区 */}
           <div className="max-w-sm">
             <a href="#top" className="inline-flex items-center gap-2.5">
-              <LogoSvg className="h-7 w-auto" />
+              <img src="/logo.svg" alt="Campux" className="h-7 w-auto" />
               <span className="font-heading text-lg font-bold text-foreground">
                 Camp<span className="text-primary">ux</span>
               </span>
@@ -85,7 +84,6 @@ export function Footer() {
                 <MessageCircle className="h-4.5 w-4.5" />
               </a>
             </div>
-
 
           </div>
 
