@@ -1,5 +1,5 @@
-import { ExternalLink, Github, Heart, MessageCircle } from 'lucide-react';
-import { LINKS, QQ_GROUPS } from '@/lib/campux';
+import { ExternalLink, Github, Heart, MessageCircle, Send } from 'lucide-react';
+import { LINKS, QQ_GROUPS, TELEGRAM_GROUPS } from '@/lib/campux';
 
 /** 页脚链接列数据 */
 const FOOTER_COLUMNS = [
@@ -82,6 +82,16 @@ export function Footer() {
                 className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:text-primary hover:shadow-card"
               >
                 <MessageCircle className="h-4.5 w-4.5" />
+              </a>
+              <a
+                href={TELEGRAM_GROUPS[0].href}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Campux Telegram 交流群"
+                title="Campux Telegram 交流群"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:text-primary hover:shadow-card"
+              >
+                <Send className="h-4.5 w-4.5" />
               </a>
             </div>
 

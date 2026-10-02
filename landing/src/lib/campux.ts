@@ -41,6 +41,15 @@ export const QQ_GROUPS = [
   },
 ] as const;
 
+/** 官方 Telegram 交流群 */
+export const TELEGRAM_GROUPS = [
+  {
+    name: 'Campux Telegram 交流群',
+    description: '加入 Telegram 交流群，获取使用反馈与接入支持',
+    href: 'https://t.me/+uSANsIhvIEY2ZGI1',
+  },
+] as const;
+
 /** 界面截图资源 */
 export const IMAGES = {
   heroReview: '/assets/screenshots/review-board.png',

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, FileTextIcon, InfoIcon, ServerIcon, ShieldCheckIcon, TagIcon, UserRoundIcon, UsersIcon, WrenchIcon } from "lucide-react";
+import { BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, FileTextIcon, InfoIcon, SendIcon, ServerIcon, ShieldCheckIcon, TagIcon, UserRoundIcon, UsersIcon, WrenchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { TenantMetadata } from "@/types/app";
@@ -32,6 +32,10 @@ const officialLinks = [
 const qqGroups = [
   { label: "Campux 技术交流", number: "226427026", url: "https://qm.qq.com/q/5d8IOOljXW" },
   { label: "Campux App 用户组", number: "1124751247", url: "https://qm.qq.com/q/MrGZr0HOUw" },
+];
+
+const telegramGroups = [
+  { label: "Campux Telegram 交流群", host: "t.me", url: "https://t.me/+uSANsIhvIEY2ZGI1" },
 ];
 
 // 仓库贡献者，按 GitHub 贡献者列表顺序（提交数降序），已排除 dependabot[bot] 与 Copilot 两个机器人账号。
@@ -283,6 +287,23 @@ export function AboutPage({ metadata, onBack }: { metadata: TenantMetadata; onBa
                   <CopyIcon />
                 </Button>
               </div>
+            ))}
+          </div>
+        </AboutSection>
+
+        <AboutSection title="Telegram 交流群" icon={SendIcon} accent="green" description="点击卡片直接进入 Telegram 邀请链接。">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {telegramGroups.map((group) => (
+              <a key={group.url} className="group flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition hover:border-primary/40 hover:bg-muted/50" href={group.url} target="_blank" rel="noreferrer">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-white shadow-sm">
+                  <SendIcon className="size-4 text-sky-600" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-foreground">{group.label}</span>
+                  <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{group.host}</span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
+              </a>
             ))}
           </div>
         </AboutSection>
