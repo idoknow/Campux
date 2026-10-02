@@ -1818,11 +1818,12 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
           <DialogHeader>
             <DialogTitle>重置当前插件为默认值？</DialogTitle>
             <DialogDescription>
-              确认后将把「{PLUGINS.find((plugin) => plugin.id === resetPending)?.name ?? "当前插件"}」的全部配置恢复为默认值，并从左侧启用列表中移除该插件。
+              确认后将把「{PLUGINS.find((plugin) => plugin.id === resetPending)?.name ?? "当前插件"}」的全部配置恢复为默认值。
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
-            该操作只影响当前插件配置，不影响其他插件。
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600 sm:px-3 sm:py-3">
+            <p className="font-medium text-slate-700">影响范围</p>
+            <p className="mt-1 break-words">该操作只影响当前插件配置，不影响其他插件。</p>
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => setResetPending(null)}>取消</Button>
