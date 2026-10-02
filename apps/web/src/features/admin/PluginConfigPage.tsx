@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
 import type { AdminMember, BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig, TenantRole } from "@/types/app";
@@ -1346,10 +1346,50 @@ function formatAuditValue(text: string): string {
   return text.length > 120 ? `${text.slice(0, 117)}…` : text;
 }
 
+function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId] | false {
+  switch (pluginId) {
+    case "markdownRender":
+      return { enabled: false };
+    case "colorSelection":
+      return { enabled: false, backgroundColors: DEFAULT_BG_COLORS, textColors: DEFAULT_TEXT_COLORS };
+    case "fontSelection":
+      return { enabled: false, fonts: FONT_OPTIONS.map((option) => ({ value: option.value, enabled: option.value === "default" })) };
+    case "anonymousAvatar":
+      return { enabled: false, items: builtInSvgAvatarFilenames.slice(0, 10).map((filename) => ({ id: filename })) };
+    case "botStylishMessages":
+      return {
+        enabled: false,
+        messageTypes: BOT_MESSAGE_TYPES.map((entry) => ({
+          type: entry.type,
+          label: entry.label,
+          enabled: false,
+          messages: DEFAULT_BOT_MSGS[entry.type] ?? [],
+        })),
+      };
+    case "campaigns":
+      return { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 };
+    case "aggregateLogin":
+      return { enabled: false, loginTypes: [], appId: "", appKey: "", endpoint: "" };
+    case "broadcast":
+      return { enabled: false, quickPresets: [] };
+    case "feedback":
+      return { enabled: false };
+    case "botAlert":
+      return { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] };
+    case "graduation":
+      return { enabled: false };
+    case "todayInHistory":
+      return { enabled: false };
+    default:
+      return false;
+  }
+}
+
 export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
   const [activeTab, setActiveTab] = useState<"config" | "info" | "log">("config");
+  const [resetPending, setResetPending] = useState<PluginId | null>(null);
   const [broadcasterMigration, setBroadcasterMigration] = useState<Array<{ member: AdminMember; nextRole: TenantRole }> | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1416,6 +1456,13 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       // 静默失败；下一次拉取会重新同步。
     }
   }
+  function applyPluginDefault(pluginId: PluginId) {
+    return {
+      ...config,
+      [pluginId]: defaultConfigForPlugin(pluginId),
+    } as TenantPluginConfig;
+  }
+
   async function save() {
     setBusy(true);
     try {
@@ -1528,6 +1575,30 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     }
   }
 
+  async function confirmReset() {
+    if (!resetPending) return;
+    const nextConfig = applyPluginDefault(resetPending);
+    const nextEnabledPresetNames = new Set(enabledPresetNames);
+    nextEnabledPresetNames.delete(PRESET_NAME_BY_ID[resetPending]);
+    const pluginName = PLUGINS.find((plugin) => plugin.id === resetPending)?.name ?? "插件";
+    setBusy(true);
+    try {
+      await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(nextConfig) });
+      setConfig(nextConfig);
+      setEnabledPresetNames(nextEnabledPresetNames);
+      savedBotAlertRef.current = JSON.stringify(nextConfig.botAlert);
+      setResetPending(null);
+      toast.success(`${pluginName}已重置并保存`);
+      await onSaved?.();
+      void refreshEnabledPlugins();
+      void refreshAuditLog();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重置失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function refreshAuditLog() {
     setAuditLogLoading(true);
     try {
@@ -1623,6 +1694,10 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
                   <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-slate-400"><UserIcon className="size-3" />作者：{activePlugin.author}</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" className="border-slate-300 text-slate-600 hover:bg-slate-50" disabled={busy} onClick={() => setResetPending(activePlugin.id)}>
+                    <RotateCcwIcon className="size-3.5" />
+                    重置默认值
+                  </Button>
                   <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1">
                     {[
                       { key: "config", label: "配置" },
@@ -1738,6 +1813,23 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
           )}
         </CardContent>
       </Card>
+      <Dialog open={resetPending !== null} onOpenChange={(open) => { if (!open) setResetPending(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>重置当前插件为默认值？</DialogTitle>
+            <DialogDescription>
+              确认后将把「{PLUGINS.find((plugin) => plugin.id === resetPending)?.name ?? "当前插件"}」的全部配置恢复为默认值，并从左侧启用列表中移除该插件。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+            该操作只影响当前插件配置，不影响其他插件。
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={busy} onClick={() => setResetPending(null)}>取消</Button>
+            <Button disabled={busy} onClick={() => void confirmReset()}>确认重置</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={broadcasterMigration !== null} onOpenChange={(open) => { if (!open && !migrationBusy) setBroadcasterMigration(null); }}>
         <DialogContent className="max-h-[80vh] overflow-y-auto">
           <DialogHeader>
