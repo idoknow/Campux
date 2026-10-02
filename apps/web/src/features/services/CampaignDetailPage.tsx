@@ -55,9 +55,9 @@ export function CampaignDetailPage({
 
   function load() {
     setLoading(true);
-    void api<{ campaign: CampaignDetail }>(`/api/campaigns/${encodeURIComponent(campaignId)}`)
+    void api<CampaignDetail>(`/api/campaigns/${encodeURIComponent(campaignId)}`)
       .then((res) => {
-        setCampaign(res.campaign);
+        setCampaign(res);
         setNotFound(false);
       })
       .catch(() => setNotFound(true))
