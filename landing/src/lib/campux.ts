@@ -5,23 +5,23 @@
 const DOCS_BASE = 'https://docs.campux.top';
 
 export const LINKS = {
-  github: 'https://github.com/campux',
+  github: 'https://github.com/idoknow/Campux',
   cloud: 'https://app.campux.top',
   docsSite: DOCS_BASE,
 
   docs: {
-    intro: DOCS_BASE,
-    selfService: `${DOCS_BASE}/guide/self-service.html`,
-    quickstart: `${DOCS_BASE}/guide/quickstart.html`,
-    singleBinary: `${DOCS_BASE}/guide/single-binary.html`,
-    workbench: `${DOCS_BASE}/guide/workbench.html`,
-    reviewPublish: `${DOCS_BASE}/guide/review-publish.html`,
-    bots: `${DOCS_BASE}/guide/bots.html`,
-    onebot: `${DOCS_BASE}/guide/onebot.html`,
-    ops: `${DOCS_BASE}/guide/ops.html`,
-    tenant: `${DOCS_BASE}/guide/tenant.html`,
-    security: `${DOCS_BASE}/guide/security.html`,
-    accounts: `${DOCS_BASE}/guide/accounts.html`,
+    intro: `${DOCS_BASE}/intro`,
+    selfService: `${DOCS_BASE}/operator/self-service-onboarding`,
+    quickstart: `${DOCS_BASE}/getting-started`,
+    singleBinary: `${DOCS_BASE}/admin/standalone-binary`,
+    workbench: `${DOCS_BASE}/operator/overview`,
+    reviewPublish: `${DOCS_BASE}/operator/review-and-publish`,
+    bots: `${DOCS_BASE}/operator/bots`,
+    onebot: `${DOCS_BASE}/reference/onebot`,
+    ops: `${DOCS_BASE}/admin/overview`,
+    tenant: `${DOCS_BASE}/admin/tenant-lifecycle`,
+    security: `${DOCS_BASE}/admin/security`,
+    accounts: `${DOCS_BASE}/admin/accounts`,
   },
 } as const;
 

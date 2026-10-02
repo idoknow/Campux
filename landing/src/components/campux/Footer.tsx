@@ -24,7 +24,7 @@ const FOOTER_COLUMNS = [
     links: [
       { label: 'GitHub 仓库', href: LINKS.github, external: true },
       { label: '参与开发', href: `${LINKS.github}/CONTRIBUTING.md`, external: true },
-      { label: '匿名遥测', href: `${LINKS.docsSite}/privacy.html`, external: true },
+      { label: '匿名遥测', href: `${LINKS.docsSite}/admin/telemetry`, external: true },
     ],
   },
 ];
