@@ -4,10 +4,15 @@ import { getServerSigningSecret } from "./server-signing-secret";
 
 const forumMediaLifetimeSeconds = 48 * 60 * 60;
 
-export function buildPublicForumMediaUrl(config: CampuxConfig, key: string, now = Date.now()) {
+export function buildPublicForumMediaUrl(
+  config: CampuxConfig,
+  key: string,
+  now = Date.now(),
+  originOverride?: string,
+) {
   const expires = Math.floor(now / 1000) + forumMediaLifetimeSeconds;
   const signature = signForumMedia(key, expires);
-  const url = new URL("/api/public/forum-media", config.webOrigin);
+  const url = new URL("/api/public/forum-media", originOverride ?? config.webOrigin);
   url.searchParams.set("key", key);
   url.searchParams.set("expires", String(expires));
   url.searchParams.set("signature", signature);

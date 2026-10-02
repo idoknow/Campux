@@ -1624,9 +1624,9 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         if (!storedCard.active) {
           return;
         }
-        forumImageUrls.push(buildPublicForumMediaUrl(config, cardKey));
+        forumImageUrls.push(buildPublicForumMediaUrl(config, cardKey, Date.now(), config.internalWebOrigin));
         for (const attachment of await readPostImageKeys(config, attempt.tenantId, target.attachments)) {
-          forumImageUrls.push(buildPublicForumMediaUrl(config, attachment));
+          forumImageUrls.push(buildPublicForumMediaUrl(config, attachment, Date.now(), config.internalWebOrigin));
         }
       }
       const forumCaption = forumBodyParts.filter(Boolean).join("\n\n---\n\n").trim();

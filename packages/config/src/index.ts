@@ -8,6 +8,9 @@ const configSchema = z.object({
   CAMPUX_SERVER_HOST: z.string().default("0.0.0.0"),
   CAMPUX_SERVER_PORT: z.coerce.number().int().positive().default(8989),
   CAMPUX_WEB_ORIGIN: z.string().default("http://localhost:5180"),
+  // 服务器内部互相拉取资源(如发布器下载渲染图)用的 origin。默认回落到公网 origin。
+  // 用于 pod 内无法 hairpin 访问公网域名(云安全组拒绝节点自访问)的场景。
+  CAMPUX_INTERNAL_WEB_ORIGIN: z.string().optional(),
   CAMPUX_WEB_DIST_DIR: z.string().default("apps/web/dist"),
   S3_ENDPOINT: z.string().default("http://localhost:9000"),
   S3_REGION: z.string().default("auto"),
@@ -145,6 +148,7 @@ export function loadConfig() {
     serverHost: env.CAMPUX_SERVER_HOST,
     serverPort: env.CAMPUX_SERVER_PORT,
     webOrigin: env.CAMPUX_WEB_ORIGIN,
+    internalWebOrigin: env.CAMPUX_INTERNAL_WEB_ORIGIN ?? env.CAMPUX_WEB_ORIGIN,
     webDistDir: env.CAMPUX_WEB_DIST_DIR,
     s3: {
       endpoint: env.S3_ENDPOINT,
