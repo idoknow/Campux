@@ -29,7 +29,7 @@ function parseCampaignRoute(pathname: string, search: string) {
   const params = new URLSearchParams(search);
   const rawFilter = params.get("filter");
   const rawKeyword = params.get("q");
-  const filter: CampaignFilter | undefined = rawFilter && (rawFilter === "active" || rawFilter === "ending_soon" || rawFilter === "ended" || rawFilter === "pending") ? rawFilter : undefined;
+  const filter: CampaignFilter | undefined = rawFilter && (rawFilter === "active" || rawFilter === "ended") ? rawFilter : undefined;
   return {
     view: "list" as const,
     filter,

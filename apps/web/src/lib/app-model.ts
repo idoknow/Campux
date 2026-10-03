@@ -57,6 +57,7 @@ export const defaultMetadata: TenantMetadata = {
   enableCampaigns: false,
   allowAnonymousCampaign: false,
   maxActiveCampaignsPerUser: 0,
+  maxCampaignOptions: 30,
   enableAggregateLogin: false,
   enableBroadcast: false,
   broadcastQuickPresets: [],

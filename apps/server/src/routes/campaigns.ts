@@ -23,7 +23,7 @@ import type { OneBotRuntime } from "../runtime/onebot";
 const MIN_DURATION_HOURS = 12;
 const MAX_DURATION_HOURS = 365 * 24;
 const MAX_TITLE_LENGTH = 60;
-const MAX_OPTIONS = 20;
+const MAX_OPTIONS = 200;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 type CampaignAttachment = { key: string; url: string; fileName: string; contentType: string; size: number };
@@ -131,11 +131,16 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
     const plugin = pluginConfig.campaigns;
     if (!plugin.enabled) return reply.code(403).send({ message: "投票竞选未开启" });
 
+    const maxOptions = Math.max(2, Math.min(200, Math.round(plugin.maxOptions ?? 30)));
+
     let body: z.infer<typeof createBodySchema>;
     try {
       body = createBodySchema.parse(request.body ?? {});
     } catch (error) {
       return reply.code(400).send({ message: errorMessageOf(error) });
+    }
+    if (body.options.length > maxOptions) {
+      return reply.code(400).send({ message: `最多添加 ${maxOptions} 个选项` });
     }
     if (body.anonymous && !plugin.allowAnonymousCreate) {
       return reply.code(400).send({ message: "当前租户不允许匿名发起竞选" });
@@ -287,7 +292,7 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
           imageAttachment: attachmentToJsonValue(attachmentFromJson(entry.imageAttachment)),
           voters: campaign.showVoterDetails
             ? entry.votes
-                .map((vote: { count: number; voter: { displayName: string | null; qqUin: bigint } | null }) => ({ count: vote.count, voter: vote.voter }))
+                .map((vote: { count: number; voter: { displayName: string | null; qqUin: bigint } | null }) => ({ count: vote.count, voter: vote.voter ? { displayName: vote.voter.displayName, qqUin: vote.voter.qqUin.toString() } : null }))
                 .sort((left: { count: number }, right: { count: number }) => right.count - left.count)
             : [],
         })),

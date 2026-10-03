@@ -148,6 +148,8 @@ export type TenantMetadata = {
   allowAnonymousCampaign: boolean;
   /** 每个用户最多同时进行的竞选数（待审核 + 进行中）；插件关闭时为 0 */
   maxActiveCampaignsPerUser: number;
+  /** 单场竞选最多选项数；默认 30 */
+  maxCampaignOptions: number;
   /** 聚合登录插件是否启用；关闭时服务页「第三方登录」入口隐藏 */
   enableAggregateLogin: boolean;
   /** 广播通知插件是否启用；关闭时投稿页顶部胶囊与服务页入口隐藏 */
@@ -214,6 +216,8 @@ export type TenantPluginConfig = {
     allowAnonymousCreate: boolean;
     /** 每个用户最多同时在进行的竞选数（待审核 + 进行中），默认 1 */
     maxActivePerUser: number;
+    /** 单场竞选最多选项数，默认 30 */
+    maxOptions: number;
   };
   aggregateLogin: {
     enabled: boolean;

@@ -12,6 +12,8 @@ for image in "${images[@]}"; do
 done
 for i in 0 1 2; do
   name="${names[$i]}"
+  strategy_payload='{"spec":{"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxSurge":1,"maxUnavailable":0}}}}'
+  kubectl --request-timeout=60s -n idoknow patch deployment "$name" --type merge -p "$strategy_payload" >/dev/null
   payload="$(jq -nc --arg name "$name" --arg image "${images[$i]}" --arg sha "$GITHUB_SHA" '{metadata:{annotations:{"campux.top/source-sha":$sha}},spec:{template:{metadata:{annotations:{"campux.top/source-sha":$sha}},spec:{containers:[{name:$name,image:$image,env:[{name:"CAMPUX_BUILD_VERSION",value:("deploy-prod-" + $sha[0:7])}]}]}}}}')"
   kubectl --request-timeout=60s -n idoknow patch deployment "$name" --type strategic -p "$payload"
   kubectl --request-timeout=60s -n idoknow rollout status "deployment/$name" --timeout=600s

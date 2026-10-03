@@ -402,6 +402,12 @@ function CampaignsPanel({ config, onChange, busy }: { config: TenantPluginConfig
     onChange({ ...config, campaigns: { ...config.campaigns, maxActivePerUser: next } });
   };
 
+  const setMaxOptions = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    const next = Number.isFinite(parsed) ? Math.max(2, Math.min(200, parsed)) : 30;
+    onChange({ ...config, campaigns: { ...config.campaigns, maxOptions: next } });
+  };
+
   return (
     <div className="space-y-4">
       <SwitchField
@@ -424,6 +430,23 @@ function CampaignsPanel({ config, onChange, busy }: { config: TenantPluginConfig
             value={config.campaigns.maxActivePerUser}
             disabled={busy}
             onChange={(event) => setMaxActive(event.target.value)}
+            className="w-20 text-right"
+          />
+        </div>
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-slate-900">单场竞选最多选项数</p>
+            <p className="text-xs leading-5 text-slate-500">创建竞选时最多可添加的候选项数量。默认 30，范围 2 到 200。</p>
+          </div>
+          <Input
+            type="number"
+            min={2}
+            max={200}
+            value={config.campaigns.maxOptions ?? 30}
+            disabled={busy}
+            onChange={(event) => setMaxOptions(event.target.value)}
             className="w-20 text-right"
           />
         </div>
@@ -1337,6 +1360,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       allowAnonymousCreate: metadata.allowAnonymousCampaign ?? false,
       // 插件关闭时后端下发 0，初始化为 1 以免新建租户保存后直接变为 0。
       maxActivePerUser: metadata.maxActiveCampaignsPerUser && metadata.maxActiveCampaignsPerUser > 0 ? metadata.maxActiveCampaignsPerUser : 1,
+      maxOptions: metadata.maxCampaignOptions && metadata.maxCampaignOptions > 0 ? metadata.maxCampaignOptions : 30,
     },
     aggregateLogin: {
       enabled: false,
@@ -1416,7 +1440,7 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
         })),
       };
     case "campaigns":
-      return { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 };
+      return { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1, maxOptions: 30 };
     case "aggregateLogin":
       return { enabled: false, loginTypes: [], appId: "", appKey: "", endpoint: "" };
     case "broadcast":

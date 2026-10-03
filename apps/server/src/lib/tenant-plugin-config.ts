@@ -79,8 +79,9 @@ export const tenantPluginConfigSchema = z.object({
       enabled: z.boolean(),
       allowAnonymousCreate: z.boolean(),
       maxActivePerUser: z.number().int().min(1).max(50),
+      maxOptions: z.number().int().min(2).max(200).default(30),
     })
-    .default({ enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 }),
+    .default({ enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1, maxOptions: 30 }),
   // 广播通知：开启后投稿页顶部出现「广播通知」胶囊与服务页入口。
   // quickPresets 是管理员配置的「快选生效时长」，发帖人点一下即可按当前时间推算结束时间；
   // 通知本身落 TenantBroadcast 表，不在本配置里持久化。
@@ -171,7 +172,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   fontSelection: { enabled: false, fonts: [] },
   anonymousAvatar: { enabled: false, items: [] },
   botStylishMessages: { enabled: false, messageTypes: [] },
-  campaigns: { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1 },
+  campaigns: { enabled: false, allowAnonymousCreate: false, maxActivePerUser: 1, maxOptions: 30 },
   broadcast: { enabled: false, quickPresets: [] },
   graduation: { enabled: false },
   aggregateLogin: {
