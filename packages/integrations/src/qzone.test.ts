@@ -248,6 +248,68 @@ describe("qzone comment list parsing", () => {
     expect(comments[0].replies[0].images).toEqual(["https://photogzmaz.photo.store.qq.com/psc?/reply.jpg"]);
   });
 
+  test("extracts comment id from tid field (real msgdetail_v6 responses)", () => {
+    const comments = parseQZoneCommentList({
+      code: 0,
+      commentlist: [
+        {
+          tid: 1,
+          uin: 1623746337,
+          name: "好好学地理",
+          content: "测试评论",
+          create_time: 1779608247,
+          list_3: [
+            {
+              tid: 2,
+              uin: 2777262813,
+              name: "纯真FIN",
+              content: "回复",
+              create_time: 1779615643,
+            },
+          ],
+        },
+        {
+          tid: 3,
+          uin: 2040347161,
+          name: "攻玉",
+          content: "第二条",
+          create_time: 1779609000,
+        },
+      ],
+    });
+    expect(comments).toHaveLength(2);
+    expect(comments[0].id).toBe("1");
+    expect(comments[0].replies[0].id).toBe("2");
+    expect(comments[1].id).toBe("3");
+  });
+
+  test("extracts comment id when the response includes it", () => {
+    const comments = parseQZoneCommentList({
+      code: 0,
+      commentlist: [
+        {
+          id: "bf7d2f8e5a6b3c4d9e0f1a2b",
+          uin: 2040347161,
+          name: "攻玉",
+          content: "支持删除",
+          create_time: 1779608247,
+          list_3: [
+            {
+              id: "c0ffee00deadbeefcafebabe01020304",
+              uin: 2777262813,
+              name: "纯真FIN",
+              content: "回复",
+              create_time: 1779615643,
+            },
+          ],
+        },
+      ],
+    });
+    expect(comments).toHaveLength(1);
+    expect(comments[0].id).toBe("bf7d2f8e5a6b3c4d9e0f1a2b");
+    expect(comments[0].replies[0].id).toBe("c0ffee00deadbeefcafebabe01020304");
+  });
+
   test("returns empty array when no commentlist", () => {
     expect(parseQZoneCommentList({ code: 0 })).toEqual([]);
   });

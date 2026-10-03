@@ -7,6 +7,7 @@ function makePost(overrides: Partial<RawFeedPost> & { id: string; displayId: num
     text: `稿件 ${overrides.displayId}`,
     attachments: [],
     anonymous: false,
+    authorId: null,
     bgColor: null,
     textColor: null,
     font: null,

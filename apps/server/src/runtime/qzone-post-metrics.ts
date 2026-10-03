@@ -215,14 +215,19 @@ async function handleQZonePostMetricRefresh(
     return;
   }
   delete job.payload[metricRequestReservationPayloadKey];
-  const claim = await runWithActiveTenantLease(
-    prisma,
-    attempt.tenantId,
-    (transaction) => claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now), transaction),
-  );
-  if (!claim.active || !claim.value) {
-    logger.info({ attemptId, botAccountId }, "qzone post metric refresh skipped after freshness claim lost");
-    return;
+  // 管理员手动刷新（payload.force）跳过新鲜度 claim：目的就是立刻拉最新数据，
+  // 否则 55 分钟内的常规刷新记录会让手动刷新被"freshness claim lost"拒掉。
+  const forceRefresh = job.payload.force === true;
+  if (!forceRefresh) {
+    const claim = await runWithActiveTenantLease(
+      prisma,
+      attempt.tenantId,
+      (transaction) => claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now), transaction),
+    );
+    if (!claim.active || !claim.value) {
+      logger.info({ attemptId, botAccountId }, "qzone post metric refresh skipped after freshness claim lost");
+      return;
+    }
   }
   dispatchState.lastStartedAt = now;
   dispatchState.nextReservationAt = Math.max(dispatchState.nextReservationAt, now + perBotRequestSpacingMs);
@@ -260,7 +265,19 @@ async function handleQZonePostMetricRefresh(
         logger.warn({ commentError, attemptId, qzoneTid }, "qzone post comment fetch failed");
       }
     }
-    const commentsJson = toInputJson(comments);
+    // 合并本地"已删除"的评论标记：QZone 侧已删的评论不会再出现在新列表里，
+    // 但管理员/审核员需要在网页端看到删除痕迹，所以把旧快照里的 deleted 条目保留下来。
+    const previousMetric = await transaction.qZonePostMetric.findUnique({
+      where: { publishAttemptId: attempt.id },
+      select: { comments: true },
+    });
+    const previousComments = Array.isArray(previousMetric?.comments)
+      ? (previousMetric.comments as Array<Record<string, unknown>>)
+      : [];
+    const deletedKept = previousComments.filter(
+      (comment) => comment?.deleted === true && !comments.some((fresh) => String(fresh.id) === String(comment.id)),
+    );
+    const commentsJson = toInputJson([...comments, ...deletedKept]);
     if (!await isTenantRuntimeActive(transaction, attempt.tenantId)) {
       return;
     }

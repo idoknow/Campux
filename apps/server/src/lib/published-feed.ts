@@ -26,6 +26,8 @@ export type RawFeedPost = {
   text: string;
   attachments: unknown;
   anonymous: boolean;
+  /** 稿件作者用户 id：用于计算 mine（是否当前查看者本人的稿件），不直接下发 */
+  authorId: string | null;
   author: RawFeedAuthor;
   bgColor: string | null;
   textColor: string | null;
@@ -45,6 +47,8 @@ export type PublishedFeedPost = {
   text: string;
   attachments: unknown;
   anonymous: boolean;
+  /** 当前查看者是否为这篇稿件的作者（评论管理插件用它判断“能否删除自己稿件下的评论”） */
+  mine: boolean;
   author: PublishedFeedAuthor;
   bgColor: string | null;
   textColor: string | null;
@@ -80,13 +84,14 @@ function redactAuthor(post: RawFeedPost, viewerIsReviewer: boolean): PublishedFe
   };
 }
 
-function toFeedPost(post: RawFeedPost, viewerIsReviewer: boolean): PublishedFeedPost {
+function toFeedPost(post: RawFeedPost, viewerIsReviewer: boolean, viewerUserId: string | null): PublishedFeedPost {
   return {
     id: post.id,
     displayId: post.displayId,
     text: post.text,
     attachments: post.attachments,
     anonymous: post.anonymous,
+    mine: post.authorId !== null && post.authorId === viewerUserId,
     author: redactAuthor(post, viewerIsReviewer),
     bgColor: post.bgColor,
     textColor: post.textColor,
@@ -113,8 +118,10 @@ export function buildPublishedFeed(input: {
   singles: SingleFeedInput[];
   batches: BatchFeedInput[];
   viewerIsReviewer: boolean;
+  /** 当前登录用户 id：用于给每条稿件标注 mine，缺省时全部为 false */
+  viewerUserId?: string | null;
 }): PublishedFeedItem[] {
-  const { viewerIsReviewer } = input;
+  const { viewerIsReviewer, viewerUserId = null } = input;
 
   const singleItems: PublishedFeedItem[] = input.singles.map((single) => {
     const publishedAt = single.publishedAt ?? single.post.createdAt;
@@ -122,8 +129,8 @@ export function buildPublishedFeed(input: {
       kind: "single" as const,
       key: single.post.id,
       publishedAt: publishedAt.toISOString(),
-      posts: [toFeedPost(single.post, viewerIsReviewer)],
-      qzoneStats: toQZonePostStats(single.metrics),
+      posts: [toFeedPost(single.post, viewerIsReviewer, viewerUserId)],
+      qzoneStats: toQZonePostStats(single.metrics, { keepDeletedComments: viewerIsReviewer }),
     };
   });
 
@@ -135,8 +142,8 @@ export function buildPublishedFeed(input: {
       kind: "batch" as const,
       key: batch.batchId,
       publishedAt: publishedAt.toISOString(),
-      posts: batch.posts.map((post) => toFeedPost(post, viewerIsReviewer)),
-      qzoneStats: toQZonePostStats(batch.metrics),
+      posts: batch.posts.map((post) => toFeedPost(post, viewerIsReviewer, viewerUserId)),
+      qzoneStats: toQZonePostStats(batch.metrics, { keepDeletedComments: viewerIsReviewer }),
     };
   });
 

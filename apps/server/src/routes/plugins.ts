@@ -286,6 +286,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["botAlert", before.botAlert, saved.botAlert],
       ["campaigns", before.campaigns, saved.campaigns],
       ["graduation", before.graduation, saved.graduation],
+      ["commentManagement", before.commentManagement, saved.commentManagement],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {

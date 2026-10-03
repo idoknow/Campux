@@ -22,6 +22,7 @@ import {
   Share2Icon,
   SlidersHorizontalIcon,
   SparklesIcon,
+  Trash2Icon,
   UserIcon,
   XIcon,
 } from "lucide-react";
@@ -266,6 +267,8 @@ export function PostsPage({
   enableFeedback,
   enableGraduation,
   enableTodayInHistory,
+  enableCommentManagement,
+  allowUserDeleteOwnPostComments,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -282,6 +285,8 @@ export function PostsPage({
   enableFeedback?: boolean;
   enableGraduation?: boolean;
   enableTodayInHistory?: boolean;
+  enableCommentManagement?: boolean;
+  allowUserDeleteOwnPostComments?: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -328,6 +333,8 @@ export function PostsPage({
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [busyRecallPostId, setBusyRecallPostId] = useState("");
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
+  const [busyCommentKey, setBusyCommentKey] = useState("");
+  const [busyMetricRefreshKey, setBusyMetricRefreshKey] = useState("");
   const [autoFollowBusy, setAutoFollowBusy] = useState(false);
   const [approveAllOpen, setApproveAllOpen] = useState(false);
   const [approveAllBusy, setApproveAllBusy] = useState(false);
@@ -673,6 +680,44 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "设置失败");
     } finally {
       setAutoFollowBusy(false);
+    }
+  }
+
+  async function deletePostComment(postId: string, commentId: string) {
+    if (!window.confirm("确定删除这条评论吗？删除通过墙号在 QQ 空间执行，不可恢复。")) {
+      return;
+    }
+    setBusyCommentKey(`${postId}:${commentId}`);
+    try {
+      await api(`/api/posts/${postId}/comments/${commentId}`, { method: "DELETE" });
+      toast.success("评论已删除。");
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "删除失败");
+    } finally {
+      setBusyCommentKey("");
+    }
+  }
+
+  // 手动刷新一条（或一批）稿件的 QZone 指标与评论：入队刷新任务后延迟两次拉取列表。
+  // 任务走逐墙号限速，若墙号刚刷新过会被延后，所以 3s / 9s 各补拉一次。
+  async function refreshPostQzoneMetrics(itemKey: string, postIds: string[]) {
+    if (postIds.length === 0 || busyMetricRefreshKey) {
+      return;
+    }
+    setBusyMetricRefreshKey(itemKey);
+    try {
+      const result = await api<{ enqueued: number; total: number }>("/api/posts/qzone-metrics/refresh", {
+        method: "POST",
+        body: JSON.stringify({ postIds }),
+      });
+      toast.success(result.enqueued > 0 ? "已加入刷新队列，稍候自动更新。" : "刷新任务已在队列中，请稍候。");
+      window.setTimeout(() => void refreshAll(), 3_000);
+      window.setTimeout(() => void refreshAll(), 9_000);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "刷新失败");
+    } finally {
+      setBusyMetricRefreshKey("");
     }
   }
 
@@ -1115,7 +1160,18 @@ export function PostsPage({
                     key={item.key}
                     item={item}
                     canViewIdentity={canReview}
+                    canViewDeleted={canReview}
                     onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
+                    commentModeration={enableCommentManagement ? {
+                      canDeleteAny: isAdmin,
+                      canDeleteOwn: Boolean(allowUserDeleteOwnPostComments),
+                      busyKey: busyCommentKey,
+                      onDelete: (postId, commentId) => void deletePostComment(postId, commentId),
+                    } : null}
+                    metricRefresh={isAdmin && item.posts.length > 0 ? {
+                      busy: busyMetricRefreshKey === item.key,
+                      onRefresh: () => void refreshPostQzoneMetrics(item.key, item.posts.map((post) => post.id)),
+                    } : null}
                   />
                 ))}
               </div>
@@ -1126,14 +1182,25 @@ export function PostsPage({
         {showHistoryTab ? (
           <TabsContent value="history" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
             <TodayInHistoryPanel
-              renderItem={(item) => (
-                <PublishedFeedCard
-                  item={item}
-                  canViewIdentity={canReview}
-                  onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
-                />
-              )}
-            />
+                renderItem={(item) => (
+                  <PublishedFeedCard
+                    item={item}
+                    canViewIdentity={canReview}
+                    canViewDeleted={canReview}
+                    onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
+                    commentModeration={enableCommentManagement ? {
+                      canDeleteAny: isAdmin,
+                      canDeleteOwn: Boolean(allowUserDeleteOwnPostComments),
+                      busyKey: busyCommentKey,
+                      onDelete: (postId, commentId) => void deletePostComment(postId, commentId),
+                    } : null}
+                    metricRefresh={isAdmin && item.posts.length > 0 ? {
+                      busy: busyMetricRefreshKey === item.key,
+                      onRefresh: () => void refreshPostQzoneMetrics(item.key, item.posts.map((post) => post.id)),
+                    } : null}
+                  />
+                )}
+              />
           </TabsContent>
         ) : null}
         {showFeedbackTab ? (
@@ -2377,16 +2444,43 @@ function PublishedFeedPostBlock({
   );
 }
 
+/** 评论管理插件下发的删除能力：deletePostId 为空表示当前卡片不可删（如用户没有自己的稿件在批次里）。 */
+type CommentModeration = {
+  canDeleteAny: boolean;
+  canDeleteOwn: boolean;
+  busyKey: string;
+  onDelete: (postId: string, commentId: string) => void;
+};
+
 function PublishedFeedCard({
   item,
   canViewIdentity,
+  canViewDeleted,
   onImagePreview,
+  commentModeration,
+  metricRefresh,
 }: {
   item: PublishedFeedItem;
   canViewIdentity: boolean;
+  canViewDeleted: boolean;
   onImagePreview: (images: PostImage[], index: number, title: string) => void;
+  commentModeration: CommentModeration | null;
+  metricRefresh: { busy: boolean; onRefresh: () => void } | null;
 }) {
   const isBatch = item.kind === "batch";
+  // 管理员可删任意稿件评论：取首条稿件 id 当接口参数；
+  // 普通用户仅可删自己稿件下的评论：取自己的那条稿件 id。
+  const moderation = commentModeration && item.posts.length > 0
+    ? {
+        deletePostId: commentModeration.canDeleteAny
+          ? item.posts[0]!.id
+          : commentModeration.canDeleteOwn
+            ? item.posts.find((post) => post.mine)?.id ?? ""
+            : "",
+        busyKey: commentModeration.busyKey,
+        onDelete: commentModeration.onDelete,
+      }
+    : null;
   return (
     <Card className="overflow-hidden rounded-md border border-slate-200 shadow-none">
       <CardContent className="grid gap-3 p-2.5 md:p-3">
@@ -2396,7 +2490,21 @@ function PublishedFeedCard({
           ) : (
             <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">独立发布</Badge>
           )}
-          <span className="text-xs font-semibold text-slate-400">发布于 {formatFullDateTime(item.publishedAt)}</span>
+          <span className="ml-auto flex items-center gap-2">
+            {item.qzoneStats && item.qzoneStats.targets.length > 0 ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                disabled={metricRefresh?.busy}
+                title="重新拉取这条稿件的浏览/点赞/评论数据"
+                onClick={() => metricRefresh?.onRefresh()}
+              >
+                <RotateCcwIcon className={`size-3 ${metricRefresh?.busy ? "animate-spin" : ""}`} />
+                {metricRefresh?.busy ? "刷新中..." : "刷新"}
+              </button>
+            ) : null}
+            <span className="text-xs font-semibold text-slate-400">发布于 {formatFullDateTime(item.publishedAt)}</span>
+          </span>
         </div>
 
         {isBatch ? (
@@ -2412,7 +2520,7 @@ function PublishedFeedCard({
         )}
 
         {/* 互动数据按说说聚合，整张卡片只显示一份 */}
-        <QZoneStatsBlock stats={item.qzoneStats} />
+        <QZoneStatsBlock stats={item.qzoneStats} moderation={moderation} canViewDeleted={canViewDeleted} />
       </CardContent>
     </Card>
   );
@@ -2495,7 +2603,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
   );
 }
 
-function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
+function QZoneStatsBlock({ stats, moderation, canViewDeleted }: { stats: PostItem["qzoneStats"]; moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string) => void } | null; canViewDeleted: boolean }) {
   if (!stats) {
     return null;
   }
@@ -2554,7 +2662,7 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
                 <span className="ml-auto text-[11px] font-semibold text-slate-400">更新 {formatFullDateTime(target.checkedAt)}</span>
               ) : null}
             </div>
-            <QZoneCommentsList comments={target.comments ?? []} />
+            <QZoneCommentsList comments={target.comments ?? []} moderation={moderation} canViewDeleted={canViewDeleted} />
           </div>
         );
       })}
@@ -2562,17 +2670,35 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
   );
 }
 
-function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]> }) {
+function QZoneCommentsList({
+  comments,
+  moderation,
+  canViewDeleted,
+}: {
+  comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]>;
+  moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string) => void } | null;
+  canViewDeleted: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
   if (!comments || comments.length === 0) {
     return null;
   }
 
-  const preview = showAll ? comments : comments.slice(0, 3);
+  // 已删除的评论（QZone 侧已不可见）与正常评论分开展示，仅管理员/审核员可见删除痕迹。
+  const active = comments.filter((comment) => !comment.deleted);
+  const deletedOnes = canViewDeleted ? comments.filter((comment) => comment.deleted) : [];
+  if (active.length === 0 && deletedOnes.length === 0) {
+    return null;
+  }
+
+  const preview = showAll ? active : active.slice(0, 3);
 
   return (
     <div className="mt-2 border-t border-slate-100 pt-2">
+      {active.length > 0 ? (
+        <>
       <button
         type="button"
         className="flex w-full items-center gap-1 text-[11px] font-black text-slate-500 hover:text-slate-700"
@@ -2580,7 +2706,7 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
         aria-expanded={open}
       >
         <MessageCircleIcon className="size-3 shrink-0" />
-        评论 {comments.length}
+        评论 {active.length}
         <ChevronDownIcon className={`size-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open ? (
@@ -2592,6 +2718,16 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
               <span className="shrink-0 font-black text-slate-700">{comment.name || comment.uin || "匿名"}</span>
               <QQUinTag uin={comment.uin} />
               {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-400">{formatFullDateTime(comment.createdAt)}</span> : null}
+              {moderation && comment.id && !comment.deleted && moderation.deletePostId ? (
+                <button
+                  type="button"
+                  className="ml-auto shrink-0 self-center text-[10px] font-bold text-rose-500 hover:underline disabled:opacity-50"
+                  disabled={moderation.busyKey === `${moderation.deletePostId}:${comment.id}`}
+                  onClick={() => moderation.onDelete(moderation.deletePostId, comment.id)}
+                >
+                  {moderation.busyKey === `${moderation.deletePostId}:${comment.id}` ? "删除中..." : "删除"}
+                </button>
+              ) : null}
             </p>
             {comment.content ? (
               <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">{comment.content}</p>
@@ -2619,16 +2755,58 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
           </div>
         ))}
           </div>
-          {comments.length > 3 ? (
+          {active.length > 3 ? (
             <button
               type="button"
               className="mt-1.5 text-[11px] font-bold text-blue-600 hover:underline"
               onClick={() => setShowAll((value) => !value)}
             >
-              {showAll ? "收起" : `展开全部 ${comments.length} 条`}
+              {showAll ? "收起" : `展开全部 ${active.length} 条`}
             </button>
           ) : null}
         </>
+      ) : null}
+        </>
+      ) : null}
+      {deletedOnes.length > 0 ? (
+        <div className={active.length > 0 ? "mt-2" : ""}>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 text-[11px] font-black text-slate-400 hover:text-slate-600"
+            onClick={() => setShowDeleted((value) => !value)}
+            aria-expanded={showDeleted}
+          >
+            <Trash2Icon className="size-3 shrink-0" />
+            已删除的评论 {deletedOnes.length}
+            <ChevronDownIcon className={`size-3 shrink-0 transition-transform ${showDeleted ? "rotate-180" : ""}`} />
+          </button>
+          {showDeleted ? (
+            <div className="mt-1.5 grid gap-1.5">
+              {deletedOnes.map((comment, index) => (
+                <div key={`${comment.uin}-deleted-${index}`} className="rounded-md border border-dashed border-slate-200 bg-slate-50/60 px-2 py-1.5 opacity-75">
+                  <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px] leading-5">
+                    <span className="shrink-0 font-black text-slate-400">{comment.name || comment.uin || "匿名"}</span>
+                    <QQUinTag uin={comment.uin} />
+                    {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-300">{formatFullDateTime(comment.createdAt)}</span> : null}
+                    <span className="ml-auto shrink-0 self-center text-[10px] font-bold text-slate-400">已删除</span>
+                  </p>
+                  {comment.content ? (
+                    <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-400 line-through">{comment.content}</p>
+                  ) : comment.images && comment.images.length > 0 ? null : (
+                    <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-400">（空）</p>
+                  )}
+                  <QZoneCommentImages images={comment.images} title={`${comment.name || comment.uin || "匿名"} 的评论图片`} />
+                  {comment.deletedBy || comment.deletedAt ? (
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      {comment.deletedBy ? `${comment.deletedBy} 删除` : "已删除"}
+                      {comment.deletedAt ? ` · ${formatFullDateTime(comment.deletedAt)}` : ""}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

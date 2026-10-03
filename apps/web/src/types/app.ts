@@ -130,6 +130,10 @@ export type TenantMetadata = {
   enableAnonymousAvatarSelection: boolean;
   /** 关注稿件有新评论时是否私信推送摘要（墙面设置开关，默认开启） */
   followedPostCommentNotifyEnabled: boolean;
+  /** 评论管理插件是否启用；关闭时稿件卡片不显示评论删除按钮 */
+  enableCommentManagement: boolean;
+  /** 评论管理插件是否允许用户删除自己稿件下的评论；插件关闭时为 false */
+  allowUserDeleteOwnPostComments: boolean;
   /** 字体选择插件启用的字体 value 白名单（包含 "default"） */
   availableFonts: string[];
   /** 多彩投稿插件启用的背景色预设（未配置时为空数组，投稿页不展示背景色选项） */
@@ -245,6 +249,11 @@ export type TenantPluginConfig = {
   todayInHistory: {
     enabled: boolean;
   };
+  /** 评论管理插件：开关 + 是否允许用户删除自己稿件下的评论 */
+  commentManagement: {
+    enabled: boolean;
+    allowUserDeleteOwnPostComments: boolean;
+  };
 };
 
 export type PluginBroadcastPreset = {
@@ -354,12 +363,17 @@ export type PostItem = {
       checkedAt: string | null;
       lastError: string | null;
       comments?: Array<{
+        id: string;
         uin: string;
         name: string;
         content: string;
         images?: string[];
         createdAt: string | null;
-        replies?: Array<{ uin: string; name: string; content: string; images?: string[]; createdAt: string | null }>;
+        /** 评论已通过墙号删除（QZone 侧已不可见），仅管理员/审核员可见 */
+        deleted?: boolean;
+        deletedAt?: string;
+        deletedBy?: string;
+        replies?: Array<{ id?: string; uin: string; name: string; content: string; images?: string[]; createdAt: string | null }>;
       }>;
     }>;
     logs: Array<{
@@ -410,6 +424,8 @@ export type PublishedFeedPost = {
   text: string;
   attachments: unknown;
   anonymous: boolean;
+  /** 当前登录用户是否为这篇稿件的作者（用于评论管理插件的“删除自己稿件下的评论”） */
+  mine: boolean;
   author: PublishedFeedAuthor;
   bgColor: string | null;
   textColor: string | null;

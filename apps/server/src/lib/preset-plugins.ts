@@ -24,7 +24,8 @@ export type PresetPluginId =
   | "feedback"
   | "botAlert"
   | "graduation"
-  | "todayInHistory";
+  | "todayInHistory"
+  | "commentManagement";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -146,6 +147,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "tenant:data", "user:data"],
     riskLevel: "low",
     rationale: "开启后投稿页新增那年今日入口，仅读取已发布稿件并按年月日筛选，不写入任何数据。",
+  },
+  {
+    id: "commentManagement",
+    name: "campux-plugin-comment-management",
+    version: "1.0.0",
+    description: "评论管理：网页端通过墙号删除已发布稿件在 QQ 空间的评论，可选允许用户删除自己稿件下的评论",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后代表墙号调用 QZone 评论删除接口，属于对外可见的不可逆操作；用户侧删除受独立开关限制且仅限本人稿件。",
   },
 ];
 
