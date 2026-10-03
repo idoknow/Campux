@@ -3,6 +3,9 @@ import { Image as ImageIcon, LoaderCircleIcon, Maximize2Icon, RotateCcwIcon, XIc
 import { Button } from "@/components/ui/button";
 
 type CropRect = { x: number; y: number; width: number; height: number };
+type Point = { x: number; y: number };
+type ViewState = { offset: Point; scale: number };
+type ViewStateRef = { current: ViewState };
 export type CropedImageState = {
   original: string;
   originalWidth: number;
@@ -21,6 +24,10 @@ type ImageCropDialogProps = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function distance(a: Point, b: Point) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function loadImage(dataUrl: string) {
@@ -62,27 +69,66 @@ function renderCroppedImage(image: HTMLImageElement, crop: CropRect): string {
 export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConfirm }: ImageCropDialogProps) {
   const [original, setOriginal] = useState<HTMLImageElement | null>(null);
   const [viewport, setViewport] = useState({ width: 480, height: 480 / aspect });
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [scale, setScale] = useState(1);
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
+  const [viewState, setViewState] = useState<ViewState>({ offset: { x: 0, y: 0 }, scale: 1 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const cropRect = useMemo(() => {
-    if (!original || !viewport.width || !viewport.height) return { x: 0, y: 0, width: 0, height: 0 };
-    return {
-      x: clamp(-offset.x / Math.max(scale, 0.001), 0, Math.max(0, original.naturalWidth - viewport.width / Math.max(scale, 0.001))),
-      y: clamp(-offset.y / Math.max(scale, 0.001), 0, Math.max(0, original.naturalHeight - viewport.height / Math.max(scale, 0.001))),
-      width: viewport.width / Math.max(scale, 0.001),
-      height: viewport.height / Math.max(scale, 0.001),
-    };
-  }, [original, viewport, offset, scale]);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const viewStateRef = useRef<ViewState>({ offset: { x: 0, y: 0 }, scale: 1 });
+  const pointersRef = useRef(new Map<number, Point>());
+  const gestureRef = useRef<{ mode: "drag" | "pinch"; startX: number; startY: number; startOffset: Point; startDistance: number; startScale: number } | null>(null);
 
   const minScale = useCallback(() => {
     if (!original || !viewport.width || !viewport.height) return 1;
     return Math.max(viewport.width / original.naturalWidth, viewport.height / original.naturalHeight);
   }, [original, viewport]);
+
+  const constrainOffset = useCallback((nextX: number, nextY: number) => {
+    if (!original) return { x: 0, y: 0 };
+    const maxX = Math.max(0, viewport.width - original.naturalWidth * viewStateRef.current.scale);
+    const maxY = Math.max(0, viewport.height - original.naturalHeight * viewStateRef.current.scale);
+    return { x: clamp(nextX, maxX, 0), y: clamp(nextY, maxY, 0) };
+  }, [original, viewport]);
+
+  const applyViewState = useCallback((next: ViewState) => {
+    const safe: ViewState = { offset: constrainOffset(next.offset.x, next.offset.y), scale: next.scale };
+    viewStateRef.current = safe;
+    setViewState(safe);
+  }, [constrainOffset]);
+
+  const setCenteredView = useCallback(() => {
+    if (!original) return;
+    const rect = centerCropRect(original.naturalWidth, original.naturalHeight, aspect);
+    const baseScale = Math.min(viewport.width / rect.width, viewport.height / rect.height);
+    applyViewState({ scale: baseScale, offset: { x: -rect.x * baseScale, y: -rect.y * baseScale } });
+  }, [applyViewState, aspect, original, viewport]);
+
+  const zoomAtCenter = useCallback((factor: number) => {
+    if (!original) return;
+    const current = viewStateRef.current;
+    const nextScale = clamp(current.scale * factor, minScale(), 5);
+    const ratio = nextScale / current.scale;
+    applyViewState({
+      scale: nextScale,
+      offset: {
+        x: viewport.width / 2 - (viewport.width / 2 - current.offset.x) * ratio,
+        y: viewport.height / 2 - (viewport.height / 2 - current.offset.y) * ratio,
+      },
+    });
+  }, [applyViewState, minScale, original, viewport]);
+
+  const zoomAtPoint = useCallback((point: Point, factor: number) => {
+    if (!original) return;
+    const current = viewStateRef.current;
+    const nextScale = clamp(current.scale * factor, minScale(), 5);
+    const ratio = nextScale / current.scale;
+    applyViewState({
+      scale: nextScale,
+      offset: {
+        x: point.x - (point.x - current.offset.x) * ratio,
+        y: point.y - (point.y - current.offset.y) * ratio,
+      },
+    });
+  }, [applyViewState, minScale, original]);
 
   useEffect(() => {
     if (!open || !dataUrl) return;
@@ -93,17 +139,13 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
       .then((image) => {
         if (cancelled) return;
         setOriginal(image);
-        const rect = centerCropRect(image.naturalWidth, image.naturalHeight, aspect);
-        const baseScale = Math.min(viewport.width / rect.width, viewport.height / rect.height);
-        setScale(baseScale);
-        setOffset({ x: -rect.x * baseScale, y: -rect.y * baseScale });
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "图片无法读取"))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [open, dataUrl, aspect, viewport]);
+  }, [open, dataUrl]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,60 +162,99 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
     if (!rect) return;
     const width = Math.max(240, Math.min(rect.width, 520));
     const height = width / aspect;
-    setViewport((current) => (Math.abs(current.width - width) < 1 && Math.abs(current.height - height) < 1 ? current : { width, height }));
+    setViewport((current) => {
+      if (Math.abs(current.width - width) < 1 && Math.abs(current.height - height) < 1) return current;
+      return { width, height };
+    });
   }, [open, original, aspect]);
 
-  const constrainOffset = useCallback((nextX: number, nextY: number) => {
-    if (!original) return { x: 0, y: 0 };
-    const maxX = Math.max(0, viewport.width - original.naturalWidth * scale);
-    const maxY = Math.max(0, viewport.height - original.naturalHeight * scale);
-    return { x: clamp(nextX, maxX, 0), y: clamp(nextY, maxY, 0) };
-  }, [original, scale, viewport]);
+  useEffect(() => {
+    if (original) setCenteredView();
+  }, [original, setCenteredView]);
+
+  const cropRect = useMemo(() => {
+    if (!original || !viewport.width || !viewport.height) return { x: 0, y: 0, width: 0, height: 0 };
+    const scale = Math.max(viewState.scale, 0.001);
+    return {
+      x: clamp(-viewState.offset.x / scale, 0, Math.max(0, original.naturalWidth - viewport.width / scale)),
+      y: clamp(-viewState.offset.y / scale, 0, Math.max(0, original.naturalHeight - viewport.height / scale)),
+      width: viewport.width / scale,
+      height: viewport.height / scale,
+    };
+  }, [original, viewport, viewState]);
 
   if (!open) return null;
+
+  function pointInViewport(clientX: number, clientY: number) {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    return rect ? { x: clientX - rect.left, y: clientY - rect.top } : { x: clientX, y: clientY };
+  }
+
+  function syncPointer(point: Point, pointerId: number) {
+    pointersRef.current.set(pointerId, point);
+    const points = Array.from(pointersRef.current.values());
+    const gesture = gestureRef.current;
+    if (gesture?.mode === "pinch" && points.length === 2) {
+      const a = points[0];
+      const b = points[1];
+      if (!a || !b) return;
+      const factor = distance(a, b) / Math.max(gesture.startDistance, 1);
+      applyViewState({ scale: clamp(gesture.startScale * factor, minScale(), 5), offset: gesture.startOffset });
+    }
+  }
+
+  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (!original) return;
+    event.preventDefault();
+    zoomAtPoint(pointInViewport(event.clientX, event.clientY), Math.exp(-event.deltaY * 0.0015));
+  }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (!dataUrl) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offsetX: offset.x, offsetY: offset.y };
+    const point = pointInViewport(event.clientX, event.clientY);
+    syncPointer(point, event.pointerId);
+
+    if (pointersRef.current.size === 1) {
+      gestureRef.current = { mode: "drag", startX: event.clientX, startY: event.clientY, startOffset: viewStateRef.current.offset, startDistance: 0, startScale: viewStateRef.current.scale };
+    } else if (pointersRef.current.size === 2) {
+      const points = Array.from(pointersRef.current.values());
+      if (points.length === 2) {
+        const a = points[0];
+        const b = points[1];
+        if (a && b) gestureRef.current = { mode: "pinch", startX: 0, startY: 0, startOffset: viewStateRef.current.offset, startDistance: distance(a, b), startScale: viewStateRef.current.scale };
+      }
+    }
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
-    const dx = event.clientX - dragRef.current.startX;
-    const dy = event.clientY - dragRef.current.startY;
-    setOffset(constrainOffset(dragRef.current.offsetX + dx, dragRef.current.offsetY + dy));
+    const point = pointInViewport(event.clientX, event.clientY);
+    syncPointer(point, event.pointerId);
+    if (!gestureRef.current) return;
+    if (gestureRef.current.mode === "drag" && pointersRef.current.size === 1) {
+      const dx = event.clientX - gestureRef.current.startX;
+      const dy = event.clientY - gestureRef.current.startY;
+      applyViewState({ scale: viewStateRef.current.scale, offset: { x: gestureRef.current.startOffset.x + dx, y: gestureRef.current.startOffset.y + dy } });
+    }
   }
 
   function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
-  }
-
-  function reset() {
-    if (!original) return;
-    const rect = centerCropRect(original.naturalWidth, original.naturalHeight, aspect);
-    const baseScale = Math.min(viewport.width / rect.width, viewport.height / rect.height);
-    setScale(baseScale);
-    setOffset({ x: -rect.x * baseScale, y: -rect.y * baseScale });
-  }
-
-  function changeScale(value: number) {
-    if (!original) return;
-    const nextScale = clamp(value, minScale(), 5);
-    const centerX = viewport.width / 2;
-    const centerY = viewport.height / 2;
-    const naturalX = (-offset.x + centerX) / Math.max(scale, 0.001);
-    const naturalY = (-offset.y + centerY) / Math.max(scale, 0.001);
-    setOffset(constrainOffset(-(naturalX * nextScale - centerX), -(naturalY * nextScale - centerY)));
-    setScale(nextScale);
+    pointersRef.current.delete(event.pointerId);
+    if (pointersRef.current.size < 2 && gestureRef.current?.mode === "pinch") gestureRef.current = null;
+    if (pointersRef.current.size === 1) {
+      const point = Array.from(pointersRef.current.values())[0];
+      if (point) gestureRef.current = { mode: "drag", startX: point.x, startY: point.y, startOffset: viewStateRef.current.offset, startDistance: 0, startScale: viewStateRef.current.scale };
+    } else if (pointersRef.current.size === 0) {
+      gestureRef.current = null;
+    }
   }
 
   function confirm() {
     if (!original) return;
     try {
       const cropped = renderCroppedImage(original, cropRect);
-      onConfirm({ original: dataUrl!, originalWidth: original.naturalWidth, originalHeight: original.naturalHeight, dataUrl: cropped });
+      onConfirm({ original: dataUrl ?? "", originalWidth: original.naturalWidth, originalHeight: original.naturalHeight, dataUrl: cropped });
     } catch {
       setError("裁切失败，请重试");
     }
@@ -193,25 +274,23 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
           </div>
         ) : (
           <div className="space-y-3">
-            <div ref={viewportRef} className="relative mx-auto w-full max-w-[520px] cursor-grab touch-none overflow-hidden rounded-lg bg-slate-900 active:cursor-grabbing" style={{ aspectRatio: `${aspect}` }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}>
+            <div ref={viewportRef} className="relative mx-auto w-full max-w-[520px] cursor-grab touch-none overflow-hidden rounded-lg bg-slate-900 active:cursor-grabbing" style={{ aspectRatio: `${aspect}` }} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}>
               <img
                 src={dataUrl ?? ""}
                 alt=""
                 draggable={false}
                 className="absolute left-0 top-0 max-w-none select-none"
-                style={{ width: original.naturalWidth * scale, height: original.naturalHeight * scale, transform: `translate(${offset.x}px, ${offset.y}px)` }}
+                style={{ width: original.naturalWidth * viewState.scale, height: original.naturalHeight * viewState.scale, transform: `translate(${viewState.offset.x}px, ${viewState.offset.y}px)` }}
               />
               <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
                 {Array.from({ length: 9 }).map((_, index) => <span key={index} className="border border-white/25" />)}
               </div>
               <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-white/50" />
             </div>
-            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="text-xs text-slate-600">缩放</span>
-              <input type="range" min={minScale()} max={5} step={0.01} value={scale} onChange={(event) => changeScale(Number(event.target.value))} className="min-w-0 flex-1" />
-              <button type="button" onClick={reset} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50"><RotateCcwIcon className="size-3.5" />居中</button>
+            <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[11px] text-slate-500">拖动图片调整展示区域，滚轮/双指缩放。</p>
+              <button type="button" onClick={setCenteredView} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50"><RotateCcwIcon className="size-3.5" />重置</button>
             </div>
-            <p className="text-[11px] text-slate-500">拖动图片调整展示区域，拖动滑杆放大缩小。确认后会保存裁切后的展示图，原图仍可在页面中点击放大查看。</p>
           </div>
         )}
 
