@@ -1,67 +1,28 @@
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { PlusIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { FullImageLightbox, ImageCropField } from "./CampaignImageControls";
+import { FullImageLightbox, ImageCropDialog } from "./CampaignImageControls";
 import type { TenantMetadata } from "@/types/app";
 
-type CropRect = { x: number; y: number; width: number; height: number };
-type OptionForm = { label: string; original: string | null; originalWidth: number; originalHeight: number; crop: CropRect; dataUrl: string | null };
-type CampaignImage = { original: string | null; originalWidth: number; originalHeight: number; crop: CropRect; dataUrl: string | null };
+type OptionForm = { label: string; original: string | null; dataUrl: string | null };
+type CampaignImage = { original: string | null; dataUrl: string | null };
 
+type CropDraft = { title: string; dataUrl: string; optionIndex?: number };
 const COVER_ASPECT = 16 / 9;
 const OPTION_ASPECT = 1;
 
 function emptyOption(): OptionForm {
-  return { label: "", original: null, originalWidth: 0, originalHeight: 0, crop: { x: 0, y: 0, width: 0, height: 0 }, dataUrl: null };
+  return { label: "", original: null, dataUrl: null };
 }
 
 function emptyImage(): CampaignImage {
-  return { original: null, originalWidth: 0, originalHeight: 0, crop: { x: 0, y: 0, width: 0, height: 0 }, dataUrl: null };
+  return { original: null, dataUrl: null };
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function cropRect(x: number, y: number, width: number, height: number) {
-  return { x: clamp(x, 0, Math.max(0, width - 100)), y: clamp(y, 0, Math.max(0, height - 100)), width, height };
-}
-
-function loadNaturalImage(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("图片无法读取"));
-    image.src = dataUrl;
-  });
-}
-
-function centerCrop(originalWidth: number, originalHeight: number, aspect: number): CropRect {
-  if (!originalWidth || !originalHeight) return { x: 0, y: 0, width: 0, height: 0 };
-  if (originalWidth / originalHeight > aspect) {
-    const width = originalWidth;
-    const height = Math.round(originalWidth / aspect);
-    return { x: 0, y: Math.max(0, Math.floor((originalHeight - height) / 2)), width, height };
-  }
-  const width = Math.round(originalHeight * aspect);
-  const height = Math.round(originalWidth / aspect);
-  return { x: Math.max(0, Math.floor((originalWidth - width) / 2)), y: 0, width, height };
-}
-
-function renderCrop(image: HTMLImageElement, crop: CropRect) {
-  const canvas = document.createElement("canvas");
-  const scale = Math.min(768 / Math.max(1, crop.width), 512 / Math.max(1, crop.height), 2);
-  canvas.width = Math.max(1, Math.round(crop.width * scale));
-  canvas.height = Math.max(1, Math.round(crop.height * scale));
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("无法生成预览");
-  context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.84);
-}
 
 export function CampaignCreateForm({
   metadata,
@@ -82,6 +43,7 @@ export function CampaignCreateForm({
   const [options, setOptions] = useState<OptionForm[]>([emptyOption(), emptyOption()]);
   const [busy, setBusy] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [cropDraft, setCropDraft] = useState<CropDraft | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const optionInputsRef = useRef<Array<HTMLInputElement | null>>([]);
   const coverReadSeq = useRef(0);
@@ -99,11 +61,7 @@ export function CampaignCreateForm({
     });
   }
 
-  async function prepareImage(dataUrl: string, aspect: number): Promise<CampaignImage> {
-    const image = await loadNaturalImage(dataUrl);
-    const crop = centerCrop(image.naturalWidth, image.naturalHeight, aspect);
-    return { original: dataUrl, originalWidth: image.naturalWidth, originalHeight: image.naturalHeight, crop, dataUrl: renderCrop(image, crop) };
-  }
+  const cropAspect = cropDraft?.title.startsWith("选项") ? OPTION_ASPECT : COVER_ASPECT;
 
   async function onCoverChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -113,18 +71,11 @@ export function CampaignCreateForm({
     try {
       const dataUrl = await readDataUrl(file);
       if (seq !== coverReadSeq.current) return;
-      setCoverImage(await prepareImage(dataUrl, COVER_ASPECT));
+      setCropDraft({ title: "封面", dataUrl });
     } catch (error) {
       if (seq !== coverReadSeq.current) return;
       toast.error(error instanceof Error ? error.message : "封面读取失败");
     }
-  }
-
-  async function updateCoverCrop(nextCrop: CropRect) {
-    const original = coverImage.original;
-    if (!original) return;
-    const image = await loadNaturalImage(original);
-    setCoverImage({ ...coverImage, crop: nextCrop, dataUrl: renderCrop(image, nextCrop) });
   }
 
   async function onOptionImageChange(index: number, event: React.ChangeEvent<HTMLInputElement>) {
@@ -133,8 +84,7 @@ export function CampaignCreateForm({
     if (!file) return;
     try {
       const dataUrl = await readDataUrl(file);
-      const prepared = await prepareImage(dataUrl, OPTION_ASPECT);
-      setOptions((current) => current.map((entry, i) => (i === index ? { ...entry, ...prepared } : entry)));
+      setCropDraft({ title: `选项 ${index + 1}`, dataUrl, optionIndex: index });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "选项图片读取失败");
     }
@@ -142,15 +92,6 @@ export function CampaignCreateForm({
 
   function updateOption(index: number, patch: Partial<OptionForm>) {
     setOptions((current) => current.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
-  }
-
-  function updateOptionCrop(index: number, nextCrop: CropRect) {
-    const target = options[index];
-    if (!target?.original) return;
-    const image = new Image();
-    image.onload = () => updateOption(index, { crop: nextCrop, dataUrl: renderCrop(image, nextCrop) });
-    image.onerror = () => updateOption(index, { crop: nextCrop, dataUrl: target.original });
-    image.src = target.original;
   }
 
   function addOption() {
@@ -205,19 +146,20 @@ export function CampaignCreateForm({
       <div className="mt-3 space-y-3">
         <Input placeholder="竞选标题（2-60字）" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={60} />
         <input ref={coverInputRef} type="file" accept="image/*" className="hidden" onChange={onCoverChange} />
-        <ImageCropField
-          label="封面"
-          original={coverImage.original}
-          originalWidth={coverImage.originalWidth}
-          originalHeight={coverImage.originalHeight}
-          crop={coverImage.crop}
-          aspect={COVER_ASPECT}
-          width={360}
-          height={225}
-          onChange={updateCoverCrop}
-          onPick={() => coverInputRef.current?.click()}
-          onRemove={() => { coverReadSeq.current += 1; setCoverImage(emptyImage()); }}
-        />
+        <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-slate-700">封面预览（16:9）</p>
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="outline" onClick={() => coverInputRef.current?.click()}>选择封面</Button>
+              {coverImage.dataUrl ? <Button size="sm" variant="ghost" onClick={() => { coverReadSeq.current += 1; setCoverImage(emptyImage()); }}>移除</Button> : null}
+            </div>
+          </div>
+          {coverImage.dataUrl ? (
+            <button type="button" onClick={() => setLightbox(coverImage.original ?? coverImage.dataUrl)} className="relative mx-auto block w-full max-w-[360px] overflow-hidden rounded border border-slate-200" style={{ aspectRatio: `${COVER_ASPECT}` }} aria-label="点击查看封面原图">
+              <img src={coverImage.dataUrl} alt="" className="size-full object-cover" />
+            </button>
+          ) : <div className="mx-auto grid w-full max-w-[360px] place-items-center rounded border border-dashed border-slate-300 bg-white py-8 text-xs text-slate-500" style={{ aspectRatio: `${COVER_ASPECT}` }}>暂无封面</div>}
+        </div>
         <div className="space-y-2">
           <p className="text-xs font-semibold text-slate-600">竞选选项</p>
           {options.map((option, index) => (
@@ -225,24 +167,12 @@ export function CampaignCreateForm({
               <div className="flex items-center gap-2">
                 <span className="grid size-6 shrink-0 place-items-center rounded bg-slate-100 text-xs text-slate-500">{index + 1}</span>
                 <Input placeholder="选项名称" value={option.label} onChange={(event) => updateOption(index, { label: event.target.value })} maxLength={40} />
-                {option.dataUrl ? <button type="button" onClick={() => setLightbox(option.dataUrl)} className="size-8 shrink-0 overflow-hidden rounded border border-slate-200"><img src={option.dataUrl} alt="" className="size-8 rounded object-cover" /></button> : null}
+                {option.dataUrl ? <button type="button" onClick={() => setLightbox(option.original ?? option.dataUrl)} className="size-8 shrink-0 overflow-hidden rounded border border-slate-200"><img src={option.dataUrl} alt="" className="size-8 rounded object-cover" /></button> : null}
                 <input type="file" accept="image/*" ref={(el) => { optionInputsRef.current[index] = el; }} className="hidden" onChange={(event) => void onOptionImageChange(index, event)} />
                 <Button size="sm" variant="outline" onClick={() => optionInputsRef.current[index]?.click()}>图</Button>
                 {options.length > 2 ? <Button size="sm" variant="ghost" onClick={() => removeOption(index)}>删除</Button> : null}
               </div>
-              <ImageCropField
-                label={`选项 ${index + 1}`}
-                original={option.original}
-                originalWidth={option.originalWidth}
-                originalHeight={option.originalHeight}
-                crop={option.crop}
-                aspect={OPTION_ASPECT}
-                width={180}
-                height={180}
-                onChange={(crop) => updateOptionCrop(index, crop)}
-                onPick={() => optionInputsRef.current[index]?.click()}
-                onRemove={() => updateOption(index, emptyOption())}
-              />
+              <p className="text-[11px] text-slate-500">{option.dataUrl ? `选项 ${index + 1}：已选择图片，点击左侧小图查看原图` : `选项 ${index + 1}：可选图片（1:1 裁切预览）`}</p>
             </div>
           ))}
           {options.length < 20 ? <Button size="sm" variant="outline" onClick={addOption}><PlusIcon className="size-4" />添加选项</Button> : null}
@@ -283,6 +213,22 @@ export function CampaignCreateForm({
           <Button onClick={() => void submit()} disabled={busy}>{busy ? "提交中..." : "提交审核"}</Button>
         </div>
       </div>
+      <ImageCropDialog
+        open={Boolean(cropDraft)}
+        title={cropDraft?.title ?? ""}
+        dataUrl={cropDraft?.dataUrl ?? null}
+        aspect={cropAspect}
+        onCancel={() => setCropDraft(null)}
+        onConfirm={(prepared) => {
+          if (!cropDraft) return;
+          if (cropDraft.title === "封面") {
+            setCoverImage(prepared);
+          } else if (cropDraft.optionIndex !== undefined) {
+            updateOption(cropDraft.optionIndex, { original: prepared.original, dataUrl: prepared.dataUrl });
+          }
+          setCropDraft(null);
+        }}
+      />
       <FullImageLightbox src={lightbox} alt="竞选图片原图" onClose={() => setLightbox(null)} />
     </section>
   );
