@@ -93,22 +93,27 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
 
   const applyViewState = useCallback((next: ViewState) => {
     if (!original) return;
-    const nextScale = next.scale;
-    const scaledWidth = original.naturalWidth * nextScale;
-    const scaledHeight = original.naturalHeight * nextScale;
-    const freeLeft = scaledWidth < viewport.width;
-    const freeTop = scaledHeight < viewport.height;
-    const centerX = freeLeft ? (viewport.width - scaledWidth) / 2 : clamp(next.offset.x, viewport.width - scaledWidth, 0);
-    const centerY = freeTop ? (viewport.height - scaledHeight) / 2 : clamp(next.offset.y, viewport.height - scaledHeight, 0);
-    const safe: ViewState = { scale: nextScale, offset: { x: centerX, y: centerY } };
+    const scaledWidth = original.naturalWidth * next.scale;
+    const scaledHeight = original.naturalHeight * next.scale;
+    const maxX = Math.max(0, viewport.width - scaledWidth);
+    const maxY = Math.max(0, viewport.height - scaledHeight);
+    const safe: ViewState = {
+      scale: next.scale,
+      offset: {
+        x: clamp(next.offset.x, maxX, 0),
+        y: clamp(next.offset.y, maxY, 0),
+      },
+    };
     viewStateRef.current = safe;
     setViewState(safe);
   }, [original, viewport]);
 
   const setCenteredView = useCallback(() => {
     if (!original) return;
-    applyViewState({ scale: 1, offset: { x: 0, y: 0 } });
-  }, [applyViewState, original]);
+    const rect = centerCropRect(original.naturalWidth, original.naturalHeight, aspect);
+    const baseScale = Math.min(viewport.width / rect.width, viewport.height / rect.height);
+    applyViewState({ scale: baseScale, offset: { x: -rect.x * baseScale, y: -rect.y * baseScale } });
+  }, [applyViewState, aspect, original, viewport]);
 
   const zoomAtCenter = useCallback((factor: number) => {
     if (!original) return;
