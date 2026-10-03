@@ -82,26 +82,20 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
     return Math.max(viewport.width / original.naturalWidth, viewport.height / original.naturalHeight);
   }, [original, viewport]);
 
-  const constrainOffset = useCallback((nextX: number, nextY: number) => {
-    if (!original) return { x: 0, y: 0 };
-    const scaledWidth = original.naturalWidth * viewStateRef.current.scale;
-    const scaledHeight = original.naturalHeight * viewStateRef.current.scale;
-    const maxX = Math.max(0, viewport.width - scaledWidth);
-    const maxY = Math.max(0, viewport.height - scaledHeight);
-    return { x: clamp(nextX, maxX, 0), y: clamp(nextY, maxY, 0) };
-  }, [original, viewport]);
-
   const applyViewState = useCallback((next: ViewState) => {
     if (!original) return;
-    const scaledWidth = original.naturalWidth * next.scale;
-    const scaledHeight = original.naturalHeight * next.scale;
-    const maxX = Math.max(0, viewport.width - scaledWidth);
-    const maxY = Math.max(0, viewport.height - scaledHeight);
+    const nextScale = next.scale;
+    const scaledWidth = original.naturalWidth * nextScale;
+    const scaledHeight = original.naturalHeight * nextScale;
+    const clampOne = (value: number, imageLength: number, viewportLength: number) => {
+      if (imageLength <= viewportLength) return (viewportLength - imageLength) / 2;
+      return clamp(value, viewportLength - imageLength, 0);
+    };
     const safe: ViewState = {
-      scale: next.scale,
+      scale: nextScale,
       offset: {
-        x: clamp(next.offset.x, maxX, 0),
-        y: clamp(next.offset.y, maxY, 0),
+        x: clampOne(next.offset.x, scaledWidth, viewport.width),
+        y: clampOne(next.offset.y, scaledHeight, viewport.height),
       },
     };
     viewStateRef.current = safe;
@@ -184,12 +178,18 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
 
   if (!open) return null;
 
-  function pointInViewport(clientX: number, clientY: number) {
+  const pointInViewport = useCallback((clientX: number, clientY: number) => {
     const rect = viewportRef.current?.getBoundingClientRect();
     return rect ? { x: clientX - rect.left, y: clientY - rect.top } : { x: clientX, y: clientY };
-  }
+  }, []);
 
-  function syncPointer(point: Point, pointerId: number) {
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!original) return;
+    event.preventDefault();
+    zoomAtCenter(Math.exp(-event.deltaY * 0.0015));
+  }, [original, zoomAtCenter]);
+
+  const syncPointer = useCallback((point: Point, pointerId: number) => {
     pointersRef.current.set(pointerId, point);
     const points = Array.from(pointersRef.current.values());
     const gesture = gestureRef.current;
@@ -200,15 +200,9 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
       const factor = distance(a, b) / Math.max(gesture.startDistance, 1);
       applyViewState({ scale: clamp(gesture.startScale * factor, minScale(), 5), offset: gesture.startOffset });
     }
-  }
+  }, [applyViewState, minScale]);
 
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-    if (!original) return;
-    event.preventDefault();
-    zoomAtCenter(Math.exp(-event.deltaY * 0.0015));
-  }
-
-  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!dataUrl) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -225,20 +219,21 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
         if (a && b) gestureRef.current = { mode: "pinch", startX: 0, startY: 0, startOffset: viewStateRef.current.offset, startDistance: distance(a, b), startScale: viewStateRef.current.scale };
       }
     }
-  }
+  }, [dataUrl, pointInViewport, syncPointer]);
 
-  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const point = pointInViewport(event.clientX, event.clientY);
     syncPointer(point, event.pointerId);
-    if (!gestureRef.current) return;
-    if (gestureRef.current.mode === "drag" && pointersRef.current.size === 1) {
-      const dx = event.clientX - gestureRef.current.startX;
-      const dy = event.clientY - gestureRef.current.startY;
-      applyViewState({ scale: viewStateRef.current.scale, offset: { x: gestureRef.current.startOffset.x + dx, y: gestureRef.current.startOffset.y + dy } });
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    if (gesture.mode === "drag" && pointersRef.current.size === 1) {
+      const dx = event.clientX - gesture.startX;
+      const dy = event.clientY - gesture.startY;
+      applyViewState({ scale: viewStateRef.current.scale, offset: { x: gesture.startOffset.x + dx, y: gesture.startOffset.y + dy } });
     }
-  }
+  }, [applyViewState, pointInViewport, syncPointer]);
 
-  function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     pointersRef.current.delete(event.pointerId);
     if (pointersRef.current.size < 2 && gestureRef.current?.mode === "pinch") gestureRef.current = null;
     if (pointersRef.current.size === 1) {
@@ -247,7 +242,7 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
     } else if (pointersRef.current.size === 0) {
       gestureRef.current = null;
     }
-  }
+  }, []);
 
   function confirm() {
     if (!original) return;
