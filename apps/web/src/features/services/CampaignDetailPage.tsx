@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FullImageLightbox } from "@/features/posts/CampaignImageControls";
 import {
   type Campaign,
   type CampaignDetail,
@@ -47,6 +48,7 @@ export function CampaignDetailPage({
   const [takedownOpen, setTakedownOpen] = useState(false);
   const [adminOnlyOpen, setAdminOnlyOpen] = useState(false);
   const [adminOnlyBusy, setAdminOnlyBusy] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -170,7 +172,7 @@ export function CampaignDetailPage({
       </button>
       <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
         <div className="product-surface p-4">
-          {campaign.coverAttachment ? <img src={campaign.coverAttachment.url} alt="" className="mb-3 h-40 w-full rounded object-cover" /> : null}
+          {campaign.coverAttachment ? <button type="button" className="group relative mb-3 block w-full overflow-hidden rounded" onClick={() => setLightbox(campaign.coverAttachment?.url ?? null)} aria-label="查看封面大图"><img src={campaign.coverAttachment.url} alt="" className="h-40 w-full rounded object-cover" /></button> : null}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-slate-500">#{campaign.displayId}</span>
             <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.text}</span>
@@ -222,7 +224,7 @@ export function CampaignDetailPage({
                 >
                   <div className="flex items-center gap-2">
                     <span className={`grid size-6 shrink-0 place-items-center rounded text-xs font-bold text-white ${selected ? "bg-blue-600" : "bg-slate-900"}`}>{index + 1}</span>
-                    {option.imageAttachment ? <img src={option.imageAttachment.url} alt="" className="size-8 shrink-0 rounded object-cover" /> : null}
+                    {option.imageAttachment ? <button type="button" onClick={(event) => { event.stopPropagation(); setLightbox(option.imageAttachment?.url ?? null); }} className="size-8 shrink-0 overflow-hidden rounded border border-slate-200" aria-label="查看选项图片大图"><img src={option.imageAttachment.url} alt="" className="size-8 rounded object-cover" /></button> : null}
                     <span className="flex-1 truncate text-sm font-medium text-slate-900">{option.label}</span>
                     <span className="text-sm font-semibold text-slate-900">{option.voteTotal} 票</span>
                     {selected ? <span className="rounded bg-blue-600 px-1.5 py-0.5 text-xs font-medium text-white">已选</span> : null}
@@ -369,6 +371,8 @@ export function CampaignDetailPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <FullImageLightbox src={lightbox} alt="竞选图片原图" onClose={() => setLightbox(null)} />
     </section>
   );
 }
