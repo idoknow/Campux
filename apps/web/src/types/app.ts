@@ -356,6 +356,8 @@ export type PostItem = {
     forwardCount: number | null;
     checkedAt: string | null;
     targets: Array<{
+      /** 发布记录 id：评论管理插件按目标（墙号）定位删除，null 表示缺失 */
+      attemptId: string | null;
       targetName: string;
       botName: string | null;
       botQqUin: string | null;

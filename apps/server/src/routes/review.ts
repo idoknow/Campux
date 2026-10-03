@@ -89,6 +89,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             include: {
               publishAttempt: {
                 select: {
+                  id: true,
                   publishTarget: {
                     select: {
                       displayName: true,

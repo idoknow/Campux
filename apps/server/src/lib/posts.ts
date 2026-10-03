@@ -38,6 +38,7 @@ export type PostQZoneMetric = {
   checkedAt: Date | null;
   qzoneTid: string;
   publishAttempt?: {
+    id: string;
     publishTarget?: {
       displayName: string;
       botAccount?: {
@@ -217,6 +218,9 @@ export function toQZonePostStats(metrics: PostQZoneMetric[], options?: { keepDel
       checkedAtTime = metric.checkedAt.getTime();
     }
     return {
+      // 发布记录 id：评论管理插件的删除按目标（墙号）定位，前端从被点击的
+      // 评论区带上它，服务端严格限定在该 attempt 内删除，避免多墙号同楼层号误删。
+      attemptId: metric.publishAttempt?.id ?? null,
       targetName: metric.publishAttempt?.publishTarget?.displayName ?? "QZone 发布目标",
       botName: metric.publishAttempt?.publishTarget?.botAccount?.displayName ?? null,
       botQqUin: metric.publishAttempt?.publishTarget?.botAccount?.qqUin.toString() ?? null,

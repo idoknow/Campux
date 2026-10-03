@@ -1326,6 +1326,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             include: {
               publishAttempt: {
                 select: {
+                  id: true,
                   publishTarget: {
                     select: {
                       displayName: true,
@@ -1391,6 +1392,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       include: {
         publishAttempt: {
           select: {
+            id: true,
             publishTarget: {
               select: {
                 displayName: true,

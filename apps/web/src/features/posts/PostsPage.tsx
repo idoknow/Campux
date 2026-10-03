@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -307,6 +307,11 @@ export function PostsPage({
   const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("review_page", 1, { min: 1 }));
   const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
+  // 轮询等异步流程里读取最新列表用：渲染闭包里的数组是旧快照。
+  const publishedItemsRef = useRef<PublishedFeedItem[]>([]);
+  useEffect(() => {
+    publishedItemsRef.current = publishedItems;
+  }, [publishedItems]);
   const [publishedTags, setPublishedTags] = useState<PostTag[]>([]);
   const [publishedTagFilter, setPublishedTagFilter] = useState("all");
   const [publishedPagination, setPublishedPagination] = useState<Pagination>(() => defaultPagination());
@@ -690,13 +695,20 @@ export function PostsPage({
     }
   }
 
-  async function deletePostComment(postId: string, commentId: string) {
+  async function deletePostComment(postId: string, commentId: string, attemptId: string | null) {
+    if (!attemptId) {
+      toast.error("缺少评论所属的发布记录，无法删除");
+      return;
+    }
     if (!window.confirm("确定删除这条评论吗？删除通过墙号在 QQ 空间执行，不可恢复。")) {
       return;
     }
     setBusyCommentKey(`${postId}:${commentId}`);
     try {
-      await api(`/api/posts/${postId}/comments/${commentId}`, { method: "DELETE" });
+      await api(`/api/posts/${postId}/comments/${commentId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ attemptId }),
+      });
       toast.success("评论已删除。");
       await refreshAll();
       // 「那年今日」面板只在挂载时拉数据，删除评论后重挂载让历史标签页同步。
@@ -722,7 +734,8 @@ export function PostsPage({
         body: JSON.stringify({ postIds }),
       });
       toast.success(result.enqueued > 0 ? "已加入刷新队列，稍候自动更新。" : "刷新任务已在队列中，请稍候。");
-      const checkedAtBefore = publishedItems.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
+      // 读 ref 而不是渲染闭包里的数组：refreshAll 触发 setState 后闭包不会更新。
+      const checkedAtBefore = publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
       for (let attempt = 0; attempt < 8; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 3_000));
         try {
@@ -730,7 +743,7 @@ export function PostsPage({
         } catch {
           // 单次轮询拉取失败不打断整体流程，下一轮继续尝试。
         }
-        const checkedAtAfter = publishedItems.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
+        const checkedAtAfter = publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
         if (checkedAtAfter && checkedAtAfter !== checkedAtBefore) {
           break;
         }
@@ -1188,7 +1201,7 @@ export function PostsPage({
                       canDeleteAny: isAdmin,
                       canDeleteOwn: Boolean(allowUserDeleteOwnPostComments),
                       busyKey: busyCommentKey,
-                      onDelete: (postId, commentId) => void deletePostComment(postId, commentId),
+                      onDelete: (postId, commentId, attemptId) => void deletePostComment(postId, commentId, attemptId),
                     } : null}
                     metricRefresh={isAdmin && item.posts.length > 0 ? {
                       busy: busyMetricRefreshKey === item.key,
@@ -1216,7 +1229,7 @@ export function PostsPage({
                       canDeleteAny: isAdmin,
                       canDeleteOwn: Boolean(allowUserDeleteOwnPostComments),
                       busyKey: busyCommentKey,
-                      onDelete: (postId, commentId) => void deletePostComment(postId, commentId),
+                      onDelete: (postId, commentId, attemptId) => void deletePostComment(postId, commentId, attemptId),
                     } : null}
                     metricRefresh={isAdmin && item.posts.length > 0 ? {
                       busy: busyMetricRefreshKey === item.key,
@@ -2473,7 +2486,7 @@ type CommentModeration = {
   canDeleteAny: boolean;
   canDeleteOwn: boolean;
   busyKey: string;
-  onDelete: (postId: string, commentId: string) => void;
+  onDelete: (postId: string, commentId: string, attemptId: string | null) => void;
 };
 
 function PublishedFeedCard({
@@ -2629,7 +2642,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
   );
 }
 
-function QZoneStatsBlock({ stats, moderation, canViewDeleted }: { stats: PostItem["qzoneStats"]; moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string) => void } | null; canViewDeleted: boolean }) {
+function QZoneStatsBlock({ stats, moderation, canViewDeleted }: { stats: PostItem["qzoneStats"]; moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string, attemptId: string | null) => void } | null; canViewDeleted: boolean }) {
   if (!stats) {
     return null;
   }
@@ -2688,7 +2701,7 @@ function QZoneStatsBlock({ stats, moderation, canViewDeleted }: { stats: PostIte
                 <span className="ml-auto text-[11px] font-semibold text-slate-400">更新 {formatFullDateTime(target.checkedAt)}</span>
               ) : null}
             </div>
-            <QZoneCommentsList comments={target.comments ?? []} moderation={moderation} canViewDeleted={canViewDeleted} />
+            <QZoneCommentsList comments={target.comments ?? []} moderation={moderation} canViewDeleted={canViewDeleted} attemptId={target.attemptId} />
           </div>
         );
       })}
@@ -2700,10 +2713,13 @@ function QZoneCommentsList({
   comments,
   moderation,
   canViewDeleted,
+  attemptId,
 }: {
   comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]>;
-  moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string) => void } | null;
+  moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string, attemptId: string | null) => void } | null;
   canViewDeleted: boolean;
+  /** 本评论区所属的发布记录 id：删除请求带它把删除限定在该墙号的说说上 */
+  attemptId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -2749,7 +2765,7 @@ function QZoneCommentsList({
                   type="button"
                   className="ml-auto shrink-0 self-center text-[10px] font-bold text-rose-500 hover:underline disabled:opacity-50"
                   disabled={moderation.busyKey === `${moderation.deletePostId}:${comment.id}`}
-                  onClick={() => moderation.onDelete(moderation.deletePostId, comment.id)}
+                  onClick={() => moderation.onDelete(moderation.deletePostId, comment.id, attemptId)}
                 >
                   {moderation.busyKey === `${moderation.deletePostId}:${comment.id}` ? "删除中..." : "删除"}
                 </button>

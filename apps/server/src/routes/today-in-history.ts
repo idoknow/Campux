@@ -103,6 +103,7 @@ export function registerTodayInHistoryRoutes(app: FastifyInstance) {
       include: {
         publishAttempt: {
           select: {
+            id: true,
             publishTarget: {
               select: {
                 displayName: true,
