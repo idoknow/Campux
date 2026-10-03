@@ -1429,6 +1429,8 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
       return { enabled: false };
     case "todayInHistory":
       return { enabled: false };
+    case "commentManagement":
+      return { enabled: false, allowUserDeleteOwnPostComments: false };
     default:
       return false;
   }

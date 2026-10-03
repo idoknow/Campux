@@ -1587,6 +1587,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     let enqueued = 0;
     const runAt = new Date();
     for (const attempt of attempts) {
+      const dedupeKey = `refreshQZonePostMetric:${attempt.id}`;
       const queued = queue.enqueueUnique(
         {
           name: "refreshQZonePostMetric",
@@ -1594,9 +1595,15 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           payload: { attemptId: attempt.id, force: true },
           runAt,
         },
-        `refreshQZonePostMetric:${attempt.id}`,
+        dedupeKey,
       );
       if (queued) {
+        enqueued += 1;
+        continue;
+      }
+      // 同一 attempt 已有排队任务时不能直接重复入队：把既有任务升级为强制刷新
+      // 并提前到本次请求的执行时间，否则它会按原 payload / 计划运行，手动刷新落空。
+      if (queue.updateQueued(dedupeKey, { payload: { attemptId: attempt.id, force: true }, runAt })) {
         enqueued += 1;
       }
     }

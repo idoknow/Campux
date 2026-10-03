@@ -157,93 +157,105 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
 
     const storedComment = await findStoredComment(tenantId, post.id, params.commentId);
 
-    const leased = await runWithActiveTenantLease(prisma, tenantId, async (transaction) => {
-      const attempts = await transaction.publishAttempt.findMany({
-        where: {
-          postId: post.id,
-          status: "succeeded",
-          qzoneTid: { not: null },
-          publishTarget: {
-            type: "qzone",
-            enabled: true,
-          },
+    // QZone 删除是慢速网络调用，放在租户 lease 之外执行，避免长时间占用租约阻塞
+    // 该墙的发布 / 指标刷新等任务；拿到结果后再用短暂 lease 原子持久化。
+    const attempts = await prisma.publishAttempt.findMany({
+      where: {
+        postId: post.id,
+        status: "succeeded",
+        qzoneTid: { not: null },
+        publishTarget: {
+          type: "qzone",
+          enabled: true,
         },
-        include: {
-          publishTarget: {
-            include: {
-              botAccount: {
-                include: {
-                  sessions: {
-                    where: {
-                      type: "qzone",
-                      domain: qzoneCookieDomain,
-                    },
-                    orderBy: { refreshedAt: "desc" },
-                    take: 1,
+      },
+      include: {
+        publishTarget: {
+          include: {
+            botAccount: {
+              include: {
+                sessions: {
+                  where: {
+                    type: "qzone",
+                    domain: qzoneCookieDomain,
                   },
+                  orderBy: { refreshedAt: "desc" },
+                  take: 1,
                 },
               },
             },
           },
         },
-        orderBy: { updatedAt: "asc" },
-      });
+      },
+      orderBy: { updatedAt: "asc" },
+    });
 
-      if (attempts.length === 0) {
-        return { ok: false as const, message: "这篇稿件没有可操作的 QZone 发布记录", results: [] satisfies CommentDeleteResult[] };
+    if (attempts.length === 0) {
+      return reply.code(502).send({ message: "这篇稿件没有可操作的 QZone 发布记录", results: [] satisfies CommentDeleteResult[] });
+    }
+
+    type PendingDeleteResult = CommentDeleteResult & {
+      attemptId: string;
+      previousVerbose: Prisma.JsonValue | null;
+      deleteVerbose: unknown;
+      failed: boolean;
+    };
+
+    const pendingResults: PendingDeleteResult[] = [];
+    for (const attempt of attempts) {
+      const targetName = attempt.publishTarget.displayName;
+      const qzoneTid = attempt.qzoneTid ?? attempt.externalId ?? "";
+      // 评论可能只存在于其中一个墙号的空间里：逐个目标尝试，
+      // “评论不存在”类失败记录下来，但只要有任一目标成功即视为成功。
+      try {
+        const session = attempt.publishTarget.botAccount.sessions[0] ?? null;
+        if (!session) {
+          throw new Error("这个发布目标还没有 QZone cookies");
+        }
+        if (session.healthStatus !== "available") {
+          throw new Error(session.healthMessage ?? "QZone cookies 不可用");
+        }
+        const deleted = await deleteQZoneEmotionComment({
+          targetName,
+          externalId: qzoneTid,
+          commentId: params.commentId,
+          cookies: toCookieRecord(session.cookies),
+        });
+        pendingResults.push({
+          targetId: attempt.publishTargetId,
+          targetName,
+          attemptId: attempt.id,
+          previousVerbose: attempt.verbose,
+          deleteVerbose: deleted.verbose,
+          ok: true,
+          failed: false,
+          message: "评论已删除",
+        });
+      } catch (error) {
+        pendingResults.push({
+          targetId: attempt.publishTargetId,
+          targetName,
+          attemptId: attempt.id,
+          previousVerbose: attempt.verbose,
+          deleteVerbose: error instanceof QZoneCommentDeleteError ? error.verbose : null,
+          ok: false,
+          failed: true,
+          message: error instanceof Error ? error.message : "删除失败",
+        });
       }
+    }
 
-      const results: CommentDeleteResult[] = [];
-      for (const attempt of attempts) {
-        const targetName = attempt.publishTarget.displayName;
-        const qzoneTid = attempt.qzoneTid ?? attempt.externalId ?? "";
-        try {
-          const session = attempt.publishTarget.botAccount.sessions[0] ?? null;
-          if (!session) {
-            throw new Error("这个发布目标还没有 QZone cookies");
-          }
-          if (session.healthStatus !== "available") {
-            throw new Error(session.healthMessage ?? "QZone cookies 不可用");
-          }
+    const wiredResults = pendingResults.map(({ targetId, targetName, ok, message }) => ({ targetId, targetName, ok, message }));
 
-          let deleteVerbose: unknown = null;
-          try {
-            const deleted = await deleteQZoneEmotionComment({
-              targetName,
-              externalId: qzoneTid,
-              commentId: params.commentId,
-              cookies: toCookieRecord(session.cookies),
-            });
-            deleteVerbose = deleted.verbose;
-          } catch (error) {
-            // 评论可能只存在于其中一个墙号的空间里：逐个目标尝试，
-            // “评论不存在”类失败记录下来，但只要有任一目标成功即视为成功。
-            const message = error instanceof Error ? error.message : "删除失败";
-            await transaction.postLog.create({
-              data: {
-                tenantId,
-                postId: post.id,
-                actorId: context.user.id,
-                oldStatus: post.status,
-                newStatus: post.status,
-                comment: `${targetName} 删除评论失败：${message}`,
-              },
-            });
-            if (error instanceof QZoneCommentDeleteError) {
-              await transaction.publishAttempt.update({
-                where: { id: attempt.id },
-                data: { verbose: toInputJson({ previous: attempt.verbose, commentDelete: error.verbose }) },
-              });
-            }
-            results.push({ targetId: attempt.publishTargetId, targetName, ok: false, message });
-            continue;
-          }
-
+    const leased = await runWithActiveTenantLease(prisma, tenantId, async (transaction) => {
+      for (const result of pendingResults) {
+        const verboseData = toInputJson({ previous: result.previousVerbose, commentDelete: result.deleteVerbose });
+        if (!result.failed) {
           await transaction.publishAttempt.update({
-            where: { id: attempt.id },
-            data: { verbose: toInputJson({ previous: attempt.verbose, commentDelete: deleteVerbose }) },
+            where: { id: result.attemptId },
+            data: { verbose: verboseData },
           });
-          await markDeletedCommentInMetrics(transaction, attempt.id, params.commentId, actorName);
+          await markDeletedCommentInMetrics(transaction, result.attemptId, params.commentId, actorName);
           await transaction.postLog.create({
             data: {
               tenantId,
@@ -251,12 +263,10 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
               actorId: context.user.id,
               oldStatus: post.status,
               newStatus: post.status,
-              comment: `${targetName} 删除了评论（${storedComment?.name || storedComment?.uin || params.commentId}）`,
+              comment: `${result.targetName} 删除了评论（${storedComment?.name || storedComment?.uin || params.commentId}）`,
             },
           });
-          results.push({ targetId: attempt.publishTargetId, targetName, ok: true, message: "评论已删除" });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "删除失败";
+        } else {
           await transaction.postLog.create({
             data: {
               tenantId,
@@ -264,14 +274,19 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
               actorId: context.user.id,
               oldStatus: post.status,
               newStatus: post.status,
-              comment: `${targetName} 删除评论失败：${message}`,
+              comment: `${result.targetName} 删除评论失败：${result.message}`,
             },
           });
-          results.push({ targetId: attempt.publishTargetId, targetName, ok: false, message });
+          if (result.deleteVerbose) {
+            await transaction.publishAttempt.update({
+              where: { id: result.attemptId },
+              data: { verbose: verboseData },
+            });
+          }
         }
       }
 
-      if (!results.some((result) => result.ok)) {
+      if (!pendingResults.some((result) => result.ok)) {
         await writeAuditLog({
           tenantId,
           actorId: context.user.id,
@@ -282,10 +297,10 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
             displayId: post.displayId,
             commentId: params.commentId,
             commentUin: storedComment?.uin ?? null,
-            results,
+            results: wiredResults,
           },
         }, transaction);
-        return { ok: false as const, message: results[0]?.message ?? "评论删除失败", results };
+        return { ok: false as const, message: pendingResults[0]?.message ?? "评论删除失败", results: wiredResults };
       }
 
       await writeAuditLog({
@@ -301,10 +316,10 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
           commentName: storedComment?.name ?? null,
           commentContentPreview: storedComment?.contentPreview ?? null,
           deletedByAdmin: isAdmin,
-          results,
+          results: wiredResults,
         },
       }, transaction);
-      return { ok: true as const, message: "评论已删除", results };
+      return { ok: true as const, message: "评论已删除", results: wiredResults };
     });
 
     if (!leased.active) {
@@ -317,16 +332,27 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
     // 成功后触发这些发布目标的指标刷新，让网页端评论列表尽快同步。
     const now = new Date();
     for (const attempt of await prisma.publishAttempt.findMany({
-      where: { postId: post.id, status: "succeeded", qzoneTid: { not: null } },
+      where: {
+        tenantId,
+        postId: post.id,
+        status: "succeeded",
+        qzoneTid: { not: null },
+        publishTarget: { type: "qzone", enabled: true, botAccount: { enabled: true } },
+      },
       select: { id: true },
       take: 10,
     })) {
-      queue.enqueueUnique({
+      const dedupeKey = `refreshQZonePostMetric:${attempt.id}`;
+      const queued = queue.enqueueUnique({
         name: "refreshQZonePostMetric",
         tenantId,
         payload: { attemptId: attempt.id, force: true },
         runAt: now,
-      }, `refreshQZonePostMetric:${attempt.id}`);
+      }, dedupeKey);
+      if (!queued) {
+        // 已有排队任务时升级为强制刷新并立即执行，避免 force 意图被既有任务吞掉。
+        queue.updateQueued(dedupeKey, { payload: { attemptId: attempt.id, force: true }, runAt: now });
+      }
     }
 
     return { ok: true, results: leased.value.results };

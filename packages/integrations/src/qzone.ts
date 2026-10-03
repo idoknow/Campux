@@ -114,6 +114,8 @@ export type QZoneCommentDeleteInput = {
   externalId: string;
   commentId: string;
   cookies?: Record<string, string> | null;
+  /** 删除请求超时毫秒数，默认 10 秒 */
+  timeoutMs?: number;
 };
 
 export type QZoneCommentDeleteVerbose = {
@@ -730,6 +732,8 @@ export async function deleteQZoneEmotionComment(input: QZoneCommentDeleteInput):
         cookie: cookieHeader,
       },
       body,
+      // 删除请求必须限时：挂起的响应会拖住整个删除路由，也占着租约外的调用现场。
+      signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
     });
     const text = await response.text();
     // delcomment_ugc 返回 HTML 包裹的 frameElement.callback(JSON)
@@ -1496,7 +1500,10 @@ function isCommentDeleteSuccess(response: Response, parsed: unknown, rawText: st
     }
   }
 
-  if (/"(?:code|ret|subcode)"\s*:\s*0/.test(rawText) || /callback\(\s*0\s*\)/i.test(rawText)) {
+  // 不再从原始文本里嗅探 "code":0 这类宽松成功标记：它可能匹配到无关或嵌套的
+  // 零值（例如失败 JSON 里的其他字段）。解析不出结构化结果一律视为失败。
+  // 仅保留 callback(0) 这一 QZone 经典纯成功形式（结构化解析器无法表达）。
+  if (/callback\(\s*0\s*\)/i.test(rawText)) {
     return {
       ok: true,
     };

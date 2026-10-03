@@ -335,6 +335,8 @@ export function PostsPage({
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
   const [busyCommentKey, setBusyCommentKey] = useState("");
   const [busyMetricRefreshKey, setBusyMetricRefreshKey] = useState("");
+  // 「那年今日」面板在挂载时拉取数据：评论删除 / 指标刷新后递增此 key 强制重挂载重拉。
+  const [historyPanelReloadKey, setHistoryPanelReloadKey] = useState(0);
   const [autoFollowBusy, setAutoFollowBusy] = useState(false);
   const [approveAllOpen, setApproveAllOpen] = useState(false);
   const [approveAllBusy, setApproveAllBusy] = useState(false);
@@ -484,7 +486,12 @@ export function PostsPage({
       await Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]);
     }
     if (activeTab === "published") {
-      await Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]);
+      // 有搜索关键词时走关键词感知的请求，避免删除评论 / 延迟刷新后把搜索结果冲掉。
+      if (publishedKeyword.trim()) {
+        await Promise.all([refreshPublishedTags(), searchPublishedFeed(publishedPage)]);
+      } else {
+        await Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]);
+      }
     }
   }
 
@@ -692,6 +699,8 @@ export function PostsPage({
       await api(`/api/posts/${postId}/comments/${commentId}`, { method: "DELETE" });
       toast.success("评论已删除。");
       await refreshAll();
+      // 「那年今日」面板只在挂载时拉数据，删除评论后重挂载让历史标签页同步。
+      setHistoryPanelReloadKey((key) => key + 1);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "删除失败");
     } finally {
@@ -699,8 +708,9 @@ export function PostsPage({
     }
   }
 
-  // 手动刷新一条（或一批）稿件的 QZone 指标与评论：入队刷新任务后延迟两次拉取列表。
-  // 任务走逐墙号限速，若墙号刚刷新过会被延后，所以 3s / 9s 各补拉一次。
+  // 手动刷新一条（或一批）稿件的 QZone 指标与评论：入队刷新任务后有界轮询拉取列表。
+  // 任务走逐墙号限速，墙号刚刷新过会被延后，完成时间不定：3s 间隔最多轮询 8 次，
+  // 目标卡片的 checkedAt 变化即提前结束；结束后重挂载「那年今日」面板同步最新数据。
   async function refreshPostQzoneMetrics(itemKey: string, postIds: string[]) {
     if (postIds.length === 0 || busyMetricRefreshKey) {
       return;
@@ -712,8 +722,20 @@ export function PostsPage({
         body: JSON.stringify({ postIds }),
       });
       toast.success(result.enqueued > 0 ? "已加入刷新队列，稍候自动更新。" : "刷新任务已在队列中，请稍候。");
-      window.setTimeout(() => void refreshAll(), 3_000);
-      window.setTimeout(() => void refreshAll(), 9_000);
+      const checkedAtBefore = publishedItems.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3_000));
+        try {
+          await refreshAll();
+        } catch {
+          // 单次轮询拉取失败不打断整体流程，下一轮继续尝试。
+        }
+        const checkedAtAfter = publishedItems.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
+        if (checkedAtAfter && checkedAtAfter !== checkedAtBefore) {
+          break;
+        }
+      }
+      setHistoryPanelReloadKey((key) => key + 1);
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "刷新失败");
     } finally {
@@ -1181,7 +1203,9 @@ export function PostsPage({
         </TabsContent>
         {showHistoryTab ? (
           <TabsContent value="history" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+            {/* key 递增时强制重挂载：面板只在挂载时拉数据，删除评论 / 指标刷新后靠它同步。 */}
             <TodayInHistoryPanel
+                key={historyPanelReloadKey}
                 renderItem={(item) => (
                   <PublishedFeedCard
                     item={item}
@@ -2492,7 +2516,8 @@ function PublishedFeedCard({
             <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">独立发布</Badge>
           )}
           <span className="ml-auto flex items-center gap-2">
-            {item.qzoneStats && item.qzoneStats.targets.length > 0 ? (
+            {/* 按钮仅在具备刷新控制（管理员）且卡片确有 QZone 数据时渲染，普通用户不显示空按钮。 */}
+            {metricRefresh && item.qzoneStats && item.qzoneStats.targets.length > 0 ? (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 disabled:opacity-50"

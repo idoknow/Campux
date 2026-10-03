@@ -275,6 +275,8 @@ async function handleQZonePostMetricRefresh(
     }
     // 合并本地"已删除"的评论标记：QZone 侧已删的评论不会再出现在新列表里，
     // 但管理员/审核员需要在网页端看到删除痕迹，所以把旧快照里的 deleted 条目保留下来。
+    // 本地已标记删除的同 id 评论优先于 QZone 新快照（QZone 删除传播有延迟，
+    // 新列表可能仍带回同 id 评论），保留其删除标记与详情，同时避免重复条目。
     const previousMetric = await transaction.qZonePostMetric.findUnique({
       where: { publishAttemptId: attempt.id },
       select: { comments: true },
@@ -282,10 +284,12 @@ async function handleQZonePostMetricRefresh(
     const previousComments = Array.isArray(previousMetric?.comments)
       ? (previousMetric.comments as Array<Record<string, unknown>>)
       : [];
-    const deletedKept = previousComments.filter(
-      (comment) => comment?.deleted === true && !comments.some((fresh) => String(fresh.id) === String(comment.id)),
-    );
-    const commentsJson = toInputJson([...comments, ...deletedKept]);
+    const deletedKept = previousComments.filter((comment) => comment?.deleted === true);
+    const deletedKeptIds = new Set(deletedKept.map((comment) => String(comment?.id ?? "")));
+    const commentsJson = toInputJson([
+      ...comments.filter((fresh) => !deletedKeptIds.has(String(fresh.id))),
+      ...deletedKept,
+    ]);
     if (!await isTenantRuntimeActive(transaction, attempt.tenantId)) {
       return;
     }

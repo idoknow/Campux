@@ -21,6 +21,8 @@ export type RuntimeQueue = {
   stop(): Promise<void>;
   enqueue(job: Omit<RuntimeJob, "id" | "dedupeKey">): RuntimeJob;
   enqueueUnique(job: Omit<RuntimeJob, "id" | "dedupeKey">, dedupeKey: string): RuntimeJob | null;
+  /** 按 dedupeKey 更新仍在队列中的任务（已出队的返回 false）。用于把既有任务升级 payload / 提前执行。 */
+  updateQueued(dedupeKey: string, patch: { payload?: Record<string, unknown>; runAt?: Date }): boolean;
   rescheduleCurrent(job: RuntimeJob, runAt: Date): void;
   registerHandler(name: RuntimeJobName, handler: (job: RuntimeJob) => Promise<void>): void;
   snapshot(): {
@@ -234,6 +236,20 @@ export function createRuntimeQueue(options: RuntimeQueueOptions): RuntimeQueue {
       dedupeKeys.add(dedupeKey);
       jobs.push(queuedJob);
       return queuedJob;
+    },
+
+    updateQueued(dedupeKey, patch) {
+      const job = jobs.find((candidate) => candidate.dedupeKey === dedupeKey);
+      if (!job) {
+        return false;
+      }
+      if (patch.payload) {
+        job.payload = patch.payload;
+      }
+      if (patch.runAt) {
+        job.runAt = patch.runAt;
+      }
+      return true;
     },
 
     rescheduleCurrent(job, runAt) {
