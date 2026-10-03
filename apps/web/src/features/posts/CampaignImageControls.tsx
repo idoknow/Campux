@@ -84,23 +84,31 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
 
   const constrainOffset = useCallback((nextX: number, nextY: number) => {
     if (!original) return { x: 0, y: 0 };
-    const maxX = Math.max(0, viewport.width - original.naturalWidth * viewStateRef.current.scale);
-    const maxY = Math.max(0, viewport.height - original.naturalHeight * viewStateRef.current.scale);
+    const scaledWidth = original.naturalWidth * viewStateRef.current.scale;
+    const scaledHeight = original.naturalHeight * viewStateRef.current.scale;
+    const maxX = Math.max(0, viewport.width - scaledWidth);
+    const maxY = Math.max(0, viewport.height - scaledHeight);
     return { x: clamp(nextX, maxX, 0), y: clamp(nextY, maxY, 0) };
   }, [original, viewport]);
 
   const applyViewState = useCallback((next: ViewState) => {
-    const safe: ViewState = { offset: constrainOffset(next.offset.x, next.offset.y), scale: next.scale };
+    if (!original) return;
+    const nextScale = next.scale;
+    const scaledWidth = original.naturalWidth * nextScale;
+    const scaledHeight = original.naturalHeight * nextScale;
+    const freeLeft = scaledWidth < viewport.width;
+    const freeTop = scaledHeight < viewport.height;
+    const centerX = freeLeft ? (viewport.width - scaledWidth) / 2 : clamp(next.offset.x, viewport.width - scaledWidth, 0);
+    const centerY = freeTop ? (viewport.height - scaledHeight) / 2 : clamp(next.offset.y, viewport.height - scaledHeight, 0);
+    const safe: ViewState = { scale: nextScale, offset: { x: centerX, y: centerY } };
     viewStateRef.current = safe;
     setViewState(safe);
-  }, [constrainOffset]);
+  }, [original, viewport]);
 
   const setCenteredView = useCallback(() => {
     if (!original) return;
-    const rect = centerCropRect(original.naturalWidth, original.naturalHeight, aspect);
-    const baseScale = Math.min(viewport.width / rect.width, viewport.height / rect.height);
-    applyViewState({ scale: baseScale, offset: { x: -rect.x * baseScale, y: -rect.y * baseScale } });
-  }, [applyViewState, aspect, original, viewport]);
+    applyViewState({ scale: 1, offset: { x: 0, y: 0 } });
+  }, [applyViewState, original]);
 
   const zoomAtCenter = useCallback((factor: number) => {
     if (!original) return;
@@ -115,20 +123,6 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
       },
     });
   }, [applyViewState, minScale, original, viewport]);
-
-  const zoomAtPoint = useCallback((point: Point, factor: number) => {
-    if (!original) return;
-    const current = viewStateRef.current;
-    const nextScale = clamp(current.scale * factor, minScale(), 5);
-    const ratio = nextScale / current.scale;
-    applyViewState({
-      scale: nextScale,
-      offset: {
-        x: point.x - (point.x - current.offset.x) * ratio,
-        y: point.y - (point.y - current.offset.y) * ratio,
-      },
-    });
-  }, [applyViewState, minScale, original]);
 
   useEffect(() => {
     if (!open || !dataUrl) return;
@@ -206,7 +200,7 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
   function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
     if (!original) return;
     event.preventDefault();
-    zoomAtPoint(pointInViewport(event.clientX, event.clientY), Math.exp(-event.deltaY * 0.0015));
+    zoomAtCenter(Math.exp(-event.deltaY * 0.0015));
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -275,11 +269,12 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
         ) : (
           <div className="space-y-3">
             <div ref={viewportRef} className="relative mx-auto w-full max-w-[520px] cursor-grab touch-none overflow-hidden rounded-lg bg-slate-900 active:cursor-grabbing" style={{ aspectRatio: `${aspect}` }} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}>
+              <div className="absolute inset-0 cursor-grab touch-none active:cursor-grabbing" />
               <img
                 src={dataUrl ?? ""}
                 alt=""
                 draggable={false}
-                className="absolute left-0 top-0 max-w-none select-none"
+                className="pointer-events-none absolute left-0 top-0 max-w-none select-none"
                 style={{ width: original.naturalWidth * viewState.scale, height: original.naturalHeight * viewState.scale, transform: `translate(${viewState.offset.x}px, ${viewState.offset.y}px)` }}
               />
               <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
