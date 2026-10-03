@@ -176,8 +176,6 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
     };
   }, [original, viewport, viewState]);
 
-  if (!open) return null;
-
   const pointInViewport = useCallback((clientX: number, clientY: number) => {
     const rect = viewportRef.current?.getBoundingClientRect();
     return rect ? { x: clientX - rect.left, y: clientY - rect.top } : { x: clientX, y: clientY };
@@ -243,6 +241,8 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
       gestureRef.current = null;
     }
   }, []);
+
+  if (!open) return null;
 
   function confirm() {
     if (!original) return;
