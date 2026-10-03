@@ -149,6 +149,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableCampaigns: false,
     allowAnonymousCampaign: false,
     maxActiveCampaignsPerUser: 0,
+    maxCampaignOptions: 30,
     enableAggregateLogin: false,
     enableBroadcast: false,
     broadcastQuickPresets: [] as Array<{ label: string; minutes: number }>,
@@ -237,6 +238,7 @@ async function readPublicMetadata(tenantId: string) {
     metadata.maxActiveCampaignsPerUser = pluginConfig.campaigns.enabled
       ? pluginConfig.campaigns.maxActivePerUser
       : 0;
+    metadata.maxCampaignOptions = pluginConfig.campaigns.maxOptions;
     // 聚合登录：未启用时服务页的「第三方登录」入口隐藏。
     metadata.enableAggregateLogin = pluginConfig.aggregateLogin.enabled;
     // 广播通知：未启用时投稿页顶部胶囊与服务页入口隐藏；快选时长仅在该插件开启时透出。

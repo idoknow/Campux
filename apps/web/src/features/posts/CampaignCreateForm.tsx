@@ -14,6 +14,13 @@ type CampaignImage = { original: string | null; dataUrl: string | null };
 type CropDraft = { title: string; dataUrl: string; optionIndex?: number };
 const COVER_ASPECT = 16 / 9;
 const OPTION_ASPECT = 1;
+const DEFAULT_MAX_OPTIONS = 30;
+const MAX_TITLE = 30;
+const MAX_OPTION_LABEL = 20;
+
+function clampMaxOptions(value: number | undefined): number {
+  return Math.max(2, Math.min(200, Math.round(Number(value ?? DEFAULT_MAX_OPTIONS) || DEFAULT_MAX_OPTIONS)));
+}
 
 function emptyOption(): OptionForm {
   return { label: "", original: null, dataUrl: null };
@@ -44,6 +51,7 @@ export function CampaignCreateForm({
   const [busy, setBusy] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [cropDraft, setCropDraft] = useState<CropDraft | null>(null);
+  const maxOptions = clampMaxOptions(metadata.maxCampaignOptions ?? DEFAULT_MAX_OPTIONS);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const optionInputsRef = useRef<Array<HTMLInputElement | null>>([]);
   const coverReadSeq = useRef(0);
@@ -95,7 +103,11 @@ export function CampaignCreateForm({
   }
 
   function addOption() {
-    setOptions((current) => current.length >= 20 ? current : [...current, emptyOption()]);
+    if (options.length >= maxOptions) {
+      toast.error(`最多添加 ${maxOptions} 个选项`);
+      return;
+    }
+    setOptions((prev) => [...prev, emptyOption()]);
   }
 
   function removeOption(index: number) {

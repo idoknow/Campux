@@ -19,7 +19,6 @@ type CampaignWithAuthor = Campaign & { author?: { displayName: string | null; qq
 
 const FILTERS: Array<{ value: CampaignFilter; label: string }> = [
   { value: "active", label: "进行中" },
-  { value: "ending_soon", label: "快结束" },
   { value: "ended", label: "已结束" },
 ];
 
@@ -132,7 +131,7 @@ export function CampaignsPage({
       <div className="mt-3 grid gap-2">
         {loading ? <p className="py-6 text-center text-sm text-slate-500">正在加载…</p> : items.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">暂无竞选。</p> : items.map((item) => {
           const badge = statusBadge(item.status);
-          const showReviewActions = filter === "pending" && item.status === "pending_approval" && canReview;
+          const showReviewActions = false;
           return (
             <div key={item.id} className="rounded-md border border-slate-200 bg-white shadow-none transition hover:border-slate-300">
               <button
