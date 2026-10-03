@@ -735,7 +735,20 @@ export function PostsPage({
       });
       toast.success(result.enqueued > 0 ? "已加入刷新队列，稍候自动更新。" : "刷新任务已在队列中，请稍候。");
       // 读 ref 而不是渲染闭包里的数组：refreshAll 触发 setState 后闭包不会更新。
-      const checkedAtBefore = publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
+      // 多墙号卡片每个目标各自刷新，逐目标记录初始 checkedAt，等全部目标的
+      // checkedAt 都变化后才提前退出，避免只看聚合时间漏等其余墙号的数据。
+      const targetKey = (target: { attemptId: string | null; qzoneTid: string }) => target.attemptId ?? target.qzoneTid;
+      const checkedAtBefore = new Map(
+        (publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.targets ?? [])
+          .map((target) => [targetKey(target), target.checkedAt] as const),
+      );
+      const allTargetsRefreshed = () => {
+        const targets = publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.targets ?? [];
+        return targets.length > 0 && targets.every((target) => {
+          const before = checkedAtBefore.get(targetKey(target));
+          return target.checkedAt !== null && target.checkedAt !== before;
+        });
+      };
       for (let attempt = 0; attempt < 8; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 3_000));
         try {
@@ -743,8 +756,7 @@ export function PostsPage({
         } catch {
           // 单次轮询拉取失败不打断整体流程，下一轮继续尝试。
         }
-        const checkedAtAfter = publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.checkedAt ?? null;
-        if (checkedAtAfter && checkedAtAfter !== checkedAtBefore) {
+        if (allTargetsRefreshed()) {
           break;
         }
       }
