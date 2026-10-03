@@ -88,8 +88,10 @@ function buildListWhere(tenantId: string, filter: string, keyword: string | unde
       base.status = "ended";
       break;
     default:
-      base.status = "running";
-      base.endsAt = { gt: now };
+      base.OR = [
+        { status: "running", endsAt: { gt: now } },
+        { status: "pending_approval", endsAt: null },
+      ];
       break;
   }
   if (keyword?.trim()) {
