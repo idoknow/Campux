@@ -2468,14 +2468,15 @@ function PublishedFeedCard({
   metricRefresh: { busy: boolean; onRefresh: () => void } | null;
 }) {
   const isBatch = item.kind === "batch";
-  // 管理员可删任意稿件评论：取首条稿件 id 当接口参数；
-  // 普通用户仅可删自己稿件下的评论：取自己的那条稿件 id。
+  // 管理员可删任意稿件评论：取首条稿件 id 当接口参数（服务端按角色放行）。
+  // 普通用户仅可删自己稿件下的评论：批量稿件共享同一条说说，若批次内作者混杂，
+  // 服务端只校验传入的稿件归属，会越权删到他人稿件的评论，因此混合批次整体禁用。
   const moderation = commentModeration && item.posts.length > 0
     ? {
         deletePostId: commentModeration.canDeleteAny
           ? item.posts[0]!.id
-          : commentModeration.canDeleteOwn
-            ? item.posts.find((post) => post.mine)?.id ?? ""
+          : commentModeration.canDeleteOwn && item.posts.every((post) => post.mine)
+            ? item.posts[0]!.id
             : "",
         busyKey: commentModeration.busyKey,
         onDelete: commentModeration.onDelete,

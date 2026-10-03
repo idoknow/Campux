@@ -119,7 +119,23 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
     const isAdmin = hasTenantRole(role, "admin");
     const post = await prisma.post.findFirst({
       where: { id: params.id, tenantId },
-      select: { id: true, displayId: true, authorId: true, status: true },
+      select: {
+        id: true,
+        displayId: true,
+        authorId: true,
+        status: true,
+        batchItem: {
+          select: {
+            batch: {
+              select: {
+                items: {
+                  select: { post: { select: { authorId: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!post) {
       return reply.code(404).send({ message: "稿件不存在" });
@@ -130,6 +146,12 @@ export function registerCommentModerationRoutes(app: FastifyInstance, queue: Run
       }
       if (post.authorId !== context.user.id) {
         return reply.code(403).send({ message: "只能删除自己稿件下的评论" });
+      }
+      // 批量稿件共享同一条说说，评论挂在这条说说上而无法按稿件归属区分；
+      // 混合作者的批次若放行，用户会借自己稿件的授权删到他人稿件的评论。
+      const batchAuthorIds = new Set(post.batchItem?.batch.items.map((item) => item.post.authorId) ?? []);
+      if (batchAuthorIds.size > 1) {
+        return reply.code(403).send({ message: "该稿件与其他用户稿件合并发布为同一条说说，评论无法按稿件区分归属，暂不支持删除" });
       }
     }
 

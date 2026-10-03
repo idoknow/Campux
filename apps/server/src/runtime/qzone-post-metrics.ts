@@ -12,6 +12,9 @@ import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 const refreshIntervalMs = 60 * 60 * 1000;
 const refreshFreshnessMs = 55 * 60 * 1000;
+// 强制刷新绕过新鲜度时效，但仍需原子 claim 防并发重叠（慢响应覆盖新快照）；
+// 该窗口仅表示"一次刷新可能在途"的最长时间，也顺带构成手动刷新的频率下限。
+const forceRefreshLockMs = 3 * 60 * 1000;
 const perBotRequestSpacingMs = 45 * 1000;
 const metricRequestReservationPayloadKey = "qzoneMetricRequestReservedAt";
 
@@ -215,19 +218,24 @@ async function handleQZonePostMetricRefresh(
     return;
   }
   delete job.payload[metricRequestReservationPayloadKey];
-  // 管理员手动刷新（payload.force）跳过新鲜度 claim：目的就是立刻拉最新数据，
-  // 否则 55 分钟内的常规刷新记录会让手动刷新被"freshness claim lost"拒掉。
+  // 管理员手动刷新（payload.force）绕过 55 分钟新鲜度时效，但仍走原子 claim：
+  // 同一 attempt 的定时刷新/多次强刷可能并发，若不加锁，较慢的响应会用旧数据覆盖新快照。
+  // 强刷的 claim 窗口缩短为 forceRefreshLockMs，只用于串行化在途请求。
   const forceRefresh = job.payload.force === true;
-  if (!forceRefresh) {
-    const claim = await runWithActiveTenantLease(
-      prisma,
-      attempt.tenantId,
-      (transaction) => claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now), transaction),
-    );
-    if (!claim.active || !claim.value) {
-      logger.info({ attemptId, botAccountId }, "qzone post metric refresh skipped after freshness claim lost");
-      return;
-    }
+  const claim = await runWithActiveTenantLease(
+    prisma,
+    attempt.tenantId,
+    (transaction) => claimQZonePostMetricRefresh(
+      attempt,
+      qzoneTid,
+      new Date(now),
+      transaction,
+      forceRefresh ? forceRefreshLockMs : refreshFreshnessMs,
+    ),
+  );
+  if (!claim.active || !claim.value) {
+    logger.info({ attemptId, botAccountId, forceRefresh }, "qzone post metric refresh skipped after refresh claim lost");
+    return;
   }
   dispatchState.lastStartedAt = now;
   dispatchState.nextReservationAt = Math.max(dispatchState.nextReservationAt, now + perBotRequestSpacingMs);
@@ -349,8 +357,9 @@ async function claimQZonePostMetricRefresh(
   qzoneTid: string,
   claimedAt: Date,
   client: Prisma.TransactionClient | typeof prisma = prisma,
+  staleWindowMs: number = refreshFreshnessMs,
 ) {
-  const staleBefore = new Date(claimedAt.getTime() - refreshFreshnessMs);
+  const staleBefore = new Date(claimedAt.getTime() - staleWindowMs);
   const existing = attempt.qzonePostMetrics[0] ?? null;
   if (existing) {
     const claimed = await client.qZonePostMetric.updateMany({
