@@ -287,7 +287,7 @@ export function registerCampaignRoutes(app: FastifyInstance, config: CampuxConfi
           imageAttachment: attachmentToJsonValue(attachmentFromJson(entry.imageAttachment)),
           voters: campaign.showVoterDetails
             ? entry.votes
-                .map((vote: { count: number; voter: { displayName: string | null; qqUin: bigint } | null }) => ({ count: vote.count, voter: vote.voter }))
+                .map((vote: { count: number; voter: { displayName: string | null; qqUin: bigint } | null }) => ({ count: vote.count, voter: vote.voter ? { displayName: vote.voter.displayName, qqUin: vote.voter.qqUin.toString() } : null }))
                 .sort((left: { count: number }, right: { count: number }) => right.count - left.count)
             : [],
         })),
