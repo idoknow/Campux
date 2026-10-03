@@ -108,6 +108,35 @@ export type QZoneRecallResult = {
   verbose: QZoneRecallVerbose;
 };
 
+export type QZoneCommentDeleteInput = {
+  targetName: string;
+  /** 说说 tid */
+  externalId: string;
+  commentId: string;
+  cookies?: Record<string, string> | null;
+  /** 删除请求超时毫秒数，默认 10 秒 */
+  timeoutMs?: number;
+};
+
+export type QZoneCommentDeleteVerbose = {
+  mode: "real-qzone-comment-delete";
+  targetName: string;
+  externalId: string;
+  commentId: string;
+  cookieStatus: "available" | "missing";
+  cookieNames: string[];
+  uin: string | null;
+  deletedAt: string | null;
+  http: QZoneHttpLog[];
+  note?: string;
+};
+
+export type QZoneCommentDeleteResult = {
+  externalId: string;
+  commentId: string;
+  verbose: QZoneCommentDeleteVerbose;
+};
+
 export type QZoneEmotionMetricsInput = {
   uin: string;
   tid: string;
@@ -136,6 +165,7 @@ export type QZoneEmotionMetricsResult = {
 };
 
 export type QZoneCommentReply = {
+  id: string;
   uin: string;
   name: string;
   content: string;
@@ -144,6 +174,7 @@ export type QZoneCommentReply = {
 };
 
 export type QZoneComment = {
+  id: string;
   uin: string;
   name: string;
   content: string;
@@ -184,6 +215,16 @@ export function isAmbiguousQZonePublishTimeout(http: QZoneHttpLog[]) {
   return false;
 }
 
+export class QZoneCommentDeleteError extends Error {
+  verbose: QZoneCommentDeleteVerbose;
+
+  constructor(message: string, verbose: QZoneCommentDeleteVerbose) {
+    super(message);
+    this.name = "QZoneCommentDeleteError";
+    this.verbose = verbose;
+  }
+}
+
 export class QZoneRecallError extends Error {
   verbose: QZoneRecallVerbose;
 
@@ -207,6 +248,9 @@ export class QZoneEmotionMetricsError extends Error {
 const publishEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_publish_v6";
 const emotionDetailEndpoint = "https://h5.qzone.qq.com/proxy/domain/taotao.qq.com/cgi-bin/emotion_cgi_msgdetail_v6";
 const emotionUpdateEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_update";
+// 实测（2026-10）有效的删除评论端点：delcomment_ugc，域名是 taotao.qzone.qq.com；
+// topicId 必须带 QQ 前缀（hostUin_tid），裸 tid 或旧端点 emotion_cgi_delete_comment 都会被网关直接 500。
+const emotionDeleteCommentEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_delcomment_ugc";
 const emotionMetricsEndpoint = "https://user.qzone.qq.com/proxy/domain/r.qzone.qq.com/cgi-bin/user/qz_opcnt2";
 const uploadImageEndpoint = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image";
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -610,6 +654,117 @@ export async function setQZoneEmotionPrivate(input: QZoneRecallInput): Promise<Q
     externalId: input.externalId,
     verbose,
   };
+}
+
+/**
+ * 删除说说的顶层评论（会连带楼中楼回复）。
+ * 需要说说作者（即墙号 bot）本人的 cookies。
+ */
+export async function deleteQZoneEmotionComment(input: QZoneCommentDeleteInput): Promise<QZoneCommentDeleteResult> {
+  const cookieNames = input.cookies ? Object.keys(input.cookies).sort() : [];
+  // QZone 页面请求里 hostUin 从不带前导 0（cookies 里的 uin 是 0xxxxxxxxx 形式）。
+  const rawUin = normalizeUin(input.cookies);
+  const uin = rawUin ? (rawUin.replace(/^0+/, "") || rawUin) : "";
+  const verbose: QZoneCommentDeleteVerbose = {
+    mode: "real-qzone-comment-delete",
+    targetName: input.targetName,
+    externalId: input.externalId,
+    commentId: input.commentId,
+    cookieStatus: input.cookies && cookieNames.length > 0 ? "available" : "missing",
+    cookieNames,
+    uin,
+    deletedAt: null,
+    http: [],
+    note: "通过墙号（说说作者）身份删除指定评论，顶层评论删除会连带楼中楼。",
+  };
+
+  if (!input.cookies || cookieNames.length === 0) {
+    throw new QZoneCommentDeleteError("缺少 QZone cookies，无法删除评论", verbose);
+  }
+  const pSkey = input.cookies.p_skey || input.cookies.skey;
+  if (!pSkey) {
+    throw new QZoneCommentDeleteError("QZone cookies 缺少 p_skey/skey，无法计算 g_tk", verbose);
+  }
+  if (!uin) {
+    throw new QZoneCommentDeleteError("QZone cookies 缺少 uin/ptui_loginuin，无法确定操作账号", verbose);
+  }
+
+  const gtk = generateGtk(pSkey);
+  const cookieHeader = toCookieHeader(input.cookies);
+  const url = `${emotionDeleteCommentEndpoint}?g_tk=${encodeURIComponent(String(gtk))}`;
+  const body = new URLSearchParams();
+  body.set("uin", uin);
+  body.set("hostUin", uin);
+  // UGC 删除接口的 topicId 是全局标识：hostUin_tid
+  body.set("topicId", `${uin}_${input.externalId}`);
+  body.set("commentId", input.commentId);
+  body.set("inCharset", "");
+  body.set("outCharset", "");
+  body.set("ref", "");
+  body.set("hostuin", uin);
+  body.set("code_version", "1");
+  body.set("format", "fs");
+  body.set("qzreferrer", "https://user.qzone.qq.com/proxy/domain/qzs.qq.com/qzone/app/mood_v6/html/index.html");
+
+  const log: QZoneHttpLog = {
+    label: "comment_delete",
+    request: {
+      method: "POST",
+      url,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        cookie: redactCookieHeader(cookieHeader),
+        origin: "https://user.qzone.qq.com",
+        referer: `https://user.qzone.qq.com/${uin}/main`,
+        "user-agent": userAgent,
+      },
+      body: Object.fromEntries(body.entries()),
+    },
+  };
+  verbose.http.push(log);
+
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...log.request.headers,
+        cookie: cookieHeader,
+      },
+      body,
+      // 删除请求必须限时：挂起的响应会拖住整个删除路由，也占着租约外的调用现场。
+      signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
+    });
+    const text = await response.text();
+    // delcomment_ugc 返回 HTML 包裹的 frameElement.callback(JSON)
+    const parsed = parseQZoneFrameCallbackResponse(text);
+    log.durationMs = Date.now() - startedAt;
+    log.response = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: pickResponseHeaders(response.headers),
+      body: truncate(text, 8_000),
+      parsed,
+    };
+
+    const success = isCommentDeleteSuccess(response, parsed, text);
+    if (!success.ok) {
+      throw new QZoneCommentDeleteError(success.message, verbose);
+    }
+    verbose.deletedAt = new Date().toISOString();
+    return {
+      externalId: input.externalId,
+      commentId: input.commentId,
+      verbose,
+    };
+  } catch (caught) {
+    if (caught instanceof QZoneCommentDeleteError) {
+      throw caught;
+    }
+    log.durationMs = Date.now() - startedAt;
+    log.error = caught instanceof Error ? caught.message : String(caught);
+    throw new QZoneCommentDeleteError(`QZone 评论删除请求失败：${log.error}`, verbose);
+  }
 }
 
 async function uploadQZoneImage({
@@ -1077,6 +1232,25 @@ function parseQZoneResponse(text: string) {
   }
 }
 
+function parseQZoneFrameCallbackResponse(text: string) {
+  const marker = "frameElement.callback(";
+  const start = text.indexOf(marker);
+  if (start === -1) {
+    return parseQZoneResponse(text);
+  }
+  const from = start + marker.length;
+  const braceStart = text.indexOf("{", from);
+  const braceEnd = text.lastIndexOf("}");
+  if (braceStart === -1 || braceEnd <= braceStart) {
+    return null;
+  }
+  try {
+    return JSON.parse(text.slice(braceStart, braceEnd + 1));
+  } catch {
+    return null;
+  }
+}
+
 function parseQZoneUploadResponse(text: string) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -1112,6 +1286,8 @@ export function parseQZoneCommentList(parsed: unknown): QZoneComment[] {
       }
       const r = rawReply as Record<string, unknown>;
       replies.push({
+        // 楼中楼回复的标识在 tid（兼容老的 id 字段名），删除评论接口使用它。
+        id: qzoneCommentRecordId(r),
         uin: r.uin !== undefined && r.uin !== null ? String(r.uin) : "",
         name: typeof r.name === "string" ? r.name : "",
         content: cleanQZoneCommentContent(r.content),
@@ -1120,6 +1296,7 @@ export function parseQZoneCommentList(parsed: unknown): QZoneComment[] {
       });
     }
     comments.push({
+      id: qzoneCommentRecordId(c),
       uin: c.uin !== undefined && c.uin !== null ? String(c.uin) : "",
       name: typeof c.name === "string" ? c.name : "",
       content: cleanQZoneCommentContent(c.content),
@@ -1129,6 +1306,12 @@ export function parseQZoneCommentList(parsed: unknown): QZoneComment[] {
     });
   }
   return comments;
+}
+
+// QZone 评论/楼中楼的唯一标识在 tid 字段（楼层号），部分老响应结构用 id。
+function qzoneCommentRecordId(record: Record<string, unknown>): string {
+  const value = record.tid ?? record.id;
+  return value !== undefined && value !== null ? String(value) : "";
 }
 
 function qzoneCommentTime(record: Record<string, unknown>): string | null {
@@ -1290,6 +1473,46 @@ function findExternalId(record: Record<string, unknown>) {
     return firstString(...Object.values(data as Record<string, unknown>));
   }
   return null;
+}
+
+function isCommentDeleteSuccess(response: Response, parsed: unknown, rawText: string): { ok: true } | { ok: false; message: string } {
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `QZone 评论删除 HTTP ${response.status} ${response.statusText || ""}`.trim(),
+    };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const record = parsed as Record<string, unknown>;
+    const numericFlags = [record.code, record.ret, record.subcode].map(toNumber).filter((value): value is number => value !== null);
+    const nonZero = numericFlags.find((value) => value !== 0);
+    if (nonZero !== undefined) {
+      return {
+        ok: false,
+        message: `QZone 评论删除被拒绝：${String(record.message ?? record.msg ?? `返回码 ${nonZero}`)}`,
+      };
+    }
+    if (numericFlags.includes(0)) {
+      return {
+        ok: true,
+      };
+    }
+  }
+
+  // 不再从原始文本里嗅探 "code":0 这类宽松成功标记：它可能匹配到无关或嵌套的
+  // 零值（例如失败 JSON 里的其他字段）。解析不出结构化结果一律视为失败。
+  // 仅保留 callback(0) 这一 QZone 经典纯成功形式（结构化解析器无法表达）。
+  if (/callback\(\s*0\s*\)/i.test(rawText)) {
+    return {
+      ok: true,
+    };
+  }
+
+  return {
+    ok: false,
+    message: "QZone 评论删除响应缺少成功标记",
+  };
 }
 
 function isRecallSuccess(response: Response, parsed: unknown, rawText: string): { ok: true } | { ok: false; message: string } {

@@ -12,6 +12,9 @@ import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 const refreshIntervalMs = 60 * 60 * 1000;
 const refreshFreshnessMs = 55 * 60 * 1000;
+// 强制刷新绕过新鲜度时效，但仍需原子 claim 防并发重叠（慢响应覆盖新快照）；
+// 该窗口仅表示"一次刷新可能在途"的最长时间，也顺带构成手动刷新的频率下限。
+const forceRefreshLockMs = 3 * 60 * 1000;
 const perBotRequestSpacingMs = 45 * 1000;
 const metricRequestReservationPayloadKey = "qzoneMetricRequestReservedAt";
 
@@ -215,13 +218,23 @@ async function handleQZonePostMetricRefresh(
     return;
   }
   delete job.payload[metricRequestReservationPayloadKey];
+  // 管理员手动刷新（payload.force）绕过 55 分钟新鲜度时效，但仍走原子 claim：
+  // 同一 attempt 的定时刷新/多次强刷可能并发，若不加锁，较慢的响应会用旧数据覆盖新快照。
+  // 强刷的 claim 窗口缩短为 forceRefreshLockMs，只用于串行化在途请求。
+  const forceRefresh = job.payload.force === true;
   const claim = await runWithActiveTenantLease(
     prisma,
     attempt.tenantId,
-    (transaction) => claimQZonePostMetricRefresh(attempt, qzoneTid, new Date(now), transaction),
+    (transaction) => claimQZonePostMetricRefresh(
+      attempt,
+      qzoneTid,
+      new Date(now),
+      transaction,
+      forceRefresh ? forceRefreshLockMs : refreshFreshnessMs,
+    ),
   );
   if (!claim.active || !claim.value) {
-    logger.info({ attemptId, botAccountId }, "qzone post metric refresh skipped after freshness claim lost");
+    logger.info({ attemptId, botAccountId, forceRefresh }, "qzone post metric refresh skipped after refresh claim lost");
     return;
   }
   dispatchState.lastStartedAt = now;
@@ -260,7 +273,36 @@ async function handleQZonePostMetricRefresh(
         logger.warn({ commentError, attemptId, qzoneTid }, "qzone post comment fetch failed");
       }
     }
-    const commentsJson = toInputJson(comments);
+    // 合并本地"已删除"的评论标记：QZone 侧已删的评论不会再出现在新列表里，
+    // 但管理员/审核员需要在网页端看到删除痕迹。
+    // QZone 删除传播有延迟，新列表可能仍带回同 id 评论：把存储的删除元数据
+    // （deleted/deletedAt/deletedBy）叠加到新评论上，不允许新数据抹掉删除痕迹；
+    // 未再出现的已删评论原样保留在末尾，且不产生重复条目。
+    const previousMetric = await transaction.qZonePostMetric.findUnique({
+      where: { publishAttemptId: attempt.id },
+      select: { comments: true },
+    });
+    const previousComments = Array.isArray(previousMetric?.comments)
+      ? (previousMetric.comments as Array<Record<string, unknown>>)
+      : [];
+    const previousDeletedById = new Map(
+      previousComments
+        .filter((comment) => comment?.deleted === true)
+        .map((comment) => [String(comment?.id ?? ""), comment]),
+    );
+    const commentsJson = toInputJson([
+      ...comments.map((fresh) => {
+        const storedDeleted = previousDeletedById.get(String(fresh.id));
+        if (!storedDeleted) {
+          return fresh;
+        }
+        // JSON 序列化会自动丢弃 undefined，历史数据缺 deletedAt/deletedBy 时保留 deleted 即可。
+        return { ...fresh, deleted: true, deletedAt: storedDeleted.deletedAt, deletedBy: storedDeleted.deletedBy };
+      }),
+      ...previousComments.filter(
+        (comment) => comment?.deleted === true && !comments.some((fresh) => String(fresh.id) === String(comment.id)),
+      ),
+    ]);
     if (!await isTenantRuntimeActive(transaction, attempt.tenantId)) {
       return;
     }
@@ -332,8 +374,9 @@ async function claimQZonePostMetricRefresh(
   qzoneTid: string,
   claimedAt: Date,
   client: Prisma.TransactionClient | typeof prisma = prisma,
+  staleWindowMs: number = refreshFreshnessMs,
 ) {
-  const staleBefore = new Date(claimedAt.getTime() - refreshFreshnessMs);
+  const staleBefore = new Date(claimedAt.getTime() - staleWindowMs);
   const existing = attempt.qzonePostMetrics[0] ?? null;
   if (existing) {
     const claimed = await client.qZonePostMetric.updateMany({

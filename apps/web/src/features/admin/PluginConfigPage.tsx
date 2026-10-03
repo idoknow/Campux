@@ -90,7 +90,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory" | "commentManagement";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -161,6 +161,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   botAlert: "campux-plugin-bot-alert",
   graduation: "campux-plugin-graduation",
   todayInHistory: "campux-plugin-today-in-history",
+  commentManagement: "campux-plugin-comment-management",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -201,6 +202,23 @@ function FeedbackPanel() {
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
         开启后，投稿页最上方会出现「意见反馈」入口。意见会先保存；墙号在线且已开启审核群通知时会同步到审核群，否则仅保存并提示通知失败。
       </div>
+    </div>
+  );
+}
+
+function CommentManagementPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，「稿件 → 已发布」卡片下的评论列表会出现「删除」按钮：管理员可删除任意已发布稿件的评论，操作通过墙号在 QQ 空间执行，删除后不可恢复。
+      </div>
+      <SwitchField
+        title="允许用户删除自己稿件下的评论"
+        description="开启后，普通用户也可以删除自己稿件下的评论；关闭时仅管理员可删除。"
+        checked={config.commentManagement.allowUserDeleteOwnPostComments}
+        disabled={busy}
+        onChange={(value) => onChange({ ...config, commentManagement: { ...config.commentManagement, allowUserDeleteOwnPostComments: value } })}
+      />
     </div>
   );
 }
@@ -1161,6 +1179,33 @@ const PLUGINS: PluginDescriptor[] = [
     render: () => <FeedbackPanel />,
   },
   {
+    id: "commentManagement" as const,
+    icon: FeedbackIcon,
+    name: "评论管理",
+    tagline: "Moderation",
+    description: "网页端通过墙号删除已发布稿件在 QQ 空间的评论",
+    detailedDescription:
+      "开启后，「稿件 → 已发布」卡片下的评论列表会出现「删除」按钮。\n\n" +
+      "· 管理员可删除任意已发布稿件的评论；删除操作通过墙号（说说作者）调用 QQ 空间接口执行，删除后不可恢复。\n" +
+      "· 可选开启「允许用户删除自己稿件下的评论」：开启后普通用户也能删除自己稿件下的评论，关闭时仅管理员可删。\n" +
+      "· 删除成功后网页会自动刷新该稿件的评论列表；操作会记入稿件日志与审计日志。\n" +
+      "· 评论列表由 QZone 数据定时刷新，刚发表尚未同步的评论可能暂时没有删除按钮。",
+    author: "haohaoxuedili",
+    hint: "删除经墙号执行、不可恢复；用户侧删除受独立开关限制。",
+    accent: "from-amber-500 to-red-500",
+    bgTint: "bg-amber-50 text-amber-700",
+    role: "admin" as const,
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium" as const,
+    rationale:
+      "开启后代表墙号调用 QZone 评论删除接口，属于对外可见的不可逆操作；用户侧删除受独立开关限制且仅限本人稿件。",
+    enabled: (config: TenantPluginConfig) => config.commentManagement.enabled,
+    setEnabled: (config: TenantPluginConfig, value: boolean) => ({ ...config, commentManagement: { ...config.commentManagement, enabled: value } }),
+    render: (config: TenantPluginConfig, onChange: (next: TenantPluginConfig) => void, busy: boolean) => (
+      <CommentManagementPanel config={config} onChange={onChange} busy={busy} />
+    ),
+  },
+  {
     id: "botAlert" as const,
     icon: BotAlertIcon,
     name: "Bot 异常通知",
@@ -1346,6 +1391,10 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     todayInHistory: {
       enabled: false,
     },
+    commentManagement: {
+      enabled: false,
+      allowUserDeleteOwnPostComments: false,
+    },
   };
 }
 
@@ -1404,6 +1453,8 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
       return { enabled: false };
     case "todayInHistory":
       return { enabled: false };
+    case "commentManagement":
+      return { enabled: false, allowUserDeleteOwnPostComments: false };
     default:
       return false;
   }

@@ -157,6 +157,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableBotAlert: false,
     enableGraduation: false,
     enableTodayInHistory: false,
+    enableCommentManagement: false,
+    allowUserDeleteOwnPostComments: false,
   };
 }
 
@@ -254,6 +256,10 @@ async function readPublicMetadata(tenantId: string) {
     metadata.enableGraduation = pluginConfig.graduation.enabled;
     // 那年今日：未启用时投稿页顶部胶囊隐藏。
     metadata.enableTodayInHistory = pluginConfig.todayInHistory.enabled;
+    // 评论管理：暴露插件启用状态与用户侧删除开关。
+    metadata.enableCommentManagement = pluginConfig.commentManagement.enabled;
+    metadata.allowUserDeleteOwnPostComments = pluginConfig.commentManagement.enabled
+      && pluginConfig.commentManagement.allowUserDeleteOwnPostComments;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

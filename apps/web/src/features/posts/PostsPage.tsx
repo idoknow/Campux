@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -22,6 +22,7 @@ import {
   Share2Icon,
   SlidersHorizontalIcon,
   SparklesIcon,
+  Trash2Icon,
   UserIcon,
   XIcon,
 } from "lucide-react";
@@ -266,6 +267,8 @@ export function PostsPage({
   enableFeedback,
   enableGraduation,
   enableTodayInHistory,
+  enableCommentManagement,
+  allowUserDeleteOwnPostComments,
   onMinePageChange,
   onTabChange,
   onRefresh,
@@ -282,6 +285,8 @@ export function PostsPage({
   enableFeedback?: boolean;
   enableGraduation?: boolean;
   enableTodayInHistory?: boolean;
+  enableCommentManagement?: boolean;
+  allowUserDeleteOwnPostComments?: boolean;
   onMinePageChange: (page: number) => void;
   onTabChange: (tab: PostsTab) => void;
   onRefresh: () => Promise<void>;
@@ -302,6 +307,11 @@ export function PostsPage({
   const [reviewKeyword, setReviewKeyword] = useState(() => readReviewListPreferences(tenantId).keyword);
   const [reviewPage, setReviewPage] = useState(() => readQueryInt("review_page", 1, { min: 1 }));
   const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
+  // 轮询等异步流程里读取最新列表用：渲染闭包里的数组是旧快照。
+  const publishedItemsRef = useRef<PublishedFeedItem[]>([]);
+  useEffect(() => {
+    publishedItemsRef.current = publishedItems;
+  }, [publishedItems]);
   const [publishedTags, setPublishedTags] = useState<PostTag[]>([]);
   const [publishedTagFilter, setPublishedTagFilter] = useState("all");
   const [publishedPagination, setPublishedPagination] = useState<Pagination>(() => defaultPagination());
@@ -328,6 +338,10 @@ export function PostsPage({
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [busyRecallPostId, setBusyRecallPostId] = useState("");
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
+  const [busyCommentKey, setBusyCommentKey] = useState("");
+  const [busyMetricRefreshKey, setBusyMetricRefreshKey] = useState("");
+  // 「那年今日」面板在挂载时拉取数据：评论删除 / 指标刷新后递增此 key 强制重挂载重拉。
+  const [historyPanelReloadKey, setHistoryPanelReloadKey] = useState(0);
   const [autoFollowBusy, setAutoFollowBusy] = useState(false);
   const [approveAllOpen, setApproveAllOpen] = useState(false);
   const [approveAllBusy, setApproveAllBusy] = useState(false);
@@ -477,7 +491,12 @@ export function PostsPage({
       await Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]);
     }
     if (activeTab === "published") {
-      await Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]);
+      // 有搜索关键词时走关键词感知的请求，避免删除评论 / 延迟刷新后把搜索结果冲掉。
+      if (publishedKeyword.trim()) {
+        await Promise.all([refreshPublishedTags(), searchPublishedFeed(publishedPage)]);
+      } else {
+        await Promise.all([refreshPublishedTags(), refreshPublishedFeed(publishedPage)]);
+      }
     }
   }
 
@@ -673,6 +692,79 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "设置失败");
     } finally {
       setAutoFollowBusy(false);
+    }
+  }
+
+  async function deletePostComment(postId: string, commentId: string, attemptId: string | null) {
+    if (!attemptId) {
+      toast.error("缺少评论所属的发布记录，无法删除");
+      return;
+    }
+    if (!window.confirm("确定删除这条评论吗？删除通过墙号在 QQ 空间执行，不可恢复。")) {
+      return;
+    }
+    setBusyCommentKey(`${postId}:${commentId}`);
+    try {
+      await api(`/api/posts/${postId}/comments/${commentId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ attemptId }),
+      });
+      toast.success("评论已删除。");
+      await refreshAll();
+      // 「那年今日」面板只在挂载时拉数据，删除评论后重挂载让历史标签页同步。
+      setHistoryPanelReloadKey((key) => key + 1);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "删除失败");
+    } finally {
+      setBusyCommentKey("");
+    }
+  }
+
+  // 手动刷新一条（或一批）稿件的 QZone 指标与评论：入队刷新任务后有界轮询拉取列表。
+  // 任务走逐墙号限速，墙号刚刷新过会被延后，完成时间不定：3s 间隔最多轮询 8 次，
+  // 目标卡片的 checkedAt 变化即提前结束；结束后重挂载「那年今日」面板同步最新数据。
+  async function refreshPostQzoneMetrics(itemKey: string, postIds: string[]) {
+    if (postIds.length === 0 || busyMetricRefreshKey) {
+      return;
+    }
+    setBusyMetricRefreshKey(itemKey);
+    try {
+      const result = await api<{ enqueued: number; total: number }>("/api/posts/qzone-metrics/refresh", {
+        method: "POST",
+        body: JSON.stringify({ postIds }),
+      });
+      toast.success(result.enqueued > 0 ? "已加入刷新队列，稍候自动更新。" : "刷新任务已在队列中，请稍候。");
+      // 读 ref 而不是渲染闭包里的数组：refreshAll 触发 setState 后闭包不会更新。
+      // 多墙号卡片每个目标各自刷新，逐目标记录初始 checkedAt，等全部目标的
+      // checkedAt 都变化后才提前退出，避免只看聚合时间漏等其余墙号的数据。
+      const targetKey = (target: { attemptId: string | null; qzoneTid: string }) => target.attemptId ?? target.qzoneTid;
+      const checkedAtBefore = new Map(
+        (publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.targets ?? [])
+          .map((target) => [targetKey(target), target.checkedAt] as const),
+      );
+      const allTargetsRefreshed = () => {
+        const targets = publishedItemsRef.current.find((item) => item.key === itemKey)?.qzoneStats?.targets ?? [];
+        return targets.length > 0 && targets.every((target) => {
+          const before = checkedAtBefore.get(targetKey(target));
+          return target.checkedAt !== null && target.checkedAt !== before;
+        });
+      };
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3_000));
+        try {
+          await refreshAll();
+        } catch {
+          // 单次轮询拉取失败不打断整体流程，下一轮继续尝试。
+        }
+        if (allTargetsRefreshed()) {
+          break;
+        }
+      }
+      setHistoryPanelReloadKey((key) => key + 1);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "刷新失败");
+    } finally {
+      setBusyMetricRefreshKey("");
     }
   }
 
@@ -1115,7 +1207,18 @@ export function PostsPage({
                     key={item.key}
                     item={item}
                     canViewIdentity={canReview}
+                    canViewDeleted={canReview}
                     onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
+                    commentModeration={enableCommentManagement ? {
+                      canDeleteAny: isAdmin,
+                      canDeleteOwn: Boolean(allowUserDeleteOwnPostComments),
+                      busyKey: busyCommentKey,
+                      onDelete: (postId, commentId, attemptId) => void deletePostComment(postId, commentId, attemptId),
+                    } : null}
+                    metricRefresh={isAdmin && item.posts.length > 0 ? {
+                      busy: busyMetricRefreshKey === item.key,
+                      onRefresh: () => void refreshPostQzoneMetrics(item.key, item.posts.map((post) => post.id)),
+                    } : null}
                   />
                 ))}
               </div>
@@ -1125,15 +1228,28 @@ export function PostsPage({
         </TabsContent>
         {showHistoryTab ? (
           <TabsContent value="history" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
+            {/* key 递增时强制重挂载：面板只在挂载时拉数据，删除评论 / 指标刷新后靠它同步。 */}
             <TodayInHistoryPanel
-              renderItem={(item) => (
-                <PublishedFeedCard
-                  item={item}
-                  canViewIdentity={canReview}
-                  onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
-                />
-              )}
-            />
+                key={historyPanelReloadKey}
+                renderItem={(item) => (
+                  <PublishedFeedCard
+                    item={item}
+                    canViewIdentity={canReview}
+                    canViewDeleted={canReview}
+                    onImagePreview={(images, index, title) => openImagePreview(images, index, title)}
+                    commentModeration={enableCommentManagement ? {
+                      canDeleteAny: isAdmin,
+                      canDeleteOwn: Boolean(allowUserDeleteOwnPostComments),
+                      busyKey: busyCommentKey,
+                      onDelete: (postId, commentId, attemptId) => void deletePostComment(postId, commentId, attemptId),
+                    } : null}
+                    metricRefresh={isAdmin && item.posts.length > 0 ? {
+                      busy: busyMetricRefreshKey === item.key,
+                      onRefresh: () => void refreshPostQzoneMetrics(item.key, item.posts.map((post) => post.id)),
+                    } : null}
+                  />
+                )}
+              />
           </TabsContent>
         ) : null}
         {showFeedbackTab ? (
@@ -2377,16 +2493,44 @@ function PublishedFeedPostBlock({
   );
 }
 
+/** 评论管理插件下发的删除能力：deletePostId 为空表示当前卡片不可删（如用户没有自己的稿件在批次里）。 */
+type CommentModeration = {
+  canDeleteAny: boolean;
+  canDeleteOwn: boolean;
+  busyKey: string;
+  onDelete: (postId: string, commentId: string, attemptId: string | null) => void;
+};
+
 function PublishedFeedCard({
   item,
   canViewIdentity,
+  canViewDeleted,
   onImagePreview,
+  commentModeration,
+  metricRefresh,
 }: {
   item: PublishedFeedItem;
   canViewIdentity: boolean;
+  canViewDeleted: boolean;
   onImagePreview: (images: PostImage[], index: number, title: string) => void;
+  commentModeration: CommentModeration | null;
+  metricRefresh: { busy: boolean; onRefresh: () => void } | null;
 }) {
   const isBatch = item.kind === "batch";
+  // 管理员可删任意稿件评论：取首条稿件 id 当接口参数（服务端按角色放行）。
+  // 普通用户仅可删自己稿件下的评论：批量稿件共享同一条说说，若批次内作者混杂，
+  // 服务端只校验传入的稿件归属，会越权删到他人稿件的评论，因此混合批次整体禁用。
+  const moderation = commentModeration && item.posts.length > 0
+    ? {
+        deletePostId: commentModeration.canDeleteAny
+          ? item.posts[0]!.id
+          : commentModeration.canDeleteOwn && item.posts.every((post) => post.mine)
+            ? item.posts[0]!.id
+            : "",
+        busyKey: commentModeration.busyKey,
+        onDelete: commentModeration.onDelete,
+      }
+    : null;
   return (
     <Card className="overflow-hidden rounded-md border border-slate-200 shadow-none">
       <CardContent className="grid gap-3 p-2.5 md:p-3">
@@ -2396,7 +2540,22 @@ function PublishedFeedCard({
           ) : (
             <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">独立发布</Badge>
           )}
-          <span className="text-xs font-semibold text-slate-400">发布于 {formatFullDateTime(item.publishedAt)}</span>
+          <span className="ml-auto flex items-center gap-2">
+            {/* 按钮仅在具备刷新控制（管理员）且卡片确有 QZone 数据时渲染，普通用户不显示空按钮。 */}
+            {metricRefresh && item.qzoneStats && item.qzoneStats.targets.length > 0 ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                disabled={metricRefresh?.busy}
+                title="重新拉取这条稿件的浏览/点赞/评论数据"
+                onClick={() => metricRefresh?.onRefresh()}
+              >
+                <RotateCcwIcon className={`size-3 ${metricRefresh?.busy ? "animate-spin" : ""}`} />
+                {metricRefresh?.busy ? "刷新中..." : "刷新"}
+              </button>
+            ) : null}
+            <span className="text-xs font-semibold text-slate-400">发布于 {formatFullDateTime(item.publishedAt)}</span>
+          </span>
         </div>
 
         {isBatch ? (
@@ -2412,7 +2571,7 @@ function PublishedFeedCard({
         )}
 
         {/* 互动数据按说说聚合，整张卡片只显示一份 */}
-        <QZoneStatsBlock stats={item.qzoneStats} />
+        <QZoneStatsBlock stats={item.qzoneStats} moderation={moderation} canViewDeleted={canViewDeleted} />
       </CardContent>
     </Card>
   );
@@ -2495,7 +2654,7 @@ function PostTextBlock({ text, createdAt, updatedAt, compact = false, textColor 
   );
 }
 
-function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
+function QZoneStatsBlock({ stats, moderation, canViewDeleted }: { stats: PostItem["qzoneStats"]; moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string, attemptId: string | null) => void } | null; canViewDeleted: boolean }) {
   if (!stats) {
     return null;
   }
@@ -2554,7 +2713,7 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
                 <span className="ml-auto text-[11px] font-semibold text-slate-400">更新 {formatFullDateTime(target.checkedAt)}</span>
               ) : null}
             </div>
-            <QZoneCommentsList comments={target.comments ?? []} />
+            <QZoneCommentsList comments={target.comments ?? []} moderation={moderation} canViewDeleted={canViewDeleted} attemptId={target.attemptId} />
           </div>
         );
       })}
@@ -2562,17 +2721,38 @@ function QZoneStatsBlock({ stats }: { stats: PostItem["qzoneStats"] }) {
   );
 }
 
-function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]> }) {
+function QZoneCommentsList({
+  comments,
+  moderation,
+  canViewDeleted,
+  attemptId,
+}: {
+  comments: NonNullable<NonNullable<PostItem["qzoneStats"]>["targets"][number]["comments"]>;
+  moderation: { deletePostId: string; busyKey: string; onDelete: (postId: string, commentId: string, attemptId: string | null) => void } | null;
+  canViewDeleted: boolean;
+  /** 本评论区所属的发布记录 id：删除请求带它把删除限定在该墙号的说说上 */
+  attemptId: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
   if (!comments || comments.length === 0) {
     return null;
   }
 
-  const preview = showAll ? comments : comments.slice(0, 3);
+  // 已删除的评论（QZone 侧已不可见）与正常评论分开展示，仅管理员/审核员可见删除痕迹。
+  const active = comments.filter((comment) => !comment.deleted);
+  const deletedOnes = canViewDeleted ? comments.filter((comment) => comment.deleted) : [];
+  if (active.length === 0 && deletedOnes.length === 0) {
+    return null;
+  }
+
+  const preview = showAll ? active : active.slice(0, 3);
 
   return (
     <div className="mt-2 border-t border-slate-100 pt-2">
+      {active.length > 0 ? (
+        <>
       <button
         type="button"
         className="flex w-full items-center gap-1 text-[11px] font-black text-slate-500 hover:text-slate-700"
@@ -2580,7 +2760,7 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
         aria-expanded={open}
       >
         <MessageCircleIcon className="size-3 shrink-0" />
-        评论 {comments.length}
+        评论 {active.length}
         <ChevronDownIcon className={`size-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open ? (
@@ -2592,6 +2772,16 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
               <span className="shrink-0 font-black text-slate-700">{comment.name || comment.uin || "匿名"}</span>
               <QQUinTag uin={comment.uin} />
               {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-400">{formatFullDateTime(comment.createdAt)}</span> : null}
+              {moderation && comment.id && !comment.deleted && moderation.deletePostId ? (
+                <button
+                  type="button"
+                  className="ml-auto shrink-0 self-center text-[10px] font-bold text-rose-500 hover:underline disabled:opacity-50"
+                  disabled={moderation.busyKey === `${moderation.deletePostId}:${comment.id}`}
+                  onClick={() => moderation.onDelete(moderation.deletePostId, comment.id, attemptId)}
+                >
+                  {moderation.busyKey === `${moderation.deletePostId}:${comment.id}` ? "删除中..." : "删除"}
+                </button>
+              ) : null}
             </p>
             {comment.content ? (
               <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-800">{comment.content}</p>
@@ -2619,16 +2809,58 @@ function QZoneCommentsList({ comments }: { comments: NonNullable<NonNullable<Pos
           </div>
         ))}
           </div>
-          {comments.length > 3 ? (
+          {active.length > 3 ? (
             <button
               type="button"
               className="mt-1.5 text-[11px] font-bold text-blue-600 hover:underline"
               onClick={() => setShowAll((value) => !value)}
             >
-              {showAll ? "收起" : `展开全部 ${comments.length} 条`}
+              {showAll ? "收起" : `展开全部 ${active.length} 条`}
             </button>
           ) : null}
         </>
+      ) : null}
+        </>
+      ) : null}
+      {deletedOnes.length > 0 ? (
+        <div className={active.length > 0 ? "mt-2" : ""}>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 text-[11px] font-black text-slate-400 hover:text-slate-600"
+            onClick={() => setShowDeleted((value) => !value)}
+            aria-expanded={showDeleted}
+          >
+            <Trash2Icon className="size-3 shrink-0" />
+            已删除的评论 {deletedOnes.length}
+            <ChevronDownIcon className={`size-3 shrink-0 transition-transform ${showDeleted ? "rotate-180" : ""}`} />
+          </button>
+          {showDeleted ? (
+            <div className="mt-1.5 grid gap-1.5">
+              {deletedOnes.map((comment, index) => (
+                <div key={`${comment.uin}-deleted-${index}`} className="rounded-md border border-dashed border-slate-200 bg-slate-50/60 px-2 py-1.5 opacity-75">
+                  <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px] leading-5">
+                    <span className="shrink-0 font-black text-slate-400">{comment.name || comment.uin || "匿名"}</span>
+                    <QQUinTag uin={comment.uin} />
+                    {comment.createdAt ? <span className="shrink-0 text-[10px] text-slate-300">{formatFullDateTime(comment.createdAt)}</span> : null}
+                    <span className="ml-auto shrink-0 self-center text-[10px] font-bold text-slate-400">已删除</span>
+                  </p>
+                  {comment.content ? (
+                    <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-400 line-through">{comment.content}</p>
+                  ) : comment.images && comment.images.length > 0 ? null : (
+                    <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-400">（空）</p>
+                  )}
+                  <QZoneCommentImages images={comment.images} title={`${comment.name || comment.uin || "匿名"} 的评论图片`} />
+                  {comment.deletedBy || comment.deletedAt ? (
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      {comment.deletedBy ? `${comment.deletedBy} 删除` : "已删除"}
+                      {comment.deletedAt ? ` · ${formatFullDateTime(comment.deletedAt)}` : ""}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

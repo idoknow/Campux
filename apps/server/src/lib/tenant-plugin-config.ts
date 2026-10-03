@@ -151,6 +151,14 @@ export const tenantPluginConfigSchema = z.object({
       enabled: z.boolean(),
     })
     .default({ enabled: false }),
+  // 评论管理：开启后管理员可在网页端删除已发布稿件的 QZone 评论；
+  // allowUserDeleteOwnPostComments 控制普通用户是否可以删除自己稿件下的评论。
+  commentManagement: z
+    .object({
+      enabled: z.boolean(),
+      allowUserDeleteOwnPostComments: z.boolean(),
+    })
+    .default({ enabled: false, allowUserDeleteOwnPostComments: false }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -177,6 +185,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   feedback: { enabled: false },
   botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
   todayInHistory: { enabled: false },
+  commentManagement: { enabled: false, allowUserDeleteOwnPostComments: false },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {

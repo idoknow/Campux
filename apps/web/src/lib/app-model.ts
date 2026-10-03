@@ -48,6 +48,8 @@ export const defaultMetadata: TenantMetadata = {
   enableFontSelection: false,
   enableAnonymousAvatarSelection: false,
   followedPostCommentNotifyEnabled: true,
+  enableCommentManagement: false,
+  allowUserDeleteOwnPostComments: false,
   availableFonts: [],
   availableBgColors: [],
   availableTextColors: [],

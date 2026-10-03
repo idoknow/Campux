@@ -103,6 +103,7 @@ export function registerTodayInHistoryRoutes(app: FastifyInstance) {
       include: {
         publishAttempt: {
           select: {
+            id: true,
             publishTarget: {
               select: {
                 displayName: true,
@@ -170,6 +171,7 @@ export function registerTodayInHistoryRoutes(app: FastifyInstance) {
             text: post.text,
             attachments: post.attachments,
             anonymous: post.anonymous,
+            authorId: post.authorId,
             bgColor: post.bgColor,
             textColor: post.textColor,
             font: post.font,
@@ -203,6 +205,7 @@ export function registerTodayInHistoryRoutes(app: FastifyInstance) {
             text: post.text,
             attachments: post.attachments,
             anonymous: post.anonymous,
+            authorId: post.authorId,
             bgColor: post.bgColor,
             textColor: post.textColor,
             font: post.font,
@@ -226,7 +229,7 @@ export function registerTodayInHistoryRoutes(app: FastifyInstance) {
       const singles = singlesPerYear.get(year) ?? [];
       const batches = batchesPerYear.get(year) ?? [];
       if (singles.length === 0 && batches.length === 0) continue;
-      const items = buildPublishedFeed({ singles, batches, viewerIsReviewer });
+      const items = buildPublishedFeed({ singles, batches, viewerIsReviewer, viewerUserId: context.user.id });
       groups.push({ year, items });
       total += items.length;
     }

@@ -393,7 +393,7 @@ function isTransactionSerializationFailure(value: unknown) {
   return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
-export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _queue: RuntimeQueue, oneBot?: OneBotRuntime) {
+export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/public/forum-media", async (request, reply) => {
     const query = publicForumMediaQuerySchema.parse(request.query);
     if (!verifyPublicForumMediaSignature(query.key, query.expires, query.signature)) {
@@ -1184,7 +1184,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       });
 
       return {
-        post: toPostListItem(post),
+        post: toPostListItem(post, { keepDeletedComments: hasTenantRole(context.selectedMembership.role, "reviewer") }),
       };
     } catch (err) {
       if (err instanceof PostCreateTransactionOutcomeUnknownError) {
@@ -1326,6 +1326,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
             include: {
               publishAttempt: {
                 select: {
+                  id: true,
                   publishTarget: {
                     select: {
                       displayName: true,
@@ -1363,7 +1364,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     ]);
 
     return {
-      posts: posts.map(toPostListItem),
+      posts: posts.map((post) => toPostListItem(post, { keepDeletedComments: hasTenantRole(context.selectedMembership.role, "reviewer") })),
       pagination: toPagination(query.page, query.limit, total),
     };
   });
@@ -1391,6 +1392,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       include: {
         publishAttempt: {
           select: {
+            id: true,
             publishTarget: {
               select: {
                 displayName: true,
@@ -1485,6 +1487,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       text: string;
       attachments: unknown;
       anonymous: boolean;
+      authorId: string | null;
       bgColor: string | null;
       textColor: string | null;
       font: string | null;
@@ -1497,6 +1500,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       text: post.text,
       attachments: post.attachments,
       anonymous: post.anonymous,
+      authorId: post.authorId,
       bgColor: post.bgColor,
       textColor: post.textColor,
       font: post.font,
@@ -1522,7 +1526,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     });
 
     let allItems = filterPublishedFeedByTag(
-      buildPublishedFeed({ singles, batches: batchInputs, viewerIsReviewer }),
+      buildPublishedFeed({ singles, batches: batchInputs, viewerIsReviewer, viewerUserId: context.user.id }),
       query.tag,
     );
 
@@ -1551,6 +1555,61 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
       items,
       pagination: toPagination(query.page, query.limit, total),
     };
+  });
+
+  // 手动刷新稿件在 QQ 空间的指标与评论：入队 refreshQZonePostMetric（逐 attempt 去重）。
+  // 与每小时的定时扫描互补，让管理员发布后无需等待即可拉到最新评论（含删除所需的评论 id）。
+  // 批量稿件的多个 post 对应同一条说说，一次性把所有 post id 传进来统一入队。
+  app.post("/api/posts/qzone-metrics/refresh", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "admin");
+    const body = z.object({ postIds: z.array(z.string().min(1)).min(1).max(50) }).parse(request.body);
+
+    const posts = await prisma.post.findMany({
+      where: { id: { in: body.postIds }, tenantId: context.selectedTenant.id },
+      select: { id: true, status: true },
+    });
+    const refreshable = posts.filter((post) => post.status === "published" || post.status === "pending_recall");
+    if (refreshable.length === 0) {
+      return reply.code(400).send({ message: "没有可刷新的已发布稿件" });
+    }
+
+    const attempts = await prisma.publishAttempt.findMany({
+      where: {
+        postId: { in: refreshable.map((post) => post.id) },
+        status: "succeeded",
+        qzoneTid: { not: null },
+        publishTarget: { type: "qzone", enabled: true, botAccount: { enabled: true } },
+      },
+      select: { id: true },
+    });
+    if (attempts.length === 0) {
+      return reply.code(400).send({ message: "这些稿件没有可刷新的 QZone 发布记录" });
+    }
+
+    let enqueued = 0;
+    const runAt = new Date();
+    for (const attempt of attempts) {
+      const dedupeKey = `refreshQZonePostMetric:${attempt.id}`;
+      const queued = queue.enqueueUnique(
+        {
+          name: "refreshQZonePostMetric",
+          tenantId: context.selectedTenant.id,
+          payload: { attemptId: attempt.id, force: true },
+          runAt,
+        },
+        dedupeKey,
+      );
+      if (queued) {
+        enqueued += 1;
+        continue;
+      }
+      // 同一 attempt 已有排队任务时不能直接重复入队：把既有任务升级为强制刷新
+      // 并提前到本次请求的执行时间，否则它会按原 payload / 计划运行，手动刷新落空。
+      if (queue.updateQueued(dedupeKey, { payload: { attemptId: attempt.id, force: true }, runAt })) {
+        enqueued += 1;
+      }
+    }
+    return { enqueued, total: attempts.length };
   });
 
   app.get("/api/posts/:id/render-preview", async (request, reply) => {
@@ -1713,7 +1772,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     });
 
     return {
-      post: toPostListItem(updated),
+      post: toPostListItem(updated, { keepDeletedComments: hasTenantRole(context.selectedMembership.role, "reviewer") }),
     };
   });
 
@@ -1733,7 +1792,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     }
     if (post.status === "pending_recall") {
       return {
-        post: toPostListItem(post),
+        post: toPostListItem(post, { keepDeletedComments: hasTenantRole(context.selectedMembership.role, "reviewer") }),
       };
     }
     if (post.status !== "published") {
@@ -1804,7 +1863,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, _
     });
 
     return {
-      post: toPostListItem(updated),
+      post: toPostListItem(updated, { keepDeletedComments: hasTenantRole(context.selectedMembership.role, "reviewer") }),
     };
   });
 

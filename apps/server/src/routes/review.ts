@@ -89,6 +89,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             include: {
               publishAttempt: {
                 select: {
+                  id: true,
                   publishTarget: {
                     select: {
                       displayName: true,
@@ -134,7 +135,8 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     return {
       posts: posts.map((post) => ({
-        ...toPostListItem(post),
+        // 审核列表仅审核员/管理员可见，保留已删除评论供其查看删除痕迹
+        ...toPostListItem(post, { keepDeletedComments: true }),
         author: {
           id: post.author.id,
           qqUin: post.author.qqUin.toString(),

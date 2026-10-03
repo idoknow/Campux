@@ -146,6 +146,8 @@ export function AppShell({
                 enableFeedback={metadata.enableFeedback}
                 enableGraduation={metadata.enableGraduation}
                 enableTodayInHistory={metadata.enableTodayInHistory}
+                enableCommentManagement={metadata.enableCommentManagement}
+                allowUserDeleteOwnPostComments={metadata.allowUserDeleteOwnPostComments}
                 onMinePageChange={onPostsPageChange}
                 onTabChange={onPostsTabChange}
                 onRefresh={onRefreshTenantData}

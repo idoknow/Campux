@@ -7,6 +7,7 @@ function makePost(overrides: Partial<RawFeedPost> & { id: string; displayId: num
     text: `稿件 ${overrides.displayId}`,
     attachments: [],
     anonymous: false,
+    authorId: null,
     bgColor: null,
     textColor: null,
     font: null,
@@ -27,6 +28,7 @@ function makeMetric(overrides: Partial<PostQZoneMetric> & { qzoneTid: string }):
     lastError: null,
     checkedAt: new Date("2026-06-08T01:00:00Z"),
     publishAttempt: {
+      id: "attempt-test",
       publishTarget: {
         displayName: "QZone 发布目标",
         botAccount: { displayName: "墙号A", qqUin: BigInt(20001) },
@@ -135,7 +137,7 @@ describe("buildPublishedFeed", () => {
             visitorCount: 5,
             likeCount: 3,
             commentCount: 4,
-            publishAttempt: { publishTarget: { displayName: "墙B", botAccount: { displayName: "墙号B", qqUin: BigInt(20002) } } },
+            publishAttempt: { id: "attempt-b", publishTarget: { displayName: "墙B", botAccount: { displayName: "墙号B", qqUin: BigInt(20002) } } },
           }),
         ],
       },

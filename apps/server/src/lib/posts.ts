@@ -1,10 +1,15 @@
 type PostQZoneComment = {
+  id: string;
   uin: string;
   name: string;
   content: string;
   images: string[];
   createdAt: string | null;
-  replies?: Array<{ uin: string; name: string; content: string; images: string[]; createdAt: string | null }>;
+  replies?: Array<{ id: string; uin: string; name: string; content: string; images: string[]; createdAt: string | null }>;
+  /** 评论已通过墙号删除（QZone 侧已不可见），仅管理员/审核员可见 */
+  deleted?: boolean;
+  deletedAt?: string | undefined;
+  deletedBy?: string | undefined;
 };
 
 type PostTagAssignmentInput = {
@@ -33,6 +38,7 @@ export type PostQZoneMetric = {
   checkedAt: Date | null;
   qzoneTid: string;
   publishAttempt?: {
+    id: string;
     publishTarget?: {
       displayName: string;
       botAccount?: {
@@ -85,7 +91,7 @@ export function toPostListItem(post: {
     };
   } | null;
   tagAssignments?: PostTagAssignmentInput[];
-}) {
+}, options?: { keepDeletedComments?: boolean }) {
   const recallLog = post.logs
     ?.filter((log) => log.oldStatus === "published" && log.newStatus === "pending_recall")
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
@@ -110,7 +116,7 @@ export function toPostListItem(post: {
     recallReason,
     following: Boolean(post.follows && post.follows.length > 0),
     submissionChannel: inferSubmissionChannel(post.logs),
-    qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? []),
+    qzoneStats: toQZonePostStats(post.qzonePostMetrics ?? [], options),
     batch: toBatchSummary(post.batchItem, post.displayId),
     tags: toPostTags(post.tagAssignments),
   };
@@ -185,10 +191,12 @@ export function toPostTimeline(
     });
 }
 
-export function toQZonePostStats(metrics: PostQZoneMetric[]) {
+export function toQZonePostStats(metrics: PostQZoneMetric[], options?: { keepDeletedComments?: boolean }) {
   if (metrics.length === 0) {
     return null;
   }
+  // 已删除的评论默认不出现在普通用户面前，仅管理员/审核员（keepDeletedComments）可见。
+  const keepDeletedComments = options?.keepDeletedComments === true;
 
   const totals = {
     visitorCount: 0,
@@ -210,6 +218,9 @@ export function toQZonePostStats(metrics: PostQZoneMetric[]) {
       checkedAtTime = metric.checkedAt.getTime();
     }
     return {
+      // 发布记录 id：评论管理插件的删除按目标（墙号）定位，前端从被点击的
+      // 评论区带上它，服务端严格限定在该 attempt 内删除，避免多墙号同楼层号误删。
+      attemptId: metric.publishAttempt?.id ?? null,
       targetName: metric.publishAttempt?.publishTarget?.displayName ?? "QZone 发布目标",
       botName: metric.publishAttempt?.publishTarget?.botAccount?.displayName ?? null,
       botQqUin: metric.publishAttempt?.publishTarget?.botAccount?.qqUin.toString() ?? null,
@@ -220,7 +231,7 @@ export function toQZonePostStats(metrics: PostQZoneMetric[]) {
       forwardCount: metric.forwardCount ?? null,
       checkedAt: metric.checkedAt?.toISOString() ?? null,
       lastError: metric.lastError,
-      comments: normalizeQZoneComments(metric.comments),
+      comments: normalizeQZoneComments(metric.comments).filter((comment) => keepDeletedComments || comment.deleted !== true),
     };
   });
 
@@ -280,6 +291,7 @@ function normalizeQZoneComments(value: unknown): PostQZoneComment[] {
           const r = rawReply as Record<string, unknown>;
           return [
             {
+              id: typeof r.id === "string" ? r.id : String(r.id ?? ""),
               uin: typeof r.uin === "string" ? r.uin : String(r.uin ?? ""),
               name: typeof r.name === "string" ? r.name : "",
               content: typeof r.content === "string" ? r.content : "",
@@ -290,12 +302,20 @@ function normalizeQZoneComments(value: unknown): PostQZoneComment[] {
         })
       : [];
     comments.push({
+      id: typeof c.id === "string" ? c.id : String(c.id ?? ""),
       uin: typeof c.uin === "string" ? c.uin : String(c.uin ?? ""),
       name: typeof c.name === "string" ? c.name : "",
       content: typeof c.content === "string" ? c.content : "",
       images: normalizeQZoneCommentImages(c.images),
       createdAt: typeof c.createdAt === "string" ? c.createdAt : null,
       replies,
+      ...(c.deleted === true
+        ? {
+            deleted: true,
+            deletedAt: typeof c.deletedAt === "string" ? c.deletedAt : undefined,
+            deletedBy: typeof c.deletedBy === "string" ? c.deletedBy : undefined,
+          }
+        : {}),
     });
   }
   return comments;
