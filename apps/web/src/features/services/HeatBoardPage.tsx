@@ -248,13 +248,13 @@ export function HeatBoardPage({ metadata }: { metadata: TenantMetadata }) {
   }
 
   return (
-    <section className="product-surface p-4">
+    <section className="product-surface h-full min-h-0 overflow-y-auto p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-rose-50"><HeatBoardIcon /></span>
           <div>
             <h2 className="text-sm font-semibold text-slate-950">热度榜</h2>
-            <p className="text-xs text-slate-500">半衰期 {metadata.heatBoardHalfLifeHours} 小时</p>
+            <p className="text-xs text-slate-500">单篇最多话题 {metadata.heatBoardMaxTagCount}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-right">

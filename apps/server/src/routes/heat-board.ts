@@ -82,21 +82,21 @@ function antiCheatingFactor(stats: PublishedHeatItem["stats"]): number {
   return 1;
 }
 
+const DEFAULT_HALF_LIFE_HOURS = 24;
 const HALF_LIFE_FLOOR = 0.12;
 
-function halfLifeDecayFactor(hoursSincePublished: number, halfLifeHours: number): number {
+function halfLifeDecayFactor(hoursSincePublished: number): number {
   const hours = Math.max(0, hoursSincePublished);
-  const halfLife = Math.max(0.25, halfLifeHours);
-  return Math.max(HALF_LIFE_FLOOR, Math.pow(0.5, hours / halfLife));
+  return Math.max(HALF_LIFE_FLOOR, Math.pow(0.5, hours / DEFAULT_HALF_LIFE_HOURS));
 }
 
-function heatScore(hoursSincePublished: number, stats: PublishedHeatItem["stats"], halfLifeHours: number): number {
+function heatScore(hoursSincePublished: number, stats: PublishedHeatItem["stats"]): number {
   const base =
     0.1 * Math.log(1 + stats.visitorCount) +
     1.0 * Math.log(1 + stats.likeCount) +
     3.0 * Math.log(1 + stats.commentCount) +
     4.0 * Math.log(1 + stats.forwardCount);
-  return base * qualityWeight(stats) * antiCheatingFactor(stats) * halfLifeDecayFactor(hoursSincePublished, halfLifeHours);
+  return base * qualityWeight(stats) * antiCheatingFactor(stats) * halfLifeDecayFactor(hoursSincePublished);
 }
 
 function toStats(metrics: PostQZoneMetric[]) {
@@ -119,7 +119,7 @@ function badgeFor(rank: number): "boiling" | "hot" | null {
   return null;
 }
 
-function toItem(input: { kind: "single" | "batch"; key: string; post: PublishedHeatPost; postId?: string; publishedAt: Date; metrics: PostQZoneMetric[] }, halfLifeHours: number): PublishedHeatItem {
+function toItem(input: { kind: "single" | "batch"; key: string; post: PublishedHeatPost; postId?: string; publishedAt: Date; metrics: PostQZoneMetric[] }): PublishedHeatItem {
   const stats = toStats(input.metrics);
   const publishedAt = input.publishedAt;
   return {
@@ -139,7 +139,7 @@ function toItem(input: { kind: "single" | "batch"; key: string; post: PublishedH
     tags: serializeAssignedPostTags(input.post.tagAssignments),
     author: input.post.author ? { displayName: input.post.author.displayName ?? "", qqUin: input.post.author.qqUin.toString() } : null,
     stats,
-    heat: heatScore((Date.now() - publishedAt.getTime()) / 3600000, stats, halfLifeHours),
+    heat: heatScore((Date.now() - publishedAt.getTime()) / 3600000, stats),
   };
 }
 
@@ -151,7 +151,6 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
       return reply.code(404).send({ message: "该插件未启用" });
     }
     const viewerIsReviewer = hasTenantRole(context.selectedMembership.role, "reviewer");
-    const halfLifeHours = Math.max(0.25, Number(pluginConfig.heatBoard.halfLifeHours) || 24);
     const tenantId = context.selectedTenant.id;
 
     const posts = await prisma.post.findMany({
@@ -169,7 +168,7 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
     });
 
     const rawItems: PublishedHeatItem[] = [
-      ...posts.map((post) => toItem({ kind: "single", key: post.id, post, publishedAt: post.updatedAt, metrics: post.qzonePostMetrics ?? [] }, halfLifeHours)),
+      ...posts.map((post) => toItem({ kind: "single", key: post.id, post, publishedAt: post.updatedAt, metrics: post.qzonePostMetrics ?? [] })),
       ...batches.flatMap((batch) => batch.items.map((item, index) => toItem({
         kind: "batch",
         key: `${batch.id}:${item.post.id}`,
@@ -177,7 +176,7 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
         post: item.post,
         publishedAt: batch.flushedAt ?? batch.updatedAt,
         metrics: batch.attempts.flatMap((attempt) => attempt.qzonePostMetrics ?? []),
-      }, halfLifeHours))),
+      }))),
     ].filter((item) => viewerIsReviewer || item.displayId !== null);
 
     const rankedPosts = rawItems.sort((a, b) => b.heat - a.heat);
@@ -205,7 +204,6 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
 
     return {
       updatedAt: new Date().toISOString(),
-      halfLifeHours,
       articles: articleList,
       topics,
     };
@@ -225,15 +223,14 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
       include: { author: { select: { displayName: true, qqUin: true } }, tagAssignments: { include: { tag: true }, orderBy: { createdAt: "asc" } }, qzonePostMetrics: true, batchItem: { select: { batch: { select: { id: true, flushedAt: true, updatedAt: true } } } } },
       orderBy: { updatedAt: "desc" },
     });
-    const halfLifeHours = Math.max(0.25, Number(pluginConfig.heatBoard.halfLifeHours) || 24);
     const articles = posts.map((post) => toItem({
       kind: post.batchItem?.batch ? "batch" : "single",
       key: post.batchItem?.batch?.id ? `${post.batchItem.batch.id}:${post.id}` : post.id,
       post,
       publishedAt: post.batchItem?.batch?.flushedAt ?? post.batchItem?.batch?.updatedAt ?? post.updatedAt,
       metrics: post.qzonePostMetrics ?? [],
-    }, halfLifeHours)).sort((a, b) => b.heat - a.heat).map((post, index) => ({ ...post, rank: index + 1, badge: badgeFor(index + 1) }));
-    return { updatedAt: new Date().toISOString(), halfLifeHours, topic: { id: topic.id, name: topic.name, color: topic.color, postCount: topic._count.assignments, heat: articles.slice(0, 50).reduce((sum, post) => sum + post.heat, 0) + 0.2 * Math.log(1 + topic._count.assignments) }, articles };
+    })).sort((a, b) => b.heat - a.heat).map((post, index) => ({ ...post, rank: index + 1, badge: badgeFor(index + 1) }));
+    return { updatedAt: new Date().toISOString(), topic: { id: topic.id, name: topic.name, color: topic.color, postCount: topic._count.assignments, heat: articles.slice(0, 50).reduce((sum, post) => sum + post.heat, 0) + 0.2 * Math.log(1 + topic._count.assignments) }, articles };
   });
 
   app.get("/api/post-tags/search", async (request, reply) => {

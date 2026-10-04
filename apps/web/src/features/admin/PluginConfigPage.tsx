@@ -1417,7 +1417,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     },
     heatBoard: {
       enabled: false,
-      halfLifeHours: 24,
+      maxTagCount: 5,
     },
     commentManagement: {
       enabled: false,
@@ -1448,14 +1448,14 @@ function formatAuditValue(text: string): string {
 }
 
 function HeatBoardPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
-  const halfLifeHours = config.heatBoard.halfLifeHours;
-  const nextHalfLifeHours = (value: string) => {
+  const maxTagCount = config.heatBoard.maxTagCount;
+  const nextMaxTagCount = (value: string) => {
     const parsed = Number.parseInt(value, 10);
     onChange({
       ...config,
       heatBoard: {
         ...config.heatBoard,
-        halfLifeHours: Number.isFinite(parsed) && parsed >= 1 && parsed <= 720 ? parsed : 24,
+        maxTagCount: Number.isFinite(parsed) && parsed >= 1 && parsed <= 20 ? parsed : 5,
       },
     });
   };
@@ -1465,15 +1465,15 @@ function HeatBoardPanel({ config, onChange, busy }: { config: TenantPluginConfig
         开启后，服务页新增「热度榜」入口，并在投稿页开放话题选择；热度按浏览、点赞、评论、转发和发布时间衰减计算。
       </div>
       <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-3">
-        <span className="text-sm font-medium text-slate-700">热度半衰期（小时）</span>
+        <span className="text-sm font-medium text-slate-700">单篇最多话题</span>
         <input
           type="number"
           min={1}
-          max={720}
+          max={20}
           step={1}
-          value={halfLifeHours}
+          value={maxTagCount}
           disabled={busy}
-          onChange={(event) => nextHalfLifeHours(event.target.value)}
+          onChange={(event) => nextMaxTagCount(event.target.value)}
           className="h-8 w-20 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-slate-400"
         />
       </label>
@@ -1515,6 +1515,8 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
       return { enabled: false };
     case "todayInHistory":
       return { enabled: false };
+    case "heatBoard":
+      return { enabled: false, maxTagCount: 5 };
     case "commentManagement":
       return { enabled: false, allowUserDeleteOwnPostComments: false };
     default:

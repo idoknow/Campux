@@ -155,9 +155,9 @@ export const tenantPluginConfigSchema = z.object({
   heatBoard: z
     .object({
       enabled: z.boolean(),
-      halfLifeHours: z.number().positive().max(720).default(24),
+      maxTagCount: z.number().int().positive().max(20).default(5),
     })
-    .default({ enabled: false, halfLifeHours: 24 }),
+    .default({ enabled: false, maxTagCount: 5 }),
   // 评论管理：开启后管理员可在网页端删除已发布稿件的 QZone 评论；
   // allowUserDeleteOwnPostComments 控制普通用户是否可以删除自己稿件下的评论。
   commentManagement: z
@@ -192,7 +192,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   feedback: { enabled: false },
   botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
   todayInHistory: { enabled: false },
-  heatBoard: { enabled: false, halfLifeHours: 24 },
+  heatBoard: { enabled: false, maxTagCount: 5 },
   commentManagement: { enabled: false, allowUserDeleteOwnPostComments: false },
 };
 

@@ -28,6 +28,13 @@ export function AppShell({
   anonymous,
   anonymousAvatar,
   pendingAttachments,
+  topicQuery,
+  topicSuggestions,
+  selectedPostTagIds,
+  onTopicQueryChange,
+  onTopicToggle,
+  onCreateTopic,
+  onTopicClearAll,
   onActiveTabChange,
   onAdminTabChange,
   onAnonymousChange,
@@ -68,6 +75,13 @@ export function AppShell({
   anonymous: boolean;
   anonymousAvatar: string;
   pendingAttachments: PendingAttachment[];
+  topicQuery: string;
+  topicSuggestions: Array<{ id: string; name: string; color: string; postCount: number }>;
+  selectedPostTagIds: string[];
+  onTopicQueryChange: (value: string) => void;
+  onTopicToggle: (tag: { id: string; name: string; color: string; postCount: number }) => void;
+  onCreateTopic: (name: string) => void;
+  onTopicClearAll: () => void;
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
@@ -121,6 +135,12 @@ export function AppShell({
                 anonymousAvatar={anonymousAvatar}
                 selectedTenant={me.currentTenant}
                 pendingAttachments={pendingAttachments}
+                topicQuery={topicQuery}
+                topicSuggestions={topicSuggestions}
+                selectedPostTagIds={selectedPostTagIds}
+                onTopicQueryChange={onTopicQueryChange}
+                onTopicToggle={onTopicToggle}
+                onTopicClearAll={onTopicClearAll}
                 onAnonymousChange={onAnonymousChange}
                 onAnonymousAvatarChange={onAnonymousAvatarChange}
                 onBgColorChange={onBgColorChange}

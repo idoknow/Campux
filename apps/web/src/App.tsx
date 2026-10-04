@@ -649,6 +649,7 @@ export function App() {
         postTextColor || undefined,
         postFont || undefined,
         anonymousAvatar || undefined,
+        selectedPostTagIds,
       );
       clearAttachments(submissionAttachmentIds);
       // 取消尚未落盘的 IndexedDB 提交，避免提交后 250ms 内又把旧草稿写回去。
@@ -820,6 +821,13 @@ export function App() {
       anonymous={anonymous}
       anonymousAvatar={anonymousAvatar}
       pendingAttachments={pendingAttachments}
+      topicQuery={topicQuery}
+      topicSuggestions={topicSuggestions}
+      selectedPostTagIds={selectedPostTagIds}
+      onTopicQueryChange={setTopicQuery}
+      onTopicToggle={(tag) => setSelectedPostTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id].slice(0, 5))}
+      onCreateTopic={createTopic}
+      onTopicClearAll={() => setSelectedPostTagIds([])}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={(value) => mutateSubmissionForm(() => setAnonymous(value))}

@@ -66,7 +66,7 @@ export const defaultMetadata: TenantMetadata = {
   enableGraduation: false,
   enableTodayInHistory: false,
   enableHeatBoard: false,
-  heatBoardHalfLifeHours: 24,
+  heatBoardMaxTagCount: 5,
 };
 
 export const navItems = [

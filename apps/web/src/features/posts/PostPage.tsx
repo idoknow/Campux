@@ -32,6 +32,12 @@ export function PostPage({
   anonymousAvatar,
   selectedTenant,
   pendingAttachments,
+  topicQuery,
+  topicSuggestions,
+  selectedPostTagIds,
+  onTopicQueryChange,
+  onTopicToggle,
+  onTopicClearAll,
   onPostTextChange,
   onAnonymousChange,
   onAnonymousAvatarChange,
@@ -53,6 +59,12 @@ export function PostPage({
   anonymousAvatar: string;
   selectedTenant: TenantSummary;
   pendingAttachments: PendingAttachment[];
+  topicQuery: string;
+  topicSuggestions: Array<{ id: string; name: string; color: string; postCount: number }>;
+  selectedPostTagIds: string[];
+  onTopicQueryChange: (value: string) => void;
+  onTopicToggle: (tag: { id: string; name: string; color: string; postCount: number }) => void;
+  onTopicClearAll: () => void;
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
   onAnonymousAvatarChange: (value: string) => void;
@@ -244,6 +256,45 @@ export function PostPage({
             {postText.trim().length > 0 ? <span className="ml-1.5 font-normal text-slate-400">已自动保存草稿</span> : null}
           </span>
         </div>
+        {metadata.enableHeatBoard && (
+          <div className="mb-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                value={topicQuery}
+                placeholder="添加话题"
+                className="h-9 w-full rounded-full border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
+                onChange={(event) => onTopicQueryChange(event.target.value)}
+              />
+              {selectedPostTagIds.length > 0 && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600"
+                  onClick={onTopicClearAll}
+                >
+                  清空
+                </button>
+              )}
+            </div>
+            {topicSuggestions.length > 0 && (
+              <div className="max-h-36 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                {topicSuggestions.map((tag) => (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    className={selectedPostTagIds.includes(tag.id) ? "flex w-full items-center justify-between rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700" : "flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"}
+                    onClick={() => onTopicToggle(tag)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color }} />
+                      <span className="truncate">{tag.name}</span>
+                    </span>
+                    <span className="text-xs text-slate-400">{tag.postCount} 篇</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <Textarea
           value={postText}
           maxLength={1000}
