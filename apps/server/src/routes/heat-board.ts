@@ -181,7 +181,7 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
     ].filter((item) => viewerIsReviewer || item.displayId !== null);
 
     const rankedPosts = rawItems.sort((a, b) => b.heat - a.heat);
-    const articleCount = Math.floor(posts.length * 0.078);
+    const articleCount = Math.floor((posts.length + batches.reduce((sum, batch) => sum + batch.items.length, 0)) * 0.078);
     const articleList = rankedPosts.slice(0, Math.max(articleCount, 0)).map((post, index) => ({ ...post, rank: index + 1, badge: badgeFor(index + 1) }));
 
     const topicMap = new Map<string, { tag: any; posts: PublishedHeatItem[] }>();
