@@ -220,6 +220,21 @@ export function ServicesPage({
             <ChevronRightIcon className="size-5 shrink-0 text-violet-400" />
           </button>
         ) : null}
+        {metadata.enableHeatBoard ? (
+          <button
+            onClick={() => navigateTo("/services/heatboard")}
+            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-rose-200/70 bg-gradient-to-br from-rose-50 via-red-50 to-orange-100 p-4 text-left shadow-sm transition hover:border-rose-300 hover:shadow-md"
+          >
+            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
+              <FlameIcon className="size-7 text-rose-500" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-rose-950">热度榜</span>
+              <span className="mt-0.5 block text-xs text-rose-900/60">查看稿件排行榜与话题排行榜，前三沸、前十热。</span>
+            </span>
+            <ChevronRightIcon className="size-5 shrink-0 text-rose-400" />
+          </button>
+        ) : null}
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
 
         <section className="product-surface p-4">
