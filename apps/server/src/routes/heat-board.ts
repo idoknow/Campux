@@ -82,13 +82,21 @@ function antiCheatingFactor(stats: PublishedHeatItem["stats"]): number {
   return 1;
 }
 
+const HALF_LIFE_FLOOR = 0.12;
+
+function halfLifeDecayFactor(hoursSincePublished: number, halfLifeHours: number): number {
+  const hours = Math.max(0, hoursSincePublished);
+  const halfLife = Math.max(0.25, halfLifeHours);
+  return Math.max(HALF_LIFE_FLOOR, Math.pow(0.5, hours / halfLife));
+}
+
 function heatScore(hoursSincePublished: number, stats: PublishedHeatItem["stats"], halfLifeHours: number): number {
   const base =
     0.1 * Math.log(1 + stats.visitorCount) +
     1.0 * Math.log(1 + stats.likeCount) +
     3.0 * Math.log(1 + stats.commentCount) +
     4.0 * Math.log(1 + stats.forwardCount);
-  return base * qualityWeight(stats) * antiCheatingFactor(stats) * Math.pow(0.5, Math.max(0, hoursSincePublished) / halfLifeHours);
+  return base * qualityWeight(stats) * antiCheatingFactor(stats) * halfLifeDecayFactor(hoursSincePublished, halfLifeHours);
 }
 
 function toStats(metrics: PostQZoneMetric[]) {

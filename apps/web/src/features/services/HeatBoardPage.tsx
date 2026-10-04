@@ -76,7 +76,11 @@ function formatTime(value: string) {
 }
 
 function formatHeat(value: number) {
-  return Number(value.toFixed(2));
+  const rounded = Math.round(value * 100) / 100;
+  if (rounded >= 1000) return Math.round(rounded).toLocaleString("zh-CN");
+  if (rounded >= 10) return rounded.toFixed(1);
+  if (rounded >= 1) return rounded.toFixed(2);
+  return rounded.toFixed(3);
 }
 
 function CommentsSection({ post }: { post: HeatPost }) {
