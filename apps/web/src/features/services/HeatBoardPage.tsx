@@ -224,7 +224,7 @@ export function HeatBoardPage({ metadata }: { metadata: TenantMetadata }) {
   }
 
   return (
-    <section className="product-surface h-full min-h-0 overflow-y-auto p-4">
+    <section className="product-surface h-full min-h-0 overflow-y-auto overscroll-contain px-4 py-4 pb-24 md:pb-6">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-rose-50"><HeatBoardIcon /></span>
