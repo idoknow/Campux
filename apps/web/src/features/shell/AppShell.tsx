@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { AdminTab, AuthenticatedMe, MainTab, Pagination, PendingAttachment, PostItem, PostsTab, TenantMetadata } from "@/types/app";
 import { canAccess, type NavItem } from "@/lib/app-model";
 import { AdminPage } from "@/features/admin/AdminPage";
@@ -105,6 +106,32 @@ export function AppShell({
   onRemoveAttachment: (id: string) => void;
   onSubmitPost: () => void;
 }) {
+  const [hideLive2D, setHideLive2D] = useState(() => window.location.pathname === "/services/lingling");
+
+  useEffect(() => {
+    const sync = () => setHideLive2D(window.location.pathname === "/services/lingling");
+    window.addEventListener("popstate", sync);
+    const pushState = window.history.pushState.bind(window.history);
+    const replaceState = window.history.replaceState.bind(window.history);
+    const originalPushState = window.history.pushState;
+    const originalReplaceState = window.history.replaceState;
+    window.history.pushState = (state: unknown, unused: string, url?: string | URL | null) => {
+      const result = pushState(state, unused, url);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      return result;
+    };
+    window.history.replaceState = (state: unknown, unused: string, url?: string | URL | null) => {
+      const result = replaceState(state, unused, url);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      return result;
+    };
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+    };
+  }, []);
+
   return (
     <Tabs value={activeTab} onValueChange={(value) => onActiveTabChange(value as MainTab)} className="h-dvh overflow-hidden">
       <div className="h-dvh overflow-hidden bg-background md:flex">

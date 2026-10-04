@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, FlameIcon, KeyRoundIcon, LoaderIcon, PowerIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
 import type { AdminMember, BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig, TenantRole } from "@/types/app";
@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { builtInSvgAvatarFilenames } from "@/lib/built-in-svg-avatars";
 import { filterPluginAuditLogs } from "./plugin-audit-log-filter";
 import { AggregateLoginIcon, AggregateLoginPluginIcon, AGGREGATE_LOGIN_TYPE_LABELS } from "../aggregate-oauth/icons";
+import { HeatBoardIcon } from "../services/HeatBoardPage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -1295,7 +1296,7 @@ const PLUGINS: PluginDescriptor[] = [
   },
   {
     id: "heatBoard",
-    icon: FlameIcon,
+    icon: HeatBoardIcon,
     name: "热度榜",
     tagline: "Trending",
     description: "服务页展示稿件热度排行与话题热度排行，投稿页支持添加话题",

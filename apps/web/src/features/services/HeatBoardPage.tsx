@@ -71,9 +71,9 @@ type TopicDetail = {
   articles: HeatPost[];
 };
 
-function HeatBoardIcon() {
+export function HeatBoardIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="size-6">
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className ?? "size-6"} fill="none">
       <path d="M512 981.333333a320 320 0 0 1-219.221333-553.088C350.037333 374.357333 490.666667 277.333333 469.333333 64c256 170.666667 384 341.333333 128 597.333333 42.666667 0 106.666667 0 213.333334-105.386666 11.52 32.981333 21.333333 68.437333 21.333333 105.386666A320 320 0 0 1 512 981.333333z" fill="#F64E54" />
     </svg>
   );

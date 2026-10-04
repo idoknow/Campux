@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, FlameIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
@@ -17,7 +17,7 @@ import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
 import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import { GraduationsPage } from "@/features/graduation/GraduationsPage";
 import { GraduationIcon } from "@/features/graduation/GraduationIcon";
-import { HeatBoardPage } from "./HeatBoardPage";
+import { HeatBoardIcon, HeatBoardPage } from "./HeatBoardPage";
 import { LinglingPage } from "./LinglingPage";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
@@ -169,92 +169,89 @@ export function ServicesPage({
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24 pr-1 md:pb-6">
-        {metadata.enableCampaigns ? (
-          <button
-            onClick={() => navigateTo("/services/campaigns")}
-            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-sky-200/70 bg-gradient-to-br from-sky-50 via-blue-50 to-pink-100 p-4 text-left shadow-sm transition hover:border-sky-300 hover:shadow-md"
-          >
-            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
-              <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="size-7" fill="none">
-                <path d="M5.9 520h50l43.7 62.2h-50z" fill="#FD643A" />
-                <path d="M1009.7 357.9l8.4 24.9-26.9 22.9-8.3-24.9z" fill="#FD9E1C" />
-                <path d="M860.2 954.1H70.6c-23.6 0-42.7-19.1-42.7-42.7l64-170.7c0-23.6 19.1-42.7 42.7-42.7h682.9c23.6 0 42.7 19.1 42.7 42.7l42.7 170.7c0 23.6-19.1 42.7-42.7 42.7z" fill="#90C261" />
-                <path d="M694.9 854.7H250.2c-11.9 0-21.5-9.6-21.5-21.5s9.6-21.5 21.5-21.5h444.7c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5z" fill="#FFFFFF" />
-                <path d="M830 514L576.4 767.5c-56 56-146.8 56-202.9 0l-164-164.1c-56-56-56-146.8 0-202.9L463.1 147c56-56 146.8-56 202.9 0l164 164.1c56 56 56 146.8 0 202.9z" fill="#FD7D24" />
-                <path d="M768.5 487.1L545.3 710.2c-42 42-110.1 42-152.1 0L267.1 584.1c-42-42-42-110.1 0-152.1l223.1-223.1c42-42 110.1-42 152.1 0L768.4 335c42.1 41.9 42.1 110.1 0.1 152.1z" fill="#FFCA28" />
-                <path d="M780 638h26.2l13.1 32.7h-26.2z" fill="#FD9E1C" />
-                <path d="M530.7 548.6l-118-108.4c-7.2-7.2-19-7.2-26.2 0-7.2 7.2-7.2 18.8 0 26l104.8 121.4c7.2 7.2 23.3 2.8 30.6-4.3 7.3-7.2 16-27.6 8.8-34.7z" fill="#FFFFFF" />
-                <path d="M696.6 375.1c-7.2-7.2-19-7.2-26.2 0L478.2 548.6c-7.2 7.2-2.9 23.2 4.4 30.4 7.2 7.2 27.7 15.9 34.9 8.7l179.1-186.4c7.3-7.3 7.3-19 0-26.2z" fill="#FFFFFF" />
-              </svg>
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-base font-bold text-sky-950">投票竞选</span>
-              <span className="mt-0.5 block text-xs text-sky-900/60">浏览正在进行的投票竞选，查看排名或参与投票。</span>
-            </span>
-            <ChevronRightIcon className="size-5 shrink-0 text-sky-400" />
-          </button>
-        ) : null}
-        {metadata.enableBroadcast ? (
-          <button
-            onClick={() => navigateTo("/services/broadcasts")}
-            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-orange-200/70 bg-gradient-to-br from-orange-50 via-amber-50 to-rose-100 p-4 text-left shadow-sm transition hover:border-orange-300 hover:shadow-md"
-          >
-            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
-              <BroadcastIcon className="size-7" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-base font-bold text-orange-950">广播通知</span>
-              <span className="mt-0.5 block text-xs text-orange-900/60">查看新通知与历史通知，广播员可标记已广播。</span>
-            </span>
-            <ChevronRightIcon className="size-5 shrink-0 text-orange-400" />
-          </button>
-        ) : null}
-        {metadata.enableGraduation ? (
-          <button
-            onClick={() => navigateTo("/services/graduations")}
-            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-violet-200/70 bg-gradient-to-br from-violet-50 via-fuchsia-50 to-pink-100 p-4 text-left shadow-sm transition hover:border-violet-300 hover:shadow-md"
-          >
-            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
-              <GraduationIcon className="size-7" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-base font-bold text-violet-950">毕业生去向</span>
-              <span className="mt-0.5 block text-xs text-violet-900/60">用户/学校/时间四视图，支持搜索与待审核队列。</span>
-            </span>
-            <ChevronRightIcon className="size-5 shrink-0 text-violet-400" />
-          </button>
-        ) : null}
-        {metadata.enableHeatBoard ? (
-          <button
-            onClick={() => navigateTo("/services/heatboard")}
-            className="mb-4 flex w-full items-center gap-4 rounded-xl border border-rose-200/70 bg-gradient-to-br from-rose-50 via-red-50 to-orange-100 p-4 text-left shadow-sm transition hover:border-rose-300 hover:shadow-md"
-          >
-            <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
-              <FlameIcon className="size-7 text-rose-500" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-base font-bold text-rose-950">热度榜</span>
-              <span className="mt-0.5 block text-xs text-rose-900/60">查看稿件排行榜与话题排行榜，前三沸、前十热。</span>
-            </span>
-            <ChevronRightIcon className="size-5 shrink-0 text-rose-400" />
-          </button>
-        ) : null}
-        <button
-          onClick={() => navigateTo("/services/lingling")}
-          className="mb-4 flex w-full items-center gap-4 rounded-xl border border-pink-200/70 bg-gradient-to-br from-pink-50 via-rose-50 to-violet-100 p-4 text-left shadow-sm transition hover:border-pink-300 hover:shadow-md"
-        >
-          <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
-            <span aria-hidden="true" className="text-2xl">🐶</span>
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-base font-bold text-pink-950">吉祥萌宠</span>
-            <span className="mt-0.5 block text-xs text-pink-900/60">看看今天的小狗状态，顺便查看成长值。</span>
-          </span>
-          <ChevronRightIcon className="size-5 shrink-0 text-pink-400" />
-        </button>
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
 
         <section className="product-surface p-4">
+          <ServiceGroup title="插件" description="Campux 预设插件入口，样式与下方服务列表保持一致。">
+            {metadata.enableCampaigns ? (
+              <button
+                type="button"
+                onClick={() => navigateTo("/services/campaigns")}
+                className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-blue">
+                  <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="size-5" fill="none">
+                    <path d="M5.9 520h50l43.7 62.2h-50z" fill="#FD643A" />
+                    <path d="M1009.7 357.9l8.4 24.9-26.9 22.9-8.3-24.9z" fill="#FD9E1C" />
+                    <path d="M860.2 954.1H70.6c-23.6 0-42.7-19.1-42.7-42.7l64-170.7c0-23.6 19.1-42.7 42.7-42.7h682.9c23.6 0 42.7 19.1 42.7 42.7l42.7 170.7c0 23.6-19.1 42.7-42.7 42.7z" fill="#90C261" />
+                    <path d="M694.9 854.7H250.2c-11.9 0-21.5-9.6-21.5-21.5s9.6-21.5 21.5-21.5h444.7c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5z" fill="#FFFFFF" />
+                    <path d="M830 514L576.4 767.5c-56 56-146.8 56-202.9 0l-164-164.1c-56-56-56-146.8 0-202.9L463.1 147c56-56 146.8-56 202.9 0l164 164.1c56 56 56 146.8 0 202.9z" fill="#FD7D24" />
+                    <path d="M768.5 487.1L545.3 710.2c-42 42-110.1 42-152.1 0L267.1 584.1c-42-42-42-110.1 0-152.1l223.1-223.1c42-42 110.1-42 152.1 0L768.4 335c42.1 41.9 42.1 110.1 0.1 152.1z" fill="#FFCA28" />
+                    <path d="M780 638h26.2l13.1 32.7h-26.2z" fill="#FD9E1C" />
+                    <path d="M530.7 548.6l-118-108.4c-7.2-7.2-19-7.2-26.2 0-7.2 7.2-7.2 18.8 0 26l104.8 121.4c7.2 7.2 23.3 2.8 30.6-4.3 7.3-7.2 16-27.6 8.8-34.7z" fill="#FFFFFF" />
+                    <path d="M696.6 375.1c-7.2-7.2-19-7.2-26.2 0L478.2 548.6c-7.2 7.2-2.9 23.2 4.4 30.4 7.2 7.2 27.7 15.9 34.9 8.7l179.1-186.4c7.3-7.3 7.3-19 0-26.2z" fill="#FFFFFF" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">投票竞选</span>
+                  <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">浏览正在进行的投票竞选，查看排名或参与投票。</span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+              </button>
+            ) : null}
+            {metadata.enableBroadcast ? (
+              <button
+                type="button"
+                onClick={() => navigateTo("/services/broadcasts")}
+                className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-amber-200 hover:bg-amber-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-amber-500/50 dark:hover:bg-amber-500/10"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-amber">
+                  <BroadcastIcon className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">广播通知</span>
+                  <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">查看新通知与历史通知，广播员可标记已广播。</span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+              </button>
+            ) : null}
+            {metadata.enableGraduation ? (
+              <button
+                type="button"
+                onClick={() => navigateTo("/services/graduations")}
+                className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-violet-200 hover:bg-violet-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-violet">
+                  <GraduationIcon className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">毕业生去向</span>
+                  <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">用户/学校/时间四视图，支持搜索与待审核队列。</span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+              </button>
+            ) : null}
+            {metadata.enableHeatBoard ? (
+              <button
+                type="button"
+                onClick={() => navigateTo("/services/heatboard")}
+                className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-rose-200 hover:bg-rose-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-rose-500/50 dark:hover:bg-rose-500/10"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-rose">
+                  <HeatBoardIcon className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">热度榜</span>
+                  <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">查看稿件排行榜与话题排行榜，前三沸、前十热。</span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+              </button>
+            ) : null}
+          </ServiceGroup>
+
+        </section>
+
+        <section className="product-surface mt-4 p-4">
           <ServiceGroup title="账户设置" description="管理你在当前校园墙里的基本账号信息。">
             {accountServices.map((service, index) => (
               <ServiceTile key={service.title} service={service} index={index} compact onOpen={() => openService(service)} />
@@ -291,14 +288,28 @@ export function ServicesPage({
             <button
               type="button"
               onClick={() => navigateTo("/services/about")}
-              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35"
+              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-blue">
                 <InfoIcon className="size-5" strokeWidth={2.1} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-slate-950">关于</span>
-                <span className="mt-0.5 block text-sm leading-5 text-slate-600">版本、部署形态、开发者、技术栈与插件信息</span>
+                <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">关于</span>
+                <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">版本、部署形态、开发者、技术栈与插件信息</span>
+              </span>
+              <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigateTo("/services/lingling")}
+              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-rose-200 hover:bg-rose-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-rose-500/50 dark:hover:bg-rose-500/10"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-rose">
+                <span aria-hidden="true" className="text-lg">🐶</span>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">吉祥萌宠</span>
+                <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">看看今天的小狗状态，顺便查看成长值。</span>
               </span>
               <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             </button>
