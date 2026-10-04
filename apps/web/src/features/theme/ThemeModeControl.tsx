@@ -1,5 +1,4 @@
 import { MoonIcon, SunIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useTheme } from "./theme";
 import { DropdownMenuLabel, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
@@ -7,7 +6,7 @@ import { DropdownMenuLabel, DropdownMenuItem } from "@/components/ui/dropdown-me
  * 日/月渐变外观开关：亮色一侧为蓝天渐变 + 太阳，暗色一侧为星空渐变 + 月球。
  * 点击在亮/暗之间切换；原本跟随系统的用户首次点击后转为显式模式。
  */
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className = "" }: { className?: string }) {
   const { resolvedTheme, setMode } = useTheme();
   const dark = resolvedTheme === "dark";
 
@@ -19,32 +18,38 @@ export function ThemeToggle({ className }: { className?: string }) {
       aria-label="切换外观模式"
       title={dark ? "切换到亮色模式" : "切换到暗色模式"}
       onClick={() => setMode(dark ? "light" : "dark")}
-      className={cn(
-        "relative inline-flex h-8 w-[72px] shrink-0 cursor-pointer items-center rounded-full p-1 shadow-inner transition-colors duration-300 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-        dark
-          ? "bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 ring-1 ring-white/15"
-          : "bg-gradient-to-r from-sky-400 via-cyan-300 to-sky-300 ring-1 ring-white/40",
-        className,
-      )}
+      className={`relative inline-flex h-9 w-[96px] shrink-0 cursor-pointer items-center rounded-full p-1 shadow-inner transition-all duration-500 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none ${dark ? "bg-gradient-to-br from-[#1f2a44] via-[#22264b] to-[#2d3561] ring-1 ring-white/10" : "bg-gradient-to-br from-[#b3d9ff] via-[#cfe6ff] to-[#ffe9a8] ring-1 ring-white/50"} ${className}`}
     >
-      {/* 星空点缀（暗色） */}
-      <span aria-hidden className={cn("pointer-events-none absolute left-3 top-2 size-0.5 rounded-full bg-white/80 transition-opacity duration-300", dark ? "opacity-100" : "opacity-0")} />
-      <span aria-hidden className={cn("pointer-events-none absolute left-9 top-3.5 size-1 rounded-full bg-white/70 transition-opacity duration-300", dark ? "opacity-100" : "opacity-0")} />
-      <span aria-hidden className={cn("pointer-events-none absolute left-14 top-2 size-0.5 rounded-full bg-white/60 transition-opacity duration-300", dark ? "opacity-100" : "opacity-0")} />
+      <span aria-hidden className={`pointer-events-none absolute left-3 top-2 size-1 rounded-full bg-white/80 shadow-[0_0_4px_1px_rgba(255,255,255,0.8)] transition-opacity duration-500 ${dark ? "opacity-100" : "opacity-0"}`} />
+      <span aria-hidden className={`pointer-events-none absolute left-[28px] top-3.5 size-0.5 rounded-full bg-white/70 transition-opacity duration-500 ${dark ? "opacity-100" : "opacity-0"}`} />
+      <span aria-hidden className={`pointer-events-none absolute left-[44px] top-2 size-0.5 rounded-full bg-white/60 transition-opacity duration-500 ${dark ? "opacity-100" : "opacity-0"}`} />
+      <span aria-hidden className={`pointer-events-none absolute right-3 top-2.5 size-1 rounded-full bg-white/70 transition-opacity duration-500 ${dark ? "opacity-100" : "opacity-0"}`} />
 
-      {/* 两端日月示意：滑块移开后露出对应天体 */}
-      <SunIcon aria-hidden className={cn("pointer-events-none absolute left-1.5 size-4 text-amber-100 transition-opacity duration-300", dark ? "opacity-95" : "opacity-0")} />
-      <MoonIcon aria-hidden className={cn("pointer-events-none absolute right-1.5 size-4 text-indigo-100 transition-opacity duration-300", dark ? "opacity-0" : "opacity-95")} />
-
-      {/* 滑块：亮色为太阳、暗色为月球 */}
       <span
         aria-hidden
-        className={cn(
-          "relative z-10 grid size-6 place-items-center rounded-full bg-white shadow-md transition-transform duration-300",
-          dark ? "translate-x-10" : "translate-x-0",
-        )}
+        className={`absolute top-1 z-10 grid size-7 place-items-center rounded-full transition-all duration-500 ${dark ? "right-1 left-auto" : "left-1 right-auto"}`}
+        style={{
+          background: dark
+            ? "radial-gradient(circle at 30% 30%, #f5f3e1 0%, #e8e4c0 55%, #c9c498 100%)"
+            : "radial-gradient(circle at 30% 30%, #fff7c2 0%, #ffd84d 55%, #ffb800 100%)",
+          boxShadow: dark
+            ? "0 2px 10px rgba(0,0,0,0.4), inset -4px -4px 8px rgba(0,0,0,0.25)"
+            : "0 2px 12px rgba(255,180,0,0.5), 0 0 20px rgba(255,200,80,0.4)",
+        }}
       >
-        {dark ? <MoonIcon className="size-3.5 text-indigo-600" /> : <SunIcon className="size-3.5 text-amber-500" />}
+        {dark ? (
+          <span aria-hidden className="relative grid size-7 place-items-center">
+            <span className="absolute left-[9px] top-[7px] size-1 rounded-full bg-black/10" />
+            <span className="absolute left-[18px] top-[15px] size-1 rounded-full bg-black/10" />
+            <span className="absolute left-[12px] top-[18px] size-0.5 rounded-full bg-black/10" />
+          </span>
+        ) : null}
+        <span className={`absolute transition-opacity duration-500 ${dark ? "opacity-0" : "opacity-100"}`}>
+          <SunIcon className="size-4 text-amber-600" />
+        </span>
+        <span className={`absolute transition-opacity duration-500 ${dark ? "opacity-100" : "opacity-0"}`}>
+          <MoonIcon className="size-4 text-indigo-900/70" />
+        </span>
       </span>
     </button>
   );
