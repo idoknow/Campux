@@ -30,10 +30,8 @@ export function AppShell({
   pendingAttachments,
   topicQuery,
   topicSuggestions,
-  selectedPostTagIds,
+  selectedPostTags,
   onTopicQueryChange,
-  onTopicToggle,
-  onCreateTopic,
   onTopicClearAll,
   onTopicAdd,
   onTopicRemove,
@@ -79,13 +77,11 @@ export function AppShell({
   pendingAttachments: PendingAttachment[];
   topicQuery: string;
   topicSuggestions: Array<{ id: string; name: string; color: string; postCount: number }>;
-  selectedPostTagIds: string[];
+  selectedPostTags: Array<{ name: string; color?: string }>;
   onTopicQueryChange: (value: string) => void;
-  onTopicToggle: (tag: { id: string; name: string; color: string; postCount: number }) => void;
-  onCreateTopic: (name: string) => void;
   onTopicClearAll: () => void;
   onTopicAdd: (name: string) => void;
-  onTopicRemove: (id: string) => void;
+  onTopicRemove: (name: string) => void;
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
@@ -141,9 +137,8 @@ export function AppShell({
                 pendingAttachments={pendingAttachments}
                 topicQuery={topicQuery}
                 topicSuggestions={topicSuggestions}
-                selectedPostTagIds={selectedPostTagIds}
+                selectedPostTags={selectedPostTags}
                 onTopicQueryChange={onTopicQueryChange}
-                onTopicToggle={onTopicToggle}
                 onTopicClearAll={onTopicClearAll}
                 onTopicAdd={onTopicAdd}
                 onTopicRemove={onTopicRemove}

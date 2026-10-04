@@ -223,6 +223,7 @@ CREATE TABLE "Post" (
     "font" TEXT,
     "status" TEXT NOT NULL DEFAULT 'pending_approval',
     "publishSummary" TEXT,
+    "pendingTags" TEXT,
     "recallIgnored" BOOLEAN NOT NULL DEFAULT false,
     "recallIgnoredAt" DATETIME,
     "reviewQueueReminderSentAt" DATETIME,

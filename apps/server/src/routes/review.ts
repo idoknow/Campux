@@ -31,6 +31,40 @@ const reviewQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
+
+function parsePendingTagNames(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 5);
+}
+
+async function activatePendingTags(transaction: Parameters<Parameters<typeof prisma.$transaction>[0]>[0] | typeof prisma, tenantId: string, postId: string, pendingTags: string | null | undefined) {
+  const names = parsePendingTagNames(pendingTags);
+  if (names.length === 0) return;
+  const now = new Date();
+  for (const name of names) {
+    const tag = await transaction.postTag.upsert({
+      where: { tenantId_name: { tenantId, name } },
+      create: {
+        tenantId,
+        name,
+        color: "#F64E54",
+        source: "user",
+        status: "active",
+        lastUsedAt: now,
+      },
+      update: {
+        status: "active",
+        lastUsedAt: now,
+      },
+    });
+    await transaction.postTagAssignment.upsert({
+      where: { postId_tagId: { postId, tagId: tag.id } },
+      create: { tenantId, postId, tagId: tag.id, source: "user" },
+      update: {},
+    });
+  }
+}
+
 export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/review/posts", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
@@ -181,6 +215,11 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
             },
           },
         },
+      });
+      await activatePendingTags(transaction, context.selectedTenant.id, post.id, post.pendingTags);
+      await transaction.post.update({
+        where: { id: post.id },
+        data: { pendingTags: null },
       });
       await writeAuditLog({
         tenantId: context.selectedTenant.id,

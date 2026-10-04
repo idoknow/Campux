@@ -368,8 +368,9 @@ model Post {
   textColor       String?
   font            String?
   status          PostStatus       @default(pending_approval)
-  publishSummary  String?
-  recallIgnored   Boolean          @default(false)
+  publishSummary     String?
+  pendingTags        String?
+  recallIgnored        Boolean       @default(false)
   recallIgnoredAt DateTime?
   reviewQueueReminderSentAt DateTime?
   createdAt       DateTime         @default(now())

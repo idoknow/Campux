@@ -151,6 +151,7 @@ function isConvertibleVideoType(contentType: string): boolean {
 }
 
 const MAX_TAGS_PER_POST = 5;
+const MAX_PENDING_TAGS_PER_POST = 5;
 const VIDEO_SIZE_CAP = 15 * 1024 * 1024;
 const REMOTE_VIDEO_SIZE_CAP = VIDEO_SIZE_CAP;
 const MAX_VIDEO_DURATION_SEC = 60;
@@ -564,7 +565,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     let bgColor: string | null = null;
     let textColor: string | null = null;
     let font: string | null = null;
-    let tagIds: string[] = [];
+    let pendingTagNames: string[] = [];
     const staged: PostAttachment[] = [];
     const remoteGifClaims: Array<{ url: string; proof: string }> = [];
     let attachmentOrder: AttachmentOrderKind[] | null = null;
@@ -602,8 +603,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
             textColor = String(part.value ?? "") || null;
           } else if (part.fieldname === "font") {
             font = String(part.value ?? "") || null;
-          } else if (part.fieldname === "tagIds") {
-            tagIds = String(part.value ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+          } else if (part.fieldname === "pendingTagNames") {
+            pendingTagNames = String(part.value ?? "").split(",").map((value) => value.trim()).filter(Boolean);
           } else if (part.fieldname === "attachmentOrder") {
             try {
               const parsed = JSON.parse(String(part.value ?? "[]"));
@@ -1009,8 +1010,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
 
       const initialStatus: "pending_approval" = "pending_approval";
       const logComment = "投稿创建";
-      const parsedTagIds = Array.isArray(tagIds)
-        ? [...new Set(tagIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0))].slice(0, MAX_TAGS_PER_POST)
+      const parsedPendingTagNames = Array.isArray(pendingTagNames)
+        ? [...new Set(pendingTagNames.filter((name): name is string => typeof name === "string" && name.trim().length > 0))].slice(0, MAX_PENDING_TAGS_PER_POST)
         : [];
 
       // Create post and consume converted-GIF claims in one transaction with retry logic.
@@ -1089,6 +1090,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   font: font || null,
                   attachments: staged,
                   status: initialStatus,
+                  pendingTags: parsedPendingTagNames.length > 0 ? parsedPendingTagNames.join(",") : null,
                   logs: {
                     create: {
                       tenantId: context.selectedTenant.id,
@@ -1099,24 +1101,6 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                   },
                 },
               });
-
-              const postTags = parsedTagIds.length > 0
-                ? await tx.postTag.findMany({
-                    where: { id: { in: parsedTagIds }, tenantId: context.selectedTenant.id },
-                    select: { id: true },
-                  })
-                : [];
-              if (postTags.length > 0) {
-                await tx.postTagAssignment.createMany({
-                  data: postTags.map((tag) => ({
-                    tenantId: context.selectedTenant.id,
-                    postId: created.id,
-                    tagId: tag.id,
-                    source: "user",
-                  })),
-                  skipDuplicates: true,
-                });
-              }
 
               return tx.post.findUniqueOrThrow({
                 where: { id: created.id },

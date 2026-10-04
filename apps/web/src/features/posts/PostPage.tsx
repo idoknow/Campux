@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS, IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB, isDefaultFont } from "@campux/domain";
-import { ChevronDownIcon, ImagePlusIcon, LightbulbIcon, LoaderIcon, MegaphoneIcon, SendIcon } from "lucide-react";
+import { ChevronDownIcon, ImagePlusIcon, LightbulbIcon, LoaderIcon, MegaphoneIcon, SendIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
@@ -34,10 +34,9 @@ export function PostPage({
   pendingAttachments,
   topicQuery,
   topicSuggestions,
-  selectedPostTagIds,
+  selectedPostTags,
   onTopicQueryChange,
   onTopicAdd,
-  onTopicToggle,
   onTopicClearAll,
   onTopicRemove,
   onPostTextChange,
@@ -63,12 +62,11 @@ export function PostPage({
   pendingAttachments: PendingAttachment[];
   topicQuery: string;
   topicSuggestions: Array<{ id: string; name: string; color: string; postCount: number }>;
-  selectedPostTagIds: string[];
+  selectedPostTags: Array<{ name: string; color?: string }>;
   onTopicQueryChange: (value: string) => void;
   onTopicAdd: (name: string) => void;
-  onTopicToggle: (tag: { id: string; name: string; color: string; postCount: number }) => void;
   onTopicClearAll: () => void;
-  onTopicRemove: (id: string) => void;
+  onTopicRemove: (name: string) => void;
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
   onAnonymousAvatarChange: (value: string) => void;
@@ -269,16 +267,30 @@ export function PostPage({
         </div>
         {metadata.enableHeatBoard && (
           <div className="mb-3 space-y-2">
-            <div className="flex items-center gap-2">
+            <div className="relative flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 focus-within:border-slate-400">
+              {selectedPostTags.map((tag) => (
+                <span key={tag.name} className="inline-flex max-w-full items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">
+                  <span className="truncate">#{tag.name}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full p-0.5 text-rose-500/80 hover:bg-rose-100 hover:text-rose-700"
+                    onClick={() => handleTopicRemove(tag.name)}
+                    aria-label={`移除话题 ${tag.name}`}
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </span>
+              ))}
               <input
                 value={topicQuery}
                 placeholder="输入话题，回车添加"
-                className="h-9 w-full rounded-full border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
+                className="h-8 min-w-40 flex-1 bg-transparent px-1 text-sm outline-none"
                 onChange={(event) => onTopicQueryChange(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && topicQueryName) {
                     event.preventDefault();
-                    onTopicAdd?.(topicQueryName);
+                    handleTopicAdd(topicQueryName);
+                    onTopicQueryChange("");
                   }
                 }}
               />
@@ -286,11 +298,14 @@ export function PostPage({
                 type="button"
                 className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 disabled:opacity-50"
                 disabled={!topicQueryName}
-                onClick={() => onTopicAdd?.(topicQueryName)}
+                onClick={() => {
+                  handleTopicAdd(topicQueryName);
+                  onTopicQueryChange("");
+                }}
               >
                 添加
               </button>
-              {selectedPostTagIds.length > 0 && (
+              {selectedPostTags.length > 0 && (
                 <button
                   type="button"
                   className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600"
@@ -300,40 +315,27 @@ export function PostPage({
                 </button>
               )}
             </div>
-            {selectedPostTagIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {selectedPostTagIds.map((id) => (
-                  <span key={id} className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">
-                    #{id}
-                    <button
-                      type="button"
-                      className="rounded-full px-1 text-rose-500/80 hover:bg-rose-100 hover:text-rose-700"
-                      onClick={() => handleTopicRemove(id)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {topicEntries.length > 0 && (
+            {topicQueryName ? (
               <div className="max-h-36 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
                 {topicEntries.map((tag) => (
                   <button
                     key={tag.key}
                     type="button"
                     className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                    onClick={() => handleTopicAdd(tag.name)}
+                    onClick={() => {
+                      handleTopicAdd(tag.name);
+                      onTopicQueryChange("");
+                    }}
                   >
                     <span className="flex items-center gap-2">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color }} />
-                      <span className="truncate">{tag.name}</span>
+                      <span className="truncate">#{tag.name}</span>
                     </span>
                     <span className="text-xs text-slate-400">{tag.postCount} 篇</span>
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
         )}
         <Textarea

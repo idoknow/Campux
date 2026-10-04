@@ -367,6 +367,7 @@ model Post {
   font            String?
   status          PostStatus       @default(pending_approval)
   publishSummary  String?
+  pendingTags     String?
   recallIgnored   Boolean          @default(false)
   recallIgnoredAt DateTime?
   reviewQueueReminderSentAt DateTime?

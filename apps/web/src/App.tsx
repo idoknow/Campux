@@ -122,7 +122,7 @@ export function App() {
   const [postBgColor, setPostBgColor] = useState<string>("");
   const [postTextColor, setPostTextColor] = useState<string>("");
   const [postFont, setPostFont] = useState<string>("");
-  const [selectedPostTagIds, setSelectedPostTagIds] = useState<string[]>([]);
+  const [selectedPostTags, setSelectedPostTags] = useState<Array<{ name: string; color?: string }>>([]);
   const [topicQuery, setTopicQuery] = useState("");
   const [topicSuggestions, setTopicSuggestions] = useState<Array<{ id: string; name: string; color: string; postCount: number }>>([]);
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
@@ -585,20 +585,10 @@ export function App() {
     return () => { if (topicTimerRef.current) clearTimeout(topicTimerRef.current); };
   }, [metadata.enableHeatBoard, topicQuery]);
 
-  function toggleTopic(id: string) {
-    setSelectedPostTagIds((current) => current.includes(id) ? current.filter((x) => x !== id) : current.length >= 5 ? current : [...current, id]);
-  }
-
-  async function createTopic() {
-    const q = topicQuery.trim().replace(/^#+/, "");
+  async function addTopicName(name: string) {
+    const q = name.trim().replace(/^#+/, "");
     if (!q) return;
-    try {
-      const data = await api<{ tag: { id: string; name: string; color: string } }>("/api/post-tags", { method: "POST", body: JSON.stringify({ name: q }) });
-      setSelectedPostTagIds((current) => current.includes(data.tag.id) ? current : [...current, data.tag.id]);
-      setTopicQuery("");
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "创建话题失败");
-    }
+    setSelectedPostTags((current) => current.some((tag) => tag.name === q) ? current : current.length >= 5 ? current : [...current, { name: q }]);
   }
 
   async function submitPost() {
@@ -649,7 +639,7 @@ export function App() {
         postTextColor || undefined,
         postFont || undefined,
         anonymousAvatar || undefined,
-        selectedPostTagIds,
+        selectedPostTags.map((tag) => tag.name),
       );
       clearAttachments(submissionAttachmentIds);
       // 取消尚未落盘的 IndexedDB 提交，避免提交后 250ms 内又把旧草稿写回去。
@@ -823,13 +813,11 @@ export function App() {
       pendingAttachments={pendingAttachments}
       topicQuery={topicQuery}
       topicSuggestions={topicSuggestions}
-      selectedPostTagIds={selectedPostTagIds}
+      selectedPostTags={selectedPostTags}
       onTopicQueryChange={setTopicQuery}
-      onTopicToggle={(tag) => setSelectedPostTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id].slice(0, 5))}
-      onCreateTopic={createTopic}
-      onTopicAdd={createTopic}
-      onTopicClearAll={() => setSelectedPostTagIds([])}
-      onTopicRemove={(id: string) => setSelectedPostTagIds((current) => current.filter((x) => x !== id))}
+      onTopicAdd={(name: string) => setSelectedPostTags((current) => current.some((tag) => tag.name === name) ? current : current.length >= 5 ? current : [...current, { name }])}
+      onTopicClearAll={() => setSelectedPostTags([])}
+      onTopicRemove={(name: string) => setSelectedPostTags((current) => current.filter((tag) => tag.name !== name))}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={(value) => mutateSubmissionForm(() => setAnonymous(value))}
