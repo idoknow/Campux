@@ -827,7 +827,9 @@ export function App() {
       onTopicQueryChange={setTopicQuery}
       onTopicToggle={(tag) => setSelectedPostTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id].slice(0, 5))}
       onCreateTopic={createTopic}
+      onTopicAdd={createTopic}
       onTopicClearAll={() => setSelectedPostTagIds([])}
+      onTopicRemove={(id: string) => setSelectedPostTagIds((current) => current.filter((x) => x !== id))}
       onActiveTabChange={setActiveTab}
       onAdminTabChange={setAdminSubTab}
       onAnonymousChange={(value) => mutateSubmissionForm(() => setAnonymous(value))}

@@ -35,6 +35,8 @@ export function AppShell({
   onTopicToggle,
   onCreateTopic,
   onTopicClearAll,
+  onTopicAdd,
+  onTopicRemove,
   onActiveTabChange,
   onAdminTabChange,
   onAnonymousChange,
@@ -82,6 +84,8 @@ export function AppShell({
   onTopicToggle: (tag: { id: string; name: string; color: string; postCount: number }) => void;
   onCreateTopic: (name: string) => void;
   onTopicClearAll: () => void;
+  onTopicAdd: (name: string) => void;
+  onTopicRemove: (id: string) => void;
   onActiveTabChange: (tab: MainTab) => void;
   onAdminTabChange: (tab: AdminTab) => void;
   onAnonymousChange: (value: boolean) => void;
@@ -141,6 +145,8 @@ export function AppShell({
                 onTopicQueryChange={onTopicQueryChange}
                 onTopicToggle={onTopicToggle}
                 onTopicClearAll={onTopicClearAll}
+                onTopicAdd={onTopicAdd}
+                onTopicRemove={onTopicRemove}
                 onAnonymousChange={onAnonymousChange}
                 onAnonymousAvatarChange={onAnonymousAvatarChange}
                 onBgColorChange={onBgColorChange}

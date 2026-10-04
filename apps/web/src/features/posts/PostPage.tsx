@@ -36,8 +36,10 @@ export function PostPage({
   topicSuggestions,
   selectedPostTagIds,
   onTopicQueryChange,
+  onTopicAdd,
   onTopicToggle,
   onTopicClearAll,
+  onTopicRemove,
   onPostTextChange,
   onAnonymousChange,
   onAnonymousAvatarChange,
@@ -63,8 +65,10 @@ export function PostPage({
   topicSuggestions: Array<{ id: string; name: string; color: string; postCount: number }>;
   selectedPostTagIds: string[];
   onTopicQueryChange: (value: string) => void;
+  onTopicAdd: (name: string) => void;
   onTopicToggle: (tag: { id: string; name: string; color: string; postCount: number }) => void;
   onTopicClearAll: () => void;
+  onTopicRemove: (id: string) => void;
   onPostTextChange: (value: string) => void;
   onAnonymousChange: (value: boolean) => void;
   onAnonymousAvatarChange: (value: string) => void;
@@ -91,6 +95,13 @@ export function PostPage({
   const sortedAttachments = [...pendingAttachments].sort((left, right) => left.sortOrder - right.sortOrder);
   const hasConverting = pendingAttachments.some((p) => p.status === "converting");
   const hasUploading = pendingAttachments.some((p) => p.status === "uploading");
+  const topicQueryName = topicQuery.trim().replace(/^#+/, "");
+  const topicEntries: Array<{ key: string; name: string; color: string; postCount: number }> = [
+    ...(topicQueryName ? [{ key: topicQueryName, name: topicQueryName, color: "#F64E54", postCount: 0 }] : []),
+    ...topicSuggestions.filter((tag) => !topicQueryName || !topicQueryName.toLowerCase().includes(tag.name.toLowerCase())).map((tag) => ({ key: tag.id, name: tag.name, color: tag.color, postCount: tag.postCount })),
+  ];
+  const handleTopicAdd = (name: string) => onTopicAdd(name);
+  const handleTopicRemove = (id: string) => onTopicRemove(id);
 
   // 关闭匿名时清除已选头像
   useEffect(() => {
@@ -261,28 +272,58 @@ export function PostPage({
             <div className="flex items-center gap-2">
               <input
                 value={topicQuery}
-                placeholder="添加话题"
+                placeholder="输入话题，回车添加"
                 className="h-9 w-full rounded-full border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
                 onChange={(event) => onTopicQueryChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && topicQueryName) {
+                    event.preventDefault();
+                    onTopicAdd?.(topicQueryName);
+                  }
+                }}
               />
+              <button
+                type="button"
+                className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 disabled:opacity-50"
+                disabled={!topicQueryName}
+                onClick={() => onTopicAdd?.(topicQueryName)}
+              >
+                添加
+              </button>
               {selectedPostTagIds.length > 0 && (
                 <button
                   type="button"
-                  className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600"
+                  className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600"
                   onClick={onTopicClearAll}
                 >
                   清空
                 </button>
               )}
             </div>
-            {topicSuggestions.length > 0 && (
+            {selectedPostTagIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedPostTagIds.map((id) => (
+                  <span key={id} className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">
+                    #{id}
+                    <button
+                      type="button"
+                      className="rounded-full px-1 text-rose-500/80 hover:bg-rose-100 hover:text-rose-700"
+                      onClick={() => handleTopicRemove(id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {topicEntries.length > 0 && (
               <div className="max-h-36 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-                {topicSuggestions.map((tag) => (
+                {topicEntries.map((tag) => (
                   <button
-                    key={tag.id}
+                    key={tag.key}
                     type="button"
-                    className={selectedPostTagIds.includes(tag.id) ? "flex w-full items-center justify-between rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700" : "flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"}
-                    onClick={() => onTopicToggle(tag)}
+                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                    onClick={() => handleTopicAdd(tag.name)}
                   >
                     <span className="flex items-center gap-2">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color }} />

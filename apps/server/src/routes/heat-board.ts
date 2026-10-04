@@ -7,6 +7,7 @@ import { normalizeTagName, serializeAssignedPostTags, tagColorForName, type Seri
 import type { PostQZoneMetric } from "../lib/posts";
 
 const MAX_TAGS_PER_POST = 5;
+const HEAT_BOARD_TOP_N = 100;
 
 type PublishedHeatPost = {
   id: string;
@@ -181,7 +182,7 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
 
     const rankedPosts = rawItems.sort((a, b) => b.heat - a.heat);
     const articleCount = Math.floor((posts.length + batches.reduce((sum, batch) => sum + batch.items.length, 0)) * 0.078);
-    const articleList = rankedPosts.slice(0, Math.max(articleCount, 0)).map((post, index) => ({ ...post, rank: index + 1, badge: badgeFor(index + 1) }));
+    const articleList = rankedPosts.slice(0, Math.min(HEAT_BOARD_TOP_N, Math.max(articleCount, 0))).map((post, index) => ({ ...post, rank: index + 1, badge: badgeFor(index + 1) }));
 
     const topicMap = new Map<string, { tag: any; posts: PublishedHeatItem[] }>();
     for (const post of rankedPosts) {
@@ -192,13 +193,13 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
       }
     }
     const topics = [...topicMap.values()].map(({ tag, posts: topicPosts }) => {
-      const top50 = topicPosts.slice(0, 50);
+      const topN = topicPosts.slice(0, HEAT_BOARD_TOP_N);
       return {
         id: tag.id,
         name: tag.name,
         color: tag.color,
         postCount: topicPosts.length,
-        heat: top50.reduce((sum, post) => sum + post.heat, 0) + 0.2 * Math.log(1 + topicPosts.length),
+        heat: topN.reduce((sum, post) => sum + post.heat, 0) + 0.2 * Math.log(1 + topicPosts.length),
       };
     }).sort((a, b) => b.heat - a.heat).map((topic, index) => ({ ...topic, badge: badgeFor(index + 1) }));
 
@@ -242,7 +243,7 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
       where: { tenantId: context.selectedTenant.id, status: "active", ...(name ? { name: { contains: name, mode: "insensitive" } } : {}) },
       include: { _count: { select: { assignments: true } } },
       orderBy,
-      take: 20,
+      take: 100,
     });
     return { tags: tags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color, postCount: tag._count.assignments, lastUsedAt: tag.lastUsedAt?.toISOString() ?? null })) };
   });
