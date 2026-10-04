@@ -2,6 +2,7 @@ import type { TenantSummary } from "@campux/domain";
 import type { AuthenticatedMe } from "@/types/app";
 import { roleLabels } from "@/lib/app-model";
 import { AccountMenu } from "./AccountMenu";
+import { Live2DPuppy } from "@/features/live2d/Live2DPuppy";
 
 export function Header({
   selectedTenant,
@@ -29,6 +30,7 @@ export function Header({
             <h1 className="text-lg font-bold leading-none tracking-normal text-slate-950">Campux</h1>
             <span className="block truncate text-sm text-slate-500">{selectedTenant.name}</span>
           </div>
+          <Live2DPuppy className="ml-1 shrink-0" width={64} height={72} zoom={0.98} />
         </div>
         <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="mobile" />
       </div>

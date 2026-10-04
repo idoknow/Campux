@@ -5,6 +5,7 @@ import type { NavItem } from "@/lib/app-model";
 import { roleLabels } from "@/lib/app-model";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountMenu } from "./AccountMenu";
+import { Live2DPuppy } from "@/features/live2d/Live2DPuppy";
 
 const SIDEBAR_MIN_WIDTH = 160;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -97,7 +98,10 @@ export function DesktopSidebar({
           })}
         </TabsList>
 
-        <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="desktop" />
+        <div className="space-y-2">
+          <Live2DPuppy className="mx-auto" width={104} height={124} zoom={1.04} />
+          <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="desktop" />
+        </div>
       </div>
       {/* 右缘拖拽句柄：拖宽/拖窄侧边栏，宽度限制在 [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] */}
       <div

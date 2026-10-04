@@ -33,6 +33,7 @@ type HeatPost = {
   title: string;
   text: string;
   attachments?: HeatAttachment[];
+  hasImages?: boolean;
   anonymous: boolean;
   author: { displayName: string; qqUin: string } | null;
   heat: number;
@@ -44,6 +45,7 @@ type HeatPost = {
     likeCount: number;
     commentCount: number;
     forwardCount: number;
+    targetCount?: number;
     targets?: Array<{ targetName: string; qzoneTid: string; comments?: HeatComment[] }>;
   };
 };
@@ -227,7 +229,10 @@ export function HeatBoardPage({ metadata }: { metadata: TenantMetadata }) {
             <BadgeMark badge={post.badge} rank={post.rank} />
             <span className="truncate text-xs text-slate-400">{post.anonymous ? "匿名" : (post.author?.displayName || "未知")}</span>
           </div>
-          <p className="line-clamp-2 text-sm font-medium leading-5 text-slate-900">{post.title}</p>
+          <div className="flex items-start gap-1.5">
+            <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-5 text-slate-900">{post.title}</p>
+            {post.hasImages ? <span className="shrink-0 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-black text-sky-600">图</span> : null}
+          </div>
           <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
             <span className="flex items-center gap-1"><EyeIcon className="size-3" />{post.stats.visitorCount}</span>
             <span className="flex items-center gap-1"><ThumbsUpIcon className="size-3" />{post.stats.likeCount}</span>
@@ -265,8 +270,8 @@ export function HeatBoardPage({ metadata }: { metadata: TenantMetadata }) {
               <div key={post.key} className="rounded-lg border border-slate-100 bg-slate-50/60">
                 <button className="flex w-full items-center gap-2 p-2 text-left" onClick={() => openPost(post)}>
                   <BadgeMark badge={post.badge} rank={post.rank} />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{post.title}</span>
-                  <span className="text-xs font-bold text-rose-500">{formatHeat(post.heat)}</span>
+                  <span className="flex min-w-0 flex-1 items-center gap-1 text-xs font-medium text-slate-700"><span className="truncate">{post.title}</span>{post.hasImages ? <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[10px] font-black text-sky-600">图</span> : null}</span>
+                  <span className="shrink-0 text-xs font-bold text-rose-500">{formatHeat(post.heat)}</span>
                 </button>
               </div>
             )) : <p className="py-4 text-center text-xs text-slate-500">正在加载话题稿件…</p>}

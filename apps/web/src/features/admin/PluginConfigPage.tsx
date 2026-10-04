@@ -1462,7 +1462,7 @@ function HeatBoardPanel({ config, onChange, busy }: { config: TenantPluginConfig
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-        开启后，服务页新增「热度榜」入口，并在投稿页开放话题选择；热度按浏览、点赞、评论、转发和发布时间衰减计算。
+        开启后，服务页新增「热度榜」入口，并在投稿页开放话题选择；热度按浏览、点赞、评论、转发、墙数和发布时间衰减计算。
       </div>
       <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-3">
         <span className="text-sm font-medium text-slate-700">单篇最多话题</span>

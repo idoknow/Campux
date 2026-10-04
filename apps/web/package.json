@@ -19,6 +19,8 @@
     "gif.js": "^0.2.0",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.5",
+    "pixi-live2d-display": "0.4.0",
+    "pixi.js": "6.5.10",
     "radix-ui": "^1.4.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

@@ -244,7 +244,25 @@ export function AboutPage({ metadata, onBack }: { metadata: TenantMetadata; onBa
             Copyright © Campux 及其贡献者，依据 Apache License 2.0 授权发布。
           </p>
           <p className="text-xs leading-5 text-muted-foreground/80">
-            代码版权归各自贡献者所有，第三方依赖与素材的版权归其原作者所有；Apache License 2.0 不授予商标使用权。
+            代码版权归各自贡献者所有；第三方依赖与素材版权归各自原作者所有；Apache License 2.0 不授予商标使用权。
+          </p>
+        </AboutSection>
+
+        <AboutSection title="Live2D 模型说明" icon={ShieldCheckIcon} accent="violet" description="下午茶 · 菜咪工社">
+          <p className="text-sm leading-6 text-muted-foreground">
+            界面中的 Live2D 模型「下午茶」不是 Campux 原创，由菜咪工社提供。使用与展示均遵循原作者公开的使用规范。
+          </p>
+          <ul className="mt-3 grid gap-1.5 text-sm leading-6 text-muted-foreground">
+            <li>感谢大家对下午茶的喜爱。</li>
+            <li>可免费用于直播、视频、私下使用，也可用于网课场景。</li>
+            <li>允许多平台使用，个人势、公会势均可使用。</li>
+            <li>使用时需要标注模型来自菜咪工社。</li>
+            <li>禁止二改模型和原画。</li>
+            <li>禁止二次贩卖。</li>
+            <li>禁止使用该模型出周边售卖。</li>
+          </ul>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground/80">
+            该模型版权归菜咪工社所有；如发现违规使用，原作者将按规范进行警告。
           </p>
         </AboutSection>
 

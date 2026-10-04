@@ -95,7 +95,9 @@ async function main() {
   }
 
   // 2) 生成 baseline DDL（from-empty diff → SQLite 建库脚本），并修正 Json 默认值
-  const prismaBin = join(dbDir, "node_modules/.bin/prisma");
+  const prismaBin = process.env.PRISMA_BIN?.trim()
+    ? resolve(process.env.PRISMA_BIN.trim())
+    : join(repoRoot, "node_modules", ".bin", "prisma");
   const rawDdl = (
     await $`${prismaBin} migrate diff --from-empty --to-schema-datamodel ${sqliteSchemaPath} --script`
       .cwd(dbDir)

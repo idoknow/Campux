@@ -40,6 +40,7 @@ type HeatStats = {
   commentCount: number;
   forwardCount: number;
   checkedAt: string | null;
+  targetCount: number;
   targets: NonNullable<ReturnType<typeof toQZonePostStats>>["targets"];
 };
 
@@ -51,6 +52,7 @@ type PublishedHeatItem = {
   title: string;
   text: string;
   attachments: unknown;
+  hasImages: boolean;
   anonymous: boolean;
   bgColor: string | null;
   textColor: string | null;
@@ -80,6 +82,10 @@ function clampNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))) : fallback;
 }
 
+function activeWallCount(stats: PublishedHeatItem["stats"]): number {
+  return Math.max(1, stats.targetCount);
+}
+
 function qualityWeight(stats: PublishedHeatItem["stats"]): number {
   const total = clampNumber(stats.visitorCount) + clampNumber(stats.likeCount) + clampNumber(stats.commentCount) + clampNumber(stats.forwardCount);
   return 0.85 + Math.min(0.3, Math.log10(total + 1) * 0.05);
@@ -104,11 +110,12 @@ function halfLifeDecayFactor(hoursSincePublished: number): number {
 }
 
 function heatScore(hoursSincePublished: number, stats: PublishedHeatItem["stats"]): number {
+  const wallCount = activeWallCount(stats);
   const base =
-    0.1 * Math.log(1 + clampNumber(stats.visitorCount)) +
-    1.0 * Math.log(1 + clampNumber(stats.likeCount)) +
-    3.0 * Math.log(1 + clampNumber(stats.commentCount)) +
-    4.0 * Math.log(1 + clampNumber(stats.forwardCount));
+    0.1 * Math.log(1 + clampNumber(stats.visitorCount) / wallCount) +
+    1.0 * Math.log(1 + clampNumber(stats.likeCount) / wallCount) +
+    3.0 * Math.log(1 + clampNumber(stats.commentCount) / wallCount) +
+    4.0 * Math.log(1 + clampNumber(stats.forwardCount) / wallCount);
   return base * qualityWeight(stats) * antiCheatingFactor(stats) * halfLifeDecayFactor(hoursSincePublished);
 }
 
@@ -120,13 +127,16 @@ function toStats(metrics: PostQZoneMetric[]): HeatStats {
     forwardCount: metrics.reduce((sum, m) => sum + clampNumber(m.forwardCount), 0),
   };
   const qzoneStats = toQZonePostStats(metrics);
+  const targets = qzoneStats?.targets ?? [];
+  const targetCount = new Set(targets.map((target) => target.qzoneTid).filter((value) => value.length > 0)).size;
   return {
     visitorCount: totals.visitorCount,
     likeCount: totals.likeCount,
     commentCount: totals.commentCount,
     forwardCount: totals.forwardCount,
     checkedAt: qzoneStats?.checkedAt ?? null,
-    targets: qzoneStats?.targets ?? [],
+    targetCount: Math.max(1, targetCount),
+    targets,
   };
 }
 
@@ -156,6 +166,7 @@ function toItem(input: { kind: "single" | "batch"; key: string; post: PublishedH
     tags: serializeAssignedPostTags(input.post.tagAssignments),
     author: input.post.author ? { displayName: input.post.author.displayName ?? "", qqUin: input.post.author.qqUin.toString() } : null,
     stats,
+    hasImages: Array.isArray(input.post.attachments) && input.post.attachments.some((attachment) => attachment && typeof attachment === "object" && (attachment as { contentType?: string }).contentType?.startsWith("image/")),
     heat: heatScore((Date.now() - publishedAt.getTime()) / 3600000, stats),
   };
 }
@@ -247,7 +258,7 @@ export function registerHeatBoardRoutes(app: FastifyInstance) {
       publishedAt: post.batchItem?.batch?.flushedAt ?? post.batchItem?.batch?.updatedAt ?? post.updatedAt,
       metrics: post.qzonePostMetrics ?? [],
     })).sort((a, b) => b.heat - a.heat).map((post, index) => ({ ...post, rank: index + 1, badge: badgeFor(index + 1) }));
-    return { updatedAt: new Date().toISOString(), topic: { id: topic.id, name: topic.name, color: topic.color, postCount: topic._count.assignments, heat: articles.slice(0, 50).reduce((sum, post) => sum + post.heat, 0) + 0.2 * Math.log(1 + topic._count.assignments) }, articles };
+    return { updatedAt: new Date().toISOString(), topic: { id: topic.id, name: topic.name, color: topic.color, postCount: topic._count.assignments, heat: articles.slice(0, HEAT_BOARD_TOP_N).reduce((sum, post) => sum + post.heat, 0) + 0.2 * Math.log(1 + topic._count.assignments) }, articles };
   });
 
   app.get("/api/post-tags/search", async (request, reply) => {
