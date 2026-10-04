@@ -286,6 +286,8 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["botAlert", before.botAlert, saved.botAlert],
       ["campaigns", before.campaigns, saved.campaigns],
       ["graduation", before.graduation, saved.graduation],
+      ["todayInHistory", before.todayInHistory, saved.todayInHistory],
+      ["heatBoard", before.heatBoard, saved.heatBoard],
       ["commentManagement", before.commentManagement, saved.commentManagement],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {

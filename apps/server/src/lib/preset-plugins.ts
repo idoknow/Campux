@@ -25,6 +25,7 @@ export type PresetPluginId =
   | "botAlert"
   | "graduation"
   | "todayInHistory"
+  | "heatBoard"
   | "commentManagement";
 
 export interface PresetPluginEntry {
@@ -147,6 +148,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "tenant:data", "user:data"],
     riskLevel: "low",
     rationale: "开启后投稿页新增那年今日入口，仅读取已发布稿件并按年月日筛选，不写入任何数据。",
+  },
+  {
+    id: "heatBoard",
+    name: "campux-plugin-heat-board",
+    version: "1.0.0",
+    description: "热度榜：服务页展示稿件热度排行与话题热度排行，投稿可添加话题",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后服务页新增热榜入口，投稿页可选话题；热度读取已发布稿件与话题关联，话题写入 tenant:data。",
   },
   {
     id: "commentManagement",

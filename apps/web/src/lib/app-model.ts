@@ -65,7 +65,9 @@ export const defaultMetadata: TenantMetadata = {
   enableBotAlert: false,
   enableGraduation: false,
   enableTodayInHistory: false,
-  };
+  enableHeatBoard: false,
+  heatBoardHalfLifeHours: 24,
+};
 
 export const navItems = [
   { value: "post", label: "投稿", emoji: "📝", icon: HomeIcon, minRole: "submitter" },

@@ -151,6 +151,13 @@ export const tenantPluginConfigSchema = z.object({
       enabled: z.boolean(),
     })
     .default({ enabled: false }),
+  // 热度榜：基于浏览/赞/评论/转发的加权热度排序，并支持话题榜。
+  heatBoard: z
+    .object({
+      enabled: z.boolean(),
+      halfLifeHours: z.number().positive().max(720).default(24),
+    })
+    .default({ enabled: false, halfLifeHours: 24 }),
   // 评论管理：开启后管理员可在网页端删除已发布稿件的 QZone 评论；
   // allowUserDeleteOwnPostComments 控制普通用户是否可以删除自己稿件下的评论。
   commentManagement: z
@@ -185,6 +192,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   feedback: { enabled: false },
   botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
   todayInHistory: { enabled: false },
+  heatBoard: { enabled: false, halfLifeHours: 24 },
   commentManagement: { enabled: false, allowUserDeleteOwnPostComments: false },
 };
 

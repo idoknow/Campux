@@ -66,6 +66,7 @@ export function createPostWithAttachments(
   textColor?: string,
   font?: string,
   anonymousAvatar?: string,
+  tagIds?: string[],
 ): Promise<CreatePostResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -145,6 +146,9 @@ export function createPostWithAttachments(
     }
     if (remoteGifClaims && remoteGifClaims.length > 0) {
       formData.append("remoteGifClaims", JSON.stringify(remoteGifClaims));
+    }
+    if (tagIds && tagIds.length > 0) {
+      formData.append("tagIds", tagIds.join(","));
     }
     xhr.send(formData);
   });

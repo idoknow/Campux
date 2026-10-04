@@ -35,6 +35,7 @@ type AppRoute =
   | { kind: "campaign-detail"; campaignId: string }
   | { kind: "broadcasts" }
   | { kind: "graduations" }
+  | { kind: "heatboard" }
   | { kind: "about" };
 
 type SelectTenantResponse = {
@@ -121,12 +122,16 @@ export function App() {
   const [postBgColor, setPostBgColor] = useState<string>("");
   const [postTextColor, setPostTextColor] = useState<string>("");
   const [postFont, setPostFont] = useState<string>("");
+  const [selectedPostTagIds, setSelectedPostTagIds] = useState<string[]>([]);
+  const [topicQuery, setTopicQuery] = useState("");
+  const [topicSuggestions, setTopicSuggestions] = useState<Array<{ id: string; name: string; color: string; postCount: number }>>([]);
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
   const [locationKey, setLocationKey] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const submissionBusyRef = useRef(false);
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const topicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { pending: pendingAttachments, add: addAttachments, remove: removeAttachment, validateBeforeUpload, markUploading, setProgress, markFailed, clearAll: clearAttachments } = usePendingAttachments({
     maxSizeMb: metadata.imageMaxSizeMb,
     compressionEnabled: metadata.imageCompression.enabled,
@@ -562,6 +567,40 @@ export function App() {
     mutateSubmissionForm(() => removeAttachment(attachmentId));
   }
 
+  useEffect(() => {
+    if (!metadata.enableHeatBoard) {
+      setTopicSuggestions([]);
+      return;
+    }
+    if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
+    topicTimerRef.current = setTimeout(async () => {
+      const q = topicQuery.trim();
+      try {
+        const data = await api<{ tags: Array<{ id: string; name: string; color: string; postCount: number }> }>(`/api/post-tags/search?${new URLSearchParams(q ? { q } : {})}`);
+        setTopicSuggestions(data.tags);
+      } catch {
+        setTopicSuggestions([]);
+      }
+    }, 180);
+    return () => { if (topicTimerRef.current) clearTimeout(topicTimerRef.current); };
+  }, [metadata.enableHeatBoard, topicQuery]);
+
+  function toggleTopic(id: string) {
+    setSelectedPostTagIds((current) => current.includes(id) ? current.filter((x) => x !== id) : current.length >= 5 ? current : [...current, id]);
+  }
+
+  async function createTopic() {
+    const q = topicQuery.trim().replace(/^#+/, "");
+    if (!q) return;
+    try {
+      const data = await api<{ tag: { id: string; name: string; color: string } }>("/api/post-tags", { method: "POST", body: JSON.stringify({ name: q }) });
+      setSelectedPostTagIds((current) => current.includes(data.tag.id) ? current : [...current, data.tag.id]);
+      setTopicQuery("");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "创建话题失败");
+    }
+  }
+
   async function submitPost() {
     if (submissionBusyRef.current) {
       return;
@@ -858,6 +897,9 @@ function routeFromPath(pathname: string): AppRoute {
   if (normalized === "/services/graduations") {
     return { kind: "graduations" };
   }
+  if (normalized === "/services/heatboard") {
+    return { kind: "heatboard" };
+  }
   if (normalized === "/services/about") {
     return { kind: "about" };
   }
@@ -920,6 +962,9 @@ function pathFromRoute(route: AppRoute) {
   }
   if (route.kind === "graduations") {
     return "/services/graduations";
+  }
+  if (route.kind === "heatboard") {
+    return "/services/heatboard";
   }
   if (route.kind === "about") {
     return "/services/about";

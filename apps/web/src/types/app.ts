@@ -162,6 +162,8 @@ export type TenantMetadata = {
   enableGraduation: boolean;
   /** 那年今日插件是否启用；关闭时投稿页顶部胶囊隐藏 */
   enableTodayInHistory: boolean;
+  enableHeatBoard: boolean;
+  heatBoardHalfLifeHours: number;
 };
 
 export type BotMessageTypeConfig = {
@@ -252,6 +254,11 @@ export type TenantPluginConfig = {
   /** 那年今日插件：开关 */
   todayInHistory: {
     enabled: boolean;
+  };
+  /** 热度榜插件：开关 + 热度衰减半衰期 */
+  heatBoard: {
+    enabled: boolean;
+    halfLifeHours: number;
   };
   /** 评论管理插件：开关 + 是否允许用户删除自己稿件下的评论 */
   commentManagement: {

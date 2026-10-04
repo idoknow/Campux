@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, FlameIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
@@ -17,6 +17,7 @@ import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
 import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import { GraduationsPage } from "@/features/graduation/GraduationsPage";
 import { GraduationIcon } from "@/features/graduation/GraduationIcon";
+import { HeatBoardPage } from "./HeatBoardPage";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
 function parseCampaignRoute(pathname: string, search: string) {
@@ -135,6 +136,9 @@ export function ServicesPage({
       return <section className="product-surface p-4 text-sm text-slate-500">毕业去向插件尚未启用。</section>;
     }
     return <GraduationsPage me={me} />;
+  }
+  if (window.location.pathname === "/services/heatboard") {
+    return <HeatBoardPage metadata={metadata} />;
   }
   if (window.location.pathname === "/services/about") {
     return <AboutPage metadata={metadata} onBack={() => navigateTo("/services")} />;

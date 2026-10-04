@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, KeyRoundIcon, LoaderIcon, PowerIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, FlameIcon, KeyRoundIcon, LoaderIcon, PowerIcon, RotateCcwIcon, SaveIcon, ShieldCheckIcon, ShieldIcon, UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FONT_OPTIONS } from "@campux/domain";
 import type { AdminMember, BotMessageTypeConfig, PluginBroadcastPreset, PluginColorPreset, TenantMetadata, TenantPluginConfig, TenantRole } from "@/types/app";
@@ -90,7 +90,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory" | "commentManagement";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory" | "heatBoard" | "commentManagement";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -161,6 +161,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   botAlert: "campux-plugin-bot-alert",
   graduation: "campux-plugin-graduation",
   todayInHistory: "campux-plugin-today-in-history",
+  heatBoard: "campux-plugin-heat-board",
   commentManagement: "campux-plugin-comment-management",
 };
 
@@ -1292,6 +1293,29 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, todayInHistory: { ...config.todayInHistory, enabled: value } }),
     render: (config, onChange, busy) => <TodayInHistoryPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "heatBoard",
+    icon: FlameIcon,
+    name: "热度榜",
+    tagline: "Trending",
+    description: "服务页展示稿件热度排行与话题热度排行，投稿页支持添加话题",
+    detailedDescription:
+      "本插件在服务页新增「热度榜」入口，展示稿件排行榜和话题排行榜；投稿页可选择或创建话题，一篇稿件最多关联 5 个话题。\n\n" +
+      "稿件热度：按浏览、点赞、评论、转发的对数加权，并叠加质量权重、防刷系数与发布时间衰减。\n" +
+      "话题热度：汇总话题下 Top 50 稿件热度，并叠加 0.2 * ln(1 + 稿件数)。\n" +
+      "展示规则：前三标「沸」，前十标「热」。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "热度半衰期建议 12-48 小时。",
+    accent: "from-rose-500 to-red-500",
+    bgTint: "bg-rose-50 text-rose-700",
+    role: "admin",
+    required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
+    riskLevel: "medium",
+    rationale: "开启后服务页新增热榜入口，投稿页可选话题；热度读取已发布稿件与话题关联，话题写入 tenant:data。",
+    enabled: (config) => config.heatBoard.enabled,
+    setEnabled: (config, value) => ({ ...config, heatBoard: { ...config.heatBoard, enabled: value } }),
+    render: (config, onChange, busy) => <HeatBoardPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
 
 /**
@@ -1391,6 +1415,10 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     todayInHistory: {
       enabled: false,
     },
+    heatBoard: {
+      enabled: false,
+      halfLifeHours: 24,
+    },
     commentManagement: {
       enabled: false,
       allowUserDeleteOwnPostComments: false,
@@ -1417,6 +1445,40 @@ function extractAuditDiff(metadata: Record<string, unknown> | null | undefined):
 // 日志值展示：过长截断，避免单条记录撑爆卡片。
 function formatAuditValue(text: string): string {
   return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+}
+
+function HeatBoardPanel({ config, onChange, busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  const halfLifeHours = config.heatBoard.halfLifeHours;
+  const nextHalfLifeHours = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    onChange({
+      ...config,
+      heatBoard: {
+        ...config.heatBoard,
+        halfLifeHours: Number.isFinite(parsed) && parsed >= 1 && parsed <= 720 ? parsed : 24,
+      },
+    });
+  };
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，服务页新增「热度榜」入口，并在投稿页开放话题选择；热度按浏览、点赞、评论、转发和发布时间衰减计算。
+      </div>
+      <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-3">
+        <span className="text-sm font-medium text-slate-700">热度半衰期（小时）</span>
+        <input
+          type="number"
+          min={1}
+          max={720}
+          step={1}
+          value={halfLifeHours}
+          disabled={busy}
+          onChange={(event) => nextHalfLifeHours(event.target.value)}
+          className="h-8 w-20 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-slate-400"
+        />
+      </label>
+    </div>
+  );
 }
 
 function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId] | false {

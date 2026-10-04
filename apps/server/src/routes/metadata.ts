@@ -157,6 +157,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableBotAlert: false,
     enableGraduation: false,
     enableTodayInHistory: false,
+    enableHeatBoard: false,
+    heatBoardHalfLifeHours: 24,
     enableCommentManagement: false,
     allowUserDeleteOwnPostComments: false,
   };
@@ -256,6 +258,9 @@ async function readPublicMetadata(tenantId: string) {
     metadata.enableGraduation = pluginConfig.graduation.enabled;
     // 那年今日：未启用时投稿页顶部胶囊隐藏。
     metadata.enableTodayInHistory = pluginConfig.todayInHistory.enabled;
+    // 热度榜：服务页入口与投稿页话题选择器由该开关控制。
+    metadata.enableHeatBoard = pluginConfig.heatBoard.enabled;
+    metadata.heatBoardHalfLifeHours = pluginConfig.heatBoard.halfLifeHours;
     // 评论管理：暴露插件启用状态与用户侧删除开关。
     metadata.enableCommentManagement = pluginConfig.commentManagement.enabled;
     metadata.allowUserDeleteOwnPostComments = pluginConfig.commentManagement.enabled

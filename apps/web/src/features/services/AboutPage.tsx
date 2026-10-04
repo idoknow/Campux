@@ -92,6 +92,7 @@ const pluginEnabledFlags: Record<ShowcasePlugin["id"], (metadata: TenantMetadata
   botAlert: (metadata) => metadata.enableBotAlert,
   graduation: (metadata) => metadata.enableGraduation,
   todayInHistory: (metadata) => metadata.enableTodayInHistory,
+  heatBoard: (metadata) => metadata.enableHeatBoard,
   commentManagement: (metadata) => metadata.enableCommentManagement,
 };
 
