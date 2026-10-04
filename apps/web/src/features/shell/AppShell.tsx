@@ -234,7 +234,7 @@ export function AppShell({
         </div>
       </div>
 
-      <MobileTabBar navItems={navItems} />
+      <MobileTabBar navItems={navItems} value={activeTab} onValueChange={onActiveTabChange} />
     </Tabs>
   );
 }
