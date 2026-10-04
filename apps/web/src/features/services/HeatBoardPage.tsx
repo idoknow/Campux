@@ -25,7 +25,6 @@ type HeatPost = {
     likeCount: number;
     commentCount: number;
     forwardCount: number;
-    targets: Array<{ targetName: string; qzoneTid: string; comments?: Array<{ id: string; authorName?: string | null; content?: string; deleted?: boolean; createdAt?: string | null }> }>;
   };
 };
 
@@ -83,28 +82,9 @@ function formatHeat(value: number) {
   return rounded.toFixed(3);
 }
 
-function CommentsSection({ post }: { post: HeatPost }) {
-  const comments = post.stats.targets.flatMap((target) => (target.comments ?? []).filter((comment) => !comment.deleted));
-  if (comments.length === 0) return <p className="py-3 text-center text-xs text-slate-400">暂无同步评论。</p>;
-  return (
-    <div className="max-h-52 space-y-2 overflow-y-auto px-5 pb-5">
-      {comments.map((comment, index) => (
-        <div key={comment.id || index} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">{comment.authorName || "匿名用户"}</span>
-            {comment.createdAt ? <span className="text-slate-400">{formatTime(comment.createdAt)}</span> : null}
-          </div>
-          <p className="mt-1 break-words text-xs leading-5 text-slate-600">{comment.content || "（无内容）"}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function PostDialog({ post, open, onClose }: { post: HeatPost | null; open: boolean; onClose: () => void }) {
-  const [showComments, setShowComments] = useState(false);
   return (
-    <Dialog open={open && post !== null} onOpenChange={(next) => { if (!next) { onClose(); setShowComments(false); } }}>
+    <Dialog open={open && post !== null} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent className="w-[min(560px,calc(100vw-32px))]">
         <DialogHeader>
           <DialogTitle>稿件详情</DialogTitle>
@@ -125,10 +105,6 @@ function PostDialog({ post, open, onClose }: { post: HeatPost | null; open: bool
               <span className="rounded-lg border border-slate-100 p-2"><MessageCircleIcon className="mx-auto size-3.5" />{post.stats.commentCount}</span>
               <span className="rounded-lg border border-slate-100 p-2"><Share2Icon className="mx-auto size-3.5" />{post.stats.forwardCount}</span>
             </div>
-            <Button variant="outline" size="sm" className="w-full" onClick={() => setShowComments((value) => !value)}>
-              {showComments ? "收起评论" : "查看评论"}
-            </Button>
-            {showComments ? <CommentsSection post={post} /> : null}
             <Button
               size="sm"
               className="w-full"

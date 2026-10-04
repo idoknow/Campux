@@ -267,7 +267,7 @@ export function PostPage({
         </div>
         {metadata.enableHeatBoard && (
           <div className="mb-3 space-y-2">
-            <div className="relative flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 focus-within:border-slate-400">
+            <div className="relative flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2 focus-within:border-slate-400">
               {selectedPostTags.map((tag) => (
                 <span key={tag.name} className="inline-flex max-w-full items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">
                   <span className="truncate">#{tag.name}</span>
