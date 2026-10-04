@@ -18,6 +18,7 @@ import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import { GraduationsPage } from "@/features/graduation/GraduationsPage";
 import { GraduationIcon } from "@/features/graduation/GraduationIcon";
 import { HeatBoardPage } from "./HeatBoardPage";
+import { LinglingPage } from "./LinglingPage";
 import type { Campaign, CampaignFilter } from "./campaign-types";
 
 function parseCampaignRoute(pathname: string, search: string) {
@@ -140,6 +141,9 @@ export function ServicesPage({
   if (window.location.pathname === "/services/heatboard") {
     return <HeatBoardPage metadata={metadata} />;
   }
+  if (window.location.pathname === "/services/lingling") {
+    return <LinglingPage onBack={() => navigateTo("/services")} />;
+  }
   if (window.location.pathname === "/services/about") {
     return <AboutPage metadata={metadata} onBack={() => navigateTo("/services")} />;
   }
@@ -235,6 +239,19 @@ export function ServicesPage({
             <ChevronRightIcon className="size-5 shrink-0 text-rose-400" />
           </button>
         ) : null}
+        <button
+          onClick={() => navigateTo("/services/lingling")}
+          className="mb-4 flex w-full items-center gap-4 rounded-xl border border-pink-200/70 bg-gradient-to-br from-pink-50 via-rose-50 to-violet-100 p-4 text-left shadow-sm transition hover:border-pink-300 hover:shadow-md"
+        >
+          <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-white bg-white/70 shadow-sm">
+            <span aria-hidden="true" className="text-2xl">🐶</span>
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-base font-bold text-pink-950">吉祥萌宠</span>
+            <span className="mt-0.5 block text-xs text-pink-900/60">看看今天的小狗状态，顺便查看成长值。</span>
+          </span>
+          <ChevronRightIcon className="size-5 shrink-0 text-pink-400" />
+        </button>
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
 
         <section className="product-surface p-4">

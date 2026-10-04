@@ -36,7 +36,8 @@ type AppRoute =
   | { kind: "broadcasts" }
   | { kind: "graduations" }
   | { kind: "heatboard" }
-  | { kind: "about" };
+  | { kind: "about" }
+  | { kind: "lingling" };
 
 type SelectTenantResponse = {
   ok: true;
@@ -168,7 +169,7 @@ export function App() {
     setRoute(nextRoute);
     if (nextRoute.kind === "tenant") {
       setActiveTabState(nextRoute.tab);
-    } else if (nextRoute.kind === "broadcasts" || nextRoute.kind === "graduations" || nextRoute.kind === "about") {
+    } else if (nextRoute.kind === "broadcasts" || nextRoute.kind === "graduations" || nextRoute.kind === "about" || nextRoute.kind === "heatboard" || nextRoute.kind === "lingling") {
       setActiveTabState("services");
     }
   }
@@ -320,7 +321,7 @@ export function App() {
       setLocationKey((key) => key + 1);
       if (nextRoute.kind === "tenant") {
         setActiveTabState(nextRoute.tab);
-      } else if (nextRoute.kind === "broadcasts" || nextRoute.kind === "graduations" || nextRoute.kind === "about") {
+      } else if (nextRoute.kind === "broadcasts" || nextRoute.kind === "graduations" || nextRoute.kind === "about" || nextRoute.kind === "lingling") {
         setActiveTabState("services");
       }
     };
@@ -901,6 +902,9 @@ function routeFromPath(pathname: string): AppRoute {
   if (normalized === "/services/about") {
     return { kind: "about" };
   }
+  if (normalized === "/services/lingling") {
+    return { kind: "lingling" };
+  }
 
   // Note: "/posts" (the bare posts path) intentionally resolves without an
   // explicit subTab so the default tab can be role-aware (reviewers land on the
@@ -967,6 +971,9 @@ function pathFromRoute(route: AppRoute) {
   if (route.kind === "about") {
     return "/services/about";
   }
+  if (route.kind === "lingling") {
+    return "/services/lingling";
+  }
   if (route.kind === "login") {
     return route.returnTo ? buildLoginPathWithReturnTo(route.returnTo) : "/login";
   }
@@ -1000,6 +1007,9 @@ function pageTitleFromRoute(route: AppRoute, systemRole?: AuthenticatedMe["user"
   }
   if (route.kind === "about") {
     return "关于";
+  }
+  if (route.kind === "lingling") {
+    return "吉祥萌宠";
   }
   if (route.kind !== "tenant") {
     return "Campux";

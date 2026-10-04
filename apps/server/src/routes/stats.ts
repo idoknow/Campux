@@ -10,6 +10,56 @@ const chinaTimezoneOffsetHours = 8;
 const publishAttemptStatuses = ["queued", "running", "succeeded", "failed", "skipped"];
 
 export function registerStatsRoutes(app: FastifyInstance) {
+  app.get("/api/services/lingling", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "submitter");
+    const tenantId = context.selectedTenant.id;
+    const now = new Date();
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { createdAt: true },
+    });
+    const totalPosts = await prisma.post.count({ where: { tenantId } });
+    const totalUsers = await prisma.tenantMembership.count({ where: { tenantId } });
+    const qzoneMetrics = await prisma.qZonePostMetric.findMany({
+      where: { tenantId },
+      select: {
+        visitorCount: true,
+        likeCount: true,
+        commentCount: true,
+        forwardCount: true,
+      },
+    });
+    const visitorCount = qzoneMetrics.reduce((sum, metric) => sum + (metric.visitorCount ?? 0), 0);
+    const likeCount = qzoneMetrics.reduce((sum, metric) => sum + (metric.likeCount ?? 0), 0);
+    const commentCount = qzoneMetrics.reduce((sum, metric) => sum + (metric.commentCount ?? 0), 0);
+    const forwardCount = qzoneMetrics.reduce((sum, metric) => sum + (metric.forwardCount ?? 0), 0);
+    const startedAt = tenant.createdAt;
+    const growthValue =
+      totalPosts * 0.4 +
+      commentCount * 0.5 +
+      visitorCount * 0.05 +
+      forwardCount * 0.75 +
+      likeCount * 0.15 +
+      totalUsers * 0.8 +
+      Math.max(1, Math.ceil((now.getTime() - startedAt.getTime()) / dayMs)) * 0.2;
+    return {
+      name: "下午茶",
+      birthday: now.toISOString().slice(0, 10),
+      species: "萨摩耶",
+      gender: "♀",
+      intro: "这只萨摩耶小狗负责陪伴墙面成长，看到你的稿件也会偷偷开心。",
+      growthValue: Math.round(growthValue * 100) / 100,
+      breakdown: {
+        posts: totalPosts,
+        comments: commentCount,
+        visitors: visitorCount,
+        forwards: forwardCount,
+        likes: likeCount,
+        users: totalUsers,
+        runDays: Math.max(1, Math.ceil((now.getTime() - startedAt.getTime()) / dayMs)),
+      },
+    };
+  });
   app.get("/api/stats/tenant", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
     const tenantId = context.selectedTenant.id;

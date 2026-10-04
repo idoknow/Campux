@@ -10,12 +10,14 @@ export function Header({
   onLogout,
   onOpenOps,
   onSelectTenant,
+  hideLive2D,
 }: {
   selectedTenant: TenantSummary;
   me: AuthenticatedMe;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
   onSelectTenant: (tenantId: string) => Promise<void>;
+  hideLive2D?: boolean;
 }) {
   const role = me.currentMembership?.role ?? "submitter";
   const logoUrl = selectedTenant.logoUrl?.trim() || "/logo.svg";
