@@ -8,12 +8,31 @@ import type { TenantMetadata } from "@/types/app";
 
 type HeatBadge = "boiling" | "hot" | null;
 
+type HeatComment = {
+  id: string;
+  name: string;
+  content: string;
+  images: string[];
+  createdAt: string | null;
+  deleted?: boolean;
+};
+
+type HeatAttachment = {
+  kind: "image";
+  key: string;
+  url: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+};
+
 type HeatPost = {
   key: string;
   postId: string | null;
   displayId: number | null;
   title: string;
   text: string;
+  attachments?: HeatAttachment[];
   anonymous: boolean;
   author: { displayName: string; qqUin: string } | null;
   heat: number;
@@ -25,6 +44,7 @@ type HeatPost = {
     likeCount: number;
     commentCount: number;
     forwardCount: number;
+    targets?: Array<{ targetName: string; qzoneTid: string; comments?: HeatComment[] }>;
   };
 };
 
@@ -82,10 +102,37 @@ function formatHeat(value: number) {
   return rounded.toFixed(3);
 }
 
+function HeatImageGallery({ images }: { images: Array<{ src: string; alt: string }> }) {
+  const [active, setActive] = useState<string | null>(null);
+  if (images.length === 0) return null;
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-2">
+        {images.map((image, index) => (
+          <button key={`${image.src}-${index}`} type="button" className="overflow-hidden rounded-xl border border-slate-100 bg-slate-50" onClick={() => setActive(image.src)}>
+            <img src={image.src} alt={image.alt} className="aspect-square w-full object-cover" />
+          </button>
+        ))}
+      </div>
+      <Dialog open={active !== null} onOpenChange={(next) => { if (!next) setActive(null); }}>
+        <DialogContent className="max-w-[min(820px,calc(100vw-24px))] p-0">
+          <DialogTitle className="sr-only">图片预览</DialogTitle>
+          {active ? <img src={active} alt="图片预览" className="max-h-[80vh] w-full rounded-2xl bg-slate-950 object-contain" /> : null}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function PostDialog({ post, open, onClose }: { post: HeatPost | null; open: boolean; onClose: () => void }) {
+  const comments = (post?.stats.targets ?? []).flatMap((target) => target.comments ?? []).filter((comment) => !comment.deleted);
+  const images = [
+    ...(post?.attachments ?? []).filter((attachment) => attachment.contentType.startsWith("image/")).map((attachment) => ({ src: attachment.url, alt: attachment.fileName || `附件图片 ${attachment.key}` })),
+    ...comments.flatMap((comment) => comment.images.map((src, index) => ({ src, alt: `${comment.name || "评论"}图片 ${index + 1}` }))),
+  ];
   return (
     <Dialog open={open && post !== null} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="w-[min(560px,calc(100vw-32px))]">
+      <DialogContent className="max-h-[86vh] w-[min(560px,calc(100vw-32px))] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>稿件详情</DialogTitle>
         </DialogHeader>
@@ -105,13 +152,23 @@ function PostDialog({ post, open, onClose }: { post: HeatPost | null; open: bool
               <span className="rounded-lg border border-slate-100 p-2"><MessageCircleIcon className="mx-auto size-3.5" />{post.stats.commentCount}</span>
               <span className="rounded-lg border border-slate-100 p-2"><Share2Icon className="mx-auto size-3.5" />{post.stats.forwardCount}</span>
             </div>
-            <Button
-              size="sm"
-              className="w-full"
-              onClick={() => window.open(`/posts/published?q=${encodeURIComponent(post.displayId ?? post.title)}&postId=${encodeURIComponent(post.postId ?? "")}`, "_blank", "noopener,noreferrer")}
-            >
-              转跳稿件/空间列表
-            </Button>
+            {images.length > 0 ? <HeatImageGallery images={images} /> : null}
+            <div>
+              <p className="mb-2 text-xs font-bold text-slate-500">评论 {comments.length > 0 ? `(${comments.length})` : ""}</p>
+              {comments.length > 0 ? (
+                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                  {comments.map((comment, index) => (
+                    <div key={comment.id || index} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-700">{comment.name || "匿名用户"}</span>
+                        {comment.createdAt ? <span className="text-slate-400">{formatTime(comment.createdAt)}</span> : null}
+                      </div>
+                      {comment.content ? <p className="mt-1 break-words text-xs leading-5 text-slate-600">{comment.content}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="py-3 text-center text-xs text-slate-400">暂无同步评论。</p>}
+            </div>
           </div>
         ) : null}
       </DialogContent>

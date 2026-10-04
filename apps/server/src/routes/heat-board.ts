@@ -4,7 +4,7 @@ import { hasTenantRole, requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { normalizeTagName, serializeAssignedPostTags, tagColorForName, type SerializedAssignedPostTag } from "../lib/post-tags";
-import type { PostQZoneMetric } from "../lib/posts";
+import { toQZonePostStats, type PostQZoneMetric } from "../lib/posts";
 
 const MAX_TAGS_PER_POST = 5;
 const HEAT_BOARD_TOP_N = 100;
@@ -34,6 +34,15 @@ type PublishedHeatBatch = {
   attempts: Array<{ qzonePostMetrics: PostQZoneMetric[] }>;
 };
 
+type HeatStats = {
+  visitorCount: number;
+  likeCount: number;
+  commentCount: number;
+  forwardCount: number;
+  checkedAt: string | null;
+  targets: NonNullable<ReturnType<typeof toQZonePostStats>>["targets"];
+};
+
 type PublishedHeatItem = {
   kind: "single" | "batch";
   key: string;
@@ -50,7 +59,7 @@ type PublishedHeatItem = {
   createdAt: string;
   tags: SerializedAssignedPostTag[];
   author: { displayName: string; qqUin: string } | null;
-  stats: { visitorCount: number; likeCount: number; commentCount: number; forwardCount: number; checkedAt: string | null; targets: Array<{ targetName: string; qzoneTid: string }> };
+  stats: HeatStats;
   heat: number;
 };
 
@@ -72,14 +81,17 @@ function clampNumber(value: unknown, fallback = 0): number {
 }
 
 function qualityWeight(stats: PublishedHeatItem["stats"]): number {
-  const total = stats.visitorCount + stats.likeCount + stats.commentCount + stats.forwardCount;
+  const total = clampNumber(stats.visitorCount) + clampNumber(stats.likeCount) + clampNumber(stats.commentCount) + clampNumber(stats.forwardCount);
   return 0.85 + Math.min(0.3, Math.log10(total + 1) * 0.05);
 }
 
 function antiCheatingFactor(stats: PublishedHeatItem["stats"]): number {
-  if (stats.visitorCount > 0 && stats.commentCount > stats.visitorCount) return 0.25;
-  if (stats.visitorCount > 0 && stats.likeCount > stats.visitorCount) return 0.65;
-  if (stats.commentCount > 0 && stats.likeCount > stats.commentCount * 40) return 0.75;
+  const visitorCount = stats.visitorCount ?? 0;
+  const likeCount = stats.likeCount ?? 0;
+  const commentCount = stats.commentCount ?? 0;
+  if (visitorCount > 0 && commentCount > visitorCount) return 0.25;
+  if (visitorCount > 0 && likeCount > visitorCount) return 0.65;
+  if (commentCount > 0 && likeCount > commentCount * 40) return 0.75;
   return 1;
 }
 
@@ -93,24 +105,28 @@ function halfLifeDecayFactor(hoursSincePublished: number): number {
 
 function heatScore(hoursSincePublished: number, stats: PublishedHeatItem["stats"]): number {
   const base =
-    0.1 * Math.log(1 + stats.visitorCount) +
-    1.0 * Math.log(1 + stats.likeCount) +
-    3.0 * Math.log(1 + stats.commentCount) +
-    4.0 * Math.log(1 + stats.forwardCount);
+    0.1 * Math.log(1 + clampNumber(stats.visitorCount)) +
+    1.0 * Math.log(1 + clampNumber(stats.likeCount)) +
+    3.0 * Math.log(1 + clampNumber(stats.commentCount)) +
+    4.0 * Math.log(1 + clampNumber(stats.forwardCount));
   return base * qualityWeight(stats) * antiCheatingFactor(stats) * halfLifeDecayFactor(hoursSincePublished);
 }
 
-function toStats(metrics: PostQZoneMetric[]) {
-  return {
+function toStats(metrics: PostQZoneMetric[]): HeatStats {
+  const totals = {
     visitorCount: metrics.reduce((sum, m) => sum + clampNumber(m.visitorCount), 0),
     likeCount: metrics.reduce((sum, m) => sum + clampNumber(m.likeCount), 0),
     commentCount: metrics.reduce((sum, m) => sum + clampNumber(m.commentCount), 0),
     forwardCount: metrics.reduce((sum, m) => sum + clampNumber(m.forwardCount), 0),
-    checkedAt: metrics.map((m) => m.checkedAt).filter(Boolean).sort((a, b) => new Date(b as Date).getTime() - new Date(a as Date).getTime())[0]?.toISOString() ?? null,
-    targets: metrics.map((m) => ({
-      targetName: m.publishAttempt?.publishTarget?.displayName ?? "空间",
-      qzoneTid: m.qzoneTid,
-    })),
+  };
+  const qzoneStats = toQZonePostStats(metrics);
+  return {
+    visitorCount: totals.visitorCount,
+    likeCount: totals.likeCount,
+    commentCount: totals.commentCount,
+    forwardCount: totals.forwardCount,
+    checkedAt: qzoneStats?.checkedAt ?? null,
+    targets: qzoneStats?.targets ?? [],
   };
 }
 
