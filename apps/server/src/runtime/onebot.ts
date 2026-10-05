@@ -2070,9 +2070,13 @@ export class OneBotRuntime {
     await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
 
     const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+    this.clearPrivatePostAggregateBuffer(draftKey);
+
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       await this.clearPrivatePostPending(draftKey);
+      await this.clearPrivatePostPendingConfirm(draftKey);
+      await this.clearPrivatePostDraft(draftKey);
       const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
       return;
@@ -2080,7 +2084,9 @@ export class OneBotRuntime {
 
     const pendingConfirm = this.privatePostPendingConfirms.get(draftKey);
     if (pendingConfirm) {
+      await this.clearPrivatePostPending(draftKey);
       await this.clearPrivatePostPendingConfirm(draftKey);
+      await this.clearPrivatePostDraft(draftKey);
       const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
       return;
