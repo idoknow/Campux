@@ -3204,8 +3204,8 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, "该用户不属于当前校园墙");
           return;
         }
-        if (membership.role === "admin") {
-          await this.sendGroupMessage(botQqUin, groupId, "不能封禁管理员");
+        if (membership.role === "admin" || targetUser.systemRole === "operations_admin" || targetUser.systemRole === "system_operator") {
+          await this.sendGroupMessage(botQqUin, groupId, "不能封禁管理员或运营管理");
           return;
         }
         const endsAt = new Date(PERMANENT_BAN_ENDS_AT);

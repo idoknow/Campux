@@ -600,8 +600,8 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     if (!membership) {
       return reply.code(404).send({ message: "该用户不属于当前校园墙" });
     }
-    if (membership.role === "admin") {
-      return reply.code(409).send({ message: "不能封禁管理员" });
+    if (membership.role === "admin" || user.systemRole === "operations_admin" || user.systemRole === "system_operator") {
+      return reply.code(409).send({ message: "不能封禁管理员或运营管理" });
     }
 
     const ban = await prisma.banRecord.create({

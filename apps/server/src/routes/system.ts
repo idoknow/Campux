@@ -969,6 +969,11 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           if (!existingMembership) {
             return null;
           }
+          if (existingMembership.user.systemRole === "operations_admin" || existingMembership.user.systemRole === "system_operator") {
+            return reply.code(403).send({
+              message: "运营管理员或系统运维的成员身份受保护，不能移除",
+            });
+          }
           assertCanManageTenant(context, existingMembership.tenantId, reply);
 
           // Hierarchy: system_operator > operations_admin > tenant admin.
