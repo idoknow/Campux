@@ -174,7 +174,7 @@ export function ServicesPage({
 
         {pluginEntriesCount > 0 ? (
         <section className="product-surface p-4">
-          <ServiceGroup title="插件" description="Campux 预设插件入口，样式与下方服务列表保持一致。">
+          <ServiceGroup title="插件" description="">
             {metadata.enableCampaigns ? (
               <button
                 type="button"
