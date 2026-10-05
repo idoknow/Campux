@@ -3,11 +3,12 @@ import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import type { EventBus } from "@campux/plugin";
 import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
-import { Prisma, TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, hashPassword, isPrismaKnownRequestError } from "@campux/db";
 import {
   BotWorkflowError,
   approveAllPendingPostsViaBot,
   findEnabledBot,
+  generateBotPassword,
   qzoneCookieDomain,
   publishTextDirectViaBot,
   refreshQZoneCookiesForBot,
@@ -49,7 +50,9 @@ import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
-import { requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
+import { enqueuePublishFanout, requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
+import { addApprovedPostToBatch } from "./publish-batching";
+import { readTenantPublishMode } from "../lib/tenant-metadata";
 import { selectReviewNotificationBot } from "./notification-routing";
 import {
   formatNewPostReviewNotification,
@@ -187,6 +190,17 @@ type PrivatePostPendingMode = {
 };
 
 type PrivatePostPendingConfirm = PrivatePostDraft;
+type ReviewPublishModeSelection = {
+  tenantId: string;
+  botQqUin: string;
+  operatorQqUin: string;
+  groupId: string;
+  text: string;
+  attachments: PostAttachment[];
+  uploadedKeys: string[];
+  stylishEnabled: boolean;
+  createdAt: number;
+};
 
 type PrivateForwardEntry = {
   time: number;
@@ -250,7 +264,7 @@ const reviewHelp = [
   "#拒绝 <理由> <稿件id>",
   "#重发 <稿件id>",
   "#回复 <内容> （引用转发私信后使用）",
-  "#发布 <内容> （可附带图片，文字+图片一起发布到空间）",
+  "#发布 <内容> （可附带图片，选择直接发布或以墙的身份投稿发布）",
   "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
   "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
   "#解封 <QQ号> 或 unban <QQ号>",
@@ -279,6 +293,7 @@ export class OneBotRuntime {
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostPendingConfirms = new Map<string, PrivatePostPendingConfirm>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
+  private readonly reviewPublishModeSelections = new Map<string, ReviewPublishModeSelection>();
   private readonly privateRegistrationCoordinator = new PrivateRegistrationCoordinator<{
     registration: Awaited<ReturnType<typeof registerUserViaBot>>;
     createdAccess: boolean;
@@ -2215,6 +2230,23 @@ export class OneBotRuntime {
     }
   }
 
+  private async clearReviewPublishModeSelection(key: string) {
+    const existing = this.reviewPublishModeSelections.get(key);
+    if (!existing) {
+      return;
+    }
+    this.reviewPublishModeSelections.delete(key);
+    if (this.config && existing.uploadedKeys.length > 0) {
+      await deleteAttachmentObjects(this.config, existing.uploadedKeys).catch((error) => {
+        this.logger.warn({ error, key }, "failed to cleanup review publish mode selection attachments");
+      });
+    }
+  }
+
+  private getReviewPublishModeSelectionKey(botQqUin: string, operatorQqUin: string) {
+    return `${botQqUin}:${operatorQqUin}`;
+  }
+
   private async clearStagedPrivatePostAttachments(uploadedKeys: string[]) {
     if (!this.config || uploadedKeys.length === 0) {
       return;
@@ -2223,6 +2255,273 @@ export class OneBotRuntime {
     await deleteAttachmentObjects(this.config, uploadedKeys).catch((error) => {
       this.logger.warn({ error }, "failed to cleanup staged private post attachments");
     });
+  }
+
+  private async stageReviewPublishAttachments(
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null },
+    event: OneBotMessageEvent,
+    permit: TenantInteractionPermit,
+  ): Promise<{ attachments: PostAttachment[]; uploadedKeys: string[] }> {
+    const imageSegments = extractOneBotImageSegments(event.message);
+    if (imageSegments.length === 0) {
+      return { attachments: [], uploadedKeys: [] };
+    }
+    if (imageSegments.length > 9) {
+      throw new BotWorkflowError("最多 9 张图片", 400);
+    }
+    if (!this.config) {
+      throw new BotWorkflowError("当前环境未配置附件存储，无法通过图片投稿", 503);
+    }
+
+    const compression = await readTenantImageCompression(prisma, bot.tenantId);
+    const imageUploadLimits = resolveImageUploadLimits({
+      maxSizeMb: compression.maxSizeMb,
+      compressionEnabled: compression.enabled,
+    });
+    const sourceFetchLimits = {
+      maxBytes: imageUploadLimits.sourceMaxBytes,
+      sizeErrorMessage: buildImageSourceSizeErrorMessage({
+        compressionEnabled: compression.enabled,
+        maxSizeMb: compression.maxSizeMb,
+      }),
+    };
+    const attachments: PostAttachment[] = [];
+    const uploadedKeys: string[] = [];
+
+    try {
+      for (const segment of imageSegments) {
+        if (!this.interactionFence.isCurrent(permit)) {
+          throw new BotWorkflowError("校园墙已暂停或归档", 409);
+        }
+        const source = await this.resolvePrivatePostImageSource(
+          bot.qqUin.toString(),
+          bot.tenantId,
+          permit,
+          segment,
+          sourceFetchLimits,
+        );
+        const fileName = source.fileName || normalizeImageFileName(source.url) || "attachment.jpg";
+        const compressed = await compressImageBuffer(source.bytes, source.contentType, compression);
+        const sizeValidation = validateProcessedImageSize(compressed.byteLength, compression.maxSizeMb);
+        if (!sizeValidation.ok) {
+          throw new BotWorkflowError(sizeValidation.message, sizeValidation.status);
+        }
+        const uploaded = await runWithActiveTenantLease(prisma, bot.tenantId, async () => {
+          if (!this.interactionFence.isCurrent(permit)) {
+            throw new BotWorkflowError("校园墙已暂停或归档", 409);
+          }
+          return uploadAttachmentBytes({
+            config: this.config!,
+            tenantId: bot.tenantId,
+            kind: "image",
+            contentType: source.contentType,
+            fileName,
+            body: compressed,
+          });
+        });
+        if (!uploaded.active) {
+          throw new BotWorkflowError("校园墙已暂停或归档", 409);
+        }
+        const attachment = uploaded.value;
+        if (!this.interactionFence.isCurrent(permit)) {
+          await deleteAttachmentObjects(this.config!, [attachment.key]).catch(() => undefined);
+          throw new BotWorkflowError("校园墙已暂停或归档", 409);
+        }
+        attachments.push(attachment);
+        uploadedKeys.push(attachment.key);
+      }
+      return { attachments, uploadedKeys };
+    } catch (error) {
+      if (this.config && uploadedKeys.length > 0) {
+        await deleteAttachmentObjects(this.config, uploadedKeys).catch((cleanupError) => {
+          this.logger.warn({ error: cleanupError }, "failed to cleanup review publish attachment upload");
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async findFirstWallAuthor(tenantId: string, botId?: string) {
+    const bots = await prisma.botAccount.findMany({
+      where: {
+        tenantId,
+        enabled: true,
+        ...(botId ? { id: botId } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+      take: 1,
+    });
+    const firstBot = bots[0] ?? null;
+    if (!firstBot) {
+      throw new BotWorkflowError("当前校园墙没有可用墙号，无法以墙的身份发布", 409);
+    }
+
+    const existing = await prisma.user.findUnique({
+      where: { qqUin: firstBot.qqUin },
+    });
+    if (existing) {
+      return existing;
+    }
+
+    const passwordHash = await hashPassword(generateBotPassword());
+    return prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          qqUin: firstBot.qqUin,
+          displayName: firstBot.displayName || `QQ ${firstBot.qqUin.toString()}`,
+          passwordHash,
+          passwordChangeRequired: true,
+        },
+      });
+      const existingMembership = await tx.tenantMembership.findUnique({
+        where: { tenantId_userId: { tenantId, userId: user.id } },
+      });
+      if (!existingMembership) {
+        await tx.tenantMembership.create({
+          data: {
+            tenantId,
+            userId: user.id,
+            role: "reviewer",
+          },
+        });
+      }
+      return user;
+    });
+  }
+
+  private async createApprovedPostFromReviewPublish({
+    bot,
+    operatorQqUin,
+    text,
+    attachments,
+    uploadedKeys,
+  }: {
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    operatorQqUin: string;
+    text: string;
+    attachments: PostAttachment[];
+    uploadedKeys: string[];
+  }) {
+    const access = await this.ensurePrivatePostingAllowed(bot.tenantId, operatorQqUin);
+    const wallAuthor = await this.findFirstWallAuthor(bot.tenantId, bot.id);
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+      await this.clearReviewPublishAttachments(uploadedKeys);
+      throw new BotWorkflowError("发布内容不能为空", 400);
+    }
+    if (trimmedText.length > 1_000) {
+      await this.clearReviewPublishAttachments(uploadedKeys);
+      throw new BotWorkflowError("发布内容太长，请控制在 1000 字以内", 400);
+    }
+
+    const injectionResult = detectPostInjection({ text: trimmedText });
+    if (injectionResult.detected) {
+      await this.clearReviewPublishAttachments(uploadedKeys);
+      throw new BotWorkflowError(`发布内容不安全：${injectionResult.reason}`, 400);
+    }
+
+    let post: Awaited<ReturnType<typeof prisma.post.create>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        post = await prisma.$transaction(
+          async (tx) => {
+            if (!await lockActiveTenantRuntime(tx, bot.tenantId)) {
+              throw new BotWorkflowError("校园墙已暂停或归档", 409);
+            }
+
+            const tenant = await tx.tenant.update({
+              where: { id: bot.tenantId },
+              data: { nextPostDisplayId: { increment: 1 } },
+              select: { nextPostDisplayId: true },
+            });
+            const displayId = tenant.nextPostDisplayId - 1;
+
+            return tx.post.create({
+              data: {
+                tenantId: bot.tenantId,
+                authorId: wallAuthor.id,
+                displayId,
+                text: trimmedText,
+                anonymous: false,
+                attachments,
+                status: "approved",
+                logs: {
+                  create: {
+                    tenantId: bot.tenantId,
+                    actorId: access.operator.id,
+                    newStatus: "approved",
+                    comment: "审核群发布命令创建，已进入发布队列",
+                  },
+                },
+              },
+            });
+          },
+          { isolationLevel: TransactionIsolationLevel.Serializable, maxWait: 15_000, timeout: 60_000 },
+        );
+        break;
+      } catch (error) {
+        if (error instanceof BotWorkflowError) {
+          throw error;
+        }
+        if (isTransactionSerializationFailure(error) && attempt < 2) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!post) {
+      await this.clearReviewPublishAttachments(uploadedKeys);
+      throw new BotWorkflowError("发布失败，请稍后再试", 503);
+    }
+
+    await writeAuditLog({
+      tenantId: bot.tenantId,
+      actorId: access.operator.id,
+      action: "bot.publish.create_post",
+      targetType: "post",
+      targetId: post.id,
+      detail: {
+        displayId: post.displayId,
+        botQqUin: bot.qqUin.toString(),
+        operatorQqUin,
+        attachmentCount: attachments.length,
+      },
+    });
+
+    const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
+    if (publishMode.mode === "accumulate") {
+      await addApprovedPostToBatch(this.queue, bot.tenantId, post.id, access.operator.id, this.logger);
+    } else {
+      await enqueuePublishFanout(this.queue, bot.tenantId, post.id, access.operator.id);
+    }
+
+    return { post, publishMode };
+  }
+
+  private async clearReviewPublishAttachments(uploadedKeys: string[]) {
+    if (!this.config || uploadedKeys.length === 0) {
+      return;
+    }
+    await deleteAttachmentObjects(this.config, uploadedKeys).catch((error) => {
+      this.logger.warn({ error }, "failed to cleanup review publish attachments");
+    });
+  }
+
+  private async readReviewPublishAttachmentsAsImages(attachments: PostAttachment[]): Promise<Array<{ name: string; bytes: Uint8Array }>> {
+    if (!this.config) {
+      return [];
+    }
+    const storage = getStorageDriver(this.config);
+    const results: Array<{ name: string; bytes: Uint8Array }> = [];
+    for (const attachment of attachments) {
+      const object = await storage.getBytes(attachment.key);
+      if (!object) {
+        throw new BotWorkflowError("无法读取已选择的图片附件，请重新发布", 400);
+      }
+      results.push({ name: attachment.fileName || "image.jpg", bytes: object.bytes });
+    }
+    return results;
   }
 
   private async stagePrivatePostAttachments(
@@ -2844,6 +3143,47 @@ export class OneBotRuntime {
 
 
     if (!command) {
+      const publishModeSelectionKey = this.getReviewPublishModeSelectionKey(botQqUin, operatorQqUin);
+      const pendingPublishModeSelection = this.reviewPublishModeSelections.get(publishModeSelectionKey);
+      if (pendingPublishModeSelection && (plainText.trim() === "1" || plainText.trim() === "2")) {
+        const selection = pendingPublishModeSelection;
+        await this.clearReviewPublishModeSelection(publishModeSelectionKey);
+        try {
+          if (plainText.trim() === "1") {
+            const images = selection.attachments.length > 0 ? await this.readReviewPublishAttachmentsAsImages(selection.attachments) : undefined;
+            const result = await publishTextDirectViaBot({
+              botQqUin,
+              groupId,
+              operatorQqUin,
+              text: selection.text,
+              ...(images ? { images } : {}),
+            });
+            await this.clearReviewPublishAttachments(selection.uploadedKeys);
+            const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
+            await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled, result.qzoneTid ?? undefined));
+            return;
+          }
+          const created = await this.createApprovedPostFromReviewPublish({
+            bot,
+            operatorQqUin,
+            text: selection.text,
+            attachments: selection.attachments,
+            uploadedKeys: selection.uploadedKeys,
+          });
+          await this.clearReviewPublishAttachments(selection.uploadedKeys);
+          await this.sendGroupMessage(
+            botQqUin,
+            groupId,
+            `已以墙的身份投稿发布，稿件 #${created.post.displayId} 已进入${created.publishMode.mode === "accumulate" ? "批量" : "即时"}发布队列`,
+          );
+          return;
+        } catch (error) {
+          await this.clearReviewPublishAttachments(selection.uploadedKeys);
+          this.logger.warn({ error, botQqUin, groupId }, "review publish mode selection failed");
+          await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error)).catch(() => undefined);
+          return;
+        }
+      }
       await this.replyToReviewGroupMention(event, botQqUin, groupId);
       return;
     }
@@ -3152,29 +3492,43 @@ export class OneBotRuntime {
           await this.sendGroupMessage(botQqUin, groupId, "发布内容太长，请控制在 1000 字以内");
           return;
         }
-        // 提取消息中的图片
         const imageSegments = extractOneBotImageSegments(event.message);
-        let images: Array<{ name: string; bytes: Uint8Array }> | undefined;
+        if (imageSegments.length > 9) {
+          await this.sendGroupMessage(botQqUin, groupId, "最多 9 张图片");
+          return;
+        }
+        const permit = this.interactionFence.snapshot(bot.tenantId);
+        if (!this.interactionFence.isCurrent(permit)) {
+          await this.sendGroupMessage(botQqUin, groupId, "校园墙已暂停或归档");
+          return;
+        }
+        const key = this.getReviewPublishModeSelectionKey(botQqUin, operatorQqUin);
+        await this.clearReviewPublishModeSelection(key);
+        let staged: { attachments: PostAttachment[]; uploadedKeys: string[] } = { attachments: [], uploadedKeys: [] };
         if (imageSegments.length > 0) {
-          if (imageSegments.length > 9) {
-            await this.sendGroupMessage(botQqUin, groupId, "最多 9 张图片");
+          try {
+            staged = await this.stageReviewPublishAttachments(bot, event, permit);
+          } catch (error) {
+            await this.sendGroupMessage(botQqUin, groupId, toErrorMessage(error));
             return;
           }
-          images = [];
-          const permit = this.interactionFence.snapshot(bot.tenantId);
-          for (const segment of imageSegments) {
-            const source = await this.resolveReviewGroupImageSource(botQqUin, bot.tenantId, permit, segment);
-            images.push({ name: source.fileName || "image.jpg", bytes: source.bytes });
-          }
         }
-        const result = await publishTextDirectViaBot({
+        this.reviewPublishModeSelections.set(key, {
+          tenantId: bot.tenantId,
+          botQqUin,
+          operatorQqUin,
+          groupId,
+          text: publishText,
+          attachments: staged.attachments,
+          uploadedKeys: staged.uploadedKeys,
+          stylishEnabled,
+          createdAt: Date.now(),
+        });
+        await this.sendGroupMessage(
           botQqUin,
           groupId,
-          operatorQqUin,
-          text: publishText,
-          ...(images ? { images } : {}),
-        });
-        await this.sendGroupMessage(botQqUin, groupId, formatBotPublishSuccess(stylishEnabled, result.qzoneTid ?? undefined));
+          "请回复发布方式：\n1️⃣ 直接发布\n2️⃣ 以墙的身份投稿发布",
+        );
         return;
       }
 
