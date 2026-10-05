@@ -3145,11 +3145,17 @@ export class OneBotRuntime {
     if (!command) {
       const publishModeSelectionKey = this.getReviewPublishModeSelectionKey(botQqUin, operatorQqUin);
       const pendingPublishModeSelection = this.reviewPublishModeSelections.get(publishModeSelectionKey);
-      if (pendingPublishModeSelection && (plainText.trim() === "1" || plainText.trim() === "2")) {
+      const normalizedReply = plainText.trim();
+      if (pendingPublishModeSelection && (normalizedReply === "1" || normalizedReply === "2" || normalizedReply === "3" || normalizedReply === "取消")) {
         const selection = pendingPublishModeSelection;
         await this.clearReviewPublishModeSelection(publishModeSelectionKey);
+        if (normalizedReply === "3" || normalizedReply === "取消") {
+          await this.clearReviewPublishAttachments(selection.uploadedKeys);
+          await this.sendGroupMessage(botQqUin, groupId, "已取消本次发布。");
+          return;
+        }
         try {
-          if (plainText.trim() === "1") {
+          if (normalizedReply === "1") {
             const images = selection.attachments.length > 0 ? await this.readReviewPublishAttachmentsAsImages(selection.attachments) : undefined;
             const result = await publishTextDirectViaBot({
               botQqUin,
@@ -3527,7 +3533,7 @@ export class OneBotRuntime {
         await this.sendGroupMessage(
           botQqUin,
           groupId,
-          "请回复发布方式：\n1️⃣ 直接发布\n2️⃣ 以墙的身份投稿发布",
+          "请回复发布方式：\n1️⃣ 直接发布\n2️⃣ 以墙的身份投稿发布\n3️⃣ 取消",
         );
         return;
       }
