@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image as ImageIcon, LoaderCircleIcon, Maximize2Icon, RotateCcwIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -298,7 +299,7 @@ export function ImageCropDialog({ open, title, dataUrl, aspect, onCancel, onConf
   );
 }
 
-export function FullImageLightbox({ src, alt, onClose }: { src: string | null; alt: string; onClose: () => void }) {
+export function FullImageLightbox({ src, alt, onClose, originRect, originRef }: { src: string | null; alt: string; onClose: () => void; originRect?: DOMRect | null; originRef?: React.MutableRefObject<DOMRect | null> }) {
   useEffect(() => {
     if (!src) return;
     function onKey(event: KeyboardEvent) {
@@ -309,12 +310,56 @@ export function FullImageLightbox({ src, alt, onClose }: { src: string | null; a
   }, [onClose, src]);
 
   if (!src) return null;
+  const start = originRef?.current ?? originRect ?? null;
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" onClick={onClose}>
-      <button type="button" className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" onClick={onClose} aria-label="关闭"><XIcon className="size-5" /></button>
-      <div className="relative max-h-full max-w-full" onClick={(event) => event.stopPropagation()}>
-        <img src={src} alt={alt} className="max-h-[88vh] max-w-[92vw] rounded-md object-contain" />
-      </div>
+    <div className="fixed inset-0 z-[80] bg-slate-950/80 backdrop-blur-sm" onClick={onClose}>
+      <ImageExpandFrame src={src} alt={alt} origin={start} />
+    </div>
+  );
+}
+
+export function ImageExpandFrame({ src, alt, origin, animateKey }: { src: string; alt: string; origin: DOMRect | null; animateKey?: string | number }) {
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    setAnimate(false);
+    requestAnimationFrame(() => setAnimate(true));
+  }, [src, animateKey]);
+
+  const source = origin ?? null;
+  const padX = 24;
+  const padY = 32;
+  const targetWidth = Math.min(window.innerWidth - padX * 2, 920);
+  const targetHeight = Math.min(window.innerHeight - padY * 2, 720);
+  const targetLeft = Math.max(padX, (window.innerWidth - targetWidth) / 2);
+  const targetTop = Math.max(padY, (window.innerHeight - targetHeight) / 2);
+
+  const sx = source ? source.left : targetLeft;
+  const sy = source ? source.top : targetTop;
+  const sw = source ? Math.max(source.width, 1) : targetWidth;
+  const sh = source ? Math.max(source.height, 1) : targetHeight;
+
+  const scale = animate ? targetWidth / sw : 1;
+  const scale2 = animate ? targetHeight / sh : 1;
+  const dx = animate ? targetLeft + targetWidth / 2 - (sx + sw / 2) : 0;
+  const dy = animate ? targetTop + targetHeight / 2 - (sy + sh / 2) : 0;
+
+  return (
+    <div
+      className="fixed left-0 top-0 grid place-items-center"
+      style={{
+        left: sx,
+        top: sy,
+        width: sw,
+        height: sh,
+        transform: `translate(${dx}px, ${dy}px) scale(${scale}, ${scale2})`,
+        transformOrigin: "center center",
+        transition: "transform 420ms cubic-bezier(0.22, 0.61, 0.36, 1), left 420ms cubic-bezier(0.22, 0.61, 0.36, 1), top 420ms cubic-bezier(0.22, 0.61, 0.36, 1), width 420ms cubic-bezier(0.22, 0.61, 0.36, 1), height 420ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+        willChange: "transform, width, height, left, top",
+      }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <img src={src} alt={alt} className="max-h-full max-w-full rounded-md object-contain" />
     </div>
   );
 }

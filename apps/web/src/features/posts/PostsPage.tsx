@@ -31,6 +31,7 @@ import type { GraduationItem } from "@/features/graduation/GraduationReview";
 import { GraduationCapIcon } from "lucide-react";
 import { GraduationPendingReview, GraduationRejectDialog, useGraduationReviewQueue } from "@/features/graduation/GraduationReview";
 import { TodayInHistoryPanel } from "./TodayInHistoryPanel";
+import { ImageExpandFrame } from "./CampaignImageControls";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import type { AssignedPostTag, FeedbackItem, FeedbackMessageItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
@@ -95,7 +96,7 @@ type ImagePreviewState = {
 };
 
 // 让深层嵌套的评论配图也能复用顶层看图浮窗，避免逐层透传回调
-type ImageLightbox = (images: PostImage[], index: number, title: string) => void;
+type ImageLightbox = (images: PostImage[], index: number, title: string, origin?: DOMRect | null) => void;
 const ImageLightboxContext = createContext<ImageLightbox | null>(null);
 
 const MarkdownContext = createContext(false);
@@ -934,7 +935,7 @@ export function PostsPage({
     }
   }
 
-  function openImagePreview(images: PostImage[], index: number, title: string) {
+  function openImagePreview(images: PostImage[], index: number, title: string, origin?: DOMRect | null) {
     setImagePreview({
       open: true,
       images,
