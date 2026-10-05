@@ -9,6 +9,7 @@ if (!process.env.TZ) {
   process.env.TZ = "Asia/Shanghai";
 }
 import Fastify from "fastify";
+import type { FastifyBaseLogger } from "fastify";
 import cors from "@fastify/cors";
 import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -69,6 +70,46 @@ const app = Fastify({
   bodyLimit: 500 * 1024 * 1024,
 });
 await runDatabaseMigrations(app.log);
+
+async function restoreProtectedOperationsAdminMemberships(logger: Pick<FastifyBaseLogger, "info" | "warn" | "error">) {
+  const protectedMembers = await prisma.tenantMembership.findMany({
+    where: {
+      user: {
+        systemRole: { in: ["operations_admin", "system_operator"] },
+      },
+      role: { not: "admin" },
+    },
+    include: { user: true, tenant: true },
+  });
+
+  if (protectedMembers.length === 0) {
+    return;
+  }
+
+  for (const membership of protectedMembers) {
+    await prisma.tenantMembership.update({
+      where: { id: membership.id },
+      data: { role: "admin" },
+    });
+  }
+
+  logger.info(
+    {
+      restored: protectedMembers.length,
+      members: protectedMembers.map((membership) => ({
+        membershipId: membership.id,
+        tenantId: membership.tenantId,
+        tenantName: membership.tenant.name,
+        userId: membership.userId,
+        qqUin: membership.user.qqUin.toString(),
+        systemRole: membership.user.systemRole,
+      })),
+    },
+    "restored protected operations admin memberships",
+  );
+}
+
+await restoreProtectedOperationsAdminMemberships(app.log);
 
 await app.register(cors, {
   origin: config.webOrigin,
