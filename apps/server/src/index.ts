@@ -71,11 +71,11 @@ const app = Fastify({
 });
 await runDatabaseMigrations(app.log);
 
-async function restoreProtectedOperationsAdminMemberships(logger: Pick<FastifyBaseLogger, "info" | "warn" | "error">) {
+async function restoreProtectedSystemOperatorMemberships(logger: Pick<FastifyBaseLogger, "info" | "warn" | "error">) {
   const protectedMembers = await prisma.tenantMembership.findMany({
     where: {
       user: {
-        systemRole: { in: ["operations_admin", "system_operator"] },
+        systemRole: "system_operator",
       },
       role: { not: "admin" },
     },
@@ -105,11 +105,11 @@ async function restoreProtectedOperationsAdminMemberships(logger: Pick<FastifyBa
         systemRole: membership.user.systemRole,
       })),
     },
-    "restored protected operations admin memberships",
+    "restored protected system operator memberships",
   );
 }
 
-await restoreProtectedOperationsAdminMemberships(app.log);
+await restoreProtectedSystemOperatorMemberships(app.log);
 
 await app.register(cors, {
   origin: config.webOrigin,
