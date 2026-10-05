@@ -274,7 +274,7 @@ function RegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => v
 
   return (
     <form className="mt-4 grid gap-3" onSubmit={submit}>
-      <Input value={email} type="email" placeholder="邮箱" onChange={(event) => setEmail(event.target.value)} />
+      <Input value={email} type="email" placeholder="QQ 邮箱（如 123456@qq.com）" onChange={(event) => setEmail(event.target.value)} />
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
         <Input value={code} inputMode="numeric" placeholder="邮箱验证码" onChange={(event) => setCode(event.target.value)} />
         <Button type="button" variant="outline" disabled={sendingCode || email.trim().length === 0} onClick={() => void requestCode()}>

@@ -17,7 +17,18 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-const emailSchema = z.string().trim().email("邮箱格式不正确").max(255);
+const emailSchema = z
+  .string()
+  .trim()
+  .regex(/^[1-9]\d{4,9}@qq\.com$/i, "只能使用 QQ 邮箱，例如 123456@qq.com")
+  .max(255);
+
+const registerQqUinFromEmail = (email: string) => {
+  const trimmed = email.trim();
+  const [qqNumber] = trimmed.split("@");
+  if (!qqNumber || !/^[1-9]\d{4,9}$/.test(qqNumber)) return null;
+  return BigInt(qqNumber);
+};
 
 const updateMeSettingsSchema = z.object({
   autoFollowOwnPosts: z.boolean().optional(),
@@ -218,12 +229,23 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
 
     const body = requestRegisterCodeSchema.parse(request.body);
     const email = normalizeEmail(body.email);
+    const qqUin = registerQqUinFromEmail(email);
+    if (!qqUin) {
+      return reply.code(400).send({ message: "只能使用 QQ 邮箱" });
+    }
     const existing = await prisma.user.findUnique({
       where: { email },
       select: { id: true },
     });
     if (existing) {
       return reply.code(409).send({ message: "这个邮箱已经注册，请直接登录" });
+    }
+    const existingQqUser = await prisma.user.findUnique({
+      where: { qqUin },
+      select: { id: true },
+    });
+    if (existingQqUser) {
+      return reply.code(409).send({ message: "这个 QQ 号已经注册，请直接登录" });
     }
 
     const code = generateEmailCode();
@@ -251,14 +273,10 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
 
     const body = registerSchema.parse(request.body);
     const email = normalizeEmail(body.email);
-    const existing = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true },
-    });
-    if (existing) {
-      return reply.code(409).send({ message: "这个邮箱已经注册，请直接登录" });
+    const qqUin = registerQqUinFromEmail(email);
+    if (!qqUin) {
+      return reply.code(400).send({ message: "只能使用 QQ 邮箱" });
     }
-
     const record = await prisma.emailVerificationCode.findFirst({
       where: {
         email,
@@ -285,6 +303,20 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       });
       return reply.code(400).send({ message: "验证码不正确" });
     }
+    const existing = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (existing) {
+      return reply.code(409).send({ message: "这个邮箱已经注册，请直接登录" });
+    }
+    const existingQqUser = await prisma.user.findUnique({
+      where: { qqUin },
+      select: { id: true },
+    });
+    if (existingQqUser) {
+      return reply.code(409).send({ message: "这个 QQ 号已经注册，请直接登录" });
+    }
 
     const user = await prisma.$transaction(async (tx) => {
       await tx.emailVerificationCode.update({
@@ -297,7 +329,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
 
       return tx.user.create({
         data: {
-          qqUin: await generateSyntheticQqUin(tx),
+          qqUin,
           email,
           displayName: body.displayName,
           passwordHash: await hashPassword(body.password),
