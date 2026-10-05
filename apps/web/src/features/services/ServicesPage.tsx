@@ -105,6 +105,7 @@ export function ServicesPage({
     }
   }, [activeAction]);
 
+  const pluginEntriesCount = (metadata.enableCampaigns ? 1 : 0) + (metadata.enableBroadcast ? 1 : 0) + (metadata.enableGraduation ? 1 : 0) + (metadata.enableHeatBoard ? 1 : 0);
   if (campaignRoute && campaignRoute.view === "detail") {
     return (
       <CampaignDetailPage
@@ -171,6 +172,7 @@ export function ServicesPage({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24 pr-1 md:pb-6">
         {loading ? <LoadingBlock title="正在加载服务入口..." /> : null}
 
+        {pluginEntriesCount > 0 ? (
         <section className="product-surface p-4">
           <ServiceGroup title="插件" description="Campux 预设插件入口，样式与下方服务列表保持一致。">
             {metadata.enableCampaigns ? (
@@ -250,6 +252,7 @@ export function ServicesPage({
           </ServiceGroup>
 
         </section>
+        ) : null}
 
         <section className="product-surface mt-4 p-4">
           <ServiceGroup title="账户设置" description="管理你在当前校园墙里的基本账号信息。">
