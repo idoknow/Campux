@@ -33,6 +33,8 @@ import { GraduationPendingReview, GraduationRejectDialog, useGraduationReviewQue
 import { TodayInHistoryPanel } from "./TodayInHistoryPanel";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
+import { statusBadge } from "@/features/services/campaign-types";
+import type { Campaign } from "@/features/services/campaign-types";
 import type { AssignedPostTag, FeedbackItem, FeedbackMessageItem, Pagination, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
@@ -45,6 +47,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 type PostImage = {
@@ -266,6 +269,7 @@ export function PostsPage({
   enableMarkdownRender,
   enableFeedback,
   enableGraduation,
+  enableCampaigns,
   enableTodayInHistory,
   enableCommentManagement,
   allowUserDeleteOwnPostComments,
@@ -284,6 +288,7 @@ export function PostsPage({
   enableMarkdownRender?: boolean;
   enableFeedback?: boolean;
   enableGraduation?: boolean;
+  enableCampaigns?: boolean;
   enableTodayInHistory?: boolean;
   enableCommentManagement?: boolean;
   allowUserDeleteOwnPostComments?: boolean;
@@ -326,6 +331,12 @@ export function PostsPage({
   const [feedbackPagination, setFeedbackPagination] = useState<Pagination>(() => defaultPagination());
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackPage, setFeedbackPage] = useState(1);
+  const [campaignBusyId, setCampaignBusyId] = useState<string | null>(null);
+  const [campaignRejectReason, setCampaignRejectReason] = useState("");
+  const [campaignRejectBusy, setCampaignRejectBusy] = useState(false);
+  const [campaignItems, setCampaignItems] = useState<Campaign[]>([]);
+  const [campaignLoading, setCampaignLoading] = useState(false);
+  const [campaignRejectTarget, setCampaignRejectTarget] = useState<Campaign | null>(null);
   const [feedbackScope, setFeedbackScope] = useState<"all" | "mine">("mine");
   const [feedbackNonce, setFeedbackNonce] = useState(0);
   const [feedbackReplyDrafts, setFeedbackReplyDrafts] = useState<Record<string, string>>({});
@@ -469,6 +480,56 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
   }, [canReview, reviewStatus, reviewPage, tenantId]);
+
+  useEffect(() => {
+    if (!canReview || reviewStatus !== "pending_approval") {
+      setCampaignItems([]);
+      setCampaignLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setCampaignLoading(true);
+    void api<{ items: Campaign[]; pagination: { total: number } }>("/api/campaigns?filter=pending&page=1&limit=20")
+      .then((res) => { if (!cancelled) setCampaignItems(res.items ?? []); })
+      .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "无法读取待审核投票竞选"); })
+      .finally(() => { if (!cancelled) setCampaignLoading(false); });
+    return () => { cancelled = true; };
+  }, [canReview, reviewStatus, tenantId]);
+
+  async function refreshPendingCampaigns() {
+    if (!canReview || reviewStatus !== "pending_approval") return;
+    setCampaignLoading(true);
+    try {
+      const res = await api<{ items: Campaign[]; pagination: { total: number } }>("/api/campaigns?filter=pending&page=1&limit=20");
+      setCampaignItems(res.items ?? []);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "无法读取待审核投票竞选");
+    } finally {
+      setCampaignLoading(false);
+    }
+  }
+
+  async function approveCampaign(target: Campaign) {
+    setCampaignBusyId(target.id);
+    try {
+      await api(`/api/campaigns/${encodeURIComponent(target.id)}/approve`, { method: "POST" });
+      toast.success("已通过该竞选");
+      await refreshPendingCampaigns();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "操作失败");
+    } finally {
+      setCampaignBusyId(null);
+    }
+  }
+
+  async function submitCampaignReject(target: Campaign, reason: string) {
+    await api(`/api/campaigns/${encodeURIComponent(target.id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    toast.success("已拒绝该竞选");
+    await refreshPendingCampaigns();
+  }
 
   useEffect(() => {
     if (activeTab !== "published") {
@@ -1401,7 +1462,7 @@ export function PostsPage({
               </div>
             ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-              {enableGraduation ? (
+              {enableGraduation && reviewStatus === "pending_approval" ? (
                 <section className="mb-6 rounded-xl border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
                   <div className="mb-3 flex items-center gap-2">
                     <GraduationCapIcon className="size-4 text-violet-600 dark:text-violet-300" />
@@ -1416,6 +1477,53 @@ export function PostsPage({
                       onApprove={(target) => void approveGraduation(target)}
                       onReject={(target) => setGraduationRejectTarget(target)}
                     />
+                  )}
+                </section>
+              ) : null}
+              {reviewStatus === "pending_approval" && enableCampaigns ? (
+                <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50/40 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+                  <div className="mb-3 flex items-center gap-2">
+                    <UserIcon className="size-4 text-amber-600 dark:text-amber-300" />
+                    <h3 className="text-sm font-bold text-amber-950 dark:text-amber-100">待审核投票竞选</h3>
+                    <span className="ml-auto text-xs font-medium text-amber-700 dark:text-amber-300">共 {campaignItems.length} 条</span>
+                  </div>
+                  {campaignLoading && campaignItems.length === 0 ? (
+                    <p className="py-6 text-center text-xs font-medium text-slate-500">正在加载待审核投票竞选…</p>
+                  ) : campaignItems.length === 0 ? (
+                    <p className="py-6 text-center text-xs font-medium text-slate-500">暂无待审核投票竞选。</p>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {campaignItems.map((item) => {
+                        const badge = statusBadge(item.status);
+                        return (
+                          <div key={item.id} className="rounded-lg border border-amber-200 bg-white p-4 dark:border-amber-500/30 dark:bg-white/5">
+                            <div className="flex items-start gap-3">
+                              {item.coverAttachment ? (
+                                <img src={item.coverAttachment.url} alt="" className="h-14 w-12 shrink-0 rounded-md border border-amber-200 object-cover" />
+                              ) : (
+                                <span className="grid h-14 w-12 shrink-0 place-items-center rounded-md bg-amber-100 text-xs font-semibold text-amber-600">投票竞选</span>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs text-slate-500">#{item.displayId}</span>
+                                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.text}</span>
+                                  {item.adminOnly ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700">仅管理可见</span> : null}
+                                  {item.anonymous ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">匿名</span> : null}
+                                </div>
+                                <p className="mt-1 line-clamp-2 text-sm font-medium text-slate-900">{item.title}</p>
+                                <p className="mt-1 text-xs text-slate-500">{item.options.length} 个选项</p>
+                                <div className="mt-3 flex items-center justify-end gap-2">
+                                  <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" disabled={campaignBusyId === item.id} onClick={() => void approveCampaign(item)}>
+                                    {campaignBusyId === item.id ? "通过中..." : "通过"}
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={campaignBusyId === item.id} onClick={() => setCampaignRejectTarget(item)} >拒绝</Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </section>
               ) : null}

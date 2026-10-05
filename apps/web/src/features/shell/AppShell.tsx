@@ -193,6 +193,7 @@ export function AppShell({
                 enableMarkdownRender={metadata.enableMarkdownRender}
                 enableFeedback={metadata.enableFeedback}
                 enableGraduation={metadata.enableGraduation}
+                enableCampaigns={metadata.enableCampaigns}
                 enableTodayInHistory={metadata.enableTodayInHistory}
                 enableCommentManagement={metadata.enableCommentManagement}
                 allowUserDeleteOwnPostComments={metadata.allowUserDeleteOwnPostComments}

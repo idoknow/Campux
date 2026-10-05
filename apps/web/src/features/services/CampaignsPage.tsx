@@ -108,7 +108,7 @@ export function CampaignsPage({
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-950">投票竞选</h2>
         <div className="flex items-center gap-1 rounded-full border border-slate-200 p-0.5 text-xs">
-          {(canReview ? [...FILTERS, { value: "pending" as CampaignFilter, label: "待审核" }] : FILTERS).map((item) => (
+          {FILTERS.map((item) => (
             <button
               key={item.value}
               className={`rounded-full px-2.5 py-1 ${filter === item.value ? "bg-slate-900 text-white" : "text-slate-600"}`}
