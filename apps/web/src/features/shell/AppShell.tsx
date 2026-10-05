@@ -149,7 +149,7 @@ export function AppShell({
           <Header me={me} selectedTenant={me.currentTenant} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} hideLive2D={window.location.pathname === "/services/lingling"} />
 
           <main className="min-h-0 flex-1 overflow-hidden">
-            <TabsContent value="post" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+            <TabsContent value="post" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
               <PostPage
                 busy={busy}
                 loading={dataLoading}
@@ -181,7 +181,7 @@ export function AppShell({
               />
             </TabsContent>
 
-            <TabsContent value="posts" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+            <TabsContent value="posts" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
               <PostsPage
                 tenantId={me.currentTenant.id}
                 posts={posts}
@@ -204,18 +204,18 @@ export function AppShell({
               />
             </TabsContent>
 
-            <TabsContent value="services" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+            <TabsContent value="services" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
               <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
             </TabsContent>
 
             {canAccess(me.currentMembership.role, "reviewer") ? (
-              <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+              <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
                 <StatsPage tenantId={me.currentTenant.id} loading={dataLoading} currentRole={me.currentMembership.role} onOpenUserDetail={onOpenAdminUserDetail} />
               </TabsContent>
             ) : null}
 
             {canAccess(me.currentMembership.role, "admin") ? (
-              <TabsContent value="admin" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+              <TabsContent value="admin" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
                 <AdminPage
                   activeTab={adminTab}
                   currentUserId={me.user.id}

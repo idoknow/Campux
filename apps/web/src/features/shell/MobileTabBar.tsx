@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import type { NavItem } from "@/lib/app-model";
 import type { MainTab } from "@/types/app";
@@ -6,7 +7,6 @@ export function MobileTabBar({ navItems, value, onValueChange }: { navItems: Nav
   const listRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [indicator, setIndicator] = useState({ x: 0, width: 0, visible: false });
-  const [animKey, setAnimKey] = useState(0);
 
   const syncIndicator = () => {
     const list = listRef.current;
@@ -48,12 +48,12 @@ export function MobileTabBar({ navItems, value, onValueChange }: { navItems: Nav
               ref={(el) => {
                 triggerRefs.current[item.value] = el;
               }}
-              onClick={() => {
-                onValueChange(item.value);
-                setAnimKey((k) => k + 1);
-              }}
+              onClick={() => onValueChange(item.value)}
               aria-current={active ? "page" : undefined}
-              className="relative z-10 flex h-[52px] w-full flex-col items-center justify-center gap-1 rounded-none border-0 bg-transparent p-0 text-[12px] font-medium leading-none text-slate-500 transition-colors duration-200 hover:text-slate-700 focus-visible:outline-none focus-visible:text-slate-900 data-active:text-blue-700"
+              className={cn(
+                "relative z-10 flex h-[52px] w-full flex-col items-center justify-center gap-1 rounded-none border-0 bg-transparent p-0 text-[12px] font-medium leading-none text-slate-500 transition-colors duration-200 hover:text-slate-700 focus-visible:outline-none focus-visible:text-slate-900",
+                active && "text-blue-700",
+              )}
             >
               <Icon className="size-5" strokeWidth={2.1} />
               {item.label}
@@ -64,31 +64,15 @@ export function MobileTabBar({ navItems, value, onValueChange }: { navItems: Nav
 
       <span
         aria-hidden
-        className={`absolute bottom-0 left-0 h-[3px] rounded-full bg-blue-600 transition-[left,width] duration-500 ease-[cubic-bezier(0.65,0,0.35,1)] ${indicator.visible ? "opacity-100" : "opacity-0"}`}
+        className={cn(
+          "absolute bottom-0 left-0 h-[3px] rounded-full bg-blue-600 transition-[left,width,opacity] duration-500 ease-[cubic-bezier(0.65,0,0.35,1)] will-change-[left,width,opacity]",
+          indicator.visible ? "opacity-100" : "opacity-0",
+        )}
         style={{
           left: `${indicator.x}px`,
           width: `${indicator.width}px`,
         }}
-      >
-        <span
-          key={animKey}
-          aria-hidden
-          className="mobile-tabbar-liquid absolute inset-0 rounded-full bg-blue-600"
-          style={{ transformOrigin: "center" }}
-        />
-      </span>
-      <style>{`
-        @keyframes mobile-tabbar-liquid {
-          0% { transform: scaleX(1); opacity: 0.9; }
-          20% { transform: scaleX(2.6); opacity: 1; }
-          55% { transform: scaleX(0.75); opacity: 0.85; }
-          80% { transform: scaleX(1.08); opacity: 0.98; }
-          100% { transform: scaleX(1); opacity: 1; }
-        }
-        .mobile-tabbar-liquid {
-          animation: mobile-tabbar-liquid 0.72s cubic-bezier(0.65, 0, 0.35, 1);
-        }
-      `}</style>
+      />
     </div>
   );
 }
