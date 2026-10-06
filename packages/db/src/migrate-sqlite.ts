@@ -26,6 +26,7 @@ const BROADCAST_NOTIFICATIONS_MIGRATION_NAME = "20260924120000_add_broadcast_not
 const TENANT_FEEDBACK_MIGRATION_NAME = "20260913140000_add_tenant_feedback";
 const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedback_messages";
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
+const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
 const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
@@ -711,6 +712,59 @@ function applyTenantFeedbackMessagesSqliteMigration(
   logger.info({ migration: TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
+/**
+ * Post.pendingTags（审核队列标签暂存列）的 SQLite 增量迁移。
+ * 老库没有该列时补上；新库由刷新后的 baseline 自带，迁移会幂等跳过。
+ */
+function applyPostPendingTagsSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const postTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'Post'`)
+    .get() as { present: number } | null;
+  if (!postTable) return;
+
+  if (doneNames.has(POST_PENDING_TAGS_MIGRATION_NAME)) {
+    skipped.push(POST_PENDING_TAGS_MIGRATION_NAME);
+    return;
+  }
+
+  const pendingTagsColumn = db
+    .query(`SELECT 1 AS present FROM pragma_table_info('Post') WHERE name = 'pendingTags'`)
+    .get() as { present: number } | null;
+  const hasColumn = pendingTagsColumn !== null;
+
+  logger.info({ migration: POST_PENDING_TAGS_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasColumn) {
+      db.exec(`ALTER TABLE "Post" ADD COLUMN "pendingTags" TEXT`);
+    }
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`ALTER TABLE "Post" ADD COLUMN "pendingTags" TEXT`),
+        POST_PENDING_TAGS_MIGRATION_NAME,
+      ],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(POST_PENDING_TAGS_MIGRATION_NAME);
+  applied.push(POST_PENDING_TAGS_MIGRATION_NAME);
+  logger.info({ migration: POST_PENDING_TAGS_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 export function applySqliteBaseline(
   baselineSql: string,
   databaseUrl: string,
@@ -768,7 +822,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -792,6 +846,7 @@ export function applySqliteBaseline(
     applyTenantFeedbackMessagesSqliteMigration(db, doneNames, applied, skipped, logger);
     applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();
