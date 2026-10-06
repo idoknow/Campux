@@ -655,7 +655,9 @@ export async function publishTextDirectViaBot({
     orderBy: { refreshedAt: "desc" },
   });
 
-  if (!session || session.healthStatus !== "available") {
+  // 只有明确判定登录态失效才阻止直接发布；unchecked（尚未验证）的会话允许尝试，
+  // 避免登录态检测抖动把实际可用的会话误判为不可用。
+  if (!session || session.healthStatus === "invalid") {
     throw new BotWorkflowError("机器人 QZone 登录态不可用，请先扫码登录", 502);
   }
 
@@ -720,6 +722,22 @@ export class BotWorkflowError extends Error {
     public readonly statusCode = 400,
   ) {
     super(message);
+  }
+}
+
+/** callAction 时目标 bot 的 OneBot 连接不在线（如 NapCat 重连窗口）。 */
+export class OneBotConnectionUnavailableError extends BotWorkflowError {
+  constructor(message: string) {
+    super(message, 503);
+    this.name = "OneBotConnectionUnavailableError";
+  }
+}
+
+/** OneBot 动作在超时时间内未收到响应。 */
+export class OneBotActionTimeoutError extends BotWorkflowError {
+  constructor(message: string) {
+    super(message, 504);
+    this.name = "OneBotActionTimeoutError";
   }
 }
 
