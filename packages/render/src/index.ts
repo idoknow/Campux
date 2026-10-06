@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { FONT_FILE_MAP } from "@campux/domain";
@@ -238,24 +238,10 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
 }
 
 /** Windows + Bun 专用：把渲染放进 Node 子进程执行，绕开 Bun 下 playwright CDP 传输挂起的问题。 */
-async function renderPostCardViaNodeSubprocess(input: RenderPostCardInput): Promise<Uint8Array> {
-  const executablePath = findChromiumExecutable();
-  const payload = Buffer.from(
-    JSON.stringify({
-      html: await renderPostHtml(input),
-      fontCss: getRenderableFontCss(input.font ?? null),
-      executablePath: executablePath || undefined,
-    }),
-    "utf8",
-  );
-
+function renderPostCardViaNodeSubprocess(input: RenderPostCardInput): Promise<Uint8Array> {
   return new Promise<Uint8Array>((resolve, reject) => {
-    const child = spawn(resolveNodeExecutable(), ["-e", NODE_RENDER_WORKER_SCRIPT], {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-
     let settled = false;
+    let child: ChildProcessWithoutNullStreams | null = null;
     let stdout = "";
     let stderr = "";
 
@@ -266,40 +252,66 @@ async function renderPostCardViaNodeSubprocess(input: RenderPostCardInput): Prom
       fn();
     };
 
+    // 计时器覆盖 renderPostHtml（含头像抓取）在内的整个流程，任何阶段卡住都能在硬超时内返回。
     const timer = setTimeout(() => {
-      killProcessTree(child);
+      if (child) {
+        killProcessTree(child);
+      }
       finish(() => reject(new RenderTimeoutError(RENDER_SUBPROCESS_TIMEOUT_MS)));
     }, RENDER_SUBPROCESS_TIMEOUT_MS);
 
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", (error) => {
-      finish(() => reject(new Error(`渲染子进程启动失败: ${error.message}`)));
-    });
-    child.on("close", (code) => {
-      finish(() => {
-        if (code === 0 && stdout.length > 0) {
-          try {
-            resolve(new Uint8Array(Buffer.from(stdout.trim(), "base64")));
-            return;
-          } catch (error) {
-            reject(new Error(`渲染子进程输出解析失败: ${error instanceof Error ? error.message : String(error)}`));
-            return;
-          }
-        }
-        reject(new Error(`渲染子进程异常退出（exit ${code}）: ${stderr.trim().slice(-1000) || "无输出"}`));
-      });
-    });
+    void renderPostHtml(input)
+      .then((html) => {
+        const executablePath = findChromiumExecutable();
+        const payload = Buffer.from(
+          JSON.stringify({
+            html,
+            fontCss: getRenderableFontCss(input.font ?? null),
+            executablePath: executablePath || undefined,
+          }),
+          "utf8",
+        );
+        child = spawn(resolveNodeExecutable(), ["-e", NODE_RENDER_WORKER_SCRIPT], {
+          stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true,
+        });
 
-    // EPIPE 等写失败不应成为未处理异常；渲染失败统一由 error/close 处理器上报。
-    child.stdin.on("error", () => {});
-    child.stdin.end(payload);
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+          stdout += chunk;
+        });
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+          stderr += chunk;
+        });
+        child.on("error", (error) => {
+          finish(() => reject(new Error(`渲染子进程启动失败: ${error.message}`)));
+        });
+        child.on("close", (code) => {
+          finish(() => {
+            if (code === 0 && stdout.length > 0) {
+              try {
+                resolve(new Uint8Array(Buffer.from(stdout.trim(), "base64")));
+                return;
+              } catch (error) {
+                reject(new Error(`渲染子进程输出解析失败: ${error instanceof Error ? error.message : String(error)}`));
+                return;
+              }
+            }
+            reject(new Error(`渲染子进程异常退出（exit ${code}）: ${stderr.trim().slice(-1000) || "无输出"}`));
+          });
+        });
+
+        // worker 提前退出时写入会失败（如 EPIPE）：不能让它成为未处理异常崩溃服务器，
+        // 记录原因后由 close 处理器统一拒绝渲染 promise。
+        child.stdin.on("error", (error) => {
+          stderr += `\nstdin write failed: ${error instanceof Error ? error.message : String(error)}`;
+        });
+        child.stdin.end(payload);
+      })
+      .catch((error) => {
+        finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+      });
   });
 }
 

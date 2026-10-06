@@ -448,7 +448,7 @@ export class OneBotRuntime {
         if (pending.connection !== connection) continue;
         clearTimeout(pending.timer);
         this.pendingActions.delete(echo);
-        pending.reject(new BotWorkflowError("OneBot 连接已断开", 503));
+        pending.reject(new OneBotConnectionUnavailableError("OneBot 连接已断开"));
       }
     });
     socket.on("error", (error) => {

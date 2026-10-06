@@ -2034,6 +2034,11 @@ async function resolveCookiesForPublish({
       if (isQZoneProtocolAutoRefreshCooldownError(error)) {
         autoRefreshError = error.message;
         logger.debug({ botAccountId, postId, publishTargetId, remainingMs: error.remainingMs }, "qzone cookies protocol auto refresh skipped during cooldown before publish");
+      } else if (isQZoneProtocolAutoRefreshTransientError(error)) {
+        // OneBot 连接瞬时不可用（如 NapCat 重连窗口）：bot 实际仍在线，不发失效通知、不写入误导性的
+        // 刷新失败信息；attempt 保持等待 cookies，心跳恢复连接并成功刷新后会自动 resume 续发
+        // （此时 cookies 已明确失效，不强行重试，避免烧尝试次数并触发 QZone 风控）。
+        logger.info({ botAccountId, postId, publishTargetId, error: error instanceof Error ? error.message : String(error) }, "qzone cookies protocol auto refresh skipped before publish: onebot connection transiently unavailable");
       } else {
         autoRefreshError = error instanceof Error ? error.message : "协议自动刷新失败";
         await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
