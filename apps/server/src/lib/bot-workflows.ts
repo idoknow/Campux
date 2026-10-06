@@ -655,7 +655,9 @@ export async function publishTextDirectViaBot({
     orderBy: { refreshedAt: "desc" },
   });
 
-  if (!session || session.healthStatus !== "available") {
+  // 只有明确判定登录态失效才阻止直接发布；unchecked（尚未验证）的会话允许尝试，
+  // 避免登录态检测抖动把实际可用的会话误判为不可用。
+  if (!session || session.healthStatus === "invalid") {
     throw new BotWorkflowError("机器人 QZone 登录态不可用，请先扫码登录", 502);
   }
 

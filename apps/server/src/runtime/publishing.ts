@@ -14,7 +14,7 @@ import { serializeAssignedPostTags } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { decryptJson } from "../lib/secret-json";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
-import { isQZoneProtocolAutoRefreshCooldownError } from "../lib/qzone-auto-refresh";
+import { isQZoneProtocolAutoRefreshCooldownError, isQZoneProtocolAutoRefreshTransientError } from "../lib/qzone-auto-refresh";
 import { joinBatchCaptions } from "./publish-batching";
 import { generatePublishSummary } from "./publish-summary";
 import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
@@ -1874,7 +1874,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     );
     const previousVerbose = qzoneError?.verbose ?? null;
     const verbose = qzoneError ? toInputJson(qzoneError.verbose) : JsonNull;
-    const needsLogin = isQZoneLoginRequiredError(rawErrorMessage);
+    let needsLogin = isQZoneLoginRequiredError(rawErrorMessage);
     if (needsLogin && attempt.publishTarget.qzoneRefreshMode === "protocol" && notifier?.refreshQZoneCookiesByProtocol && currentAttempt.attempt < maxPublishAttempts) {
       try {
         const refreshResult = await notifier.refreshQZoneCookiesByProtocol(attempt.publishTarget.botAccountId, "publish_login_required");
@@ -1922,6 +1922,14 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
             { botAccountId: attempt.publishTarget.botAccountId, postId: attempt.postId, publishTargetId: attempt.publishTargetId, remainingMs: refreshError.remainingMs },
             "qzone cookies protocol auto refresh skipped during cooldown after publish login error",
           );
+        } else if (isQZoneProtocolAutoRefreshTransientError(refreshError)) {
+          // OneBot 连接瞬时不可用（如 NapCat 重连窗口）：bot 实际仍在线，不发失效通知；
+          // 按普通失败走自动重试，连接恢复后重试即可成功
+          logger.info(
+            { botAccountId: attempt.publishTarget.botAccountId, postId: attempt.postId, publishTargetId: attempt.publishTargetId, error: refreshError.message },
+            "qzone cookies protocol auto refresh skipped after publish login error: onebot connection transiently unavailable",
+          );
+          needsLogin = false;
         } else {
           const refreshMessage = refreshError instanceof Error ? refreshError.message : "协议自动刷新失败";
           await notifier.notifyQZoneCookiesInvalid?.(attempt.publishTarget.botAccountId, message, { autoRefreshError: refreshMessage }).catch((error) => {
@@ -2068,7 +2076,10 @@ async function ensureSessionChecked(
 }
 
 function getAvailableCookies(session: { cookies: Prisma.JsonValue; healthStatus: string } | null) {
-  if (!session || session.healthStatus !== "available") {
+  // 只有明确判定失效（invalid）才阻断发布；unchecked（尚未验证）的 cookies
+  // 允许直接尝试发布——发布结果本身就是更可靠的登录态检测。
+  // 这样检测接口抖动/限流不会把可用 cookies 误判为失效而把发布任务挂起（网站一直“发布中”）。
+  if (!session || session.healthStatus === "invalid") {
     return null;
   }
   return toCookieRecord(session.cookies);
@@ -2141,13 +2152,13 @@ async function markAttemptWaitingForCookies({
 
 function isQZoneLoginRequiredError(message: string) {
   const normalized = message.toLowerCase();
+  // 注意不要加入过于宽泛的关键字（比如 "uin"）：QZone 的错误信息/字段名里几乎必然出现 uin，
+  // 误判成登录态失效会跳过自动重试、触发协议刷新，刷新失败还会发出虚假的 bot 异常告警。
   return (
     normalized.includes("cookie") ||
-    normalized.includes("cookies") ||
     message.includes("登录") ||
     message.includes("p_skey") ||
     message.includes("skey") ||
-    message.includes("uin") ||
     message.includes("g_tk")
   );
 }

@@ -48,7 +48,7 @@ import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
-import { QZoneProtocolAutoRefreshCooldownError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
+import { isQZoneProtocolAutoRefreshTransientError, QZoneProtocolAutoRefreshCooldownError, QZoneProtocolAutoRefreshTransientError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { enqueuePublishFanout, requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
 import { addApprovedPostToBatch } from "./publish-batching";
@@ -857,6 +857,25 @@ export class OneBotRuntime {
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      // OneBot 连接瞬时不可用（如 NapCat 重连窗口）：bot 实际仍然在线，
+      // 这不是登录态失效也不是刷新能力损坏，不应发告警邮件、也不应进入失败冷却，
+      // 否则每次 #发布 都可能误报“onebot 链接不在线”。等下一次心跳重试即可。
+      if (isQZoneProtocolAutoRefreshTransientError(error)) {
+        await writeAuditLog({
+          tenantId: bot.tenantId,
+          actorId: null,
+          action: "bot.qzone.cookies.auto_refresh_skipped_transient",
+          targetType: "bot_account",
+          targetId: bot.id,
+          detail: {
+            reason,
+            source: "protocol",
+            error: errorMessage,
+          },
+        }).catch(() => {});
+        this.logger.warn({ botAccountId: bot.id, reason, error: errorMessage }, "qzone cookies protocol auto refresh skipped: onebot connection transiently unavailable");
+        throw new QZoneProtocolAutoRefreshTransientError(errorMessage);
+      }
       this.qzoneProtocolAutoRefreshFailures.set(bot.id, {
         failedAt: Date.now(),
         error: errorMessage,

@@ -16,6 +16,26 @@ export function isQZoneProtocolAutoRefreshCooldownError(error: unknown): error i
   return error instanceof QZoneProtocolAutoRefreshCooldownError;
 }
 
+/**
+ * 协议自动刷新的“暂时无法执行”错误：例如触发刷新时 OneBot 连接恰好短暂不在线
+ * （NapCat 重连窗口）或动作响应超时。这不代表登录态真的失效，也不代表刷新能力损坏，
+ * 因此调用方不应发告警邮件/群失效通知，也不应进入失败冷却，等下一次触发重试即可。
+ */
+export class QZoneProtocolAutoRefreshTransientError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QZoneProtocolAutoRefreshTransientError";
+  }
+}
+
+export function isQZoneProtocolAutoRefreshTransientError(error: unknown): error is QZoneProtocolAutoRefreshTransientError {
+  if (error instanceof QZoneProtocolAutoRefreshTransientError) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("OneBot 连接不在线") || message.includes("等待响应超时");
+}
+
 export function formatQZoneAutoRefreshCooldown(remainingMs: number) {
   const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   if (remainingMinutes < 60) {
