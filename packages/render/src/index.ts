@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { FONT_FILE_MAP } from "@campux/domain";
 import type { Browser } from "playwright-core";
@@ -152,6 +153,50 @@ let browserPromise: Promise<Browser> | null = null;
 /** 单次卡片渲染的硬超时（含 newPage + setContent + 字体 + screenshot 全过程）。 */
 const RENDER_TOTAL_TIMEOUT_MS = 30_000;
 
+/**
+ * Windows + Bun 下 playwright 的 CDP 传输（pipe 与 WebSocket 均会）在握手阶段永久挂起，
+ * chromium 进程本身能启动但协议层无响应。生产环境（Docker/Linux 或 Node 运行时）不受影响，
+ * 因此仅在 `win32 && Bun` 时把渲染路由到真正的 Node 子进程执行。
+ */
+const RENDER_VIA_NODE_SUBPROCESS = process.platform === "win32" && typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+
+/** Node 子进程渲染的整体硬超时。 */
+const RENDER_SUBPROCESS_TIMEOUT_MS = 45_000;
+
+/**
+ * 在 Node 子进程里执行的渲染 worker。
+ * 通过 stdin 接收 { html, fontCss, executablePath } JSON，渲染成功则向 stdout 输出 base64 JPEG，
+ * 失败则写 stderr 并以非零码退出。playwright-core 由 Node 从 cwd 向上解析 node_modules。
+ */
+const NODE_RENDER_WORKER_SCRIPT = `
+const chunks = [];
+process.stdin.on("data", (chunk) => chunks.push(chunk));
+process.stdin.on("end", async () => {
+  try {
+    const { html, fontCss, executablePath } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const { chromium } = await import("playwright-core");
+    const browser = await chromium.launch(executablePath ? { executablePath, headless: true } : { headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+      await page.setContent(html, { waitUntil: "load", timeout: 10000 });
+      if (fontCss) {
+        await page.addStyleTag({ content: fontCss });
+        await page.waitForFunction(() => document.fonts.status === "loaded", undefined, { timeout: 15000 });
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+      }
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const shot = await page.screenshot({ type: "jpeg", quality: 92, fullPage: true, animations: "disabled", caret: "hide" });
+      process.stdout.write(shot.toString("base64"));
+    } finally {
+      await browser.close().catch(() => {});
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+});
+`;
+
 export class RenderTimeoutError extends Error {
   constructor(ms: number) {
     super(`渲染卡片超时（>${ms}ms）`);
@@ -180,6 +225,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  *   使下一次调用重建一个干净的 chromium 实例（自愈），避免缓存的僵死实例导致后续 newPage 永久阻塞。
  */
 export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8Array> {
+  if (RENDER_VIA_NODE_SUBPROCESS) {
+    return renderPostCardViaNodeSubprocess(input);
+  }
   try {
     return await withTimeout(renderPostCardInner(input), RENDER_TOTAL_TIMEOUT_MS);
   } catch (error) {
@@ -187,6 +235,83 @@ export async function renderPostCard(input: RenderPostCardInput): Promise<Uint8A
     await resetBrowser();
     throw error;
   }
+}
+
+/** Windows + Bun 专用：把渲染放进 Node 子进程执行，绕开 Bun 下 playwright CDP 传输挂起的问题。 */
+async function renderPostCardViaNodeSubprocess(input: RenderPostCardInput): Promise<Uint8Array> {
+  const executablePath = findChromiumExecutable();
+  const payload = Buffer.from(
+    JSON.stringify({
+      html: await renderPostHtml(input),
+      fontCss: getRenderableFontCss(input.font ?? null),
+      executablePath: executablePath || undefined,
+    }),
+    "utf8",
+  );
+
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const child = spawn(resolveNodeExecutable(), ["-e", NODE_RENDER_WORKER_SCRIPT], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+
+    const timer = setTimeout(() => {
+      killProcessTree(child);
+      finish(() => reject(new RenderTimeoutError(RENDER_SUBPROCESS_TIMEOUT_MS)));
+    }, RENDER_SUBPROCESS_TIMEOUT_MS);
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      finish(() => reject(new Error(`渲染子进程启动失败: ${error.message}`)));
+    });
+    child.on("close", (code) => {
+      finish(() => {
+        if (code === 0 && stdout.length > 0) {
+          try {
+            resolve(new Uint8Array(Buffer.from(stdout.trim(), "base64")));
+            return;
+          } catch (error) {
+            reject(new Error(`渲染子进程输出解析失败: ${error instanceof Error ? error.message : String(error)}`));
+            return;
+          }
+        }
+        reject(new Error(`渲染子进程异常退出（exit ${code}）: ${stderr.trim().slice(-1000) || "无输出"}`));
+      });
+    });
+
+    child.stdin.end(payload);
+  });
+}
+
+function resolveNodeExecutable(): string {
+  return process.env.RENDER_NODE_EXECUTABLE_PATH || "node";
+}
+
+/** 结束渲染子进程的整棵进程树，避免超时后残留 chromium 子进程。 */
+function killProcessTree(child: ReturnType<typeof spawn>): void {
+  if (process.platform === "win32" && child.pid) {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  child.kill("SIGKILL");
 }
 
 async function renderPostCardInner(input: RenderPostCardInput): Promise<Uint8Array> {
@@ -264,9 +389,28 @@ function findChromiumExecutable() {
   return (
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
     process.env.CHROME_PATH ||
+    findWindowsChromiumExecutable() ||
     (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : undefined) ||
-    "/usr/bin/google-chrome"
+    (process.platform === "linux" ? "/usr/bin/google-chrome" : undefined) ||
+    ""
   );
+}
+
+/**
+ * Windows 下按常见安装位置探测 Chrome / Edge（Edge 同为 Chromium 内核，可直接用于渲染）。
+ * 找不到返回 undefined，让调用方走 playwright 自身的浏览器缓存。
+ */
+function findWindowsChromiumExecutable(): string | undefined {
+  if (process.platform !== "win32") {
+    return undefined;
+  }
+  const programDirs = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env["LocalAppData"]]
+    .filter((dir): dir is string => Boolean(dir));
+  const candidates = programDirs.flatMap((dir) => [
+    path.join(dir, "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(dir, "Microsoft", "Edge", "Application", "msedge.exe"),
+  ]);
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
 async function renderPostHtml(input: RenderPostCardInput) {
