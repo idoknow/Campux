@@ -262,6 +262,10 @@ function renderPostCardViaNodeSubprocess(input: RenderPostCardInput): Promise<Ui
 
     void renderPostHtml(input)
       .then((html) => {
+        // 超时已触发时不再构建 payload / 启动 worker，避免留下无人清理的孤儿子进程。
+        if (settled) {
+          return;
+        }
         const executablePath = findChromiumExecutable();
         const payload = Buffer.from(
           JSON.stringify({

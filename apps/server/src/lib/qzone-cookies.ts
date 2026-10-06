@@ -91,7 +91,9 @@ export async function checkQZoneCookieHealth(cookies: Record<string, string>, fa
       };
     }
 
-    const message = typeof payload?.message === "string" ? payload.message : typeof payload?.msg === "string" ? payload.msg : "";
+    const message = typeof payload?.message === "string" && payload.message
+      ? payload.message
+      : typeof payload?.msg === "string" ? payload.msg : "";
     const code = typeof payload?.code === "number" ? payload.code : null;
     if (code !== null && code !== 0 && !isQZoneLoginFailureMessage(message)) {
       // QZone 返回了可解析的业务错误负载（限流/风控等）：不能证明登录态失效，按检测暂时不可用处理。
