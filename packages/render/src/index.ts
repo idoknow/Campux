@@ -297,12 +297,25 @@ async function renderPostCardViaNodeSubprocess(input: RenderPostCardInput): Prom
       });
     });
 
+    // EPIPE 等写失败不应成为未处理异常；渲染失败统一由 error/close 处理器上报。
+    child.stdin.on("error", () => {});
     child.stdin.end(payload);
   });
 }
 
 function resolveNodeExecutable(): string {
-  return process.env.RENDER_NODE_EXECUTABLE_PATH || "node";
+  const fromEnv = process.env.RENDER_NODE_EXECUTABLE_PATH;
+  if (fromEnv) {
+    return fromEnv;
+  }
+  // 本函数仅在 Windows + Bun 下被调用。独立产物不捆绑 Node，
+  // PATH 中找不到 node 时给出明确指引，而不是 spawn ENOENT 的隐晦错误。
+  const bun = (globalThis as { Bun?: { which?: (command: string) => string | null } }).Bun;
+  const resolved = bun?.which?.("node");
+  if (resolved) {
+    return resolved;
+  }
+  throw new Error("未找到 Node.js 可执行文件，无法执行卡片渲染。请安装 Node.js 并加入 PATH，或通过 RENDER_NODE_EXECUTABLE_PATH 指定其路径。");
 }
 
 /** 结束渲染子进程的整棵进程树，避免超时后残留 chromium 子进程。 */

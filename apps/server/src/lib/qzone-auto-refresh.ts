@@ -29,11 +29,7 @@ export class QZoneProtocolAutoRefreshTransientError extends Error {
 }
 
 export function isQZoneProtocolAutoRefreshTransientError(error: unknown): error is QZoneProtocolAutoRefreshTransientError {
-  if (error instanceof QZoneProtocolAutoRefreshTransientError) {
-    return true;
-  }
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.includes("OneBot 连接不在线") || message.includes("等待响应超时");
+  return error instanceof QZoneProtocolAutoRefreshTransientError;
 }
 
 export function formatQZoneAutoRefreshCooldown(remainingMs: number) {

@@ -725,6 +725,22 @@ export class BotWorkflowError extends Error {
   }
 }
 
+/** callAction 时目标 bot 的 OneBot 连接不在线（如 NapCat 重连窗口）。 */
+export class OneBotConnectionUnavailableError extends BotWorkflowError {
+  constructor(message: string) {
+    super(message, 503);
+    this.name = "OneBotConnectionUnavailableError";
+  }
+}
+
+/** OneBot 动作在超时时间内未收到响应。 */
+export class OneBotActionTimeoutError extends BotWorkflowError {
+  constructor(message: string) {
+    super(message, 504);
+    this.name = "OneBotActionTimeoutError";
+  }
+}
+
 export async function reviewCampaignViaBot({
   queue: _queue,
   botQqUin,

@@ -6,6 +6,8 @@ import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
 import { Prisma, TransactionIsolationLevel, hashPassword, isPrismaKnownRequestError } from "@campux/db";
 import {
   BotWorkflowError,
+  OneBotActionTimeoutError,
+  OneBotConnectionUnavailableError,
   approveAllPendingPostsViaBot,
   findEnabledBot,
   generateBotPassword,
@@ -855,11 +857,14 @@ export class OneBotRuntime {
       await this.notifyQZoneCookiesAutoRefreshed(bot.id, reason, result.cookieNames.length, checked?.healthMessage ?? null);
       await this.resumeWaitingPublishAttemptsForBot(bot.id);
       return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      // OneBot 连接瞬时不可用（如 NapCat 重连窗口）：bot 实际仍然在线，
+    } catch (caught) {
+      const errorMessage = caught instanceof Error ? caught.message : String(caught);
+      // OneBot 连接瞬时不可用（如 NapCat 重连窗口）或动作响应超时：bot 实际仍然在线，
       // 这不是登录态失效也不是刷新能力损坏，不应发告警邮件、也不应进入失败冷却，
       // 否则每次 #发布 都可能误报“onebot 链接不在线”。等下一次心跳重试即可。
+      const error = caught instanceof OneBotConnectionUnavailableError || caught instanceof OneBotActionTimeoutError
+        ? new QZoneProtocolAutoRefreshTransientError(errorMessage)
+        : caught;
       if (isQZoneProtocolAutoRefreshTransientError(error)) {
         await writeAuditLog({
           tenantId: bot.tenantId,
@@ -1102,7 +1107,7 @@ export class OneBotRuntime {
   async callAction(botQqUin: string, action: string, params: Record<string, unknown>, timeoutMs = 8_000) {
     const connection = this.findConnection(botQqUin);
     if (!connection) {
-      throw new BotWorkflowError(`Bot ${botQqUin} 的 OneBot 连接不在线`, 503);
+      throw new OneBotConnectionUnavailableError(`Bot ${botQqUin} 的 OneBot 连接不在线`);
     }
     if (!await this.ensureConnectionTenantActive(connection)) {
       throw new BotWorkflowError("校园墙已暂停或归档", 409);
@@ -1126,7 +1131,7 @@ export class OneBotRuntime {
       return new Promise<OneBotActionResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingActions.delete(echo);
-        reject(new BotWorkflowError(`OneBot 动作 ${action} 等待响应超时`, 504));
+        reject(new OneBotActionTimeoutError(`OneBot 动作 ${action} 等待响应超时`));
       }, timeoutMs);
       this.pendingActions.set(echo, {
         tenantId: connection.tenantId,
