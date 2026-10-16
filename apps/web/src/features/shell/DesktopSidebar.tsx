@@ -20,6 +20,7 @@ export function DesktopSidebar({
   selectedTenant,
   me,
   navItems,
+  showPet,
   onLogout,
   onOpenOps,
   onSelectTenant,
@@ -28,6 +29,8 @@ export function DesktopSidebar({
   activeTab: MainTab;
   me: AuthenticatedMe;
   navItems: NavItem[];
+  /** 吉祥萌宠插件是否启用；关闭时不渲染 Live2D 小狗 */
+  showPet: boolean;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
   onSelectTenant: (tenantId: string) => Promise<void>;
@@ -99,7 +102,7 @@ export function DesktopSidebar({
         </TabsList>
 
         <div className="space-y-2">
-          <Live2DPuppy className="mx-auto" width={104} height={124} zoom={1.04} />
+          {showPet ? <Live2DPuppy className="mx-auto" width={104} height={124} zoom={1.04} /> : null}
           <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="desktop" />
         </div>
       </div>

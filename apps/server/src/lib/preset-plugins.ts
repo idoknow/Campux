@@ -26,7 +26,8 @@ export type PresetPluginId =
   | "graduation"
   | "todayInHistory"
   | "heatBoard"
-  | "commentManagement";
+  | "commentManagement"
+  | "lingling";
 
 export interface PresetPluginEntry {
   /** tenant_metadata.plugin_config 的 section 名 */
@@ -166,6 +167,15 @@ export const PRESET_PLUGINS: PresetPluginEntry[] = [
     required: ["config:read", "db:read", "db:write", "tenant:data", "user:data"],
     riskLevel: "medium",
     rationale: "开启后代表墙号调用 QZone 评论删除接口，属于对外可见的不可逆操作；用户侧删除受独立开关限制且仅限本人稿件。",
+  },
+  {
+    id: "lingling",
+    name: "campux-plugin-lingling",
+    version: "1.0.0",
+    description: "吉祥萌宠：服务页展示宠物与成长值，侧边栏/页头展示 Live2D 小狗",
+    required: ["config:read", "db:read", "tenant:data"],
+    riskLevel: "low",
+    rationale: "开启后服务页新增吉祥萌宠入口与 Live2D 小狗；成长值仅由已发布稿件、互动指标与运行天数等租户统计数据计算，不写入任何数据。",
   },
 ];
 

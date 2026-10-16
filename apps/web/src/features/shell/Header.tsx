@@ -7,17 +7,18 @@ import { Live2DPuppy } from "@/features/live2d/Live2DPuppy";
 export function Header({
   selectedTenant,
   me,
+  showPet,
   onLogout,
   onOpenOps,
   onSelectTenant,
-  hideLive2D,
 }: {
   selectedTenant: TenantSummary;
   me: AuthenticatedMe;
+  /** 吉祥萌宠插件是否启用；关闭时不渲染 Live2D 小狗 */
+  showPet: boolean;
   onLogout: () => void;
   onOpenOps: (() => void) | undefined;
   onSelectTenant: (tenantId: string) => Promise<void>;
-  hideLive2D?: boolean;
 }) {
   const role = me.currentMembership?.role ?? "submitter";
   const logoUrl = selectedTenant.logoUrl?.trim() || "/logo.svg";
@@ -32,7 +33,7 @@ export function Header({
             <h1 className="text-lg font-bold leading-none tracking-normal text-slate-950">Campux</h1>
             <span className="block truncate text-sm text-slate-500">{selectedTenant.name}</span>
           </div>
-          <Live2DPuppy className="ml-1 shrink-0" width={64} height={72} zoom={0.98} />
+          {showPet ? <Live2DPuppy className="ml-1 shrink-0" width={64} height={72} zoom={0.98} /> : null}
         </div>
         <AccountMenu me={me} selectedTenant={selectedTenant} roleLabel={roleLabels[role]} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} variant="mobile" />
       </div>
