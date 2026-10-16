@@ -1580,6 +1580,8 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
       return { enabled: false, maxTagCount: 5 };
     case "commentManagement":
       return { enabled: false, allowUserDeleteOwnPostComments: false };
+    case "lingling":
+      return { enabled: false };
     default:
       return false;
   }
