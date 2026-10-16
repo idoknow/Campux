@@ -67,6 +67,7 @@ export const defaultMetadata: TenantMetadata = {
   enableTodayInHistory: false,
   enableHeatBoard: false,
   heatBoardMaxTagCount: 5,
+  enableLingling: false,
 };
 
 export const navItems = [

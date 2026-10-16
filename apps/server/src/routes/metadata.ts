@@ -161,6 +161,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     heatBoardMaxTagCount: 5,
     enableCommentManagement: false,
     allowUserDeleteOwnPostComments: false,
+    enableLingling: false,
   };
 }
 
@@ -265,6 +266,8 @@ async function readPublicMetadata(tenantId: string) {
     metadata.enableCommentManagement = pluginConfig.commentManagement.enabled;
     metadata.allowUserDeleteOwnPostComments = pluginConfig.commentManagement.enabled
       && pluginConfig.commentManagement.allowUserDeleteOwnPostComments;
+    // 吉祥萌宠：未启用时服务页入口与侧边栏/页头 Live2D 小狗隐藏。
+    metadata.enableLingling = pluginConfig.lingling.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }

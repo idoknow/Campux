@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { requireReadyTenant } from "../lib/auth";
 import { prisma } from "../lib/prisma";
+import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
 import { buildBotFriendDailySeries, buildBotFriendTargetSeries } from "../lib/bot-friend-stats";
 import { buildCreatedAtRange, buildPostRangeOverview } from "../lib/stats-post-overview";
@@ -13,6 +14,11 @@ export function registerStatsRoutes(app: FastifyInstance) {
   app.get("/api/services/lingling", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "submitter");
     const tenantId = context.selectedTenant.id;
+    // 吉祥萌宠插件：未启用时直接拒绝，前端据此隐藏入口。
+    const pluginConfig = await readTenantPluginConfig(prisma, tenantId);
+    if (!pluginConfig.lingling.enabled) {
+      return reply.code(403).send({ message: "吉祥萌宠插件未开启" });
+    }
     const now = new Date();
     const tenant = await prisma.tenant.findUniqueOrThrow({
       where: { id: tenantId },

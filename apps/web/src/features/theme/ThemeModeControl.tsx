@@ -1,23 +1,33 @@
-import { MoonIcon, SunIcon } from "lucide-react";
+import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { useTheme } from "./theme";
+import type { ThemeMode } from "./theme";
 import { DropdownMenuLabel, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
+const modeLabels: Record<ThemeMode, string> = {
+  light: "亮色模式",
+  dark: "暗色模式",
+  system: "跟随系统",
+};
+
 /**
- * 日/月渐变外观开关：亮色一侧为蓝天渐变 + 太阳，暗色一侧为星空渐变 + 月球。
- * 点击在亮/暗之间切换；原本跟随系统的用户首次点击后转为显式模式。
+ * 日/月/系统三态外观开关：亮色一侧为蓝天渐变 + 太阳，暗色一侧为星空渐变 + 月球，
+ * 中间档为跟随系统（显示器图标，底色随当前解析出的亮/暗渐变变化）。
+ * 点击按 亮色 → 跟随系统 → 暗色 → 亮色 循环。
  */
 export function ThemeToggle({ className = "" }: { className?: string }) {
-  const { resolvedTheme, setMode } = useTheme();
+  const { mode, resolvedTheme, setMode } = useTheme();
   const dark = resolvedTheme === "dark";
+  const nextMode: ThemeMode = mode === "light" ? "system" : mode === "system" ? "dark" : "light";
+  const knobOffset = mode === "system" ? 28 : dark ? 56 : 0;
 
   return (
     <button
       type="button"
       role="switch"
       aria-checked={dark}
-      aria-label="切换外观模式"
-      title={dark ? "切换到亮色模式" : "切换到暗色模式"}
-      onClick={() => setMode(dark ? "light" : "dark")}
+      aria-label={`外观模式：${modeLabels[mode]}，点击切换为${modeLabels[nextMode]}`}
+      title={`外观模式：${modeLabels[mode]}（点击切换为${modeLabels[nextMode]}）`}
+      onClick={() => setMode(nextMode)}
       className={`relative inline-flex h-9 w-[96px] shrink-0 cursor-pointer items-center rounded-full p-1 shadow-inner transition-all duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none ring-1 ${dark ? "ring-white/10" : "ring-white/50"} ${className}`}
     >
       <span
@@ -39,13 +49,16 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
         aria-hidden
         className="absolute top-1 z-10 grid size-7 place-items-center rounded-full transition-transform duration-700 ease-[cubic-bezier(0.65,0,0.35,1)]"
         style={{
-          transform: dark ? "translateX(56px)" : "translateX(0px)",
+          transform: `translateX(${knobOffset}px)`,
         }}
       >
         <span
           aria-hidden
           className="absolute inset-0 rounded-full transition-all duration-700 ease-[cubic-bezier(0.65,0,0.35,1)]"
-          style={dark ? {
+          style={mode === "system" ? {
+            background: "radial-gradient(circle at 30% 30%, #f1f5f9 0%, #dbe2ea 55%, #b6c2cf 100%)",
+            boxShadow: "0 2px 10px rgba(15,23,42,0.3), inset 2px 2px 6px rgba(255,255,255,0.6)",
+          } : dark ? {
             background: "radial-gradient(circle at 30% 30%, #f5f3e1 0%, #e8e4c0 55%, #c9c498 100%)",
             boxShadow: "0 2px 10px rgba(0,0,0,0.4), inset -4px -4px 8px rgba(0,0,0,0.25)",
           } : {
@@ -53,13 +66,16 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
             boxShadow: "0 2px 12px rgba(255,180,0,0.5), 0 0 20px rgba(255,200,80,0.4)",
           }}
         />
-        <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${dark ? "opacity-0" : "opacity-100"}`}>
+        <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${mode === "light" ? "opacity-100" : "opacity-0"}`}>
           <SunIcon className="size-4 text-amber-600" />
         </span>
-        <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${dark ? "opacity-100" : "opacity-0"}`}>
+        <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${mode === "system" ? "opacity-100" : "opacity-0"}`}>
+          <MonitorIcon className="size-4 text-slate-600" />
+        </span>
+        <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${mode === "dark" ? "opacity-100" : "opacity-0"}`}>
           <MoonIcon className="size-4 text-indigo-900/70" />
         </span>
-        {dark ? (
+        {mode === "dark" ? (
           <span aria-hidden className="relative grid size-7 place-items-center">
             <span className="absolute left-[9px] top-[7px] size-1 rounded-full bg-black/10" />
             <span className="absolute left-[18px] top-[15px] size-1 rounded-full bg-black/10" />
@@ -76,14 +92,16 @@ export function ThemeModeButton() {
 }
 
 export function ThemeMenuItems() {
-  const { resolvedTheme } = useTheme();
+  const { mode, resolvedTheme } = useTheme();
 
   return (
     <>
       <DropdownMenuLabel className="text-xs font-semibold text-slate-500">外观模式</DropdownMenuLabel>
       <DropdownMenuItem onSelect={(event) => event.preventDefault()} className="gap-2">
         <ThemeToggle />
-        <span className="text-sm">{resolvedTheme === "dark" ? "暗色模式" : "亮色模式"}</span>
+        <span className="text-sm">
+          {mode === "system" ? `跟随系统（当前${resolvedTheme === "dark" ? "暗色" : "亮色"}）` : modeLabels[mode]}
+        </span>
       </DropdownMenuItem>
     </>
   );

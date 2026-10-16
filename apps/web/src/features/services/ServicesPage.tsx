@@ -105,7 +105,7 @@ export function ServicesPage({
     }
   }, [activeAction]);
 
-  const pluginEntriesCount = (metadata.enableCampaigns ? 1 : 0) + (metadata.enableBroadcast ? 1 : 0) + (metadata.enableGraduation ? 1 : 0) + (metadata.enableHeatBoard ? 1 : 0);
+  const pluginEntriesCount = (metadata.enableCampaigns ? 1 : 0) + (metadata.enableBroadcast ? 1 : 0) + (metadata.enableGraduation ? 1 : 0) + (metadata.enableHeatBoard ? 1 : 0) + (metadata.enableLingling ? 1 : 0);
   if (campaignRoute && campaignRoute.view === "detail") {
     return (
       <CampaignDetailPage
@@ -143,6 +143,9 @@ export function ServicesPage({
     return <HeatBoardPage metadata={metadata} />;
   }
   if (window.location.pathname === "/services/lingling") {
+    if (!metadata.enableLingling) {
+      return <section className="product-surface p-4 text-sm text-slate-500">吉祥萌宠插件尚未启用。</section>;
+    }
     return <LinglingPage onBack={() => navigateTo("/services")} />;
   }
   if (window.location.pathname === "/services/about") {
@@ -249,6 +252,22 @@ export function ServicesPage({
                 <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
               </button>
             ) : null}
+            {metadata.enableLingling ? (
+              <button
+                type="button"
+                onClick={() => navigateTo("/services/lingling")}
+                className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-rose-200 hover:bg-rose-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-rose-500/50 dark:hover:bg-rose-500/10"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-rose">
+                  <span aria-hidden="true" className="text-lg">🐶</span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">吉祥萌宠</span>
+                  <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">看看今天的小狗状态，顺便查看成长值。</span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+              </button>
+            ) : null}
           </ServiceGroup>
 
         </section>
@@ -299,20 +318,6 @@ export function ServicesPage({
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">关于</span>
                 <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">版本、部署形态、开发者、技术栈与插件信息</span>
-              </span>
-              <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
-            </button>
-            <button
-              type="button"
-              onClick={() => navigateTo("/services/lingling")}
-              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-rose-200 hover:bg-rose-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-rose-500/50 dark:hover:bg-rose-500/10"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-rose">
-                <span aria-hidden="true" className="text-lg">🐶</span>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">吉祥萌宠</span>
-                <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">看看今天的小狗状态，顺便查看成长值。</span>
               </span>
               <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             </button>

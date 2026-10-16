@@ -91,7 +91,7 @@ export function CampaignsIcon({ className }: PluginIconProps) {
   );
 }
 
-type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory" | "heatBoard" | "commentManagement";
+type PluginId = "markdownRender" | "colorSelection" | "fontSelection" | "anonymousAvatar" | "botStylishMessages" | "campaigns" | "aggregateLogin" | "broadcast" | "feedback" | "botAlert" | "graduation" | "todayInHistory" | "heatBoard" | "commentManagement" | "lingling";
 type PluginPermission = "db:read" | "db:write" | "events:emit" | "events:listen" | "http:route" | "config:read" | "tenant:data" | "user:data";
 
 type PluginRisk = "low" | "medium" | "high";
@@ -164,6 +164,7 @@ const PRESET_NAME_BY_ID: PresetNameByConfigId = {
   todayInHistory: "campux-plugin-today-in-history",
   heatBoard: "campux-plugin-heat-board",
   commentManagement: "campux-plugin-comment-management",
+  lingling: "campux-plugin-lingling",
 };
 
 // 侧栏只展示预设插件；已启用计数与条目高亮也只统计预设插件的 registry 状态。
@@ -836,6 +837,35 @@ function GraduationPanel({ busy }: { config: TenantPluginConfig; onChange: (next
   );
 }
 
+function LinglingIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className}>
+      <path d="M254 396 L172 128 Q166 108 186 112 L436 208 Z" fill="#F43F5E" />
+      <path d="M770 396 L852 128 Q858 108 838 112 L588 208 Z" fill="#F43F5E" />
+      <circle cx="512" cy="596" r="316" fill="#FDA4AF" />
+      <ellipse cx="512" cy="706" rx="150" ry="112" fill="#FFF1F2" />
+      <circle cx="398" cy="524" r="30" fill="#27272A" />
+      <circle cx="626" cy="524" r="30" fill="#27272A" />
+      <ellipse cx="512" cy="668" rx="48" ry="36" fill="#27272A" />
+      <path d="M512 704 L512 748 M512 748 Q468 790 424 758 M512 748 Q556 790 600 758" stroke="#27272A" strokeWidth="20" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function LinglingPanel({ busy }: { config: TenantPluginConfig; onChange: (next: TenantPluginConfig) => void; busy: boolean }) {
+  void busy;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        开启后，服务页新增「吉祥萌宠」入口与 Live2D 小狗页面，桌面侧边栏与移动端页头也会出现小狗。
+      </div>
+      <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        成长值由本校园墙的稿件数、互动指标（浏览/点赞/评论/转发）、成员数与运行天数计算，仅读取不写入。
+      </div>
+    </div>
+  );
+}
+
 const BOT_MESSAGE_TYPES: Array<{ type: string; label: string; description: string }> = [
   { type: "submissionSuccess", label: "投稿成功", description: "用户私聊投稿完成后，机器人反馈的语句。支持 {id} 占位符。" },
   { type: "reviewApproved", label: "审核通过", description: "稿件通过审核后发送给作者的语句。支持 {id}。" },
@@ -1317,6 +1347,33 @@ const PLUGINS: PluginDescriptor[] = [
     setEnabled: (config, value) => ({ ...config, heatBoard: { ...config.heatBoard, enabled: value } }),
     render: (config, onChange, busy) => <HeatBoardPanel config={config} onChange={onChange} busy={busy} />,
   },
+  {
+    id: "lingling",
+    icon: LinglingIcon,
+    name: "吉祥萌宠",
+    tagline: "Lingling",
+    description: "服务页展示吉祥萌宠与成长值，侧边栏/页头展示 Live2D 小狗",
+    detailedDescription:
+      "本插件让校园墙拥有一只专属的 Live2D 吉祥物小狗：\n\n" +
+      "桌面侧边栏与移动端页头：\n" +
+      "· 小狗常驻展示，会随鼠标/视线转动头部、随机眨眼，点击可切换表情。\n\n" +
+      "服务页 → 吉祥萌宠：\n" +
+      "· 独立页面展示小狗大图与基本信息（名称/生日/物种/性别）。\n" +
+      "· 成长值由稿件数、互动指标（浏览/点赞/评论/转发）、成员数与运行天数加权计算，随墙的成长而增长。\n\n" +
+      "管理：\n" +
+      "· 插件仅有开关，无需配置其他项；禁用后服务页入口、独立页面与侧边栏/页头小狗同时隐藏。",
+    author: DEFAULT_PLUGIN_AUTHOR,
+    hint: "成长值只涨不跌，由墙的整体活跃度驱动。",
+    accent: "from-rose-500 to-pink-500",
+    bgTint: "bg-rose-50 text-rose-700",
+    role: "admin",
+    required: ["config:read", "db:read", "tenant:data"],
+    riskLevel: "low",
+    rationale: "开启后服务页新增吉祥萌宠入口与 Live2D 小狗；成长值仅由已发布稿件、互动指标与运行天数等租户统计数据计算，不写入任何数据。",
+    enabled: (config) => config.lingling.enabled,
+    setEnabled: (config, value) => ({ ...config, lingling: { ...config.lingling, enabled: value } }),
+    render: (config, onChange, busy) => <LinglingPanel config={config} onChange={onChange} busy={busy} />,
+  },
 ];
 
 /**
@@ -1424,6 +1481,9 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
       enabled: false,
       allowUserDeleteOwnPostComments: false,
     },
+    lingling: {
+      enabled: false,
+    },
   };
 }
 
@@ -1520,6 +1580,8 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
       return { enabled: false, maxTagCount: 5 };
     case "commentManagement":
       return { enabled: false, allowUserDeleteOwnPostComments: false };
+    case "lingling":
+      return { enabled: false };
     default:
       return false;
   }

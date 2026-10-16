@@ -94,6 +94,7 @@ const pluginEnabledFlags: Record<ShowcasePlugin["id"], (metadata: TenantMetadata
   todayInHistory: (metadata) => metadata.enableTodayInHistory,
   heatBoard: (metadata) => metadata.enableHeatBoard,
   commentManagement: (metadata) => metadata.enableCommentManagement,
+  lingling: (metadata) => metadata.enableLingling,
 };
 
 // 卡片与文字统一走主题令牌：about 页不再写死 bg-white / text-slate-*，否则深色模式下会发白。

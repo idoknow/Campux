@@ -164,6 +164,8 @@ export type TenantMetadata = {
   enableTodayInHistory: boolean;
   enableHeatBoard: boolean;
   heatBoardMaxTagCount: number;
+  /** 吉祥萌宠插件是否启用；关闭时服务页入口与侧边栏/页头 Live2D 小狗隐藏 */
+  enableLingling: boolean;
 };
 
 export type BotMessageTypeConfig = {
@@ -264,6 +266,10 @@ export type TenantPluginConfig = {
   commentManagement: {
     enabled: boolean;
     allowUserDeleteOwnPostComments: boolean;
+  };
+  /** 吉祥萌宠插件：开关 */
+  lingling: {
+    enabled: boolean;
   };
 };
 

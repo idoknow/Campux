@@ -166,6 +166,12 @@ export const tenantPluginConfigSchema = z.object({
       allowUserDeleteOwnPostComments: z.boolean(),
     })
     .default({ enabled: false, allowUserDeleteOwnPostComments: false }),
+  // 吉祥萌宠：开启后服务页展示吉祥萌宠入口与成长值统计，桌面侧边栏与移动端页头展示 Live2D 小狗。
+  lingling: z
+    .object({
+      enabled: z.boolean(),
+    })
+    .default({ enabled: false }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -194,6 +200,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   todayInHistory: { enabled: false },
   heatBoard: { enabled: false, maxTagCount: 5 },
   commentManagement: { enabled: false, allowUserDeleteOwnPostComments: false },
+  lingling: { enabled: false },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {
