@@ -32,7 +32,8 @@ export function ThemeToggle({ theme, resolvedTheme, onToggle, compact = false, c
       onClick={onToggle}
       className={cn(
         'relative flex shrink-0 items-center rounded-full border border-border bg-muted px-1 shadow-inner transition-colors duration-300',
-        compact ? 'h-7 w-[4.25rem]' : 'h-8 w-[4.75rem]',
+        // 两种尺寸的行程均为 40px：亮色 0 / 跟随系统 20px（中点）/ 暗色 40px
+        compact ? 'h-7 w-[4.25rem]' : 'h-8 w-[4.5rem]',
         className
       )}
     >
@@ -57,13 +58,9 @@ export function ThemeToggle({ theme, resolvedTheme, onToggle, compact = false, c
           'relative z-10 flex items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform duration-300 ease-out',
           compact ? 'h-5 w-5' : 'h-6 w-6',
           theme === 'system'
-            ? compact
-              ? 'translate-x-6'
-              : 'translate-x-7'
+            ? 'translate-x-5'
             : theme === 'dark'
-              ? compact
-                ? 'translate-x-12'
-                : 'translate-x-[3.25rem]'
+              ? 'translate-x-10'
               : 'translate-x-0'
         )}
       >
