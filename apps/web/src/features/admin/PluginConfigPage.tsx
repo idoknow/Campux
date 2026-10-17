@@ -199,6 +199,16 @@ function FeedbackIcon({ className }: PluginIconProps) {
   );
 }
 
+/** 评论管理专属图标：琥珀色对话气泡 + 白色删除叉，与插件琥珀色调一致 */
+function CommentManagementIcon({ className }: PluginIconProps) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={className} fill="none">
+      <path d="M512 96C276.27 96 96 262.1 96 480c0 116.35 54.2 218.5 140.05 288.1l-29.72 151.9c-3.02 15.44 11.51 27.7 25.6 20.98l163.75-74.25C432.86 875.4 471.6 880 512 880c235.73 0 416-166.1 416-384S747.73 96 512 96z" fill="#F59E0B" />
+      <path d="M394 368l236 236M630 368L394 604" stroke="#FFFFFF" strokeWidth="64" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function FeedbackPanel() {
   return (
     <div className="space-y-4">
@@ -1212,7 +1222,7 @@ const PLUGINS: PluginDescriptor[] = [
   },
   {
     id: "commentManagement" as const,
-    icon: FeedbackIcon,
+    icon: CommentManagementIcon,
     name: "评论管理",
     tagline: "Moderation",
     description: "网页端通过墙号删除已发布稿件在 QQ 空间的评论",
