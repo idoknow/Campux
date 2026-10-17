@@ -854,7 +854,7 @@ async function uploadQZoneImage({
     if (!response.ok) {
       throw new QZonePublishError(`QZone 图片上传 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
     }
-    const uploadInfo = getPicBoAndRichval(parsed);
+    const uploadInfo = getPicBoAndRichval(parsed, text);
     const result = {
       name: image.name,
       bytes: image.bytes.byteLength,
@@ -1138,13 +1138,20 @@ function extractPicBo(value: string) {
   return value.split("bo=")[1]?.split("&")[0] ?? null;
 }
 
-function getPicBoAndRichval(parsed: unknown) {
+function getPicBoAndRichval(parsed: unknown, rawText: string) {
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("QZone 图片上传没有返回可解析的 JSON");
+    throw new Error(`QZone 图片上传没有返回可解析的 JSON：${truncate(rawText, 300)}`);
   }
   const record = parsed as Record<string, unknown>;
-  if (toNumber(record.ret) !== 0) {
-    throw new Error(`QZone 图片上传被拒绝：${String(record.message ?? record.msg ?? record.ret ?? "未知错误")}`);
+  // QZone 的错误响应可能把 ret/msg 嵌在 data 里（如 {"data":{"ret":-100,"msg":"登录失败…"}}），
+  // 成功响应则是顶层 {"ret":0,"data":{...}}，两种形状都要识别。
+  const nestedData = record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : null;
+  const ret = toNumber(record.ret) ?? (nestedData ? toNumber(nestedData.ret) : null);
+  if (ret !== 0) {
+    const reason =
+      firstString(record.message, record.msg, nestedData?.message, nestedData?.msg) ??
+      (ret !== null ? `错误码 ${ret}` : `无法识别的响应：${truncate(rawText, 300)}`);
+    throw new Error(`QZone 图片上传被拒绝：${reason}`);
   }
   const data = record.data;
   if (!data || typeof data !== "object") {
