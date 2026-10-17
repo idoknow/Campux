@@ -25,8 +25,6 @@ export function ThemeToggle({ theme, resolvedTheme, onToggle, compact = false, c
   return (
     <button
       type="button"
-      role="switch"
-      aria-checked={theme !== 'system'}
       aria-label={`当前：${MODE_LABELS[theme]}${theme === 'system' ? `（${isDark ? '暗色' : '亮色'}）` : ''}，点击切换`}
       title={`当前：${MODE_LABELS[theme]}${theme === 'system' ? `（${isDark ? '暗色' : '亮色'}）` : ''}`}
       onClick={onToggle}
