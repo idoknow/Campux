@@ -108,8 +108,8 @@ export const tenantPluginConfigSchema = z.object({
     })
     .default({ enabled: false }),
   // 聚合登录：把第三方平台（QQ/微信/支付宝等）身份绑定到已有账号后，用该身份直接登录。
-  // 凭证（appid/appkey/endpoint）放在本配置里（租户级）；未绑定的第三方身份不自动建号，
-  // 而是引导先登录已有账号完成绑定（严格「只做第三方登录、不涉及注册」）。
+  // 凭证（appid/appkey/endpoint）放在本配置里（租户级）。默认未绑定的第三方身份不自动建号，
+  // 而是引导先登录已有账号完成绑定；开启 autoCreateAccount 后，首次扫码即建号进墙。
   aggregateLogin: z
     .object({
       enabled: z.boolean(),
@@ -119,6 +119,9 @@ export const tenantPluginConfigSchema = z.object({
       appId: z.string().max(128).default(""),
       appKey: z.string().max(256).default(""),
       endpoint: z.string().max(512).default(""),
+      // 开启后，未绑定的 QQ 身份在首次登录时自动建号并加入本墙（与游客投稿同口径）。
+      // 关闭时保持原有严格行为：只做登录与绑定，不注册。
+      autoCreateAccount: z.boolean().default(false),
     })
     .default({
       enabled: false,
@@ -126,6 +129,7 @@ export const tenantPluginConfigSchema = z.object({
       appId: "",
       appKey: "",
       endpoint: "",
+      autoCreateAccount: false,
     }),
   // 意见反馈：开启后投稿页顶部出现入口；提交后发到审核群。
   feedback: z
@@ -172,6 +176,13 @@ export const tenantPluginConfigSchema = z.object({
       enabled: z.boolean(),
     })
     .default({ enabled: false }),
+  // 游客投稿：开启后，本墙登录页允许访客用「QQ 号 + 用户名 + 密码」自助注册并登录投稿，
+  // 无需先由机器人建号；无 Bot 模式下这是普通用户唯一的进站方式。
+  guestSubmission: z
+    .object({
+      enabled: z.boolean(),
+    })
+    .default({ enabled: false }),
 });
 
 export type TenantPluginConfig = z.infer<typeof tenantPluginConfigSchema>;
@@ -194,6 +205,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
     appId: "",
     appKey: "",
     endpoint: "",
+    autoCreateAccount: false,
   },
   feedback: { enabled: false },
   botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
@@ -201,6 +213,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
   heatBoard: { enabled: false, maxTagCount: 5 },
   commentManagement: { enabled: false, allowUserDeleteOwnPostComments: false },
   lingling: { enabled: false },
+  guestSubmission: { enabled: false },
 };
 
 export function parseTenantPluginConfig(value: unknown): TenantPluginConfig {

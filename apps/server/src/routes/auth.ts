@@ -1,10 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { hashPassword, Prisma, verifyPassword } from "@campux/db";
 import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { clearSessionCookie, createSession, findActiveBan, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { generateEmailCode, hashEmailCode, normalizeEmail, sendVerificationEmail } from "../lib/email";
+import { readTenantOperateMode } from "../lib/tenant-metadata";
+import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
@@ -45,6 +47,13 @@ const registerSchema = z.object({
   password: z.string().min(6).max(128),
 });
 
+// 游客投稿：直接用 QQ 号作账号注册，不要求 QQ 邮箱验证码。
+const tenantRegisterSchema = z.object({
+  qqUin: z.string().trim().regex(/^[1-9]\d{4,11}$/, "请输入正确的 QQ 号"),
+  displayName: z.string().trim().min(1, "用户名不能为空").max(80, "用户名最多 80 个字符"),
+  password: z.string().min(6).max(128),
+});
+
 const selectTenantSchema = z.object({
   tenantId: z.string().min(1),
 });
@@ -62,7 +71,79 @@ const requiredPasswordChangeSchema = z.object({
   newPassword: z.string().min(6).max(128),
 });
 
+// 忘记密码：用 QQ 号 + 该账号绑定的 QQ 邮箱验证码重置（未登录入口）。
+const forgotPasswordSchema = z.object({
+  account: z.string().trim().min(1, "请输入 QQ 号或邮箱"),
+});
+
+const resetPasswordSchema = z.object({
+  account: z.string().trim().min(1, "请输入 QQ 号或邮箱"),
+  code: z.string().trim().regex(/^\d{6}$/, "验证码格式不正确"),
+  newPassword: z.string().min(6).max(128),
+});
+
+const RESET_PASSWORD_PURPOSE = "password_reset";
+// 验证码频率限制：60 秒内只能发一次；同一账号 1 小时最多 5 次。
+const RESET_CODE_COOLDOWN_SECONDS = 60;
+const RESET_CODE_HOURLY_LIMIT = 5;
+const RESET_CODE_TTL_SECONDS = 10 * 60;
+
+/** 频率限制检查：返回需要拒绝时的提示与重试秒数。 */
+async function checkResetCodeRateLimit(emailKey: string) {
+  const now = Date.now();
+  const sinceHour = new Date(now - 60 * 60 * 1_000);
+  const recent = await prisma.emailVerificationCode.findMany({
+    where: {
+      email: emailKey,
+      purpose: RESET_PASSWORD_PURPOSE,
+      createdAt: { gte: sinceHour },
+    },
+    select: { createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const latest = recent[0];
+  if (latest) {
+    const elapsedSeconds = (now - latest.createdAt.getTime()) / 1_000;
+    if (elapsedSeconds < RESET_CODE_COOLDOWN_SECONDS) {
+      return {
+        retryAfterSeconds: Math.ceil(RESET_CODE_COOLDOWN_SECONDS - elapsedSeconds),
+        reason: "cooldown" as const,
+      };
+    }
+  }
+  if (recent.length >= RESET_CODE_HOURLY_LIMIT) {
+    return { retryAfterSeconds: 60 * 60, reason: "hourly" as const };
+  }
+  return null;
+}
+
+function parseAccountKey(account: string): { email: string } | { qqUin: bigint } | null {
+  const value = account.trim();
+  if (value.includes("@")) {
+    return { email: normalizeEmail(value) };
+  }
+  return /^\d+$/.test(value) ? { qqUin: BigInt(value) } : null;
+}
+
+/** 只回显邮箱首尾，避免把完整地址发给未登录请求方。 */
+function maskEmail(email: string) {
+  const [name = "", domain = ""] = email.split("@");
+  const head = name.slice(0, Math.min(2, name.length));
+  return `${head}${name.length > 2 ? "***" : ""}@${domain}`;
+}
+
 export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
+  // 游客投稿：单墙部署的租户 host 为空，回退到唯一的单墙租户，否则注册入口永远不可用。
+  async function resolvePublicTenantByRequest(request: FastifyRequest): Promise<{ id: string } | null> {
+    const hostTenant = await findTenantByRequestHost(request);
+    if (hostTenant) {
+      return hostTenant;
+    }
+    const singleModeTenantId = await resolveSingleModeTenantId();
+    return singleModeTenantId ? { id: singleModeTenantId } : null;
+  }
+
   app.get("/api/auth/context", async (request) => {
     const [managementHost, hostTenant, deployMode] = await Promise.all([
       findManagementHostByRequest(request),
@@ -356,6 +437,79 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     };
   });
 
+  // 游客投稿：登录页在未登录时查询本墙是否开放 QQ 号自助注册。
+  app.get("/api/auth/tenant-registration", async (request) => {
+    const hostTenant = await resolvePublicTenantByRequest(request);
+    if (!hostTenant) {
+      return { enabled: false, operateMode: "bot" as const };
+    }
+    const [pluginConfig, operateMode] = await Promise.all([
+      readTenantPluginConfig(prisma, hostTenant.id),
+      readTenantOperateMode(prisma, hostTenant.id),
+    ]);
+    return { enabled: pluginConfig.guestSubmission.enabled, operateMode };
+  });
+
+  // 游客投稿：QQ 号 + 用户名 + 密码注册，注册后直接成为该墙的投稿用户并登录。
+  app.post("/api/auth/tenant-register", async (request, reply) => {
+    const hostTenant = await resolvePublicTenantByRequest(request);
+    if (!hostTenant) {
+      return reply.code(404).send({ message: "当前入口不开放注册" });
+    }
+
+    const pluginConfig = await readTenantPluginConfig(prisma, hostTenant.id);
+    if (!pluginConfig.guestSubmission.enabled) {
+      return reply.code(403).send({ message: "当前校园墙未开放注册，请联系管理员" });
+    }
+
+    const body = tenantRegisterSchema.parse(request.body);
+    const qqUin = BigInt(body.qqUin);
+    const existing = await prisma.user.findUnique({
+      where: { qqUin },
+      select: { id: true },
+    });
+    if (existing) {
+      return reply.code(409).send({ message: "这个 QQ 号已经注册，请直接登录" });
+    }
+
+    const user = await prisma.user.create({
+      data: {
+        qqUin,
+        displayName: body.displayName,
+        passwordHash: await hashPassword(body.password),
+        passwordChangeRequired: false,
+        isTestAccount: false,
+        systemRole: null,
+      },
+    });
+    const membership = await prisma.tenantMembership.create({
+      data: { tenantId: hostTenant.id, userId: user.id, role: "submitter" },
+    });
+
+    const token = await createSession(user.id, hostTenant.id);
+    setSessionCookie(reply, token);
+
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: hostTenant.id },
+      include: {
+        metadata: { where: { key: "logo_url" } },
+        aiSettings: { select: { enabled: true } },
+        _count: { select: { botAccounts: true, posts: { where: { status: "pending_approval" } } } },
+      },
+    });
+
+    return {
+      authenticated: true,
+      user: toPublicUser(user),
+      memberships: [{ id: membership.id, role: membership.role, tenant: toTenantSummary(tenant) }],
+      currentTenant: toTenantSummary(tenant),
+      currentMembership: { id: membership.id, role: membership.role },
+      activeBan: null,
+      needsTenantSelection: false,
+      hostLocked: true,
+    };
+  });
+
   app.post("/api/auth/logout", async (request, reply) => {
     const token = getCookie(request, sessionCookieName);
     if (token) {
@@ -431,6 +585,166 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         passwordChangeRequired: false,
       },
     });
+
+    return { ok: true };
+  });
+
+  // 忘记密码第一步：按 QQ 号 / 邮箱找到账号，向账号邮箱发验证码。
+  // 只对绑定了邮箱的账号发送，且不向外泄露该账号是否存在（统一返回 ok）。
+  app.post("/api/auth/password/forgot", async (request, reply) => {
+    const body = forgotPasswordSchema.parse(request.body);
+    const key = parseAccountKey(body.account);
+    if (!key) {
+      return reply.code(400).send({ message: "请输入 QQ 号或邮箱" });
+    }
+    const user = await prisma.user.findUnique({
+      where: key,
+      select: { id: true, email: true },
+    });
+    if (!user) {
+      return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
+    }
+
+    // 没绑定邮箱的账号（例如游客注册或扫码建号）：给账号名下的第三方身份生成验证码，
+    // 由本人持有的第三方账号完成所有权验证，而不依赖邮箱。
+    if (!user.email) {
+      const identities = await prisma.oAuthIdentity.findMany({
+        where: { userId: user.id },
+        select: { provider: true, providerUserId: true },
+      });
+      if (identities.length === 0) {
+        // 既没邮箱也没第三方身份：用专用错误码告知前端弹“联系管理员”提示，
+        // 不再与“验证码错误”混为同一个模糊报错。
+        return reply.code(409).send({
+          code: "RESET_UNAVAILABLE",
+          message: "该账号未绑定 QQ 邮箱或第三方登录，无法自助重置密码，请联系校园墙管理员重置。",
+        });
+      }
+      const rateLimited = await checkResetCodeRateLimit(`identity:${user.id}`);
+      if (rateLimited) {
+        return reply.code(429).send({
+          code: "RATE_LIMITED",
+          message: rateLimited.reason === "cooldown"
+            ? `验证码发送过于频繁，请 ${rateLimited.retryAfterSeconds} 秒后再试`
+            : "该账号获取验证码次数过多，请 1 小时后再试",
+          retryAfterSeconds: rateLimited.retryAfterSeconds,
+        });
+      }
+      const code = generateEmailCode();
+      await prisma.$transaction([
+        prisma.emailVerificationCode.deleteMany({ where: { email: `identity:${user.id}`, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } }),
+        prisma.emailVerificationCode.create({
+          data: {
+            email: `identity:${user.id}`,
+            codeHash: hashEmailCode(`identity:${user.id}`, code),
+            purpose: RESET_PASSWORD_PURPOSE,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
+          },
+        }),
+      ]);
+      // 自托管环境没有邮件服务时直接回显验证码；生产下请通过第三方渠道确认身份后再重置。
+      return {
+        ok: true,
+        channel: "identity" as const,
+        providers: identities.map((identity) => identity.provider.replace(/^aggregate:/, "")),
+        devCode: code,
+        expiresInSeconds: RESET_CODE_TTL_SECONDS,
+      };
+    }
+
+    const rateLimited = await checkResetCodeRateLimit(user.email);
+    if (rateLimited) {
+      return reply.code(429).send({
+        code: "RATE_LIMITED",
+        message: rateLimited.reason === "cooldown"
+          ? `验证码发送过于频繁，请 ${rateLimited.retryAfterSeconds} 秒后再试`
+          : "该账号获取验证码次数过多，请 1 小时后再试",
+        retryAfterSeconds: rateLimited.retryAfterSeconds,
+      });
+    }
+
+    const code = generateEmailCode();
+    await prisma.emailVerificationCode.create({
+      data: {
+        email: user.email,
+        codeHash: hashEmailCode(user.email, code),
+        purpose: RESET_PASSWORD_PURPOSE,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
+      },
+    });
+    const sent = await sendVerificationEmail(config, { to: user.email, code });
+
+    return {
+      ok: true,
+      channel: "email" as const,
+      email: maskEmail(user.email),
+      expiresInSeconds: RESET_CODE_TTL_SECONDS,
+      // 未配置邮件服务时直接返回验证码，保证自托管环境可用（与注册流程一致）。
+      ...(sent.skipped ? { devCode: code } : {}),
+    };
+  });
+
+  // 忘记密码第二步：校验邮箱验证码并写入新密码。
+  app.post("/api/auth/password/reset", async (request, reply) => {
+    const body = resetPasswordSchema.parse(request.body);
+    const key = parseAccountKey(body.account);
+    if (!key) {
+      return reply.code(400).send({ message: "请输入 QQ 号或邮箱" });
+    }
+    const user = await prisma.user.findUnique({
+      where: key,
+      select: { id: true, email: true },
+    });
+    if (!user) {
+      return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
+    }
+    const resetEmailKey = user.email ?? `identity:${user.id}`;
+
+    const latestRecord = await prisma.emailVerificationCode.findFirst({
+      where: {
+        email: resetEmailKey,
+        purpose: RESET_PASSWORD_PURPOSE,
+        consumedAt: null,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latestRecord) {
+      return reply.code(400).send({ code: "CODE_MISSING", message: "还没有获取过验证码，请先点击获取验证码" });
+    }
+    if (latestRecord.expiresAt.getTime() <= Date.now()) {
+      return reply.code(400).send({
+        code: "CODE_EXPIRED",
+        message: `验证码已过期（有效期 ${RESET_CODE_TTL_SECONDS / 60} 分钟），请重新获取`,
+      });
+    }
+    if (latestRecord.attempts >= 5) {
+      return reply.code(429).send({ code: "CODE_ATTEMPTS", message: "验证码尝试次数过多，请重新获取" });
+    }
+    if (latestRecord.codeHash !== hashEmailCode(resetEmailKey, body.code)) {
+      await prisma.emailVerificationCode.update({
+        where: { id: latestRecord.id },
+        data: { attempts: { increment: 1 } },
+      });
+      const remaining = Math.max(0, 4 - latestRecord.attempts);
+      return reply.code(400).send({
+        code: "CODE_INVALID",
+        message: remaining > 0 ? `验证码不正确，还可以尝试 ${remaining} 次` : "验证码不正确，请重新获取",
+      });
+    }
+    const record = latestRecord;
+
+    await prisma.$transaction([
+      prisma.emailVerificationCode.update({
+        where: { id: record.id },
+        data: { consumedAt: new Date(), attempts: { increment: 1 } },
+      }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await hashPassword(body.newPassword), passwordChangeRequired: false },
+      }),
+      // 重置密码后让旧会话失效，避免残留登录态继续使用。
+      prisma.accountSession.deleteMany({ where: { userId: user.id } }),
+    ]);
 
     return { ok: true };
   });

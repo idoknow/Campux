@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { api } from "@/lib/api";
@@ -72,9 +72,25 @@ export function LoginScreen({
   const [password, setPassword] = useState(() => savedCredentials?.password ?? (allowTestAccounts ? "campux123" : ""));
   const [remember, setRemember] = useState(() => savedCredentials !== null);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<"login" | "register">("login");
+  const [view, setView] = useState<"login" | "register" | "tenantRegister" | "forgot">("login");
   const [loginError, setLoginError] = useState("");
+  const [tenantRegistration, setTenantRegistration] = useState<{ enabled: boolean; operateMode: "bot" | "manual" } | null>(null);
   const displayError = loginError || error;
+
+  // 游客投稿开关由本墙管理员控制；未登录时只读查询一次，用于决定是否展示注册入口。
+  // 单墙部署时管理域名就是墙自己的域名（managementHost 为真），不能据此隐藏入口；
+  // 多租户管理域名下服务端解析不到单墙租户，会返回 enabled=false。
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ enabled: boolean; operateMode: "bot" | "manual" }>("/api/auth/tenant-registration")
+      .then((data) => {
+        if (!cancelled) setTenantRegistration(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 第三方回调携带的提示参数（未绑定身份 / 无该墙访问权限）。
   const oauthNotice = useMemo<{ type: "unbound" | "no_access" | null; label: string }>(() => {
@@ -137,13 +153,44 @@ export function LoginScreen({
           </div>
         </div>
 
-        {managementHost && view === "register" ? (
+        {view === "forgot" ? (
+          <div className="product-surface px-4 py-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-slate-950">重置密码</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  输入你的 QQ 号或邮箱，我们会把验证码发到账号绑定的邮箱；验证通过后即可设置新密码。
+                  没绑定邮箱的账号请联系校园墙管理员。
+                </p>
+              </div>
+              <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("login")}>
+                返回登录
+              </button>
+            </div>
+            <ForgotPasswordPanel />
+          </div>
+        ) : view === "tenantRegister" ? (
+          <div className="product-surface px-4 py-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-slate-950">注册 {title} 账号</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  用 QQ 号作为账号，设置用户名和密码后即可登录投稿。如果已经通过墙号机器人建过号，请直接登录。
+                </p>
+              </div>
+              <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("login")}>
+                返回登录
+              </button>
+            </div>
+            <TenantRegisterPanel onRegistered={onRegistered} />
+          </div>
+        ) : managementHost && view === "register" ? (
           <div className="product-surface px-4 py-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-lg font-semibold text-slate-950">注册运营管理员账号</p>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  这个入口只面向要创建并运营校园墙的运营者，注册后可自助开墙。普通用户请通过对应校园墙机器人注册。
+                  这个入口只面向要创建并运营校园墙的运营者，注册后可自助开墙。普通用户请通过对应校园墙机器人或扫码注册。
                 </p>
               </div>
               <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("login")}>
@@ -151,16 +198,6 @@ export function LoginScreen({
               </button>
             </div>
             <RegisterPanel onRegistered={onRegistered} />
-            <div className="mt-5 border-t border-slate-100 pt-3 text-center">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <a className="text-xs text-slate-400 underline-offset-4 hover:underline" href="https://docs.campux.top" target="_blank" rel="noreferrer">
-                    想要自己部署？
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[280px]">Campux 开源且支持自部署，访问 docs.campux.top 自建你的校园墙服务。</TooltipContent>
-              </Tooltip>
-            </div>
           </div>
         ) : (
           <>
@@ -185,6 +222,15 @@ export function LoginScreen({
               <Button className="mt-5 w-full font-medium" disabled={busy} type="submit">
                 {busy ? "登录中" : "登录"}
               </Button>
+              <div className="mt-3 text-center">
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-blue-700 underline-offset-4 hover:underline"
+                  onClick={() => setView("forgot")}
+                >
+                  忘记密码？
+                </button>
+              </div>
               {allowTestAccounts ? (
                 <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
                   <summary className="cursor-pointer font-medium text-slate-600">开发测试账号</summary>
@@ -208,6 +254,22 @@ export function LoginScreen({
 
             <AggregateLoginButtons returnTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"} />
 
+            {tenantRegistration?.enabled ? (
+              <div className="mt-3 product-surface px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-950">还没有账号？</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                      本墙已开放游客注册：用 QQ 号设置用户名和密码，注册后即可登录投稿。
+                    </p>
+                  </div>
+                  <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("tenantRegister")}>
+                    注册
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {managementHost ? (
               <div className="mt-3 product-surface px-4 py-4">
                 <div className="flex items-start justify-between gap-3">
@@ -227,6 +289,147 @@ export function LoginScreen({
         )}
       </section>
     </main>
+  );
+}
+
+function ForgotPasswordPanel() {
+  const [account, setAccount] = useState("");
+  const [code, setCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [maskedEmail, setMaskedEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageKind, setMessageKind] = useState<"info" | "error">("info");
+  const [cooldown, setCooldown] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  // 发送后的倒计时：与后端 60 秒冷却保持一致，避免用户反复点击。
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1_000);
+    return () => window.clearInterval(timer);
+  }, [cooldown > 0]);
+
+  async function requestCode() {
+    setSending(true);
+    setMessage("");
+    setMessageKind("info");
+    try {
+      const data = await api<{
+        ok: true;
+        channel?: "email" | "identity";
+        email?: string;
+        providers?: string[];
+        devCode?: string;
+        expiresInSeconds?: number;
+      }>("/api/auth/password/forgot", {
+        method: "POST",
+        body: JSON.stringify({ account }),
+      });
+      setCooldown(60);
+      const ttl = Math.round((data.expiresInSeconds ?? 600) / 60);
+      if (data.channel === "identity") {
+        setMaskedEmail("");
+        setMessage(
+          data.devCode
+            ? `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${(data.providers ?? []).join("、")}）验证。本次验证码：${data.devCode}，${ttl} 分钟内有效。`
+            : `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${(data.providers ?? []).join("、")}）验证，${ttl} 分钟内有效。`,
+        );
+        if (data.devCode) setCode(data.devCode);
+        return;
+      }
+      setMaskedEmail(data.email ?? "");
+      if (data.devCode) {
+        setCode(data.devCode);
+        setMessage(`站点未配置邮件服务，验证码：${data.devCode}，${ttl} 分钟内有效。`);
+      } else {
+        setMessage(`验证码已发送到 ${data.email}，${ttl} 分钟内有效。`);
+      }
+    } catch (caught) {
+      setMessageKind("error");
+      setMessage(caught instanceof Error ? caught.message : "发送失败");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/api/auth/password/reset", {
+        method: "POST",
+        body: JSON.stringify({ account, code, newPassword }),
+      });
+      setMessage("密码已重置，可以用新密码登录了");
+      setCode("");
+      setNewPassword("");
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "重置失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="mt-4 grid gap-3" onSubmit={submit}>
+      <Input value={account} placeholder="QQ 号或邮箱" onChange={(event) => setAccount(event.target.value)} />
+      <div className="flex gap-2">
+        <Input value={code} inputMode="numeric" placeholder="6 位验证码" onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} />
+        <Button type="button" variant="outline" disabled={sending || cooldown > 0 || account.trim().length === 0} onClick={() => void requestCode()}>
+          {sending ? "发送中" : cooldown > 0 ? `${cooldown} 秒后可重发` : maskedEmail ? "重新发送" : "发送验证码"}
+        </Button>
+      </div>
+      <Input value={newPassword} type="password" placeholder="新密码，至少 6 位" onChange={(event) => setNewPassword(event.target.value)} />
+      {message ? (
+        <p className={`text-sm font-medium ${messageKind === "error" ? "text-red-600" : "text-slate-700"}`}>{message}</p>
+      ) : null}
+      <Button className="font-medium" disabled={busy || code.length !== 6 || newPassword.length < 6} type="submit">
+        {busy ? "重置中" : "重置密码"}
+      </Button>
+    </form>
+  );
+}
+
+function TenantRegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => void }) {
+  const [qqUin, setQqUin] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    try {
+      const data = await api<MeResponse>("/api/auth/tenant-register", {
+        method: "POST",
+        body: JSON.stringify({ qqUin, displayName, password }),
+      });
+      onRegistered(data);
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "注册失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="mt-4 grid gap-3" onSubmit={submit}>
+      <Input value={qqUin} inputMode="numeric" placeholder="QQ 号" onChange={(event) => setQqUin(event.target.value.replace(/\D/g, ""))} />
+      <Input value={displayName} placeholder="用户名（对外展示的名称）" maxLength={80} onChange={(event) => setDisplayName(event.target.value)} />
+      <Input value={password} type="password" placeholder="密码，至少 6 位" onChange={(event) => setPassword(event.target.value)} />
+      {message ? <p className="text-sm font-medium text-red-600">{message}</p> : null}
+      <Button
+        className="font-medium"
+        disabled={busy || qqUin.length < 5 || displayName.trim().length === 0 || password.length < 6}
+        type="submit"
+      >
+        {busy ? "注册中" : "注册并登录"}
+      </Button>
+    </form>
   );
 }
 

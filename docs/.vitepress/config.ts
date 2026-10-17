@@ -105,6 +105,8 @@ export default defineConfig({
           { text: "OAuth2 接入", link: "/reference/oauth" },
           { text: "系统架构", link: "/reference/architecture" },
           { text: "发布状态", link: "/reference/publish-states" },
+          { text: "待发布队列接口", link: "/reference/pending-publish" },
+          { text: "登录与密码接口", link: "/reference/auth-and-password" },
           { text: "插件系统", link: "/reference/plugins/overview" },
           { text: "预设插件", link: "/reference/plugins/preset-plugins" },
         ],

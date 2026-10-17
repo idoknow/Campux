@@ -114,6 +114,33 @@ export async function readTenantImageCompression(client: MetadataClient, tenantI
   };
 }
 
+// 运营模式：bot 由墙号机器人自动发布到 QQ 空间；manual（无 Bot）由管理员在网页端
+// 渲染稿件、手动保存发布后点「确认已发布」，审核通过不再自动入队。
+export type OperateMode = "bot" | "manual";
+
+export const operateModeKey = "operate_mode";
+export const operateModeDefault: OperateMode = "bot";
+
+export function normalizeOperateMode(value: unknown): OperateMode {
+  return value === "manual" || (typeof value === "string" && value.toLowerCase() === "manual") ? "manual" : "bot";
+}
+
+export async function readTenantOperateMode(client: MetadataClient, tenantId: string): Promise<OperateMode> {
+  const entry = await client.tenantMetadata.findUnique({
+    where: {
+      tenantId_key: {
+        tenantId,
+        key: operateModeKey,
+      },
+    },
+    select: {
+      value: true,
+    },
+  });
+
+  return normalizeOperateMode(entry?.value);
+}
+
 export type PublishMode = "single" | "accumulate";
 
 export const publishModeKey = "publish_mode";

@@ -60,6 +60,7 @@ const postsTabPaths: Record<PostsTab, string> = {
   published: "/posts/published",
   feedback: "/posts/feedback",
   history: "/posts/history",
+  pendingPublish: "/posts/pending-publish",
 };
 
 const adminTabPaths: Record<AdminTab, string> = {
@@ -85,6 +86,7 @@ const postsTabTitles: Record<PostsTab, string> = {
   published: "已发布",
   feedback: "意见",
   history: "那年今日",
+  pendingPublish: "待发布",
 };
 
 const adminTabTitles: Record<AdminTab, string> = {

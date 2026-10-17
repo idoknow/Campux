@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { requireTenantContext } from "../lib/auth";
+import { hasTenantRole, requireTenantContext } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
@@ -272,5 +272,38 @@ export function registerFeedbackRoutes(app: FastifyInstance, oneBot?: OneBotRunt
     }
 
     return { ok: true, role };
+  });
+
+  // 管理员删除意见：连同对话消息一并删除，删除后不可恢复。
+  app.delete("/api/feedback/:id", async (request, reply) => {
+    const context = await requireTenantContext(request, reply);
+    if (!hasTenantRole(context.selectedMembership.role, "admin")) {
+      return reply.code(403).send({ message: "仅管理员可删除意见" });
+    }
+
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const feedback = await prisma.tenantFeedback.findFirst({
+      where: { id: params.id, tenantId: context.selectedTenant.id },
+      select: { id: true, content: true },
+    });
+    if (!feedback) {
+      return reply.code(404).send({ message: "意见不存在" });
+    }
+
+    await prisma.$transaction([
+      prisma.tenantFeedbackMessage.deleteMany({ where: { feedbackId: feedback.id } }),
+      prisma.tenantFeedback.delete({ where: { id: feedback.id } }),
+    ]);
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "tenant.feedback.delete",
+      targetType: "feedback",
+      targetId: feedback.id,
+      detail: { preview: feedback.content.slice(0, 80) },
+    });
+
+    return { ok: true };
   });
 }

@@ -288,10 +288,18 @@ export function qzoneFetchWithTimeout(
   timeoutMs = qzonePublishRequestTimeoutMs,
   fetcher: typeof fetch = globalThis.fetch,
 ) {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  // 不直接用 AbortSignal.timeout：它依赖一个 unref 定时器，在没有其他 ref 定时器时
+  // （例如一个永不 settle 的 fetch 占着事件循环）不会触发，超时就彻底失效。
+  // 这里用显式 setTimeout（unref，不阻止进程退出）+ AbortController；
+  // 定时器不能随响应头返回就清除，因为读取响应 body 同样可能永不结束。
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException(`QZone request timed out after ${timeoutMs}ms`, "TimeoutError"));
+  }, timeoutMs);
+  timer.unref?.();
   const signal = init.signal
-    ? combineQZoneAbortSignals([init.signal, timeoutSignal])
-    : timeoutSignal;
+    ? combineQZoneAbortSignals([init.signal, controller.signal])
+    : controller.signal;
   return fetcher(input, { ...init, signal });
 }
 

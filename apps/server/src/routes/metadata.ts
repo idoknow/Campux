@@ -43,6 +43,8 @@ import {
   normalizeEnableAnonymousAvatarSelection,
   followedPostCommentNotifyEnabledKey,
   normalizeFollowedPostCommentNotifyEnabled,
+  operateModeKey,
+  normalizeOperateMode,
 } from "../lib/tenant-metadata";
 import { maxImageMaxSizeMb, minImageMaxSizeMb, normalizeImageMaxSizeMb } from "../lib/image-upload-policy";
 
@@ -68,6 +70,7 @@ const publicMetadataKeys = [
   enableFontSelectionKey,
   enableAnonymousAvatarSelectionKey,
   followedPostCommentNotifyEnabledKey,
+  operateModeKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -101,6 +104,7 @@ const patchMetadataSchema = z.object({
   enableFontSelection: z.boolean().optional(),
   enableAnonymousAvatarSelection: z.boolean().optional(),
   followedPostCommentNotifyEnabled: z.boolean().optional(),
+  operateMode: z.enum(["bot", "manual"]).optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -142,6 +146,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
     enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
     followedPostCommentNotifyEnabled: normalizeFollowedPostCommentNotifyEnabled(record[followedPostCommentNotifyEnabledKey]),
+    operateMode: normalizeOperateMode(record[operateModeKey]),
     availableFonts: [] as string[],
     availableBgColors: [] as Array<{ value: string; label: string; hex: string }>,
     availableTextColors: [] as Array<{ value: string; label: string; hex: string }>,
@@ -162,6 +167,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableCommentManagement: false,
     allowUserDeleteOwnPostComments: false,
     enableLingling: false,
+    enableGuestSubmission: false,
   };
 }
 
@@ -268,6 +274,7 @@ async function readPublicMetadata(tenantId: string) {
       && pluginConfig.commentManagement.allowUserDeleteOwnPostComments;
     // 吉祥萌宠：未启用时服务页入口与侧边栏/页头 Live2D 小狗隐藏。
     metadata.enableLingling = pluginConfig.lingling.enabled;
+    metadata.enableGuestSubmission = pluginConfig.guestSubmission.enabled;
   } catch {
     // 缺少插件配置时保留 tenant_metadata 里的旧开关
   }
@@ -481,6 +488,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     if (body.followedPostCommentNotifyEnabled !== undefined) {
       updates.push({ key: followedPostCommentNotifyEnabledKey, value: body.followedPostCommentNotifyEnabled });
     }
+    if (body.operateMode !== undefined) {
+      updates.push({ key: operateModeKey, value: body.operateMode });
+    }
 
     await prisma.$transaction(
       updates.map((entry) =>
@@ -513,6 +523,24 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
         fields: Object.keys(body),
       },
     });
+
+    // 无 Bot 模式不需要墙号上线：选定后立即把墙标记为已开通，
+    // 否则 readyAt 永远为空，管理员会被一直困在开墙向导、其他人只能看到等待墙号页面。
+    if (body.operateMode === "manual" && context.selectedTenant.readyAt === null) {
+      const now = new Date();
+      await prisma.tenant.update({
+        where: { id: context.selectedTenant.id },
+        data: { readyAt: now },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "tenant.ready",
+        targetType: "tenant",
+        targetId: context.selectedTenant.id,
+        detail: { operateMode: "manual" },
+      });
+    }
 
     return readPublicMetadata(context.selectedTenant.id);
   });

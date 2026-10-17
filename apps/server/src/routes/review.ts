@@ -10,7 +10,7 @@ import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedErro
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
-import { readTenantPublishMode } from "../lib/tenant-metadata";
+import { readTenantOperateMode, readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -235,10 +235,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
     const publishMode = approved.value;
-    if (publishMode.mode === "accumulate") {
-      await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
-    } else {
-      await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+    // 无 Bot 模式：不自动入队，稿件停在「已通过」，由管理员在「待发布」页手动发完后确认。
+    const operateMode = await readTenantOperateMode(prisma, context.selectedTenant.id);
+    if (operateMode !== "manual") {
+      if (publishMode.mode === "accumulate") {
+        await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
+      } else {
+        await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+      }
     }
 
     // 触发插件事件
@@ -272,6 +276,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
+    const operateMode = await readTenantOperateMode(prisma, context.selectedTenant.id);
     let approved = 0;
 
     for (const post of pending) {
@@ -304,10 +309,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (!approvedPost.active) break;
       if (!approvedPost.value) continue;
 
-      if (publishMode.mode === "accumulate") {
-        await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
-      } else {
-        await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+      if (operateMode !== "manual") {
+        if (publishMode.mode === "accumulate") {
+          await addApprovedPostToBatch(queue, context.selectedTenant.id, post.id, context.user.id, request.log);
+        } else {
+          await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
+        }
       }
       approved += 1;
     }

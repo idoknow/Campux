@@ -6,7 +6,7 @@ import { prisma } from "./prisma";
 import { decryptJson, encryptJson } from "./secret-json";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
-import { readTenantPublishMode } from "./tenant-metadata";
+import { readTenantOperateMode, readTenantPublishMode } from "./tenant-metadata";
 import { tenantRuntimeRelationFilter } from "./tenant-runtime";
 import { runWithActiveTenantLease } from "./tenant-runtime-lease";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -346,10 +346,13 @@ export async function reviewPostViaBot({
 
   if (action === "approve") {
     const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
-    if (publishMode.mode === "accumulate") {
-      await addApprovedPostToBatch(queue, bot.tenantId, post.id, operator.id);
-    } else {
-      await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+    // 切到无 Bot 模式后群命令也只把稿件推进到「已通过」，由管理员在待发布页手动确认。
+    if ((await readTenantOperateMode(prisma, bot.tenantId)) !== "manual") {
+      if (publishMode.mode === "accumulate") {
+        await addApprovedPostToBatch(queue, bot.tenantId, post.id, operator.id);
+      } else {
+        await enqueuePublishFanout(queue, bot.tenantId, post.id, operator.id);
+      }
     }
   }
 
@@ -394,6 +397,7 @@ export async function approveAllPendingPostsViaBot({
   }
 
   const publishMode = await readTenantPublishMode(prisma, bot.tenantId);
+  const operateMode = await readTenantOperateMode(prisma, bot.tenantId);
   const approval = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
     const approvedPostIds: string[] = [];
 
@@ -444,6 +448,9 @@ export async function approveAllPendingPostsViaBot({
   const approvedPostIds = approval.value;
 
   for (const postId of approvedPostIds) {
+    if (operateMode === "manual") {
+      break;
+    }
     if (publishMode.mode === "accumulate") {
       await addApprovedPostToBatch(queue, bot.tenantId, postId, operator.id);
     } else {

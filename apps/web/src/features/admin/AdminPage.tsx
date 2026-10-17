@@ -82,6 +82,8 @@ type TenantSettingsForm = {
   publishAccumulateStaleMinutes: number;
   publishLlmSummaryEnabled: boolean;
   followedPostCommentNotifyEnabled: boolean;
+  // manual = 无 Bot 模式：审核通过的稿件进待发布列表，不再自动入队。
+  operateMode: "bot" | "manual";
 };
 
 type BanForm = {
@@ -376,7 +378,7 @@ export function AdminPage({
     const nextForm = toForm(selectedTenant, metadata);
     setForm(nextForm);
     setImageMaxSizeDraft(String(nextForm.imageMaxSizeMb));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled, metadata.operateMode]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -559,6 +561,7 @@ export function AdminPage({
           publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
           publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
           followedPostCommentNotifyEnabled: form.followedPostCommentNotifyEnabled,
+          operateMode: form.operateMode,
         }),
       });
       await onSaved();
@@ -1927,6 +1930,44 @@ function MetadataPanel({
                 />
                 <span className="text-xs font-normal text-slate-500">宽或高超过该值时按比例缩放，默认 2048。</span>
               </label>
+            </div>
+          </div>
+          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">运营模式</p>
+                <p className="text-xs text-slate-500">
+                  无 Bot 模式不接入墙号机器人：审核通过的稿件停在「稿件 · 待发布」，由管理员渲染、手动发出后点「确认已发布」。
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onFormChange({ ...form, operateMode: "bot" })}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  form.operateMode === "bot"
+                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
+                    : "border-slate-200 bg-white hover:border-slate-300"
+                }`}
+              >
+                <p className="text-sm font-semibold text-slate-900">墙号机器人发布</p>
+                <p className="text-xs text-slate-500">审核通过后由墙号自动发到 QQ 空间。</p>
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onFormChange({ ...form, operateMode: "manual" })}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  form.operateMode === "manual"
+                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
+                    : "border-slate-200 bg-white hover:border-slate-300"
+                }`}
+              >
+                <p className="text-sm font-semibold text-slate-900">无 Bot 模式运营</p>
+                <p className="text-xs text-slate-500">不接入机器人，由管理员手动发布并在待发布页确认。</p>
+              </button>
             </div>
           </div>
           <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
@@ -3999,6 +4040,7 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     publishAccumulateStaleMinutes: metadata.publishAccumulate.staleMinutes,
     publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
     followedPostCommentNotifyEnabled: metadata.followedPostCommentNotifyEnabled,
+    operateMode: metadata.operateMode ?? "bot",
   };
 }
 

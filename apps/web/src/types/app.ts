@@ -1,7 +1,7 @@
 import type { TenantSummary } from "@campux/domain";
 
 export type MainTab = "post" | "posts" | "stats" | "services" | "admin";
-export type PostsTab = "mine" | "review" | "published" | "feedback" | "history";
+export type PostsTab = "mine" | "review" | "published" | "feedback" | "history" | "pendingPublish";
 export type AdminTab = "users" | "bans" | "metadata" | "bots" | "publish" | "pluginConfig";
 export type TenantRole = "submitter" | "broadcaster" | "reviewer" | "admin";
 export type SystemRole = "operations_admin" | "system_operator";
@@ -166,6 +166,10 @@ export type TenantMetadata = {
   heatBoardMaxTagCount: number;
   /** 吉祥萌宠插件是否启用；关闭时服务页入口与侧边栏/页头 Live2D 小狗隐藏 */
   enableLingling: boolean;
+  /** 游客投稿插件是否启用；开启时登录页允许访客用 QQ 号 + 用户名 + 密码注册 */
+  enableGuestSubmission?: boolean;
+  /** 运营模式：manual 为无 Bot 模式，审核通过的稿件进入待发布列表 */
+  operateMode?: "bot" | "manual";
 };
 
 export type BotMessageTypeConfig = {
@@ -230,6 +234,8 @@ export type TenantPluginConfig = {
     appId: string;
     appKey: string;
     endpoint: string;
+    /** 首次扫码即自动建号并加入本墙（关闭时只做登录/绑定） */
+    autoCreateAccount: boolean;
   };
   /** 广播通知插件：开关 + 快选生效时长 */
   broadcast: {
@@ -269,6 +275,10 @@ export type TenantPluginConfig = {
   };
   /** 吉祥萌宠插件：开关 */
   lingling: {
+    enabled: boolean;
+  };
+  /** 游客投稿插件：开放 QQ 号 + 用户名 + 密码自助注册 */
+  guestSubmission: {
     enabled: boolean;
   };
 };
@@ -981,6 +991,21 @@ export type AuditLogItem = {
     qqUin: string;
     displayName: string | null;
   } | null;
+};
+
+/** 无 Bot 模式的待发布稿件（审核通过，等待管理员手动发布）。 */
+export type PendingPublishItem = {
+  id: string;
+  displayId: number;
+  text: string;
+  anonymous: boolean;
+  attachmentCount: number;
+  createdAt: string;
+  author: {
+    id: string;
+    qqUin: string;
+    displayName: string | null;
+  };
 };
 
 export type FeedbackMessageItem = {

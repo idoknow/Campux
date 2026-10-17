@@ -289,6 +289,7 @@ export function registerPluginRoutes(app: FastifyInstance, pluginRegistry: Plugi
       ["todayInHistory", before.todayInHistory, saved.todayInHistory],
       ["heatBoard", before.heatBoard, saved.heatBoard],
       ["commentManagement", before.commentManagement, saved.commentManagement],
+      ["guestSubmission", before.guestSubmission, saved.guestSubmission],
     ];
     for (const [pluginId, beforeValue, afterValue] of pluginSections) {
       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {

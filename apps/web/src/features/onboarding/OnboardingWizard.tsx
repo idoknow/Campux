@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
-import { CheckIcon, CopyIcon, Loader2Icon, QrCodeIcon, RotateCcwIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, Loader2Icon, PowerIcon, QrCodeIcon, RotateCcwIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import type { AdminBotAccount } from "@/types/app";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,8 @@ export function OnboardingWizard({
   const [qrLogin, setQrLogin] = useState<QrLoginState>({ open: false, botId: "", loginId: "", qrImage: "", status: "", message: "" });
 
   const [publishMode, setPublishMode] = useState<"single" | "accumulate">("single");
+  const [operateMode, setOperateMode] = useState<"bot" | "manual">("bot");
+  const [switchingOperateMode, setSwitchingOperateMode] = useState(false);
   const [accumulateMin, setAccumulateMin] = useState(6);
   const [accumulateMax, setAccumulateMax] = useState(9);
   const [savingPublishMode, setSavingPublishMode] = useState(false);
@@ -106,9 +108,10 @@ export function OnboardingWizard({
   // Load the current announcement so the info step shows what's already set.
   useEffect(() => {
     let ignore = false;
-    void api<{ banner?: string }>("/api/tenant/metadata")
+    void api<{ banner?: string; operateMode?: "bot" | "manual" }>("/api/tenant/metadata")
       .then((data) => {
         if (!ignore && typeof data.banner === "string") setBanner(data.banner);
+        if (!ignore && data.operateMode) setOperateMode(data.operateMode);
       })
       .catch(() => undefined);
     return () => {
@@ -133,6 +136,27 @@ export function OnboardingWizard({
     if (!botName) setBotName(`${tenant.name} 墙号`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.name]);
+
+  async function setOperateModePersisted(next: "bot" | "manual") {
+    setSwitchingOperateMode(true);
+    try {
+      await api("/api/admin/tenant/metadata", {
+        method: "PATCH",
+        body: JSON.stringify({ operateMode: next }),
+      });
+      setOperateMode(next);
+      if (next === "manual") {
+        toast.success("已切换为无 Bot 模式运营");
+        setStep("done");
+      } else {
+        toast.success("已切换回接入墙号机器人");
+      }
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "切换运营模式失败");
+    } finally {
+      setSwitchingOperateMode(false);
+    }
+  }
 
   async function saveInfo() {
     setSavingInfo(true);
@@ -261,7 +285,7 @@ export function OnboardingWizard({
     onEnterWorkspace();
   }
 
-  const currentIndex = STEP_ORDER.indexOf(step);
+  const visibleSteps = operateMode === "manual" ? STEP_ORDER.filter((item) => item !== "publish") : STEP_ORDER;
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
@@ -281,7 +305,7 @@ export function OnboardingWizard({
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-4 py-6">
-        <StepRail steps={STEP_ORDER} current={step} botOnline={botOnline} />
+        <StepRail steps={visibleSteps} current={step} botOnline={botOnline} />
 
         <div className="mt-5 min-w-0 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           {step === "info" ? (
@@ -311,7 +335,31 @@ export function OnboardingWizard({
           {step === "bot" ? (
             <section className="grid gap-4">
               <StepTitle index={2} title="接入墙号机器人" hint="用墙号 QQ 登录 NapCat，并把连接地址填进去。连接成功即代表墙号通过认证。" />
-              {loadingBots ? (
+              {operateMode === "manual" ? (
+                <div className="grid min-w-0 gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/30">
+                  <div className="flex items-center gap-2">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-white text-sky-700 ring-1 ring-sky-200 dark:bg-slate-900 dark:text-sky-300">
+                      <PowerIcon className="size-4" />
+                    </span>
+                    <p className="text-sm font-bold text-slate-900 dark:text-slate-100">当前为无 Bot 模式运营</p>
+                  </div>
+                  <p className="text-xs font-semibold leading-5 text-slate-600 dark:text-slate-300">
+                    不接入任何 QQ 机器人。稿件审核通过后进入「稿件 · 待发布」，由管理员在网页端渲染、保存图片并手动发到 QQ 空间，
+                    再回到「待发布」点「确认已发布」即可归入已发布分组。群通知、自动发布、空间评论管理等功能不会生效。
+                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setStep("info")}>上一步</Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" disabled={switchingOperateMode} onClick={() => void setOperateModePersisted("bot")}>
+                        {switchingOperateMode ? <Loader2Icon className="animate-spin" data-icon="inline-start" /> : null}
+                        改回接入墙号机器人
+                      </Button>
+                      <Button onClick={() => setStep("done")}>下一步</Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {operateMode === "manual" ? null : loadingBots ? (
                 <p className="text-sm font-semibold text-slate-500">正在读取墙号状态…</p>
               ) : !primaryBot ? (
                 <div className="grid min-w-0 gap-3">
@@ -324,6 +372,18 @@ export function OnboardingWizard({
                   <Field label="审核群号（可选）">
                     <Input value={reviewGroup} onChange={(event) => setReviewGroup(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="接收新稿件和审核通知的 QQ 群" />
                   </Field>
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/40">
+                    <p className="text-sm font-bold text-slate-900 dark:text-slate-100">不想接入机器人？用无 Bot 模式运营</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-600 dark:text-slate-300">
+                      不登录 NapCat、不建墙号。稿件审核通过后进入「稿件 · 待发布」，由管理员在网页端渲染、保存图片并手动发到 QQ 空间，
+                      发完后点「确认已发布」即可归入已发布分组。适合人手充足、暂不打算上机器人的校园墙。
+                    </p>
+                    <Button className="mt-2" variant="outline" size="sm" disabled={switchingOperateMode} onClick={() => void setOperateModePersisted("manual")}>
+                      {switchingOperateMode ? <Loader2Icon className="animate-spin" data-icon="inline-start" /> : null}
+                      <PowerIcon data-icon="inline-start" />
+                      无 Bot 模式运营
+                    </Button>
+                  </div>
                   <div className="flex items-center justify-between gap-2">
                     <Button variant="ghost" size="sm" onClick={() => setStep("info")}>上一步</Button>
                     <Button disabled={creatingBot} onClick={() => void createBot()}>
@@ -450,8 +510,13 @@ export function OnboardingWizard({
               <div className="mx-auto grid size-12 place-items-center rounded-full bg-green-50 text-green-600 ring-1 ring-green-200">
                 <CheckIcon className="size-6" />
               </div>
-              <StepTitle index={4} title="开通完成" hint="墙号已接入，校园墙可以开始收稿了。" center />
-              {!publishReady ? (
+              <StepTitle index={4} title="开通完成" hint={operateMode === "manual" ? "已选择无 Bot 模式：审核通过的稿件会进入「待发布」，由管理员手动发布并确认。" : "墙号已接入，校园墙可以开始收稿了。"} center />
+              {operateMode === "manual" ? (
+                <p className="text-xs font-semibold text-sky-700 dark:text-sky-300">
+                  别忘了在「管理 · 插件配置」里按需开启「游客投稿」，让普通同学用 QQ 号、用户名和密码自行注册登录投稿。
+                </p>
+              ) : null}
+              {!publishReady && operateMode !== "manual" ? (
                 <p className="text-xs font-semibold text-amber-600">提示：还没有配置 QQ 空间登录态，审核通过的稿件暂时无法自动发布。进入后可在「发布管理」补上。</p>
               ) : null}
               <div className="flex justify-center">
@@ -461,7 +526,7 @@ export function OnboardingWizard({
           ) : null}
         </div>
 
-        <p className="mt-4 text-center text-xs font-semibold text-slate-400">第 {currentIndex + 1} / {STEP_ORDER.length} 步</p>
+        <p className="mt-4 text-center text-xs font-semibold text-slate-400">第 {visibleSteps.indexOf(step) + 1} / {visibleSteps.length} 步</p>
       </main>
 
       <Dialog open={qrLogin.open} onOpenChange={(open) => setQrLogin((current) => ({ ...current, open }))}>

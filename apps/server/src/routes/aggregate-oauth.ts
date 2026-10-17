@@ -21,6 +21,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { createHmac, randomBytes } from "node:crypto";
+import { Prisma, hashPassword } from "@campux/db";
 import { z } from "zod";
 import type { CampuxConfig } from "@campux/config";
 import {
@@ -331,11 +332,40 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
 
     const session = await getSessionContext(request);
 
-    // 未登录：仅当该身份已绑定某账号时完成登录；否则提示先绑定，不做注册。
+    // 未登录：已绑定则直接登录；开启自动建号时，首次扫码就建号并加入本墙。
     if (!session) {
       if (!identity) {
-        // 未绑定的第三方身份绝不自动建号：回登录页提示先登录已有账号完成绑定。
-        return reply.redirect(`/login?aggregate_unbound=1&provider=${encodeURIComponent(state.p)}`);
+        if (!plugin.autoCreateAccount) {
+          // 未开启自动建号：保留严格行为，回登录页提示先登录已有账号完成绑定。
+          return reply.redirect(`/login?aggregate_unbound=1&provider=${encodeURIComponent(state.p)}`);
+        }
+
+        // QQ 号作为账号唯一标识：聚合站返回的 openid 一般不暴露真实 QQ 号，
+        // 因此生成一个未占用的合成 QQ 号作为登录账号，真实身份靠 OAuthIdentity 关联。
+        const syntheticQqUin = await generateSyntheticQqUin(prisma);
+        const created = await prisma.user.create({
+          data: {
+            qqUin: syntheticQqUin,
+            displayName: name?.trim() || `用户${providerUserId.slice(-6)}`,
+            // 随机初始密码：主要登录入口是第三方扫码；用户可在账户设置里设密码。
+            passwordHash: await hashPassword(randomBytes(18).toString("base64url")),
+            passwordChangeRequired: false,
+            isTestAccount: false,
+            systemRole: null,
+            memberships: {
+              create: { tenantId: tenant.id, role: "submitter" },
+            },
+            oauthIdentities: {
+              create: buildIdentityCreate(provider, providerUserId, name, avatar),
+            },
+          },
+          select: { id: true, memberships: { where: { tenantId: tenant.id }, select: { id: true, role: true } } },
+        });
+
+        const token = await createSession(created.id, tenant.id);
+        setSessionCookie(reply, token);
+        const to = state.r && state.r.startsWith("/") ? state.r : "/";
+        return reply.redirect(to);
       }
       const targetUser = await prisma.user.findUnique({
         where: { id: identity.userId },
@@ -367,7 +397,7 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
     if (!identity) {
       // createMany + skipDuplicates：吞掉并发下两次 findUnique==null 但先后 create 命中唯一键的竞态。
       const created = await prisma.oAuthIdentity.createMany({
-        data: buildIdentityCreate(session.user.id, provider, providerUserId, name, avatar),
+        data: buildIdentityCreateForUser(session.user.id, provider, providerUserId, name, avatar),
         skipDuplicates: true,
       });
       if (created.count === 0) {
@@ -425,6 +455,17 @@ export function registerAggregateOAuthRoutes(app: FastifyInstance, _config: Camp
   });
 }
 
+async function generateSyntheticQqUin(client: Pick<typeof prisma, "user">): Promise<bigint> {
+  for (let index = 0; index < 10; index += 1) {
+    const candidate = BigInt(`8${Date.now()}${Math.floor(Math.random() * 900) + 100}`);
+    const existing = await client.user.findUnique({ where: { qqUin: candidate }, select: { id: true } });
+    if (!existing) {
+      return candidate;
+    }
+  }
+  throw new Error("无法生成账号编号，请重试");
+}
+
 async function loadIdentities(userId: string) {
   const rows = await prisma.oAuthIdentity.findMany({
     where: { userId },
@@ -438,14 +479,12 @@ async function loadIdentities(userId: string) {
 }
 
 function buildIdentityCreate(
-  userId: string,
   provider: string,
   providerUserId: string,
   name: string | undefined,
   avatar: string | undefined,
-): { userId: string; provider: string; providerUserId: string; name?: string; avatar?: string } {
-  const data: { userId: string; provider: string; providerUserId: string; name?: string; avatar?: string } = {
-    userId,
+): Prisma.OAuthIdentityCreateWithoutUserInput {
+  const data: Prisma.OAuthIdentityCreateWithoutUserInput = {
     provider,
     providerUserId,
   };
@@ -456,4 +495,14 @@ function buildIdentityCreate(
     data.avatar = avatar;
   }
   return data;
+}
+
+function buildIdentityCreateForUser(
+  userId: string,
+  provider: string,
+  providerUserId: string,
+  name: string | undefined,
+  avatar: string | undefined,
+): Prisma.OAuthIdentityUncheckedCreateInput {
+  return { ...buildIdentityCreate(provider, providerUserId, name, avatar), userId };
 }

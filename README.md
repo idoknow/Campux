@@ -38,6 +38,8 @@
 
 此外还有：
 
+- **无 Bot 模式运营**：不接任何 QQ 机器人也能开墙。审核通过的稿件进入「稿件 · 待发布」，由管理员渲染图片、手动发到空间后一键确认，支持分页、多选批量确认与逐条失败明细；从无 Bot 切回机器人模式时可一键把滞留稿件补入自动发布队列。
+- **多种进站方式**：QQ 号 + 用户名 + 密码自助注册（游客投稿开关控制）、QQ 聚合登录（可开关首次扫码自动建号），以及带频率限制与过期提示的忘记密码流程。
 - **OneBot v11 机器人接入**：墙号机器人私聊注册、重置密码、审核群命令、扫码登录、cookies 健康检查。
 - **两种部署模式**：自用单墙（隐藏多租户，开箱即用）或多租户运营平台（多个运营者自助开墙）。
 - **引导式初始化**：全新实例首次打开走「初始化向导」创建管理员，无需手动改库。
@@ -52,6 +54,7 @@
 完整文档见 **[docs.campux.top](https://docs.campux.top)**。
 
 - 运营管理员：[自助开墙](https://docs.campux.top/operator/self-service-onboarding) · [运营手册](https://docs.campux.top/operator/overview) · [OneBot 接入](https://docs.campux.top/reference/onebot) · [配置参考](https://docs.campux.top/reference/configuration)
+- 接口与状态：[待发布队列](https://docs.campux.top/reference/pending-publish) · [登录与密码](https://docs.campux.top/reference/auth-and-password) · [发布状态](https://docs.campux.top/reference/publish-states)
 - 系统维护者：[部署与快速开始](https://docs.campux.top/getting-started) · [系统维护手册](https://docs.campux.top/admin/overview) · [故障排查](https://docs.campux.top/admin/troubleshooting)
 
 ## 自托管部署
