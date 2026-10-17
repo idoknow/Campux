@@ -14,7 +14,7 @@ import { Lightbox } from '@/components/campux/Lightbox';
 /** Campux 官网首页（单页落地页） */
 export default function HomePage() {
   // 全站主题状态统一在这里维护，Navbar 内部再切一次会导致状态不同步
-  const { theme, toggleTheme } = useTheme();
+  const { theme, resolvedTheme, toggleTheme } = useTheme();
   const [lightbox, setLightbox] = useState<{ src: string; title: string } | null>(null);
 
   const openLightbox = (src: string, title: string) => setLightbox({ src, title });
@@ -22,7 +22,7 @@ export default function HomePage() {
 
   return (
     <div className="relative min-h-screen w-full overflow-x-clip">
-      <Navbar theme={theme} onToggleTheme={toggleTheme} />
+      <Navbar theme={theme} resolvedTheme={resolvedTheme} onToggleTheme={toggleTheme} />
       <main className="flex-1">
         <HeroSection onImageClick={openLightbox} />
         <WhySection />

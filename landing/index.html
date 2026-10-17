@@ -16,7 +16,8 @@
           var saved = localStorage.getItem('campux-theme');
           var dark =
             saved === 'dark' ||
-            (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            ((saved === 'system' || !saved) &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
           document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
         } catch (e) {}
