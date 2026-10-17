@@ -852,6 +852,13 @@ async function uploadQZoneImage({
     };
 
     if (!response.ok) {
+      // 非 2xx 响应也可能携带嵌套的登录错误（如 {"data":{"ret":-100,"msg":"登录失败…"}}），
+      // 先解析响应体暴露真实原因（含「登录」才能被发布流程识别为登录态失效），再退回笼统的 HTTP 状态错误
+      try {
+        getPicBoAndRichval(parsed, text);
+      } catch (cause) {
+        throw new QZonePublishError(cause instanceof Error ? cause.message : String(cause), verbose);
+      }
       throw new QZonePublishError(`QZone 图片上传 HTTP ${response.status} ${response.statusText || ""}`.trim(), verbose);
     }
     const uploadInfo = getPicBoAndRichval(parsed, text);
@@ -1148,8 +1155,9 @@ function getPicBoAndRichval(parsed: unknown, rawText: string) {
   const nestedData = record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : null;
   const ret = toNumber(record.ret) ?? (nestedData ? toNumber(nestedData.ret) : null);
   if (ret !== 0) {
+    // 嵌套的 data.msg 优先：顶层 msg 可能是一般性错误描述，登录信号通常在嵌套结构里
     const reason =
-      firstString(record.message, record.msg, nestedData?.message, nestedData?.msg) ??
+      firstString(nestedData?.message, nestedData?.msg, record.message, record.msg) ??
       (ret !== null ? `错误码 ${ret}` : `无法识别的响应：${truncate(rawText, 300)}`);
     throw new Error(`QZone 图片上传被拒绝：${reason}`);
   }
