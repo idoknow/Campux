@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowUpRight, Cloud, Github, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LINKS } from '@/lib/campux';
-import type { ThemeMode } from '@/hooks/useTheme';
+import type { ResolvedTheme, ThemeMode } from '@/hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,12 +35,13 @@ const SHEET_ENTER_STEP_MS = 45;
 
 interface NavbarProps {
   theme: ThemeMode;
+  resolvedTheme: ResolvedTheme;
   onToggleTheme: () => void;
   onHomeClick?: () => void;
 }
 
 /** 顶部导航：玻璃拟态，下滑超过 40px 收缩为居中悬浮胶囊；移动端抽屉菜单 */
-export function Navbar({ theme, onToggleTheme, onHomeClick }: NavbarProps) {
+export function Navbar({ theme, resolvedTheme, onToggleTheme, onHomeClick }: NavbarProps) {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -129,7 +130,7 @@ export function Navbar({ theme, onToggleTheme, onHomeClick }: NavbarProps) {
               <Github className="h-3.5 w-3.5" />
             </a>
 
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} compact={scrolled} />
+            <ThemeToggle theme={theme} resolvedTheme={resolvedTheme} onToggle={onToggleTheme} compact={scrolled} />
 
             {/* Cloud 按钮 */}
             <Button
@@ -208,7 +209,7 @@ export function Navbar({ theme, onToggleTheme, onHomeClick }: NavbarProps) {
             }}
             className="animate-sheet-item-in mt-auto flex items-center justify-between gap-3 border-t border-border p-5"
           >
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <ThemeToggle theme={theme} resolvedTheme={resolvedTheme} onToggle={onToggleTheme} />
             <Button asChild className="flex-1 rounded-full font-medium">
               <a href={LINKS.cloud} target="_blank" rel="noreferrer">
                 <Cloud aria-hidden="true" className="h-4 w-4" />
