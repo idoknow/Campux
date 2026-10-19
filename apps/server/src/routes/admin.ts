@@ -364,28 +364,65 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     if (!membership) {
       return reply.code(404).send({ message: "该用户不属于当前校园墙" });
     }
-    if (membership.role === "admin" || membership.user.systemRole === "operations_admin" || membership.user.systemRole === "system_operator") {
-      return reply.code(409).send({ message: "不能重置管理员或平台角色的密码" });
-    }
 
     const tempPassword = `cp${randomInt(100_000, 999_999)}${randomInt(100_000, 999_999)}`;
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { id: membership.userId },
-        data: { passwordHash: await hashPassword(tempPassword), passwordChangeRequired: true },
-      }),
-      // 重置后让旧会话失效，避免残留登录态继续使用。
-      prisma.accountSession.deleteMany({ where: { userId: membership.userId } }),
-    ]);
+    const passwordHash = await hashPassword(tempPassword);
 
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "member.password.reset",
-      targetType: "user",
-      targetId: membership.userId,
-      detail: { qqUin: membership.user.qqUin.toString() },
+    // 密码与会话是全局生效的（跨租户），所以这里的边界要比「本墙成员」更严：
+    // 1) 目标只要在任何租户是管理员、或带平台角色，就禁止重置（否则本墙管理员可以
+    //    接管别墙管理员的账号）；
+    // 2) 校验与写入在同一事务里，避免并发改角色绕过；
+    // 3) 用条件更新保证只有本次实际写进去的临时密码才会被返回（并发重置不会返回失效密码）；
+    // 4) 一并撤销该账号的 OAuth 令牌，避免持旧 refresh token 的人继续换发访问令牌。
+    const reset = await prisma.$transaction(async (tx) => {
+      const adminMemberships = await tx.tenantMembership.count({
+        where: { userId: membership.userId, role: "admin" },
+      });
+      if (
+        adminMemberships > 0 ||
+        membership.user.systemRole === "operations_admin" ||
+        membership.user.systemRole === "system_operator"
+      ) {
+        return { ok: false as const, reason: "forbidden" as const };
+      }
+
+      const updated = await tx.user.updateMany({
+        where: { id: membership.userId, tokenVersion: membership.user.tokenVersion },
+        data: { passwordHash, passwordChangeRequired: true, tokenVersion: { increment: 1 } },
+      });
+      if (updated.count === 0) {
+        return { ok: false as const, reason: "conflict" as const };
+      }
+
+      await tx.accountSession.deleteMany({ where: { userId: membership.userId } });
+      await tx.oAuthAccessToken.updateMany({
+        where: { userId: membership.userId, revokedAt: null },
+        data: { revokedAt: new Date(), refreshExpiresAt: new Date() },
+      });
+      return { ok: true as const };
     });
+
+    if (!reset.ok) {
+      return reply.code(409).send({
+        message: reset.reason === "forbidden"
+          ? "不能重置管理员或平台角色的密码（该账号可能是其他校园墙的管理员）"
+          : "该成员刚刚被其他操作改动，请刷新后重试",
+      });
+    }
+
+    // 审计日志写失败不应把已提交的重置吞掉：否则管理员拿不到临时密码、成员也登不上。
+    try {
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "member.password.reset",
+        targetType: "user",
+        targetId: membership.userId,
+        detail: { qqUin: membership.user.qqUin.toString() },
+      });
+    } catch (error) {
+      app.log.warn({ error, userId: membership.userId }, "failed to write audit log for password reset");
+    }
 
     return { ok: true, qqUin: membership.user.qqUin.toString(), tempPassword };
   });

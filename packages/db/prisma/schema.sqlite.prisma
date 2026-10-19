@@ -9,6 +9,7 @@ datasource db {
 }
 
 
+
 enum TenantStatus {
   active
   paused
@@ -116,6 +117,8 @@ model User {
   displayName String?
   passwordHash String
   passwordChangeRequired Boolean @default(false)
+  // 密码版本号：每次改密 +1，用于让旧会话一次性失效（管理员重置、自助改密、找回密码）。
+  tokenVersion Int                @default(0)
   autoFollowOwnPosts Boolean       @default(true)
   isTestAccount Boolean           @default(false)
   systemRole  SystemRole?
@@ -199,6 +202,8 @@ model OAuthIdentity {
 model EmailVerificationCode {
   id         String    @id @default(uuid())
   email      String
+  // 发起者账号 ID：用于按账号限流，以及把密码重置码绑定到具体账号。
+  userId     String?
   codeHash   String
   purpose    String
   attempts   Int       @default(0)
@@ -207,6 +212,7 @@ model EmailVerificationCode {
   createdAt  DateTime  @default(now())
 
   @@index([email, purpose, createdAt])
+  @@index([userId, purpose, createdAt])
   @@index([expiresAt])
 }
 
@@ -222,6 +228,8 @@ model AccountSession {
   userId           String
   tokenHash        String   @unique
   selectedTenantId String?
+  // 签发时的 User.tokenVersion；与当前值不一致即视为已失效（密码被改过）。
+  tokenVersion     Int      @default(0)
   expiresAt        DateTime
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

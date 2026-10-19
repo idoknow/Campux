@@ -24,6 +24,7 @@ CREATE TABLE "User" (
     "displayName" TEXT,
     "passwordHash" TEXT NOT NULL,
     "passwordChangeRequired" BOOLEAN NOT NULL DEFAULT false,
+    "tokenVersion" INTEGER NOT NULL DEFAULT 0,
     "autoFollowOwnPosts" BOOLEAN NOT NULL DEFAULT true,
     "isTestAccount" BOOLEAN NOT NULL DEFAULT false,
     "systemRole" TEXT,
@@ -78,6 +79,7 @@ CREATE TABLE "OAuthIdentity" (
 CREATE TABLE "EmailVerificationCode" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "email" TEXT NOT NULL,
+    "userId" TEXT,
     "codeHash" TEXT NOT NULL,
     "purpose" TEXT NOT NULL,
     "attempts" INTEGER NOT NULL DEFAULT 0,
@@ -100,6 +102,7 @@ CREATE TABLE "AccountSession" (
     "userId" TEXT NOT NULL,
     "tokenHash" TEXT NOT NULL,
     "selectedTenantId" TEXT,
+    "tokenVersion" INTEGER NOT NULL DEFAULT 0,
     "expiresAt" DATETIME NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
@@ -613,6 +616,9 @@ CREATE UNIQUE INDEX "OAuthIdentity_provider_providerUserId_key" ON "OAuthIdentit
 
 -- CreateIndex
 CREATE INDEX "EmailVerificationCode_email_purpose_createdAt_idx" ON "EmailVerificationCode"("email", "purpose", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "EmailVerificationCode_userId_purpose_createdAt_idx" ON "EmailVerificationCode"("userId", "purpose", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "EmailVerificationCode_expiresAt_idx" ON "EmailVerificationCode"("expiresAt");

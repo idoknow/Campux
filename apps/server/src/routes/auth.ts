@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { hashPassword, Prisma, verifyPassword } from "@campux/db";
+import { hashPassword, Prisma, TransactionIsolationLevel, verifyPassword } from "@campux/db";
 import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { clearSessionCookie, createSession, findActiveBan, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
@@ -10,6 +10,7 @@ import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
+import { isTransactionSerializationFailure, retryTransactionSerializationFailures } from "../lib/tenant-membership-removal";
 import { findManagementHostByRequest, findTenantByRequestHost } from "../lib/tenant-host";
 import { getDeployMode, resolveSingleModeTenantId } from "../lib/deploy-mode";
 
@@ -101,14 +102,37 @@ const RESET_CODE_TTL_SECONDS = 10 * 60;
 
 const BIND_EMAIL_PURPOSE = "email_bind";
 const BIND_CODE_TTL_SECONDS = 10 * 60;
+// 按账号（登录用户）的发送限流：防止同一账号向大量不同地址发信。
+const ACCOUNT_SEND_COOLDOWN_SECONDS = 60;
+const ACCOUNT_SEND_HOURLY_LIMIT = 10;
+// 邮件投递的兜底超时：避免服务商卡住时请求一直挂着。
+const BIND_EMAIL_SEND_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => rejectPromise(new Error("email send timed out")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolvePromise(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        rejectPromise(error);
+      },
+    );
+  });
+}
+
+type DbClient = Prisma.TransactionClient | typeof prisma;
 
 /** 频率限制检查：返回需要拒绝时的提示与重试秒数。 */
-async function checkCodeRateLimit(emailKey: string, purpose: string) {
+async function checkCodeRateLimit(client: DbClient, key: string, purpose: string) {
   const now = Date.now();
   const sinceHour = new Date(now - 60 * 60 * 1_000);
-  const recent = await prisma.emailVerificationCode.findMany({
+  const recent = await client.emailVerificationCode.findMany({
     where: {
-      email: emailKey,
+      email: key,
       purpose,
       createdAt: { gte: sinceHour },
     },
@@ -132,8 +156,36 @@ async function checkCodeRateLimit(emailKey: string, purpose: string) {
   return null;
 }
 
-async function checkResetCodeRateLimit(emailKey: string) {
-  return checkCodeRateLimit(emailKey, RESET_PASSWORD_PURPOSE);
+async function checkResetCodeRateLimit(key: string) {
+  return checkCodeRateLimit(prisma, key, RESET_PASSWORD_PURPOSE);
+}
+
+/**
+ * 按账号（登录用户）限制发码频率：只按收件地址限流时，同一账号可以给大量地址发信。
+ * 与收件地址的限流相互独立，两者都通过才允许发码。
+ */
+async function checkAccountSendLimit(client: DbClient, userId: string, purpose: string) {
+  const now = Date.now();
+  const sinceHour = new Date(now - 60 * 60 * 1_000);
+  const recent = await client.emailVerificationCode.findMany({
+    where: { userId, purpose, createdAt: { gte: sinceHour } },
+    select: { createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const latest = recent[0];
+  if (latest) {
+    const elapsedSeconds = (now - latest.createdAt.getTime()) / 1_000;
+    if (elapsedSeconds < ACCOUNT_SEND_COOLDOWN_SECONDS) {
+      return {
+        retryAfterSeconds: Math.ceil(ACCOUNT_SEND_COOLDOWN_SECONDS - elapsedSeconds),
+        reason: "cooldown" as const,
+      };
+    }
+  }
+  if (recent.length >= ACCOUNT_SEND_HOURLY_LIMIT) {
+    return { retryAfterSeconds: 60 * 60, reason: "hourly" as const };
+  }
+  return null;
 }
 
 /** 取 zod 校验失败的首条中文提示，避免 .parse() 抛错变成 500。 */
@@ -567,6 +619,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       data: {
         passwordHash: await hashPassword(body.newPassword),
         passwordChangeRequired: false,
+        // 递增密码版本号，让其他设备上的旧会话失效。
+        tokenVersion: { increment: 1 },
       },
     });
 
@@ -606,6 +660,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       data: {
         passwordHash: await hashPassword(body.newPassword),
         passwordChangeRequired: false,
+        // 递增密码版本号，让其他设备上的旧会话失效。
+        tokenVersion: { increment: 1 },
       },
     });
 
@@ -659,6 +715,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         prisma.emailVerificationCode.create({
           data: {
             email: `identity:${user.id}`,
+            userId: user.id,
             codeHash: hashEmailCode(`identity:${user.id}`, code),
             purpose: RESET_PASSWORD_PURPOSE,
             expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
@@ -692,6 +749,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     await prisma.emailVerificationCode.create({
       data: {
         email: user.email,
+        userId: user.id,
         codeHash: hashEmailCode(user.email, code),
         purpose: RESET_PASSWORD_PURPOSE,
         expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
@@ -704,8 +762,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       channel: "email" as const,
       email: maskEmail(user.email),
       expiresInSeconds: RESET_CODE_TTL_SECONDS,
-      // 未配置邮件服务时直接返回验证码，保证自托管环境可用（与注册流程一致）。
-      ...(sent.skipped ? { devCode: code } : {}),
+      // 仅在开发环境回显验证码（未配置邮件服务时）；生产环境回显等于把重置码直接交给请求方。
+      ...(config.nodeEnv === "development" && sent.skipped ? { devCode: code } : {}),
     };
   });
 
@@ -746,11 +804,16 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(429).send({ code: "CODE_ATTEMPTS", message: "验证码尝试次数过多，请重新获取" });
     }
     if (latestRecord.codeHash !== hashEmailCode(resetEmailKey, body.code)) {
-      await prisma.emailVerificationCode.update({
-        where: { id: latestRecord.id },
+      // 原子消费一次尝试机会：并发猜测无法再基于同一个旧计数全部通过。
+      const consumed = await prisma.emailVerificationCode.updateMany({
+        where: { id: latestRecord.id, attempts: { lt: 5 } },
         data: { attempts: { increment: 1 } },
       });
-      const remaining = Math.max(0, 4 - latestRecord.attempts);
+      if (consumed.count === 0) {
+        return reply.code(429).send({ code: "CODE_ATTEMPTS", message: "验证码尝试次数过多，请重新获取" });
+      }
+      const fresh = await prisma.emailVerificationCode.findUnique({ where: { id: latestRecord.id }, select: { attempts: true } });
+      const remaining = Math.max(0, 5 - (fresh?.attempts ?? 5));
       return reply.code(400).send({
         code: "CODE_INVALID",
         message: remaining > 0 ? `验证码不正确，还可以尝试 ${remaining} 次` : "验证码不正确，请重新获取",
@@ -767,6 +830,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         where: { id: user.id },
         data: { passwordHash: await hashPassword(body.newPassword), passwordChangeRequired: false },
       }),
+      // 递增密码版本号：旧会话（含改密前登录、改密后才建会话的竞态会话）立即失效。
+      prisma.user.update({ where: { id: user.id }, data: { tokenVersion: { increment: 1 } } }),
       // 重置密码后让旧会话失效，避免残留登录态继续使用。
       prisma.accountSession.deleteMany({ where: { userId: user.id } }),
     ]);
@@ -796,40 +861,78 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(409).send({ message: "该邮箱已被其他账号绑定，请换一个邮箱" });
     }
 
-    const rateLimited = await checkCodeRateLimit(email, BIND_EMAIL_PURPOSE);
-    if (rateLimited) {
+    // 限流检查与验证码落库放在同一个 Serializable 事务里：并发请求不会再基于
+    // 同一个旧计数全部通过，也不会在没有任何记录前并发把信发出去。
+    let issued: { kind: "issued"; code: string } | { kind: "limited"; retryAfterSeconds: number; reason: string };
+    try {
+      issued = await retryTransactionSerializationFailures(
+        () =>
+          prisma.$transaction(
+            async (tx) => {
+              const recipientLimited = await checkCodeRateLimit(tx, email, BIND_EMAIL_PURPOSE);
+              if (recipientLimited) {
+                return { kind: "limited" as const, ...recipientLimited };
+              }
+              const accountLimited = await checkAccountSendLimit(tx, context.user.id, BIND_EMAIL_PURPOSE);
+              if (accountLimited) {
+                return { kind: "limited" as const, ...accountLimited };
+              }
+              const code = generateEmailCode();
+              await tx.emailVerificationCode.create({
+                data: {
+                  email,
+                  userId: context.user.id,
+                  codeHash: hashEmailCode(email, code),
+                  purpose: BIND_EMAIL_PURPOSE,
+                  expiresAt: new Date(Date.now() + BIND_CODE_TTL_SECONDS * 1_000),
+                },
+              });
+              return { kind: "issued" as const, code };
+            },
+            { isolationLevel: TransactionIsolationLevel.Serializable },
+          ),
+        isTransactionSerializationFailure,
+      );
+    } catch {
+      return reply.code(500).send({ message: "发送验证码失败，请稍后重试" });
+    }
+
+    if (issued.kind === "limited") {
       return reply.code(429).send({
         code: "RATE_LIMITED",
-        message: rateLimited.reason === "cooldown"
-          ? `验证码发送过于频繁，请 ${rateLimited.retryAfterSeconds} 秒后再试`
-          : "该邮箱获取验证码次数过多，请 1 小时后再试",
-        retryAfterSeconds: rateLimited.retryAfterSeconds,
+        message: issued.reason === "cooldown"
+          ? `验证码发送过于频繁，请 ${issued.retryAfterSeconds} 秒后再试`
+          : "获取验证码次数过多，请 1 小时后再试",
+        retryAfterSeconds: issued.retryAfterSeconds,
       });
     }
 
-    const code = generateEmailCode();
-    await prisma.emailVerificationCode.create({
-      data: {
-        email,
-        codeHash: hashEmailCode(email, code),
-        purpose: BIND_EMAIL_PURPOSE,
-        expiresAt: new Date(Date.now() + BIND_CODE_TTL_SECONDS * 1_000),
-      },
-    });
-
-    const sent = await sendEmail(config, {
-      to: email,
-      subject: "Campux 绑定邮箱验证码",
-      html: `<p>你正在把该邮箱绑定为 Campux 账号邮箱，验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>验证码 ${BIND_CODE_TTL_SECONDS / 60} 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`,
-      text: `你正在把该邮箱绑定为 Campux 账号邮箱，验证码是：${code}\n验证码 ${BIND_CODE_TTL_SECONDS / 60} 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`,
-    });
+    const code = issued.code;
+    let sent: { skipped: boolean };
+    try {
+      sent = await withTimeout(
+        sendEmail(config, {
+          to: email,
+          subject: "Campux 绑定邮箱验证码",
+          html: `<p>你正在把该邮箱绑定为 Campux 账号邮箱，验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>验证码 ${BIND_CODE_TTL_SECONDS / 60} 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`,
+          text: `你正在把该邮箱绑定为 Campux 账号邮箱，验证码是：${code}\n验证码 ${BIND_CODE_TTL_SECONDS / 60} 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`,
+        }),
+        BIND_EMAIL_SEND_TIMEOUT_MS,
+      );
+    } catch {
+      // 投递失败时删掉刚落库的验证码：否则它会触发冷却，用户既没收到码也无法立刻重试。
+      await prisma.emailVerificationCode.deleteMany({
+        where: { email, userId: context.user.id, purpose: BIND_EMAIL_PURPOSE, consumedAt: null },
+      });
+      return reply.code(502).send({ message: "验证码邮件发送失败，请稍后重试" });
+    }
 
     return {
       ok: true,
       email: maskEmail(email),
       expiresInSeconds: BIND_CODE_TTL_SECONDS,
-      // 未配置邮件服务时直接返回验证码，保证自托管环境可用（与注册流程一致）。
-      ...(sent.skipped ? { devCode: code } : {}),
+      // 仅在开发环境回显验证码（未配置邮件服务时）；生产环境回显等于把绑定码直接交给请求方。
+      ...(config.nodeEnv === "development" && sent.skipped ? { devCode: code } : {}),
     };
   });
 
@@ -858,24 +961,50 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(429).send({ code: "CODE_ATTEMPTS", message: "验证码尝试次数过多，请重新获取" });
     }
     if (latestRecord.codeHash !== hashEmailCode(email, parsed.data.code)) {
-      await prisma.emailVerificationCode.update({ where: { id: latestRecord.id }, data: { attempts: { increment: 1 } } });
-      const remaining = Math.max(0, 4 - latestRecord.attempts);
+      // 原子消费一次尝试机会：并发猜测无法再基于同一个旧计数全部通过。
+      const consumed = await prisma.emailVerificationCode.updateMany({
+        where: { id: latestRecord.id, attempts: { lt: 5 } },
+        data: { attempts: { increment: 1 } },
+      });
+      if (consumed.count === 0) {
+        return reply.code(429).send({ code: "CODE_ATTEMPTS", message: "验证码尝试次数过多，请重新获取" });
+      }
+      const fresh = await prisma.emailVerificationCode.findUnique({ where: { id: latestRecord.id }, select: { attempts: true } });
+      const remaining = Math.max(0, 5 - (fresh?.attempts ?? 5));
       return reply.code(400).send({ code: "CODE_INVALID", message: remaining > 0 ? `验证码不正确，还可以尝试 ${remaining} 次` : "验证码不正确，请重新获取" });
     }
 
-    // 绑定前再查一次唯一性；并发冲突时下面事务抛错并转 409。
+    // 绑定前再查一次唯一性。
     const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (existing && existing.id !== context.user.id) {
       return reply.code(409).send({ code: "EMAIL_TAKEN", message: "该邮箱已被其他账号绑定，请换一个邮箱" });
     }
 
+    const previousEmail = context.user.email;
+    // 条件更新：只在邮箱仍等于读取时的值时才写入，避免并发绑定/解绑互相覆盖。
+    const emailUpdate = await prisma.user.updateMany({
+      where: { id: context.user.id, email: previousEmail },
+      data: { email },
+    });
+    if (emailUpdate.count === 0) {
+      return reply.code(409).send({ code: "EMAIL_CHANGED", message: "邮箱状态已变化，请重新获取验证码" });
+    }
+
     try {
       await prisma.$transaction([
         prisma.emailVerificationCode.update({ where: { id: latestRecord.id }, data: { consumedAt: new Date(), attempts: { increment: 1 } } }),
-        prisma.user.update({ where: { id: context.user.id }, data: { email } }),
+        // 撤销该地址上遗留的密码重置码：邮箱改绑后，旧主人的码不能用来重置新主人。
+        prisma.emailVerificationCode.deleteMany({ where: { email, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } }),
+        ...(previousEmail
+          ? [prisma.emailVerificationCode.deleteMany({ where: { email: previousEmail, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } })]
+          : []),
       ]);
-    } catch {
-      return reply.code(409).send({ code: "EMAIL_TAKEN", message: "该邮箱已被其他账号绑定，请换一个邮箱" });
+    } catch (error) {
+      // 只有邮箱唯一性冲突才转 409，其他错误照常抛出。
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return reply.code(409).send({ code: "EMAIL_TAKEN", message: "该邮箱已被其他账号绑定，请换一个邮箱" });
+      }
+      throw error;
     }
 
     return { ok: true, email };
@@ -898,7 +1027,12 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(409).send({ message: "当前账号尚未绑定邮箱" });
     }
 
-    await prisma.user.update({ where: { id: user.id }, data: { email: null } });
+    const releasedEmail = user.email;
+    // 解绑时撤销该地址上遗留的密码重置码：否则旧主人留下的码可能被后来绑定该地址的人用来重置。
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { email: null } }),
+      prisma.emailVerificationCode.deleteMany({ where: { email: releasedEmail, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } }),
+    ]);
     return { ok: true };
   });
 
