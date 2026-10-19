@@ -7,6 +7,7 @@ import { StatsPage } from "@/features/stats/StatsPage";
 import { ServicesPage } from "@/features/services/ServicesPage";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { DesktopSidebar } from "./DesktopSidebar";
+import { EmailBindBanner } from "./EmailBindBanner";
 import { Header } from "./Header";
 import { MobileTabBar } from "./MobileTabBar";
 
@@ -121,6 +122,8 @@ export function AppShell({
 
         <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:mx-auto md:max-w-[980px] md:border-x md:border-slate-200">
           <Header me={me} selectedTenant={me.currentTenant} showPet={metadata.enableLingling} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} />
+
+          {!me.user.email ? <EmailBindBanner userId={me.user.id} /> : null}
 
           <main className="min-h-0 flex-1 overflow-hidden">
             <TabsContent value="post" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
