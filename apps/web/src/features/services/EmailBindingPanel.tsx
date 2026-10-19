@@ -105,13 +105,13 @@ export function EmailBindingPanel({ email, onDone }: { email: string | null; onD
         <p className="text-base font-semibold">邮箱绑定</p>
       </div>
       <p className="mt-2 text-sm leading-6 text-slate-600">
-        绑定邮箱后，你可以在「忘记密码」时通过邮件验证码自助重置，也能接收校园墙通知。无 Bot 模式下这是主要的账号联系方式。
+        绑定邮箱后，你可以在「忘记密码」时通过邮件验证码自助重置密码。无 Bot 模式下这是账号重要的联系方式。
       </p>
 
       <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
         {email
           ? `当前绑定邮箱：${email}`
-          : "尚未绑定邮箱。切换无 Bot 模式后将无法接收通知、也无法自助找回密码。"}
+          : "尚未绑定邮箱。切换无 Bot 模式后将无法自助找回密码。"}
       </div>
 
       <form
@@ -121,7 +121,17 @@ export function EmailBindingPanel({ email, onDone }: { email: string | null; onD
           void (sentTo ? confirmBind() : requestCode());
         }}
       >
-        <Input type="email" placeholder="要绑定的邮箱" value={target} onChange={(event) => setTarget(event.target.value)} />
+        <Input
+          type="email"
+          placeholder="要绑定的邮箱"
+          value={target}
+          onChange={(event) => {
+            setTarget(event.target.value);
+            // 改了邮箱就作废上一轮的发码状态，避免把 A 邮箱的验证码用到 B 邮箱上。
+            setSentTo(null);
+            setDevCode(null);
+          }}
+        />
         <div className="grid grid-cols-2 gap-2">
           <Input placeholder="6 位验证码" value={code} onChange={(event) => setCode(event.target.value)} />
           <Button type="button" variant="outline" disabled={busy || !target.trim()} onClick={() => void requestCode()}>

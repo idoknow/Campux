@@ -32,7 +32,8 @@ export function EmailBindBanner({ userId }: { userId: string }) {
   }
 
   function goBind() {
-    window.history.pushState(null, "", "/services");
+    // 带上 action，让服务页直接展开「邮箱绑定」面板。
+    window.history.pushState(null, "", "/services?action=email-binding");
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
@@ -41,7 +42,7 @@ export function EmailBindBanner({ userId }: { userId: string }) {
       <div className="mx-auto flex max-w-[980px] flex-wrap items-center gap-2">
         <MailIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" strokeWidth={2.3} />
         <p className="min-w-0 flex-1 text-xs leading-5 text-amber-900 dark:text-amber-200">
-          你还没有绑定邮箱。绑定后可在忘记密码时自助重置、并接收校园墙通知；未绑定将无法通过邮件找回密码。
+          你还没有绑定邮箱。绑定后可在忘记密码时通过邮件验证码自助重置密码；未绑定将无法通过邮件找回密码。
         </p>
         <button type="button" onClick={goBind} className="text-xs font-semibold text-amber-900 underline-offset-4 hover:underline dark:text-amber-100">
           去绑定

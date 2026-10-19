@@ -1551,6 +1551,10 @@ function MemberDetailDialog({
     if (!detail) {
       return;
     }
+    const name = detail.member.user.displayName ?? detail.member.user.qqUin;
+    if (!window.confirm(`确定要重置 ${name} 的密码吗？该用户的所有登录会话将失效。`)) {
+      return;
+    }
     setResetBusy(true);
     try {
       const data = await api<{ ok: true; qqUin: string; tempPassword: string }>(

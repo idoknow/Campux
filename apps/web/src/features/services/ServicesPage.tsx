@@ -44,6 +44,13 @@ function parseCampaignRoute(pathname: string, search: string) {
 
 type ServiceAction = "profile" | "password" | "rules" | "oauth-bindings" | "email-binding" | "";
 
+function readServiceAction(): ServiceAction {
+  const action = new URLSearchParams(window.location.search).get("action");
+  return action === "profile" || action === "password" || action === "rules" || action === "oauth-bindings" || action === "email-binding"
+    ? action
+    : "";
+}
+
 const servicePalettes = [
   {
     shell: "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10",
@@ -95,8 +102,13 @@ export function ServicesPage({
   const campaignRoute = parseCampaignRoute(window.location.pathname, window.location.search);
   const { accountServices, campusServices } = buildServiceEntries(metadata.services);
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
-  const [activeAction, setActiveAction] = useState<ServiceAction>("");
+  const [activeAction, setActiveAction] = useState<ServiceAction>(() => readServiceAction());
   const panelsRef = useRef<HTMLDivElement>(null);
+
+  // 路由变化（含横幅「去绑定」带过来的 ?action=）时同步当前展开的面板。
+  useEffect(() => {
+    setActiveAction(readServiceAction());
+  }, [tick]);
 
   // 账户设置/第三方登录的按钮点击后，对应面板渲染在页面底部；
   // 自动平滑滚动过去，避免面板出现在视口外。
