@@ -56,7 +56,7 @@ S3_PUBLIC_BASE_URL="https://cdn.example/campux"
 
 ### 关于邮件（Resend）
 
-多租户模式下运营者通过邮箱验证码自助注册。如果配置了 `RESEND_API_KEY`，验证码通过邮件发送；**未配置时不会报错**，验证码也不会出现在响应里（避免把验证码直接交给请求方）。本地联调需要看到验证码时，设置 `CAMPUX_EMAIL_EXPOSE_CODE=1`（详见[配置参考](/reference/configuration#邮件调试)）。单墙模式管理员账号在向导里直接创建，完全不依赖邮件。
+多租户模式下运营者通过邮箱验证码自助注册。如果配置了 `RESEND_API_KEY`，验证码通过邮件发送；**未配置时接口不会报错，但验证码既不发送也不会出现在响应里，运营者因此无法完成注册**——多租户生产部署必须配置 `RESEND_API_KEY`。本地联调需要看到验证码时，设置 `CAMPUX_EMAIL_EXPOSE_CODE=1`（详见[配置参考](/reference/configuration#邮件调试)）。单墙模式管理员账号在向导里直接创建，完全不依赖邮件。
 
 ## 首次检查
 
