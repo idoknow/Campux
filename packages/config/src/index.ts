@@ -27,6 +27,9 @@ const configSchema = z.object({
   CAMPUX_DB_PROVIDER: z.enum(["sqlite", "postgresql"]).optional(),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().default("Campux <noreply@campux.top>"),
+  // "true"/"1" 时，邮件投递被跳过（未配置 RESEND_API_KEY）的验证码会回显到接口响应里。
+  // 仅供本地联调，生产环境必须留空。
+  CAMPUX_EMAIL_EXPOSE_CODE: z.string().optional(),
   // Required in production (see ensureBotSessionSecretConfigured); used to
   // encrypt stored bot session cookies. Read here so it is validated/visible
   // centrally even though secret-json.ts also reads process.env directly.
@@ -165,6 +168,9 @@ export function loadConfig() {
     resend: {
       apiKey: env.RESEND_API_KEY,
       fromEmail: env.RESEND_FROM_EMAIL,
+      // 仅在显式打开时才把验证码回显到响应里（本地调试用）。默认关闭，
+      // 这样即使生产误配 NODE_ENV=development 也不会把绑定码直接交给请求方。
+      exposeCode: flagEnabled(env.CAMPUX_EMAIL_EXPOSE_CODE),
     },
     buildVersion: env.CAMPUX_BUILD_VERSION ?? "dev",
     telemetry: {

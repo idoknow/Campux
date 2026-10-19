@@ -417,7 +417,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
 
     return {
       ok: true,
-      ...(sent.skipped ? { devCode: code } : {}),
+      ...(config.resend.exposeCode && sent.skipped ? { devCode: code } : {}),
     };
   });
 
@@ -764,14 +764,14 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
           },
         }),
       ]);
-      // 生产环境不回显验证码：回显等于「报出 QQ 号即可重置」。改由用户用绑定的
-      // 第三方身份扫码登录后自行改密；仅开发环境保留回显，方便本地联调。
+      // 回显验证码等于「报出 QQ 号即可重置」，因此只在显式打开调试开关时回显；
+      // 否则改由用户用绑定的第三方身份扫码登录后自行改密。
       return {
         ok: true,
         channel: "identity" as const,
         providers: identities.map((identity) => identity.provider.replace(/^aggregate:/, "")),
         hint: "该账号未绑定邮箱。若已绑定第三方登录，可在登录页用对应身份扫码登录后到「服务 → 修改密码」重置；否则请联系校园墙管理员重置密码。",
-        ...(config.nodeEnv === "development" ? { devCode: code } : {}),
+        ...(config.resend.exposeCode ? { devCode: code } : {}),
         expiresInSeconds: RESET_CODE_TTL_SECONDS,
       };
     }
@@ -804,8 +804,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       channel: "email" as const,
       email: maskEmail(user.email),
       expiresInSeconds: RESET_CODE_TTL_SECONDS,
-      // 仅在开发环境回显验证码（未配置邮件服务时）；生产环境回显等于把重置码直接交给请求方。
-      ...(config.nodeEnv === "development" && sent.skipped ? { devCode: code } : {}),
+      // 只有显式打开调试开关且本次确实跳过投递时才回显；生产回显等于把重置码直接交给请求方。
+      ...(config.resend.exposeCode && sent.skipped ? { devCode: code } : {}),
     };
   });
 
@@ -973,8 +973,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       ok: true,
       email: maskEmail(email),
       expiresInSeconds: BIND_CODE_TTL_SECONDS,
-      // 仅在开发环境回显验证码（未配置邮件服务时）；生产环境回显等于把绑定码直接交给请求方。
-      ...(config.nodeEnv === "development" && sent.skipped ? { devCode: code } : {}),
+      // 只有在显式打开 CAMPUX_EMAIL_EXPOSE_CODE 且本次确实跳过了投递时才回显验证码。
+      // 生产环境绝不回显：回显等于把绑定码直接交给请求方，无需证明能访问该邮箱。
+      ...(config.resend.exposeCode && sent.skipped ? { devCode: code } : {}),
     };
   });
 
@@ -1075,11 +1076,19 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const releasedEmail = user.email;
-    // 解绑时撤销该地址上遗留的密码重置码：否则旧主人留下的码可能被后来绑定该地址的人用来重置。
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { email: null } }),
-      prisma.emailVerificationCode.deleteMany({ where: { email: releasedEmail, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } }),
-    ]);
+    // 条件更新 + 同事务清理：只在邮箱仍等于读取时的值时才解绑，避免与并发绑定互相覆盖；
+    // 同时撤销该地址上遗留的密码重置码，否则旧主人留下的码可能被后来绑定该地址的人用来重置。
+    const released = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.updateMany({ where: { id: user.id, email: releasedEmail }, data: { email: null } });
+      if (updated.count === 0) {
+        return false;
+      }
+      await tx.emailVerificationCode.deleteMany({ where: { email: releasedEmail, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } });
+      return true;
+    });
+    if (!released) {
+      return reply.code(409).send({ code: "EMAIL_CHANGED", message: "邮箱状态已变化，请刷新后重试" });
+    }
     return { ok: true };
   });
 
