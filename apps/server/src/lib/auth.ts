@@ -81,19 +81,21 @@ export function getCookie(request: FastifyRequest, name: string) {
   return undefined;
 }
 
-export async function createSession(userId: string, selectedTenantId?: string | null) {
+export async function createSession(userId: string, selectedTenantId?: string | null, verifiedTokenVersion?: number) {
   const token = issueSessionToken();
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + sessionMaxAgeSeconds * 1000);
 
-  // 记录签发时的密码版本号：之后任何改密都会让这批会话失效。
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true } });
+  // 优先使用「校验密码时」读到的版本号：校验之后发生的改密会让这个会话一出生就失效。
+  const tokenVersion = verifiedTokenVersion
+    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true } }))?.tokenVersion
+    ?? 0;
   await prisma.accountSession.create({
     data: {
       userId,
       tokenHash,
       selectedTenantId: selectedTenantId ?? null,
-      tokenVersion: user?.tokenVersion ?? 0,
+      tokenVersion,
       expiresAt,
     },
   });

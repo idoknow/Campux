@@ -304,7 +304,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         });
       }
 
-      const token = await createSession(user.id, hostTenant.id);
+      const token = await createSession(user.id, hostTenant.id, user.tokenVersion);
       setSessionCookie(reply, token);
       const visibleMemberships = hostMembership === undefined ? [] : [toMembership(hostMembership)];
 
@@ -338,7 +338,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         ?? (singleModeMembership ? user.memberships[0] : undefined)
       : user.systemRole === "system_operator" ? undefined : visibleMemberships.length === 1 ? visibleMemberships[0] : undefined;
     const selectedTenantId = singleModeTenantId && singleModeMembership ? singleModeTenantId : onlyMembership?.tenantId ?? null;
-    const token = await createSession(user.id, selectedTenantId);
+    const token = await createSession(user.id, selectedTenantId, user.tokenVersion);
     setSessionCookie(reply, token);
 
     if (singleModeTenantId && singleModeMembership) {
@@ -496,7 +496,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       });
     });
 
-    const token = await createSession(user.id, null);
+    const token = await createSession(user.id, null, user.tokenVersion);
     setSessionCookie(reply, token);
 
     return {
@@ -561,7 +561,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       data: { tenantId: hostTenant.id, userId: user.id, role: "submitter" },
     });
 
-    const token = await createSession(user.id, hostTenant.id);
+    const token = await createSession(user.id, hostTenant.id, user.tokenVersion);
     setSessionCookie(reply, token);
 
     const tenant = await prisma.tenant.findUniqueOrThrow({
@@ -612,16 +612,18 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(401).send({ message: "当前密码不正确" });
     }
 
-    await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        passwordHash: await hashPassword(body.newPassword),
-        passwordChangeRequired: false,
-        // 递增密码版本号，让其他设备上的旧会话失效。
-        tokenVersion: { increment: 1 },
-      },
+    const passwordHash = await hashPassword(body.newPassword);
+    await prisma.$transaction(async (tx) => {
+      // 递增密码版本号让其他设备上的旧会话失效；当前会话同步到新版本号，避免把自己踢下线。
+      const updated = await tx.user.update({
+        where: { id: user.id },
+        data: { passwordHash, passwordChangeRequired: false, tokenVersion: { increment: 1 } },
+        select: { tokenVersion: true },
+      });
+      await tx.accountSession.update({
+        where: { id: context.session.id },
+        data: { tokenVersion: updated.tokenVersion },
+      });
     });
 
     return { ok: true };
@@ -653,16 +655,18 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(409).send({ message: "当前账号不需要强制修改密码" });
     }
 
-    await prisma.user.update({
-      where: {
-        id: context.user.id,
-      },
-      data: {
-        passwordHash: await hashPassword(body.newPassword),
-        passwordChangeRequired: false,
-        // 递增密码版本号，让其他设备上的旧会话失效。
-        tokenVersion: { increment: 1 },
-      },
+    const passwordHash = await hashPassword(body.newPassword);
+    await prisma.$transaction(async (tx) => {
+      // 递增密码版本号让其他设备上的旧会话失效；当前会话同步到新版本号，避免把自己踢下线。
+      const updated = await tx.user.update({
+        where: { id: context.user.id },
+        data: { passwordHash, passwordChangeRequired: false, tokenVersion: { increment: 1 } },
+        select: { tokenVersion: true },
+      });
+      await tx.accountSession.update({
+        where: { id: context.session.id },
+        data: { tokenVersion: updated.tokenVersion },
+      });
     });
 
     return { ok: true };
@@ -858,7 +862,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
     const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (existing) {
-      return reply.code(409).send({ message: "该邮箱已被其他账号绑定，请换一个邮箱" });
+      return reply.code(409).send({ code: "EMAIL_TAKEN", message: "该邮箱已被其他账号绑定，请换一个邮箱" });
     }
 
     // 限流检查与验证码落库放在同一个 Serializable 事务里：并发请求不会再基于
@@ -981,24 +985,29 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const previousEmail = context.user.email;
-    // 条件更新：只在邮箱仍等于读取时的值时才写入，避免并发绑定/解绑互相覆盖。
-    const emailUpdate = await prisma.user.updateMany({
-      where: { id: context.user.id, email: previousEmail },
-      data: { email },
-    });
-    if (emailUpdate.count === 0) {
-      return reply.code(409).send({ code: "EMAIL_CHANGED", message: "邮箱状态已变化，请重新获取验证码" });
-    }
-
     try {
-      await prisma.$transaction([
-        prisma.emailVerificationCode.update({ where: { id: latestRecord.id }, data: { consumedAt: new Date(), attempts: { increment: 1 } } }),
+      // 邮箱写入、验证码消费、重置码清理放在同一事务：并发绑定时 P2002 也能转 409，
+      // 且不会出现「邮箱已改但码没消费」的中间态。
+      const changed = await prisma.$transaction(async (tx) => {
+        // 条件更新：只在邮箱仍等于读取时的值时才写入，避免并发绑定/解绑互相覆盖。
+        const emailUpdate = await tx.user.updateMany({
+          where: { id: context.user.id, email: previousEmail },
+          data: { email },
+        });
+        if (emailUpdate.count === 0) {
+          return false;
+        }
+        await tx.emailVerificationCode.update({ where: { id: latestRecord.id }, data: { consumedAt: new Date(), attempts: { increment: 1 } } });
         // 撤销该地址上遗留的密码重置码：邮箱改绑后，旧主人的码不能用来重置新主人。
-        prisma.emailVerificationCode.deleteMany({ where: { email, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } }),
-        ...(previousEmail
-          ? [prisma.emailVerificationCode.deleteMany({ where: { email: previousEmail, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } })]
-          : []),
-      ]);
+        await tx.emailVerificationCode.deleteMany({ where: { email, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } });
+        if (previousEmail) {
+          await tx.emailVerificationCode.deleteMany({ where: { email: previousEmail, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null } });
+        }
+        return true;
+      });
+      if (!changed) {
+        return reply.code(409).send({ code: "EMAIL_CHANGED", message: "邮箱状态已变化，请重新获取验证码" });
+      }
     } catch (error) {
       // 只有邮箱唯一性冲突才转 409，其他错误照常抛出。
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

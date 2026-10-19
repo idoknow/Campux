@@ -374,33 +374,43 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
     // 2) 校验与写入在同一事务里，避免并发改角色绕过；
     // 3) 用条件更新保证只有本次实际写进去的临时密码才会被返回（并发重置不会返回失效密码）；
     // 4) 一并撤销该账号的 OAuth 令牌，避免持旧 refresh token 的人继续换发访问令牌。
-    const reset = await prisma.$transaction(async (tx) => {
-      const adminMemberships = await tx.tenantMembership.count({
-        where: { userId: membership.userId, role: "admin" },
-      });
-      if (
-        adminMemberships > 0 ||
-        membership.user.systemRole === "operations_admin" ||
-        membership.user.systemRole === "system_operator"
-      ) {
-        return { ok: false as const, reason: "forbidden" as const };
-      }
+    const reset = await retryTransactionSerializationFailures(
+      () =>
+        prisma.$transaction(async (tx) => {
+          // 只允许重置「当前租户是唯一归属」的普通成员：其他租户的成员、任何租户的
+          // 管理员、平台角色都拒绝，避免跨租户账号接管。systemRole 也在事务内读，
+          // 避免校验与写入之间被并发改动。
+          const [target, privilegedOrForeign] = await Promise.all([
+            tx.user.findUnique({ where: { id: membership.userId }, select: { systemRole: true } }),
+            tx.tenantMembership.count({
+              where: {
+                userId: membership.userId,
+                OR: [{ role: "admin" }, { tenantId: { not: context.selectedTenant.id } }],
+              },
+            }),
+          ]);
+          if (!target || privilegedOrForeign > 0 || target.systemRole !== null) {
+            return { ok: false as const, reason: "forbidden" as const };
+          }
 
-      const updated = await tx.user.updateMany({
-        where: { id: membership.userId, tokenVersion: membership.user.tokenVersion },
-        data: { passwordHash, passwordChangeRequired: true, tokenVersion: { increment: 1 } },
-      });
-      if (updated.count === 0) {
-        return { ok: false as const, reason: "conflict" as const };
-      }
+          const updated = await tx.user.updateMany({
+            where: { id: membership.userId, tokenVersion: membership.user.tokenVersion },
+            data: { passwordHash, passwordChangeRequired: true, tokenVersion: { increment: 1 } },
+          });
+          if (updated.count === 0) {
+            return { ok: false as const, reason: "conflict" as const };
+          }
 
-      await tx.accountSession.deleteMany({ where: { userId: membership.userId } });
-      await tx.oAuthAccessToken.updateMany({
-        where: { userId: membership.userId, revokedAt: null },
-        data: { revokedAt: new Date(), refreshExpiresAt: new Date() },
-      });
-      return { ok: true as const };
-    });
+          await tx.accountSession.deleteMany({ where: { userId: membership.userId } });
+          await tx.oAuthAccessToken.updateMany({
+            where: { userId: membership.userId, revokedAt: null },
+            data: { revokedAt: new Date(), refreshExpiresAt: new Date() },
+          });
+          return { ok: true as const };
+        },
+        { isolationLevel: TransactionIsolationLevel.Serializable }),
+      isTransactionSerializationFailure,
+    );
 
     if (!reset.ok) {
       return reply.code(409).send({
