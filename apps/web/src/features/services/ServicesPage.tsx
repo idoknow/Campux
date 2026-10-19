@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, MailIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
@@ -13,6 +13,7 @@ import { CampaignsPage } from "./CampaignsPage";
 import { AboutPage } from "./AboutPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { OAuthBindingsPanel } from "./OAuthBindingsPanel";
+import { EmailBindingPanel } from "./EmailBindingPanel";
 import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
 import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import { GraduationsPage } from "@/features/graduation/GraduationsPage";
@@ -41,7 +42,7 @@ function parseCampaignRoute(pathname: string, search: string) {
 
 
 
-type ServiceAction = "profile" | "password" | "rules" | "oauth-bindings" | "";
+type ServiceAction = "profile" | "password" | "rules" | "oauth-bindings" | "email-binding" | "";
 
 const servicePalettes = [
   {
@@ -294,6 +295,20 @@ export function ServicesPage({
               <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             </button>
             ) : null}
+            <button
+              type="button"
+              onClick={() => setActiveAction("email-binding")}
+              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-blue">
+                <MailIcon className="size-5" strokeWidth={2.1} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">邮箱绑定</span>
+                <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">绑定后可用邮箱找回密码、接收通知</span>
+              </span>
+              <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+            </button>
           </ServiceGroup>
 
           {campusServices.length > 0 ? (
@@ -329,6 +344,7 @@ export function ServicesPage({
           {activeAction === "password" ? <PasswordPanel onDone={(message) => toast.success(message)} /> : null}
           {activeAction === "rules" ? <RulesPanel rules={rules} /> : null}
           {activeAction === "oauth-bindings" ? <OAuthBindingsPanel /> : null}
+          {activeAction === "email-binding" ? <EmailBindingPanel email={me.user.email} onDone={onProfileSaved} /> : null}
         </div>
       </div>
     </div>
