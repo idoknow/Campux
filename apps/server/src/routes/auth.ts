@@ -613,18 +613,37 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const passwordHash = await hashPassword(body.newPassword);
-    await prisma.$transaction(async (tx) => {
-      // 递增密码版本号让其他设备上的旧会话失效；当前会话同步到新版本号，避免把自己踢下线。
-      const updated = await tx.user.update({
-        where: { id: user.id },
-        data: { passwordHash, passwordChangeRequired: false, tokenVersion: { increment: 1 } },
-        select: { tokenVersion: true },
-      });
-      await tx.accountSession.update({
-        where: { id: context.session.id },
-        data: { tokenVersion: updated.tokenVersion },
-      });
-    });
+    const sessionStale = await retryTransactionSerializationFailures(
+      async () => {
+        let stale = false;
+        await prisma.$transaction(
+          async (tx) => {
+            // 条件更新：只有用户版本号仍等于 requireSession 当时接受的版本时才写。否则说明
+            // 期间有人改过密码（并发改密 / 管理员重置），这个过期请求既不能改密，也不能把
+            // 自己救活 —— 直接放弃整个事务。
+            const updated = await tx.user.updateMany({
+              where: { id: user.id, tokenVersion: context.session.tokenVersion },
+              data: { passwordHash, passwordChangeRequired: false, tokenVersion: { increment: 1 } },
+            });
+            if (updated.count === 0) {
+              stale = true;
+              return;
+            }
+            // 递增密码版本号让其他设备上的旧会话失效；当前会话同步到新版本号，避免把自己踢下线。
+            await tx.accountSession.update({
+              where: { id: context.session.id },
+              data: { tokenVersion: context.session.tokenVersion + 1 },
+            });
+          },
+          { isolationLevel: TransactionIsolationLevel.Serializable },
+        );
+        return stale;
+      },
+      isTransactionSerializationFailure,
+    );
+    if (sessionStale) {
+      return reply.code(409).send({ code: "SESSION_STALE", message: "登录状态已过期，请重新登录后重试" });
+    }
 
     return { ok: true };
   });
@@ -656,18 +675,37 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const passwordHash = await hashPassword(body.newPassword);
-    await prisma.$transaction(async (tx) => {
-      // 递增密码版本号让其他设备上的旧会话失效；当前会话同步到新版本号，避免把自己踢下线。
-      const updated = await tx.user.update({
-        where: { id: context.user.id },
-        data: { passwordHash, passwordChangeRequired: false, tokenVersion: { increment: 1 } },
-        select: { tokenVersion: true },
-      });
-      await tx.accountSession.update({
-        where: { id: context.session.id },
-        data: { tokenVersion: updated.tokenVersion },
-      });
-    });
+    const sessionStale = await retryTransactionSerializationFailures(
+      async () => {
+        let stale = false;
+        await prisma.$transaction(
+          async (tx) => {
+            // 条件更新：只有用户版本号仍等于 requireSession 当时接受的版本时才写。否则说明
+            // 期间有人改过密码（并发改密 / 管理员重置），这个过期请求既不能改密，也不能把
+            // 自己救活 —— 直接放弃整个事务。
+            const updated = await tx.user.updateMany({
+              where: { id: context.user.id, tokenVersion: context.session.tokenVersion },
+              data: { passwordHash, passwordChangeRequired: false, tokenVersion: { increment: 1 } },
+            });
+            if (updated.count === 0) {
+              stale = true;
+              return;
+            }
+            // 递增密码版本号让其他设备上的旧会话失效；当前会话同步到新版本号，避免把自己踢下线。
+            await tx.accountSession.update({
+              where: { id: context.session.id },
+              data: { tokenVersion: context.session.tokenVersion + 1 },
+            });
+          },
+          { isolationLevel: TransactionIsolationLevel.Serializable },
+        );
+        return stale;
+      },
+      isTransactionSerializationFailure,
+    );
+    if (sessionStale) {
+      return reply.code(409).send({ code: "SESSION_STALE", message: "登录状态已过期，请重新登录后重试" });
+    }
 
     return { ok: true };
   });
