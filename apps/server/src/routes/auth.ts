@@ -4,7 +4,7 @@ import { hashPassword, Prisma, verifyPassword } from "@campux/db";
 import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { clearSessionCookie, createSession, findActiveBan, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
-import { generateEmailCode, hashEmailCode, normalizeEmail, sendVerificationEmail } from "../lib/email";
+import { generateEmailCode, hashEmailCode, normalizeEmail, sendEmail, sendVerificationEmail } from "../lib/email";
 import { readTenantOperateMode } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { prisma } from "../lib/prisma";
@@ -82,20 +82,34 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(6).max(128),
 });
 
+// 绑定邮箱：允许任意有效邮箱（不限于 QQ 邮箱），用于接收通知与找回密码。
+export const bindEmailSchema = z
+  .string()
+  .trim()
+  .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "请输入有效的邮箱地址")
+  .max(255);
+
+const bindEmailRequestCodeSchema = z.object({ email: bindEmailSchema });
+const bindEmailConfirmSchema = z.object({ email: bindEmailSchema, code: z.string().trim().regex(/^\d{6}$/, "验证码格式不正确") });
+const unbindEmailSchema = z.object({ password: z.string().min(1, "请输入当前密码") });
+
 const RESET_PASSWORD_PURPOSE = "password_reset";
 // 验证码频率限制：60 秒内只能发一次；同一账号 1 小时最多 5 次。
 const RESET_CODE_COOLDOWN_SECONDS = 60;
 const RESET_CODE_HOURLY_LIMIT = 5;
 const RESET_CODE_TTL_SECONDS = 10 * 60;
 
+const BIND_EMAIL_PURPOSE = "email_bind";
+const BIND_CODE_TTL_SECONDS = 10 * 60;
+
 /** 频率限制检查：返回需要拒绝时的提示与重试秒数。 */
-async function checkResetCodeRateLimit(emailKey: string) {
+async function checkCodeRateLimit(emailKey: string, purpose: string) {
   const now = Date.now();
   const sinceHour = new Date(now - 60 * 60 * 1_000);
   const recent = await prisma.emailVerificationCode.findMany({
     where: {
       email: emailKey,
-      purpose: RESET_PASSWORD_PURPOSE,
+      purpose,
       createdAt: { gte: sinceHour },
     },
     select: { createdAt: true },
@@ -116,6 +130,15 @@ async function checkResetCodeRateLimit(emailKey: string) {
     return { retryAfterSeconds: 60 * 60, reason: "hourly" as const };
   }
   return null;
+}
+
+async function checkResetCodeRateLimit(emailKey: string) {
+  return checkCodeRateLimit(emailKey, RESET_PASSWORD_PURPOSE);
+}
+
+/** 取 zod 校验失败的首条中文提示，避免 .parse() 抛错变成 500。 */
+function firstIssueMessage(result: { success: false; error: { issues: Array<{ message?: string }> } }, fallback: string) {
+  return result.error.issues[0]?.message ?? fallback;
 }
 
 function parseAccountKey(account: string): { email: string } | { qqUin: bigint } | null {
@@ -746,6 +769,134 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       prisma.accountSession.deleteMany({ where: { userId: user.id } }),
     ]);
 
+    return { ok: true };
+  });
+
+  // ── 绑定邮箱 ──────────────────────────────────────────
+  // 切换到无 Bot 模式后，普通用户只能靠邮箱接收通知、自助找回密码，
+  // 因此补一个登录后可自助绑定的入口（原先 email 只能在注册时写入一次）。
+
+  app.post("/api/auth/email/bind/request-code", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const parsed = bindEmailRequestCodeSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: firstIssueMessage(parsed, "请求参数不正确") });
+    }
+    const email = normalizeEmail(parsed.data.email);
+    if (context.user.email === email) {
+      return reply.code(409).send({ message: "该邮箱已是当前账号的绑定邮箱" });
+    }
+    const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) {
+      return reply.code(409).send({ message: "该邮箱已被其他账号绑定，请换一个邮箱" });
+    }
+
+    const rateLimited = await checkCodeRateLimit(email, BIND_EMAIL_PURPOSE);
+    if (rateLimited) {
+      return reply.code(429).send({
+        code: "RATE_LIMITED",
+        message: rateLimited.reason === "cooldown"
+          ? `验证码发送过于频繁，请 ${rateLimited.retryAfterSeconds} 秒后再试`
+          : "该邮箱获取验证码次数过多，请 1 小时后再试",
+        retryAfterSeconds: rateLimited.retryAfterSeconds,
+      });
+    }
+
+    const code = generateEmailCode();
+    await prisma.emailVerificationCode.create({
+      data: {
+        email,
+        codeHash: hashEmailCode(email, code),
+        purpose: BIND_EMAIL_PURPOSE,
+        expiresAt: new Date(Date.now() + BIND_CODE_TTL_SECONDS * 1_000),
+      },
+    });
+
+    const sent = await sendEmail(config, {
+      to: email,
+      subject: "Campux 绑定邮箱验证码",
+      html: `<p>你正在把该邮箱绑定为 Campux 账号邮箱，验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>验证码 ${BIND_CODE_TTL_SECONDS / 60} 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`,
+      text: `你正在把该邮箱绑定为 Campux 账号邮箱，验证码是：${code}\n验证码 ${BIND_CODE_TTL_SECONDS / 60} 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`,
+    });
+
+    return {
+      ok: true,
+      email: maskEmail(email),
+      expiresInSeconds: BIND_CODE_TTL_SECONDS,
+      // 未配置邮件服务时直接返回验证码，保证自托管环境可用（与注册流程一致）。
+      ...(sent.skipped ? { devCode: code } : {}),
+    };
+  });
+
+  app.post("/api/auth/email/bind", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const parsed = bindEmailConfirmSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: firstIssueMessage(parsed, "请求参数不正确") });
+    }
+    const email = normalizeEmail(parsed.data.email);
+
+    const latestRecord = await prisma.emailVerificationCode.findFirst({
+      where: { email, purpose: BIND_EMAIL_PURPOSE, consumedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latestRecord) {
+      return reply.code(400).send({ code: "CODE_MISSING", message: "还没有获取过验证码，请先点击获取验证码" });
+    }
+    if (latestRecord.expiresAt.getTime() <= Date.now()) {
+      return reply.code(400).send({ code: "CODE_EXPIRED", message: `验证码已过期（有效期 ${BIND_CODE_TTL_SECONDS / 60} 分钟），请重新获取` });
+    }
+    if (latestRecord.attempts >= 5) {
+      return reply.code(429).send({ code: "CODE_ATTEMPTS", message: "验证码尝试次数过多，请重新获取" });
+    }
+    if (latestRecord.codeHash !== hashEmailCode(email, parsed.data.code)) {
+      await prisma.emailVerificationCode.update({ where: { id: latestRecord.id }, data: { attempts: { increment: 1 } } });
+      const remaining = Math.max(0, 4 - latestRecord.attempts);
+      return reply.code(400).send({ code: "CODE_INVALID", message: remaining > 0 ? `验证码不正确，还可以尝试 ${remaining} 次` : "验证码不正确，请重新获取" });
+    }
+
+    // 绑定前再查一次唯一性；并发冲突时下面事务抛错并转 409。
+    const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing && existing.id !== context.user.id) {
+      return reply.code(409).send({ code: "EMAIL_TAKEN", message: "该邮箱已被其他账号绑定，请换一个邮箱" });
+    }
+
+    try {
+      await prisma.$transaction([
+        prisma.emailVerificationCode.update({ where: { id: latestRecord.id }, data: { consumedAt: new Date(), attempts: { increment: 1 } } }),
+        prisma.user.update({ where: { id: context.user.id }, data: { email } }),
+      ]);
+    } catch {
+      return reply.code(409).send({ code: "EMAIL_TAKEN", message: "该邮箱已被其他账号绑定，请换一个邮箱" });
+    }
+
+    return { ok: true, email };
+  });
+
+  app.post("/api/auth/email/unbind", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const parsed = unbindEmailSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: firstIssueMessage(parsed, "请求参数不正确") });
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: context.user.id } });
+    if (!(await verifyPassword(parsed.data.password, user.passwordHash))) {
+      return reply.code(401).send({ message: "当前密码不正确" });
+    }
+    if (!user.email) {
+      return reply.code(409).send({ message: "当前账号尚未绑定邮箱" });
+    }
+
+    await prisma.user.update({ where: { id: user.id }, data: { email: null } });
     return { ok: true };
   });
 
