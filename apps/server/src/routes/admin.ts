@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import { randomInt } from "node:crypto";
 import { z } from "zod";
-import { Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
+import { hashPassword, Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import {
@@ -345,6 +346,48 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         operator: ban.operator,
       })),
     };
+  });
+
+  // 管理员重置成员密码：无 Bot 模式下，没绑邮箱也没绑定第三方登录的用户
+  // 无法自助找回密码，这是打破「忘记密码 ↔ 强制绑邮箱」死锁的兜底通道。
+  app.post("/api/admin/members/users/:userId/reset-password", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = memberUserParamsSchema.parse(request.params);
+
+    const membership = await prisma.tenantMembership.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        userId: params.userId,
+      },
+      include: { user: true },
+    });
+    if (!membership) {
+      return reply.code(404).send({ message: "该用户不属于当前校园墙" });
+    }
+    if (membership.role === "admin" || membership.user.systemRole === "operations_admin" || membership.user.systemRole === "system_operator") {
+      return reply.code(409).send({ message: "不能重置管理员或平台角色的密码" });
+    }
+
+    const tempPassword = `cp${randomInt(100_000, 999_999)}${randomInt(100_000, 999_999)}`;
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: membership.userId },
+        data: { passwordHash: await hashPassword(tempPassword), passwordChangeRequired: true },
+      }),
+      // 重置后让旧会话失效，避免残留登录态继续使用。
+      prisma.accountSession.deleteMany({ where: { userId: membership.userId } }),
+    ]);
+
+    await writeAuditLog({
+      tenantId: context.selectedTenant.id,
+      actorId: context.user.id,
+      action: "member.password.reset",
+      targetType: "user",
+      targetId: membership.userId,
+      detail: { qqUin: membership.user.qqUin.toString() },
+    });
+
+    return { ok: true, qqUin: membership.user.qqUin.toString(), tempPassword };
   });
 
   app.post("/api/admin/members", async (request, reply) => {

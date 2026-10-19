@@ -665,12 +665,14 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
           },
         }),
       ]);
-      // 自托管环境没有邮件服务时直接回显验证码；生产下请通过第三方渠道确认身份后再重置。
+      // 生产环境不回显验证码：回显等于「报出 QQ 号即可重置」。改由用户用绑定的
+      // 第三方身份扫码登录后自行改密；仅开发环境保留回显，方便本地联调。
       return {
         ok: true,
         channel: "identity" as const,
         providers: identities.map((identity) => identity.provider.replace(/^aggregate:/, "")),
-        devCode: code,
+        hint: "该账号未绑定邮箱。若已绑定第三方登录，可在登录页用对应身份扫码登录后到「服务 → 修改密码」重置；否则请联系校园墙管理员重置密码。",
+        ...(config.nodeEnv === "development" ? { devCode: code } : {}),
         expiresInSeconds: RESET_CODE_TTL_SECONDS,
       };
     }
