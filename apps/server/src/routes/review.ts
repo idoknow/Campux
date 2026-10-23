@@ -197,8 +197,10 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     const body = z.object({ matched: z.boolean(), humanAction: z.enum(["approve", "reject"]), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
     const saved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
       const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, post: { select: { tenantId: true, status: true } } } });
-      if (!analysis || analysis.post.tenantId !== context.selectedTenant.id || (body.humanAction === "approve" ? analysis.post.status !== "approved" : analysis.post.status !== "rejected")) return null;
-      const existing = await transaction.aiFeedback.findFirst({ where: { analysisId, tenantId: context.selectedTenant.id }, select: { id: true } });
+      const expectedFinalStatus = body.humanAction === "approve" ? "approved" : "rejected";
+      if (!analysis || analysis.post.tenantId !== context.selectedTenant.id || analysis.post.status !== expectedFinalStatus) return null;
+      const existing = await transaction.aiFeedback.findFirst({ where: { analysisId, tenantId: context.selectedTenant.id }, select: { id: true, humanAction: true } });
+      if (existing && existing.humanAction !== body.humanAction) return null;
       return transaction.aiFeedback.upsert({
         where: { id: existing?.id ?? "__missing__" },
         create: { tenantId: context.selectedTenant.id, postId: analysis.postId, analysisId, reviewerId: context.user.id, aiAction: analysis.suggestedAction, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched: body.matched },
