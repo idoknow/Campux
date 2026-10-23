@@ -2260,6 +2260,15 @@ function PostDetailDialog({
               <span>作者 ID：{post.author?.id ?? "未知"}</span>
             </div>
             <PostTimeline timeline={post.timeline} />
+            {post.aiReview ? (
+              <div className={`mt-3 rounded-md border p-3 text-sm ${post.aiReview.status === "completed" ? "border-violet-200 bg-violet-50" : "border-amber-200 bg-amber-50"}`} aria-label="AI 审核辅助状态">
+                {post.aiReview.status === "completed" && post.aiReview.assessment ? <>
+                  <p className="font-semibold text-violet-900">AI 辅助建议（仅供人工参考）· {post.aiReview.assessment.riskLevel === "high" ? "较高风险" : post.aiReview.assessment.riskLevel === "medium" ? "需留意" : "低风险"} · {post.aiReview.assessment.category}</p>
+                  <p className="mt-1 text-violet-900">{post.aiReview.assessment.reason}</p>
+                  <p className="mt-1 text-xs text-violet-700">置信度 {Math.round(post.aiReview.assessment.confidence * 100)}% · 审核员决定不受此建议影响</p>
+                </> : <p className="font-semibold text-amber-900">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>}
+              </div>
+            ) : null}
             {images.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {images.map((image, index) => (

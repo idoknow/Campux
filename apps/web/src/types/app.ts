@@ -440,6 +440,7 @@ export type ReviewPostItem = PostItem & {
     displayName: string | null;
   } | null;
   timeline?: PostTimelineEntry[];
+  aiReview?: { status: "completed" | "failed" | "unavailable"; assessment?: { riskLevel: "low" | "medium" | "high"; category: string; reason: string; confidence: number } } | null;
 };
 
 export type PublishedFeedAuthor = {
@@ -660,6 +661,7 @@ export type AdminBotAccount = {
 };
 
 export type AiRules = {
+  aiReviewMode?: "off" | "shadow" | "assist";
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;
   /** 是否启用投稿后的 LLM 自动打标 */

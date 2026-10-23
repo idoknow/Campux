@@ -46,6 +46,7 @@ import type { EventBus } from "@campux/plugin";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
 import { autoTagPost } from "../runtime/post-tagging";
+import { assessPostForReview } from "../runtime/post-review";
 import { verifyPublicForumMediaSignature } from "../lib/public-forum-media";
 import { getServerSigningSecret } from "../lib/server-signing-secret";
 import {
@@ -1183,6 +1184,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         logger: request.log,
       }).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to auto-tag post");
+      });
+      void assessPostForReview({ tenantId: context.selectedTenant.id, postId: post.id, logger: request.log }).catch((error) => {
+        app.log.warn({ error, postId: post.id }, "failed to assess post for AI review");
       });
 
       // 触发插件事件：稿件创建

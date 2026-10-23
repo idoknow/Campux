@@ -169,6 +169,7 @@ type AiSettingsForm = {
   temperature: number;
   timeoutSeconds: number;
   privatePostAiEnabled: boolean;
+  aiReviewMode: "off" | "shadow" | "assist";
   postTaggingEnabled: boolean;
   postTagMaintenanceEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
@@ -335,7 +336,6 @@ export function AdminPage({
   const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
   const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
   const [aiSectionOpen, setAiSectionOpen] = useState(false);
-  const [aiReviewSectionOpen, setAiReviewSectionOpen] = useState(false);
   const [oauthSectionOpen, setOAuthSectionOpen] = useState(false);
   const [members, setMembers] = useState<AdminMember[]>([]);
   const [bots, setBots] = useState<AdminBotAccount[]>([]);
@@ -594,6 +594,7 @@ export function AdminPage({
     if (!aiForm) return null;
     const rules: AiRules = {
       privatePostAiEnabled: aiForm.privatePostAiEnabled,
+      aiReviewMode: aiForm.aiReviewMode,
       postTaggingEnabled: aiForm.postTaggingEnabled,
       postTagMaintenanceEnabled: aiForm.postTagMaintenanceEnabled,
       privatePostAggregateDelaySeconds: aiForm.privatePostAggregateDelaySeconds,
@@ -1184,42 +1185,34 @@ export function AdminPage({
                   onSave={() => void saveSettings()}
                   onUploaded={onSaved}
                 />
-                {aiSettings && aiForm ? (
-                  <div className="product-surface overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setAiReviewSectionOpen((open) => !open)}
-                      aria-expanded={aiReviewSectionOpen}
-                      className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
-                    >
-                      <div>
-                        <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
-                        <p className="mt-1 text-sm text-slate-600">管理现有 AI 投稿辅助能力；不代替审核员决定通过或拒绝。</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
-                        <ChevronDownIcon className={`size-4 shrink-0 text-slate-400 transition-transform ${aiReviewSectionOpen ? "rotate-180" : ""}`} />
-                      </div>
-                    </button>
-                    {aiReviewSectionOpen ? (
-                      <div className="grid gap-3 border-t border-slate-200 p-4">
-                        <p className="text-xs leading-5 text-slate-500">当前服务端没有独立的自动内容审核/风险策略配置。以下开关复用已有 LLM 配置并通过「保存 LLM 设置」持久化，不会自动审核通过或拒绝稿件。</p>
-                        <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-3">
-                          <span><span className="block text-sm font-semibold text-slate-900">投稿后 AI 自动打标</span><span className="mt-1 block text-xs text-slate-500">为新投稿生成标签，不改变稿件审核状态。</span></span>
-                          <Switch checked={aiForm.postTaggingEnabled} disabled={busy || aiTesting} onCheckedChange={(checked) => setAiForm({ ...aiForm, postTaggingEnabled: checked })} aria-label="启用 AI 自动打标" />
-                        </label>
-                        <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-3">
-                          <span><span className="block text-sm font-semibold text-slate-900">AI 定期维护标签库</span><span className="mt-1 block text-xs text-slate-500">基于近期稿件维护标签库，不改变稿件审核状态。</span></span>
-                          <Switch checked={aiForm.postTagMaintenanceEnabled} disabled={busy || aiTesting} onCheckedChange={(checked) => setAiForm({ ...aiForm, postTagMaintenanceEnabled: checked })} aria-label="启用 AI 标签维护" />
-                        </label>
-                        <Button className="w-fit px-4" disabled={busy || aiTesting} onClick={() => void saveAiSettings()}>
-                          <SaveIcon data-icon="inline-start" />
-                          保存 LLM 设置
-                        </Button>
-                      </div>
-                    ) : null}
+                <details className="product-surface overflow-hidden">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
+                    <div>
+                      <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
+                      <p className="mt-1 text-sm text-slate-600">AI 仅提供建议，审核决定始终由人工做出。</p>
+                    </div>
+                    <Badge className="rounded-full bg-violet-50 text-violet-700 shadow-none">AI 辅助</Badge>
+                  </summary>
+                  <div className="border-t border-slate-200 px-4 py-3">
+                    <p className="text-sm leading-6 text-slate-600">AI 评估只作为审核员参考，不会自动通过或拒绝。失败时保留原人工审核流程。</p>
+                    <label className="mt-3 grid max-w-sm gap-1 text-sm font-medium">
+                      审核辅助模式
+                      <Select value={aiForm?.aiReviewMode ?? "off"} disabled={busy || aiTesting || !aiForm} onValueChange={(mode) => aiForm && setAiForm({ ...aiForm, aiReviewMode: mode as AiSettingsForm["aiReviewMode"] })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="off">关闭</SelectItem>
+                          <SelectItem value="shadow">仅审计记录</SelectItem>
+                          <SelectItem value="assist">展示给审核员</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-xs font-normal text-slate-500">使用已配置的 LLM；开启后投稿文字会发送给配置的模型服务，模型不会自动通过或拒绝稿件。</span>
+                    </label>
+                    <Button className="mt-3" disabled={busy || aiTesting || !aiForm} onClick={() => void saveAiSettings()}>
+                      <SaveIcon data-icon="inline-start" />
+                      保存审核设置
+                    </Button>
                   </div>
-                ) : null}
+                </details>
                 {aiSettings && aiForm ? (
                   <div className="product-surface overflow-hidden">
                     <button
@@ -4093,6 +4086,7 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     temperature: settings.temperature,
     timeoutSeconds: settings.timeoutSeconds,
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
+    aiReviewMode: settings.rules.aiReviewMode ?? "off",
     postTaggingEnabled: settings.rules.postTaggingEnabled ?? true,
     postTagMaintenanceEnabled: settings.rules.postTagMaintenanceEnabled ?? true,
     privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,

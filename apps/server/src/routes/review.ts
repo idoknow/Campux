@@ -10,6 +10,7 @@ import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedErro
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
+import { parsePersistedPostReviewDetail } from "../runtime/post-review";
 import { readTenantOperateMode, readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -159,6 +160,16 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         take: query.limit,
       }),
     ]);
+    const assessmentRows = await Promise.all(posts.map((post) => prisma.auditLog.findFirst({
+      where: { tenantId: context.selectedTenant.id, targetType: "post", targetId: post.id, action: "post.ai_review.assessed" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    })));
+    const assessmentByPost = new Map<string, NonNullable<(typeof assessmentRows)[number]>>(
+      posts.flatMap((post, index) => {
+        const row = assessmentRows[index];
+        return row ? [[post.id, row] as const] : [];
+      }),
+    );
 
     // 解析时间线里出现的操作人（actorId → 用户名/QQ），系统自动操作 actorId 为 null。
     const actorIds = [...new Set(posts.flatMap((post) => post.logs.map((log) => log.actorId).filter((id): id is string => Boolean(id))))];
@@ -177,6 +188,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           displayName: post.author.displayName,
         },
         timeline: toPostTimeline(post.logs, actorMap),
+        aiReview: parsePersistedPostReviewDetail(assessmentByPost.get(post.id)?.detail),
       })),
       pagination: toPagination(query.page, query.limit, total),
     };

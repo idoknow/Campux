@@ -31,6 +31,7 @@ import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, parsePostRecallOrCancelCommand, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
+import { assessPostForReview } from "./post-review";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { setBotCustomStylishMessages } from "../lib/bot-messages";
@@ -3028,6 +3029,9 @@ export class OneBotRuntime {
         this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
       });
     }
+    void assessPostForReview({ tenantId: bot.tenantId, postId: post.id, logger: this.logger }).catch((error) => {
+      this.logger.warn({ error, postId: post.id }, "failed to assess private post for AI review");
+    });
 
     return { post };
   }
