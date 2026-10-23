@@ -814,7 +814,7 @@ export function PostsPage({
         if (wantsFeedback) {
           const matched = window.confirm("人工结论与 AI 建议一致吗？确定为一致，取消为人工覆盖。");
           try {
-            await api(`/api/review/ai-feedback/${reviewed.aiReview.analysisId}`, { method: "POST", body: JSON.stringify({ matched, humanAction: action, humanComment: comment ?? null }) });
+            await api(`/api/review/ai-feedback/${reviewed.aiReview.analysisId}`, { method: "POST", body: JSON.stringify({ matched, humanAction: action, analysisMode: reviewed.aiReview.mode, humanComment: comment ?? null }) });
           } catch (feedbackError) {
             toast.error(feedbackError instanceof Error ? `反馈未保存；稿件审核已完成：${feedbackError.message}` : "反馈未保存；稿件审核已完成");
           }

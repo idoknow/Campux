@@ -19,8 +19,9 @@ describe("withTenantReviewSlot", () => {
 });
 describe("parsePostReviewAssessment", () => {
   it("does not make shadow analysis visible to reviewer results", () => {
-    const shadowRecord = { id: "analysis-1", status: "completed", riskLevel: "high", confidence: 0.9, categories: ["privacy"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["reason"], maskedText: null, rewrittenText: null, rejectionReason: null };
-    expect(parsePostReviewAnalysisRecord(shadowRecord)).not.toBeNull();
+    const shadowRecord = { id: "analysis-1", mode: "shadow", status: "completed", riskLevel: "high", confidence: 0.9, categories: ["privacy"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["reason"], maskedText: null, rewrittenText: null, rejectionReason: null };
+    expect(parsePostReviewAnalysisRecord(shadowRecord)).toBeNull();
+    expect(parsePostReviewAnalysisRecord({ ...shadowRecord, mode: "assist" })).toEqual(expect.objectContaining({ mode: "assist", status: "completed" }));
   });
   it("accepts only a bounded advisory assessment", () => {
     expect(parsePostReviewAssessment('{"riskLevel":"high","categories":["骚扰攻击"],"sensitiveFindings":[],"suggestedAction":"manual_review","reasons":["包含针对性攻击"],"confidence":0.92,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toEqual({
@@ -35,7 +36,7 @@ describe("parsePostReviewAssessment", () => {
   });
 
   it("validates persisted audit detail before returning it", () => {
-    expect(parsePersistedPostReviewDetail({ mode: "assist", status: "failed" })).toEqual({ status: "failed" });
+    expect(parsePersistedPostReviewDetail({ mode: "assist", status: "failed" })).toEqual({ mode: "assist", status: "failed" });
     expect(parsePersistedPostReviewDetail({ mode: "shadow", status: "completed" })).toBeNull();
     expect(parsePersistedPostReviewDetail({ mode: "assist", status: "completed", assessment: { riskLevel: "low" } })).toBeNull();
   });
