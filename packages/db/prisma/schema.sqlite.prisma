@@ -103,6 +103,10 @@ model Tenant {
   publishTargets PublishTarget[]
   auditLogs      AuditLog[]
   aiSettings     TenantAiSettings?
+  schoolEntities   SchoolEntity[]
+  schoolSnapshots  SchoolModelSnapshot[]
+  postAiAnalyses   PostAiAnalysis[]
+  aiFeedback       AiFeedback[]
   qzoneVisitorSnapshots QZoneVisitorSnapshot[]
   botFriendSnapshots BotFriendSnapshot[]
   publishBatches PublishBatch[]
@@ -131,6 +135,7 @@ model User {
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens OAuthAccessToken[]
   auditLogs   AuditLog[]
+  aiFeedback  AiFeedback[]
   postFollows PostFollow[]
   oauthIdentities OAuthIdentity[]
   feedbacks   TenantFeedback[]
@@ -381,9 +386,12 @@ model Post {
   qzonePostMetrics QZonePostMetric[]
   follows         PostFollow[]
   tagAssignments  PostTagAssignment[]
+  aiAnalyses      PostAiAnalysis[]
+  aiFeedback      AiFeedback[]
   batchItem       PublishBatchItem?
 
   @@unique([tenantId, displayId])
+  @@unique([tenantId, id])
   @@unique([tenantId, legacyDisplayId])
   @@index([tenantId, status, createdAt])
   @@index([tenantId, status, reviewQueueReminderSentAt])
@@ -760,7 +768,98 @@ model TenantAiSettings {
   tenant                     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
-// 意见反馈：投稿页入口提交，存档供管理员/本人在稿件页查看。
+// AI 审核副驾驶按租户隔离存储：分析永不改变稿件状态。
+model SchoolEntity {
+  id          String   @id @default(uuid())
+  tenantId    String
+  type        String
+  name        String
+  aliases     Json     @default("[]")
+  confidence  Float    @default(1)
+  sensitivity String   @default("normal")
+  source      String   @default("admin")
+  evidence    Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, name])
+  @@index([tenantId, type, sensitivity])
+}
+
+model SchoolModelSnapshot {
+  id        String   @id @default(uuid())
+  tenantId  String
+  version   Int
+  status    String   @default("active")
+  summary   String
+  entities  Json
+  riskMemory Json     @default("{}")
+  rules     Json
+  metrics   Json     @default("{}")
+  createdAt DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  analyses    PostAiAnalysis[]
+
+  @@unique([tenantId, version])
+  @@unique([tenantId, id])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+model PostAiAnalysis {
+  id                String   @id @default(uuid())
+  tenantId          String
+  postId            String
+  modelSnapshotId   String?
+  version           Int      @default(1)
+  provider          String
+  model             String
+  status            String   @default("pending")
+  riskLevel         String?
+  confidence        Float?
+  categories        Json     @default("[]")
+  sensitiveFindings Json     @default("[]")
+  suggestedAction   String?
+  reasons           Json     @default("[]")
+  rewrittenText     String?
+  maskedText        String?
+  rejectionReason   String?
+  error             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post              Post     @relation(fields: [postId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  snapshot          SchoolModelSnapshot? @relation(fields: [modelSnapshotId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  feedback          AiFeedback[]
+
+  @@unique([postId, tenantId, version])
+  @@unique([tenantId, id])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, postId, createdAt])
+}
+
+model AiFeedback {
+  id           String   @id @default(uuid())
+  tenantId     String
+  postId       String
+  analysisId   String
+  reviewerId   String?
+  aiAction     String?
+  humanAction  String
+  humanComment String?
+  matched      Boolean
+  createdAt    DateTime @default(now())
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post         Post     @relation(fields: [postId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  analysis     PostAiAnalysis @relation(fields: [analysisId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  reviewer     User?    @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@unique([analysisId])
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+}
+
 model TenantFeedback {
   id             String   @id @default(uuid())
   tenantId       String

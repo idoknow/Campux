@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PostStatus, Prisma } from "@campux/db";
 import { insensitiveContains } from "@campux/db";
 import { z } from "zod";
-import { requireReadyTenant } from "../lib/auth";
+import { requireReadyTenant, requireTenantRole } from "../lib/auth";
 import { toPostListItem, toPostTimeline } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
@@ -10,7 +10,7 @@ import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedErro
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
-import { parsePersistedPostReviewDetail } from "../runtime/post-review";
+import { parsePostReviewAnalysisRecord } from "../runtime/post-review";
 import { readTenantOperateMode, readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -160,15 +160,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         take: query.limit,
       }),
     ]);
-    const assessmentRows = await Promise.all(posts.map((post) => prisma.auditLog.findFirst({
-      where: { tenantId: context.selectedTenant.id, targetType: "post", targetId: post.id, action: "post.ai_review.assessed" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    const assessmentRows = await Promise.all(posts.map((post) => prisma.postAiAnalysis.findFirst({
+      where: { tenantId: context.selectedTenant.id, postId: post.id },
+      orderBy: [{ version: "desc" }, { createdAt: "desc" }],
     })));
     const assessmentByPost = new Map<string, NonNullable<(typeof assessmentRows)[number]>>(
-      posts.flatMap((post, index) => {
-        const row = assessmentRows[index];
-        return row ? [[post.id, row] as const] : [];
-      }),
+      posts.map((post, index) => [post.id, assessmentRows[index]] as const).filter((entry): entry is readonly [string, NonNullable<(typeof assessmentRows)[number]>] => Boolean(entry[1])),
     );
 
     // 解析时间线里出现的操作人（actorId → 用户名/QQ），系统自动操作 actorId 为 null。
@@ -188,10 +185,30 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           displayName: post.author.displayName,
         },
         timeline: toPostTimeline(post.logs, actorMap),
-        aiReview: parsePersistedPostReviewDetail(assessmentByPost.get(post.id)?.detail),
+        aiReview: parsePostReviewAnalysisRecord(assessmentByPost.get(post.id)),
       })),
       pagination: toPagination(query.page, query.limit, total),
     };
+  });
+
+  app.post("/api/review/ai-feedback/:analysisId", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "reviewer");
+    const { analysisId } = z.object({ analysisId: z.string().uuid() }).parse(request.params);
+    const body = z.object({ matched: z.boolean(), humanAction: z.enum(["approve", "reject"]), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
+    const saved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, post: { select: { tenantId: true, status: true } } } });
+      if (!analysis || analysis.post.tenantId !== context.selectedTenant.id || (body.humanAction === "approve" ? analysis.post.status !== "approved" : analysis.post.status !== "rejected")) return null;
+      const existing = await transaction.aiFeedback.findFirst({ where: { analysisId, tenantId: context.selectedTenant.id }, select: { id: true } });
+      return transaction.aiFeedback.upsert({
+        where: { id: existing?.id ?? "__missing__" },
+        create: { tenantId: context.selectedTenant.id, postId: analysis.postId, analysisId, reviewerId: context.user.id, aiAction: analysis.suggestedAction, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched: body.matched },
+        update: { reviewerId: context.user.id, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched: body.matched },
+      }).then((feedback) => ({ postId: analysis.postId, feedback }));
+    });
+    if (!saved.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    if (!saved.value) return reply.code(404).send({ message: "AI 分析记录不存在" });
+    await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched: body.matched, humanAction: body.humanAction } });
+    return { feedback: saved.value };
   });
 
   app.post("/api/review/posts/:id/approve", async (request, reply) => {

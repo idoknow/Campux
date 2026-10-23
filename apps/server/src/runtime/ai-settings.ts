@@ -19,7 +19,14 @@ export type TenantAiSettingsPayload = {
 };
 
 export type AiRules = {
-  /** Human-only AI review assistance; off, shadow (audit only), or assist (visible to reviewers). */
+  /** Tenant moderation controls consumed by human-only AI review. */
+  aiReviewRules?: {
+    blockedPatterns?: string[] | undefined;
+    allowedCategories?: string[] | undefined;
+    tone?: string | undefined;
+    strictPrivacy?: boolean | undefined;
+  } | undefined;
+  /** Whether to run review assistance after a post is submitted. */
   aiReviewMode?: "off" | "shadow" | "assist" | undefined;
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean | undefined;
@@ -277,11 +284,23 @@ export function normalizeAiRules(value: unknown): AiRules {
   return {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
     aiReviewMode: candidate.aiReviewMode === "shadow" || candidate.aiReviewMode === "assist" ? candidate.aiReviewMode : "off",
+    aiReviewRules: normalizeAiReviewRules(candidate.aiReviewRules),
     postTaggingEnabled: typeof candidate.postTaggingEnabled === "boolean" ? candidate.postTaggingEnabled : defaultAiSettings.rules.postTaggingEnabled,
     postTagMaintenanceEnabled: typeof candidate.postTagMaintenanceEnabled === "boolean" ? candidate.postTagMaintenanceEnabled : defaultAiSettings.rules.postTagMaintenanceEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
     privatePostPrompt: normalizePrivatePostPrompt(candidate.privatePostPrompt),
+  };
+}
+
+function normalizeAiReviewRules(value: unknown): NonNullable<AiRules["aiReviewRules"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { blockedPatterns: [], allowedCategories: [], tone: "", strictPrivacy: true };
+  const candidate = value as Record<string, unknown>;
+  return {
+    blockedPatterns: normalizeStringArray(candidate.blockedPatterns).slice(0, 100).map((item) => item.slice(0, 160)),
+    allowedCategories: normalizeStringArray(candidate.allowedCategories).slice(0, 40).map((item) => item.slice(0, 80)),
+    tone: typeof candidate.tone === "string" ? candidate.tone.trim().slice(0, 500) : "",
+    strictPrivacy: candidate.strictPrivacy !== false,
   };
 }
 

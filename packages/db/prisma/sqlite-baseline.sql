@@ -554,6 +554,82 @@ CREATE TABLE "TenantAiSettings" (
 );
 
 -- CreateTable
+CREATE TABLE "SchoolEntity" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "aliases" JSONB NOT NULL DEFAULT '[]',
+    "confidence" REAL NOT NULL DEFAULT 1,
+    "sensitivity" TEXT NOT NULL DEFAULT 'normal',
+    "source" TEXT NOT NULL DEFAULT 'admin',
+    "evidence" JSONB NOT NULL DEFAULT '[]',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "SchoolEntity_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "SchoolModelSnapshot" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "version" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "summary" TEXT NOT NULL,
+    "entities" JSONB NOT NULL,
+    "riskMemory" JSONB NOT NULL DEFAULT '{}',
+    "rules" JSONB NOT NULL,
+    "metrics" JSONB NOT NULL DEFAULT '{}',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SchoolModelSnapshot_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "PostAiAnalysis" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "modelSnapshotId" TEXT,
+    "version" INTEGER NOT NULL DEFAULT 1,
+    "provider" TEXT NOT NULL,
+    "model" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "riskLevel" TEXT,
+    "confidence" REAL,
+    "categories" JSONB NOT NULL DEFAULT '[]',
+    "sensitiveFindings" JSONB NOT NULL DEFAULT '[]',
+    "suggestedAction" TEXT,
+    "reasons" JSONB NOT NULL DEFAULT '[]',
+    "rewrittenText" TEXT,
+    "maskedText" TEXT,
+    "rejectionReason" TEXT,
+    "error" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "PostAiAnalysis_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "PostAiAnalysis_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "PostAiAnalysis_modelSnapshotId_tenantId_fkey" FOREIGN KEY ("modelSnapshotId", "tenantId") REFERENCES "SchoolModelSnapshot" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "AiFeedback" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "analysisId" TEXT NOT NULL,
+    "reviewerId" TEXT,
+    "aiAction" TEXT,
+    "humanAction" TEXT NOT NULL,
+    "humanComment" TEXT,
+    "matched" BOOLEAN NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AiFeedback_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "AiFeedback_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "AiFeedback_analysisId_tenantId_fkey" FOREIGN KEY ("analysisId", "tenantId") REFERENCES "PostAiAnalysis" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "AiFeedback_reviewerId_fkey" FOREIGN KEY ("reviewerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "TenantFeedback" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
@@ -691,6 +767,9 @@ CREATE INDEX "Post_tenantId_status_reviewQueueReminderSentAt_idx" ON "Post"("ten
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Post_tenantId_displayId_key" ON "Post"("tenantId", "displayId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Post_tenantId_id_key" ON "Post"("tenantId", "id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Post_tenantId_legacyDisplayId_key" ON "Post"("tenantId", "legacyDisplayId");
@@ -832,6 +911,45 @@ CREATE UNIQUE INDEX "CampaignVote_campaignId_voterId_optionId_key" ON "CampaignV
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TenantAiSettings_tenantId_key" ON "TenantAiSettings"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "SchoolEntity_tenantId_type_sensitivity_idx" ON "SchoolEntity"("tenantId", "type", "sensitivity");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SchoolEntity_tenantId_type_name_key" ON "SchoolEntity"("tenantId", "type", "name");
+
+-- CreateIndex
+CREATE INDEX "SchoolModelSnapshot_tenantId_status_createdAt_idx" ON "SchoolModelSnapshot"("tenantId", "status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "SchoolModelSnapshot_tenantId_createdAt_idx" ON "SchoolModelSnapshot"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SchoolModelSnapshot_tenantId_version_key" ON "SchoolModelSnapshot"("tenantId", "version");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SchoolModelSnapshot_tenantId_id_key" ON "SchoolModelSnapshot"("tenantId", "id");
+
+-- CreateIndex
+CREATE INDEX "PostAiAnalysis_tenantId_status_createdAt_idx" ON "PostAiAnalysis"("tenantId", "status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "PostAiAnalysis_tenantId_postId_createdAt_idx" ON "PostAiAnalysis"("tenantId", "postId", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PostAiAnalysis_postId_tenantId_version_key" ON "PostAiAnalysis"("postId", "tenantId", "version");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PostAiAnalysis_tenantId_id_key" ON "PostAiAnalysis"("tenantId", "id");
+
+-- CreateIndex
+CREATE INDEX "AiFeedback_tenantId_createdAt_idx" ON "AiFeedback"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AiFeedback_analysisId_key" ON "AiFeedback"("analysisId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AiFeedback_tenantId_id_key" ON "AiFeedback"("tenantId", "id");
 
 -- CreateIndex
 CREATE INDEX "TenantFeedback_tenantId_createdAt_idx" ON "TenantFeedback"("tenantId", "createdAt");

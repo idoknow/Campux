@@ -169,6 +169,7 @@ type AiSettingsForm = {
   temperature: number;
   timeoutSeconds: number;
   privatePostAiEnabled: boolean;
+  aiReviewRules: { blockedPatterns: string[]; allowedCategories: string[]; tone: string; strictPrivacy: boolean };
   aiReviewMode: "off" | "shadow" | "assist";
   postTaggingEnabled: boolean;
   postTagMaintenanceEnabled: boolean;
@@ -371,6 +372,10 @@ export function AdminPage({
   }));
   const [busy, setBusy] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [aiReviewEntities, setAiReviewEntities] = useState<Array<{ id: string; type: string; name: string; aliases: string[]; sensitivity: string }>>([]);
+  const [aiReviewMetrics, setAiReviewMetrics] = useState<{ total: number; byStatus: Record<string, number>; feedback: Record<string, number> } | null>(null);
+  const [aiEntityForm, setAiEntityForm] = useState({ type: "location", name: "", aliases: "", sensitivity: "normal" });
+  const [aiReviewLoading, setAiReviewLoading] = useState(false);
   const [memberDetail, setMemberDetail] = useState<AdminMemberDetail | null>(null);
   const [memberDetailOpen, setMemberDetailOpen] = useState(false);
   const [memberDetailLoading, setMemberDetailLoading] = useState(false);
@@ -380,6 +385,17 @@ export function AdminPage({
     setForm(nextForm);
     setImageMaxSizeDraft(String(nextForm.imageMaxSizeMb));
   }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled, metadata.operateMode]);
+
+  useEffect(() => {
+    if (activeTab !== "metadata") return;
+    let cancelled = false;
+    setAiReviewLoading(true);
+    Promise.all([api<{ entities: typeof aiReviewEntities }>("/api/admin/ai-review/entities"), api<NonNullable<typeof aiReviewMetrics>>("/api/admin/ai-review/metrics")])
+      .then(([entities, metrics]) => { if (!cancelled) { setAiReviewEntities(entities.entities); setAiReviewMetrics(metrics); } })
+      .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "无法读取 AI 审核数据"); })
+      .finally(() => { if (!cancelled) setAiReviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedTenant.id]);
 
   useEffect(() => {
     if (activeTab === "users") {
@@ -594,6 +610,7 @@ export function AdminPage({
     if (!aiForm) return null;
     const rules: AiRules = {
       privatePostAiEnabled: aiForm.privatePostAiEnabled,
+      aiReviewRules: aiForm.aiReviewRules,
       aiReviewMode: aiForm.aiReviewMode,
       postTaggingEnabled: aiForm.postTaggingEnabled,
       postTagMaintenanceEnabled: aiForm.postTagMaintenanceEnabled,
@@ -1188,6 +1205,28 @@ export function AdminPage({
                 <details className="product-surface overflow-hidden">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
                     <div>
+                      <p className="text-base font-semibold text-slate-950">学校实体词典与审核反馈</p>
+                      <p className="mt-1 text-sm text-slate-600">当前租户隔离管理；实体仅用于辅助分析，不会自动成为校园事实或触发审核决定。</p>
+                    </div>
+                    <Badge className="rounded-full bg-sky-50 text-sky-700 shadow-none">AI 数据</Badge>
+                  </summary>
+                  <div className="grid gap-3 border-t border-slate-200 p-4">
+                    <p className="text-sm text-slate-700">分析 {aiReviewMetrics?.total ?? 0} 条；人工判断一致 {aiReviewMetrics?.feedback.matched ?? 0} 条，覆盖 {aiReviewMetrics?.feedback.overridden ?? 0} 条。</p>
+                    <Button variant="outline" disabled={aiReviewLoading} onClick={() => void (async () => { try { await api("/api/admin/ai-review/snapshots/refresh", { method: "POST", body: JSON.stringify({}) }); toast.success("学校模型快照已更新"); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "快照更新失败"); } })()}>更新学校模型快照</Button>
+                    {aiReviewLoading ? <p className="text-sm text-slate-500">读取中…</p> : null}
+                    <div className="grid gap-2 md:grid-cols-4">
+                      <Select value={aiEntityForm.type} onValueChange={(type) => setAiEntityForm({ ...aiEntityForm, type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{[["location", "地点"], ["class", "班级"], ["person_alias", "人物别名"], ["organization", "组织"], ["topic", "话题"], ["risky_phrase", "风险短语"], ["service", "校园服务"]].map(([value, label]) => <SelectItem key={value ?? label} value={value ?? "location"}>{label}</SelectItem>)}</SelectContent></Select>
+                      <Input value={aiEntityForm.name} maxLength={120} placeholder="实体名称" onChange={(event) => setAiEntityForm({ ...aiEntityForm, name: event.target.value })} />
+                      <Input value={aiEntityForm.aliases} placeholder="别名，逗号分隔" onChange={(event) => setAiEntityForm({ ...aiEntityForm, aliases: event.target.value })} />
+                      <Select value={aiEntityForm.sensitivity} onValueChange={(sensitivity) => setAiEntityForm({ ...aiEntityForm, sensitivity })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="normal">普通</SelectItem><SelectItem value="sensitive">敏感</SelectItem><SelectItem value="blocked">高风险</SelectItem></SelectContent></Select>
+                    </div>
+                    <Button disabled={busy || !aiEntityForm.name.trim()} onClick={() => void (async () => { try { const result = await api<{ entity: (typeof aiReviewEntities)[number] }>("/api/admin/ai-review/entities", { method: "POST", body: JSON.stringify({ ...aiEntityForm, aliases: aiEntityForm.aliases.split(/[，,]/).map((value) => value.trim()).filter(Boolean).slice(0, 20), confidence: 1 }) }); setAiReviewEntities((items) => [...items.filter((item) => item.id !== result.entity.id), result.entity]); setAiEntityForm({ ...aiEntityForm, name: "", aliases: "" }); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "保存实体失败"); } })()}>添加或更新实体</Button>
+                    <div className="grid gap-2">{aiReviewEntities.map((entity) => <div key={entity.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm"><span>{entity.type} · {entity.name}{entity.aliases.length ? `（${entity.aliases.join("、")}）` : ""} · {entity.sensitivity}</span><Button variant="outline" size="sm" onClick={() => void (async () => { try { await api(`/api/admin/ai-review/entities/${entity.id}`, { method: "DELETE" }); setAiReviewEntities((items) => items.filter((item) => item.id !== entity.id)); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除实体失败"); } })()}>删除</Button></div>)}</div>
+                  </div>
+                </details>
+                <details className="product-surface overflow-hidden">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
+                    <div>
                       <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
                       <p className="mt-1 text-sm text-slate-600">AI 仅提供建议，审核决定始终由人工做出。</p>
                     </div>
@@ -1206,6 +1245,22 @@ export function AdminPage({
                         </SelectContent>
                       </Select>
                       <span className="text-xs font-normal text-slate-500">使用已配置的 LLM；开启后投稿文字会发送给配置的模型服务，模型不会自动通过或拒绝稿件。</span>
+                    </label>
+                    <label className="mt-3 grid max-w-sm gap-1 text-sm font-medium">
+                      墙号风格/审核原则
+                      <Textarea value={aiForm?.aiReviewRules.tone ?? ""} maxLength={500} disabled={busy || aiTesting || !aiForm} onChange={(event) => aiForm && setAiForm({ ...aiForm, aiReviewRules: { ...aiForm.aiReviewRules, tone: event.target.value } })} placeholder="例如：保护未成年人隐私；表达轻松，不放大未经证实的校园纠纷。" />
+                    </label>
+                    <label className="mt-3 grid max-w-sm gap-1 text-sm font-medium">
+                      需重点检查的内容（每行一条）
+                      <Textarea value={aiForm?.aiReviewRules.blockedPatterns.join("\n") ?? ""} disabled={busy || aiTesting || !aiForm} onChange={(event) => aiForm && setAiForm({ ...aiForm, aiReviewRules: { ...aiForm.aiReviewRules, blockedPatterns: lines(event.target.value).slice(0, 100) } })} placeholder="泄露联系方式\n针对个人挂人" />
+                    </label>
+                    <label className="mt-3 grid max-w-sm gap-1 text-sm font-medium">
+                      允许的投稿类别（每行一条）
+                      <Textarea value={aiForm?.aiReviewRules.allowedCategories.join("\n") ?? ""} disabled={busy || aiTesting || !aiForm} onChange={(event) => aiForm && setAiForm({ ...aiForm, aiReviewRules: { ...aiForm.aiReviewRules, allowedCategories: lines(event.target.value).slice(0, 40) } })} placeholder="表白\n失物招领\n树洞" />
+                    </label>
+                    <label className="mt-3 flex items-center justify-between gap-3 text-sm font-medium">
+                      严格检查个人隐私
+                      <Switch checked={aiForm?.aiReviewRules.strictPrivacy ?? true} disabled={busy || aiTesting || !aiForm} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, aiReviewRules: { ...aiForm.aiReviewRules, strictPrivacy: checked } })} />
                     </label>
                     <Button className="mt-3" disabled={busy || aiTesting || !aiForm} onClick={() => void saveAiSettings()}>
                       <SaveIcon data-icon="inline-start" />
@@ -4086,6 +4141,12 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     temperature: settings.temperature,
     timeoutSeconds: settings.timeoutSeconds,
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
+    aiReviewRules: {
+      blockedPatterns: settings.rules.aiReviewRules?.blockedPatterns ?? [],
+      allowedCategories: settings.rules.aiReviewRules?.allowedCategories ?? [],
+      tone: settings.rules.aiReviewRules?.tone ?? "",
+      strictPrivacy: settings.rules.aiReviewRules?.strictPrivacy ?? true,
+    },
     aiReviewMode: settings.rules.aiReviewMode ?? "off",
     postTaggingEnabled: settings.rules.postTaggingEnabled ?? true,
     postTagMaintenanceEnabled: settings.rules.postTagMaintenanceEnabled ?? true,

@@ -802,13 +802,25 @@ export function PostsPage({
 
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
     setBusyPostId(id);
+    const reviewed = detailPostId === id ? detailPost : reviewPosts.find((post) => post.id === id);
     try {
       await api(`/api/review/posts/${id}/${action}`, {
         method: "POST",
         body: JSON.stringify(comment ? { comment } : {}),
       });
       toast.success(action === "approve" ? "已通过，正在生成发布任务。" : "已拒绝。");
-      await refreshAll();
+      if (reviewed?.aiReview?.analysisId) {
+        const wantsFeedback = window.confirm("是否记录本次 AI 审核反馈？取消表示暂不反馈，不影响已完成的人工审核。");
+        if (wantsFeedback) {
+          const matched = window.confirm("人工结论与 AI 建议一致吗？确定为一致，取消为人工覆盖。");
+          try {
+            await api(`/api/review/ai-feedback/${reviewed.aiReview.analysisId}`, { method: "POST", body: JSON.stringify({ matched, humanAction: action, humanComment: comment ?? null }) });
+          } catch (feedbackError) {
+            toast.error(feedbackError instanceof Error ? `反馈未保存；稿件审核已完成：${feedbackError.message}` : "反馈未保存；稿件审核已完成");
+          }
+        }
+      }
+      try { await refreshAll(); } catch (refreshError) { toast.error(refreshError instanceof Error ? `审核已完成，但列表刷新失败：${refreshError.message}` : "审核已完成，但列表刷新失败"); }
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "审核失败");
     } finally {
@@ -2263,9 +2275,14 @@ function PostDetailDialog({
             {post.aiReview ? (
               <div className={`mt-3 rounded-md border p-3 text-sm ${post.aiReview.status === "completed" ? "border-violet-200 bg-violet-50" : "border-amber-200 bg-amber-50"}`} aria-label="AI 审核辅助状态">
                 {post.aiReview.status === "completed" && post.aiReview.assessment ? <>
-                  <p className="font-semibold text-violet-900">AI 辅助建议（仅供人工参考）· {post.aiReview.assessment.riskLevel === "high" ? "较高风险" : post.aiReview.assessment.riskLevel === "medium" ? "需留意" : "低风险"} · {post.aiReview.assessment.category}</p>
-                  <p className="mt-1 text-violet-900">{post.aiReview.assessment.reason}</p>
-                  <p className="mt-1 text-xs text-violet-700">置信度 {Math.round(post.aiReview.assessment.confidence * 100)}% · 审核员决定不受此建议影响</p>
+                  <p className="font-semibold text-violet-900">AI 审核辅助（仅供参考）· {({ low: "低", medium: "中", high: "高", critical: "严重" } as const)[post.aiReview.assessment.riskLevel]}风险 · 建议：{({ approve: "可考虑通过", revise: "建议修改", reject: "建议拒绝", manual_review: "重点人工复核" } as const)[post.aiReview.assessment.suggestedAction]}</p>
+                  <p className="mt-1 text-violet-900">类别：{post.aiReview.assessment.categories.join("、") || "未分类"} · 置信度 {Math.round(post.aiReview.assessment.confidence * 100)}%</p>
+                  <ul className="mt-1 list-disc pl-5 text-violet-900">{post.aiReview.assessment.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
+                  {post.aiReview.assessment.sensitiveFindings.length ? <div className="mt-2"><p className="font-semibold text-amber-900">敏感信息提示</p>{post.aiReview.assessment.sensitiveFindings.map((finding, index) => <p key={index} className="text-amber-900">{finding.type}：{finding.excerpt} — {finding.reason}</p>)}</div> : null}
+                  {post.aiReview.assessment.maskedText ? <details className="mt-2"><summary className="cursor-pointer font-semibold">查看打码建议</summary><p className="mt-1 whitespace-pre-wrap">{post.aiReview.assessment.maskedText}</p></details> : null}
+                  {post.aiReview.assessment.rewrittenText ? <details className="mt-2"><summary className="cursor-pointer font-semibold">查看改写建议</summary><p className="mt-1 whitespace-pre-wrap">{post.aiReview.assessment.rewrittenText}</p></details> : null}
+                  {post.aiReview.assessment.rejectionReason ? <p className="mt-2">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p> : null}
+                  <p className="mt-2 text-xs text-violet-700">AI 不执行审核决定；请核对原文并由审核员作最终判断。</p>
                 </> : <p className="font-semibold text-amber-900">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>}
               </div>
             ) : null}
