@@ -3,6 +3,13 @@ import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
 import { normalizeAiRules } from "./ai-settings";
 
 describe("AI settings normalization", () => {
+  test("defaults AI review to off and only accepts supported modes", () => {
+    expect(normalizeAiRules(undefined).aiReviewMode).toBe("off");
+    expect(normalizeAiRules({ aiReviewMode: "shadow" }).aiReviewMode).toBe("shadow");
+    expect(normalizeAiRules({ aiReviewMode: "assist" }).aiReviewMode).toBe("assist");
+    expect(normalizeAiRules({ aiReviewMode: "auto_approve" }).aiReviewMode).toBe("off");
+  });
+
   test("uses built-in private post prompt when rules are missing", () => {
     expect(normalizeAiRules(undefined).privatePostPrompt).toBe(DEFAULT_PRIVATE_POST_PROMPT);
   });

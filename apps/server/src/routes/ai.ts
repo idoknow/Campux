@@ -16,6 +16,7 @@ export const aiSettingsSchema = z.object({
   temperature: z.number().min(0).max(1).optional(),
   timeoutSeconds: z.number().int().min(5).max(120).optional(),
   rules: z.object({
+    aiReviewMode: z.enum(["off", "shadow", "assist"]).optional(),
     privatePostAiEnabled: z.boolean().optional(),
     postTaggingEnabled: z.boolean().optional(),
     postTagMaintenanceEnabled: z.boolean().optional(),

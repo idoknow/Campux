@@ -2,6 +2,8 @@ import { DEFAULT_PRIVATE_POST_PROMPT, PRIVATE_POST_PROMPT_MAX_LENGTH } from "@ca
 import { DbNull, type Prisma } from "@campux/db";
 import { prisma } from "../lib/prisma";
 import { decryptJson, encryptJson } from "../lib/secret-json";
+import { assertSafeLlmUrl } from "./llm-url";
+import { readBoundedLlmResponse } from "./post-review";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 
 export type TenantAiSettingsPayload = {
@@ -17,6 +19,8 @@ export type TenantAiSettingsPayload = {
 };
 
 export type AiRules = {
+  /** Human-only AI review assistance; off, shadow (audit only), or assist (visible to reviewers). */
+  aiReviewMode?: "off" | "shadow" | "assist" | undefined;
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean | undefined;
   /** 是否启用投稿后的 LLM 自动打标 */
@@ -64,6 +68,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
   temperature: 0.2,
   timeoutSeconds: 30,
   rules: {
+    aiReviewMode: "off",
     privatePostAiEnabled: false,
     postTaggingEnabled: true,
     postTagMaintenanceEnabled: true,
@@ -173,37 +178,35 @@ export async function testTenantAiSettings(
       message: "未配置 LLM API Key。",
     };
   }
+  const safeUrl = await assertSafeLlmUrl(baseUrl);
+  const safeBaseUrl = safeUrl.toString().replace(/\/$/, "");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1_000);
   const startedAt = Date.now();
   try {
     const leased = await runWithActiveTenantLease(prisma, tenantId, async () => {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 32,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: "只返回 JSON。",
-          },
-          {
-            role: "user",
-            content: "请返回 {\"ok\":true,\"message\":\"ready\"}",
-          },
-        ],
-      }),
+      const response = await fetch(`${safeBaseUrl}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        redirect: "error",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          max_tokens: 32,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: "只返回 JSON。" },
+            { role: "user", content: "请返回 {\"ok\":true,\"message\":\"ready\"}" },
+          ],
+        }),
       });
-      const data = await response.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } } | null;
+      const raw = await readBoundedLlmResponse(response, 16 * 1024);
+      const data = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
       return { response, data };
     });
     if (!leased.active) {
@@ -212,17 +215,9 @@ export async function testTenantAiSettings(
     const { response, data } = leased.value;
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
-      return {
-        ok: false,
-        mode,
-        provider,
-        model,
-        baseUrl,
-        latencyMs,
-        message: data?.error?.message || `LLM 请求失败：${response.status}`,
-      };
+      return { ok: false, mode, provider, model, baseUrl, latencyMs, message: data.error?.message || `LLM 请求失败：${response.status}` };
     }
-    const content = data?.choices?.[0]?.message?.content;
+    const content = data.choices?.[0]?.message?.content;
     if (!content) {
       return {
         ok: false,
@@ -281,6 +276,7 @@ export function normalizeAiRules(value: unknown): AiRules {
   const candidate = value as Record<string, unknown>;
   return {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
+    aiReviewMode: candidate.aiReviewMode === "shadow" || candidate.aiReviewMode === "assist" ? candidate.aiReviewMode : "off",
     postTaggingEnabled: typeof candidate.postTaggingEnabled === "boolean" ? candidate.postTaggingEnabled : defaultAiSettings.rules.postTaggingEnabled,
     postTagMaintenanceEnabled: typeof candidate.postTagMaintenanceEnabled === "boolean" ? candidate.postTagMaintenanceEnabled : defaultAiSettings.rules.postTagMaintenanceEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
