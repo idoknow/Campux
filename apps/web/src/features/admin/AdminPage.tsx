@@ -335,6 +335,7 @@ export function AdminPage({
   const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
   const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
   const [aiSectionOpen, setAiSectionOpen] = useState(false);
+  const [aiReviewSectionOpen, setAiReviewSectionOpen] = useState(false);
   const [oauthSectionOpen, setOAuthSectionOpen] = useState(false);
   const [members, setMembers] = useState<AdminMember[]>([]);
   const [bots, setBots] = useState<AdminBotAccount[]>([]);
@@ -1183,6 +1184,42 @@ export function AdminPage({
                   onSave={() => void saveSettings()}
                   onUploaded={onSaved}
                 />
+                {aiSettings && aiForm ? (
+                  <div className="product-surface overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setAiReviewSectionOpen((open) => !open)}
+                      aria-expanded={aiReviewSectionOpen}
+                      className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
+                    >
+                      <div>
+                        <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
+                        <p className="mt-1 text-sm text-slate-600">管理现有 AI 投稿辅助能力；不代替审核员决定通过或拒绝。</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
+                        <ChevronDownIcon className={`size-4 shrink-0 text-slate-400 transition-transform ${aiReviewSectionOpen ? "rotate-180" : ""}`} />
+                      </div>
+                    </button>
+                    {aiReviewSectionOpen ? (
+                      <div className="grid gap-3 border-t border-slate-200 p-4">
+                        <p className="text-xs leading-5 text-slate-500">当前服务端没有独立的自动内容审核/风险策略配置。以下开关复用已有 LLM 配置并通过「保存 LLM 设置」持久化，不会自动审核通过或拒绝稿件。</p>
+                        <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-3">
+                          <span><span className="block text-sm font-semibold text-slate-900">投稿后 AI 自动打标</span><span className="mt-1 block text-xs text-slate-500">为新投稿生成标签，不改变稿件审核状态。</span></span>
+                          <Switch checked={aiForm.postTaggingEnabled} disabled={busy || aiTesting} onCheckedChange={(checked) => setAiForm({ ...aiForm, postTaggingEnabled: checked })} aria-label="启用 AI 自动打标" />
+                        </label>
+                        <label className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-3">
+                          <span><span className="block text-sm font-semibold text-slate-900">AI 定期维护标签库</span><span className="mt-1 block text-xs text-slate-500">基于近期稿件维护标签库，不改变稿件审核状态。</span></span>
+                          <Switch checked={aiForm.postTagMaintenanceEnabled} disabled={busy || aiTesting} onCheckedChange={(checked) => setAiForm({ ...aiForm, postTagMaintenanceEnabled: checked })} aria-label="启用 AI 标签维护" />
+                        </label>
+                        <Button className="w-fit px-4" disabled={busy || aiTesting} onClick={() => void saveAiSettings()}>
+                          <SaveIcon data-icon="inline-start" />
+                          保存 LLM 设置
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {aiSettings && aiForm ? (
                   <div className="product-surface overflow-hidden">
                     <button
