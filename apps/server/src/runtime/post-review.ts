@@ -15,7 +15,7 @@ export type PostReviewAssessment = {
   rewrittenText: string | null;
   rejectionReason: string | null;
 };
-export type PersistedPostReview = { status: "completed" | "failed" | "unavailable"; assessment?: PostReviewAssessment; analysisId?: string };
+export type PersistedPostReview = { mode: "assist"; status: "completed" | "failed" | "unavailable"; assessment?: PostReviewAssessment; analysisId?: string };
 const activeReviewRequests = new Map<string, number>();
 const MAX_ACTIVE_REVIEW_REQUESTS_PER_TENANT = 2;
 
@@ -41,14 +41,14 @@ export function parsePostReviewAssessment(raw: string): PostReviewAssessment | n
   } catch { return null; }
 }
 
-export function parsePostReviewAnalysisRecord(record: { id: string; status: string; riskLevel: string | null; confidence: number | null; categories: unknown; sensitiveFindings: unknown; suggestedAction: string | null; reasons: unknown; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null } | null | undefined): PersistedPostReview | null {
-  if (!record) return null;
+export function parsePostReviewAnalysisRecord(record: { id: string; mode: string; status: string; riskLevel: string | null; confidence: number | null; categories: unknown; sensitiveFindings: unknown; suggestedAction: string | null; reasons: unknown; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null } | null | undefined): PersistedPostReview | null {
+  if (!record || record.mode !== "assist") return null;
   if (record.status !== "completed") {
-    if (record.status === "failed" || record.status === "unavailable") return { status: record.status, analysisId: record.id };
+    if (record.status === "failed" || record.status === "unavailable") return { mode: "assist", status: record.status, analysisId: record.id };
     return null;
   }
   const assessment = parsePostReviewAssessment(JSON.stringify({ riskLevel: record.riskLevel, categories: record.categories, sensitiveFindings: record.sensitiveFindings, suggestedAction: record.suggestedAction, reasons: record.reasons, confidence: record.confidence, maskedText: record.maskedText, rewrittenText: record.rewrittenText, rejectionReason: record.rejectionReason }));
-  return assessment ? { status: "completed", assessment, analysisId: record.id } : null;
+  return assessment ? { mode: "assist", status: "completed", assessment, analysisId: record.id } : null;
 }
 
 export function parsePersistedPostReviewDetail(detail: unknown): PersistedPostReview | null {
@@ -57,7 +57,7 @@ export function parsePersistedPostReviewDetail(detail: unknown): PersistedPostRe
   if (candidate.mode !== "assist" || !(candidate.status === "completed" || candidate.status === "failed" || candidate.status === "unavailable")) return null;
   const assessment = candidate.status === "completed" ? parsePostReviewAssessment(JSON.stringify(candidate.assessment)) : undefined;
   if (candidate.status === "completed" && !assessment) return null;
-  return { status: candidate.status, ...(assessment ? { assessment } : {}) };
+  return { mode: "assist", status: candidate.status, ...(assessment ? { assessment } : {}) };
 }
 
 export async function withTenantReviewSlot<T>(tenantId: string, operation: () => Promise<T>): Promise<T | null> {
@@ -108,7 +108,7 @@ async function writeAssistAssessment(options: { tenantId: string; postId: string
     const version = (existing?.version ?? 0) + 1;
     await transaction.postAiAnalysis.create({ data: {
       tenantId: options.tenantId, postId: options.postId, version, provider: options.provider, model: options.model,
-      modelSnapshotId: options.snapshotId ?? null, status: options.status,
+      modelSnapshotId: options.snapshotId ?? null, mode: "assist", status: options.status,
       ...(options.assessment ? { riskLevel: options.assessment.riskLevel, confidence: options.assessment.confidence, categories: options.assessment.categories, sensitiveFindings: options.assessment.sensitiveFindings, suggestedAction: options.assessment.suggestedAction, reasons: options.assessment.reasons, maskedText: options.assessment.maskedText, rewrittenText: options.assessment.rewrittenText, rejectionReason: options.assessment.rejectionReason } : {}),
     } });
     return true;
@@ -190,6 +190,6 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
   });
   if (result === null) {
     const settings = await readTenantAiSettings(options.tenantId);
-    if (settings.rules.aiReviewMode === "assist" || settings.rules.aiReviewMode === "shadow") await writeAssistAssessment({ tenantId: options.tenantId, postId: options.postId, status: "unavailable", provider: settings.provider, model: settings.model });
+    if (settings.rules.aiReviewMode === "assist") await writeAssistAssessment({ tenantId: options.tenantId, postId: options.postId, status: "unavailable", provider: settings.provider, model: settings.model });
   }
 }

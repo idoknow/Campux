@@ -16,7 +16,7 @@ CREATE TABLE "SchoolModelSnapshot" (
 );
 CREATE TABLE "PostAiAnalysis" (
   "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL,
-  "modelSnapshotId" TEXT, "version" INTEGER NOT NULL DEFAULT 1, "provider" TEXT NOT NULL, "model" TEXT NOT NULL,
+  "modelSnapshotId" TEXT, "mode" TEXT NOT NULL DEFAULT 'assist', "version" INTEGER NOT NULL DEFAULT 1, "provider" TEXT NOT NULL, "model" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'pending', "riskLevel" TEXT, "confidence" REAL,
   "categories" JSONB NOT NULL DEFAULT '[]', "sensitiveFindings" JSONB NOT NULL DEFAULT '[]',
   "suggestedAction" TEXT, "reasons" JSONB NOT NULL DEFAULT '[]', "rewrittenText" TEXT, "maskedText" TEXT,

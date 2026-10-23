@@ -811,6 +811,7 @@ model PostAiAnalysis {
   tenantId          String
   postId            String
   modelSnapshotId   String?
+  mode              String   @default("assist")
   version           Int      @default(1)
   provider          String
   model             String

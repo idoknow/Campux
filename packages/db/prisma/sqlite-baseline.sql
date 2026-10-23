@@ -590,6 +590,7 @@ CREATE TABLE "PostAiAnalysis" (
     "tenantId" TEXT NOT NULL,
     "postId" TEXT NOT NULL,
     "modelSnapshotId" TEXT,
+    "mode" TEXT NOT NULL DEFAULT 'assist',
     "version" INTEGER NOT NULL DEFAULT 1,
     "provider" TEXT NOT NULL,
     "model" TEXT NOT NULL,

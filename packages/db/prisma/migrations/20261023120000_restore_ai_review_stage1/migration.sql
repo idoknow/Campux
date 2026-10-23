@@ -12,8 +12,7 @@ CREATE TABLE "SchoolModelSnapshot" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "SchoolModelSnapshot_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "PostAiAnalysis" (
-    "id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL, "modelSnapshotId" TEXT,
-    "version" INTEGER NOT NULL DEFAULT 1, "provider" TEXT NOT NULL, "model" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT 'pending',
+    "id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL, "modelSnapshotId" TEXT, "mode" TEXT NOT NULL DEFAULT 'assist', "version" INTEGER NOT NULL DEFAULT 1, "provider" TEXT NOT NULL, "model" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT 'pending',
     "riskLevel" TEXT, "confidence" DOUBLE PRECISION, "categories" JSONB NOT NULL DEFAULT '[]', "sensitiveFindings" JSONB NOT NULL DEFAULT '[]',
     "suggestedAction" TEXT, "reasons" JSONB NOT NULL DEFAULT '[]', "rewrittenText" TEXT, "maskedText" TEXT, "rejectionReason" TEXT, "error" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "PostAiAnalysis_pkey" PRIMARY KEY ("id")

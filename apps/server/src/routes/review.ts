@@ -194,7 +194,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   app.post("/api/review/ai-feedback/:analysisId", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
     const { analysisId } = z.object({ analysisId: z.string().uuid() }).parse(request.params);
-    const body = z.object({ matched: z.boolean(), humanAction: z.enum(["approve", "reject"]), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
+    const body = z.object({ matched: z.boolean(), humanAction: z.enum(["approve", "reject"]), analysisMode: z.literal("assist"), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
     const saved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
       const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, post: { select: { tenantId: true, status: true } } } });
       const expectedFinalStatus = body.humanAction === "approve" ? "approved" : "rejected";
