@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAssessment, readBoundedLlmResponse } from "./post-review";
+import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, readBoundedLlmResponse } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
 
 describe("withTenantReviewSlot", () => {
@@ -18,16 +18,20 @@ describe("withTenantReviewSlot", () => {
   });
 });
 describe("parsePostReviewAssessment", () => {
+  it("does not make shadow analysis visible to reviewer results", () => {
+    const shadowRecord = { id: "analysis-1", status: "completed", riskLevel: "high", confidence: 0.9, categories: ["privacy"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["reason"], maskedText: null, rewrittenText: null, rejectionReason: null };
+    expect(parsePostReviewAnalysisRecord(shadowRecord)).not.toBeNull();
+  });
   it("accepts only a bounded advisory assessment", () => {
-    expect(parsePostReviewAssessment('{"riskLevel":"high","category":"harassment","reason":"Contains a direct insult","confidence":0.92}')).toEqual({
-      riskLevel: "high", category: "harassment", reason: "Contains a direct insult", confidence: 0.92,
+    expect(parsePostReviewAssessment('{"riskLevel":"high","categories":["骚扰攻击"],"sensitiveFindings":[],"suggestedAction":"manual_review","reasons":["包含针对性攻击"],"confidence":0.92,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toEqual({
+      riskLevel: "high", categories: ["骚扰攻击"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["包含针对性攻击"], confidence: 0.92, maskedText: null, rewrittenText: null, rejectionReason: null,
     });
   });
   it("rejects malformed, unsupported, and out-of-range model output", () => {
     expect(parsePostReviewAssessment("not json")).toBeNull();
-    expect(parsePostReviewAssessment('{"riskLevel":"reject","category":"x","reason":"x","confidence":0.5}')).toBeNull();
-    expect(parsePostReviewAssessment('{"riskLevel":"low","category":"x","reason":"x","confidence":3}')).toBeNull();
-    expect(parsePostReviewAssessment('{"riskLevel":"low","category":"x","reason":"x","confidence":0.5,"decision":"approve"}')).toBeNull();
+    expect(parsePostReviewAssessment('{"riskLevel":"reject","categories":["x"],"sensitiveFindings":[],"suggestedAction":"approve","reasons":["x"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toBeNull();
+    expect(parsePostReviewAssessment('{"riskLevel":"low","categories":["x"],"sensitiveFindings":[],"suggestedAction":"approve","reasons":["x"],"confidence":3,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toBeNull();
+    expect(parsePostReviewAssessment('{"riskLevel":"low","categories":["x"],"sensitiveFindings":[],"suggestedAction":"approve","reasons":["x"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null,"decision":"approve"}')).toBeNull();
   });
 
   it("validates persisted audit detail before returning it", () => {

@@ -440,7 +440,7 @@ export type ReviewPostItem = PostItem & {
     displayName: string | null;
   } | null;
   timeline?: PostTimelineEntry[];
-  aiReview?: { status: "completed" | "failed" | "unavailable"; assessment?: { riskLevel: "low" | "medium" | "high"; category: string; reason: string; confidence: number } } | null;
+  aiReview?: { status: "completed" | "failed" | "unavailable"; analysisId?: string; assessment?: { riskLevel: "low" | "medium" | "high" | "critical"; categories: string[]; sensitiveFindings: Array<{ type: string; excerpt: string; reason: string }>; suggestedAction: "approve" | "revise" | "reject" | "manual_review"; reasons: string[]; confidence: number; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null } } | null;
 };
 
 export type PublishedFeedAuthor = {
@@ -661,6 +661,12 @@ export type AdminBotAccount = {
 };
 
 export type AiRules = {
+  aiReviewRules?: {
+    blockedPatterns?: string[] | undefined;
+    allowedCategories?: string[] | undefined;
+    tone?: string | undefined;
+    strictPrivacy?: boolean | undefined;
+  };
   aiReviewMode?: "off" | "shadow" | "assist";
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;
