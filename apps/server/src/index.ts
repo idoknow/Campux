@@ -22,6 +22,7 @@ import { registerBotFriendSnapshotScheduler } from "./runtime/bot-friend-snapsho
 import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-comments";
 import { registerBatchFlushSweeper, stopBatchFlushSweeper } from "./runtime/publish-batching";
 import { startCampaignScheduler } from "./runtime/campaign-scheduler";
+import { startAutoModerationScheduler } from "./runtime/auto-moderation-scheduler";
 import { registerTelemetryReporter } from "./runtime/telemetry";
 import { prisma } from "./lib/prisma";
 import { registerAboutRoutes } from "./routes/about";
@@ -241,6 +242,7 @@ const stopTelemetryReporter = registerTelemetryReporter({ logger: app.log, confi
 const stopFailedPublishAttemptRepublisher = registerFailedPublishAttemptRepublisher(queue, app.log);
 registerBatchFlushSweeper(queue, app.log);
 const stopCampaignScheduler = startCampaignScheduler();
+const stopAutoModerationScheduler = startAutoModerationScheduler(app.log, { queue, oneBot, pluginEvents: pluginRegistry.getEventBus() });
 
 app.addHook("onClose", async () => {
   stopQZoneCookieHeartbeat();
@@ -253,6 +255,7 @@ app.addHook("onClose", async () => {
   stopFailedPublishAttemptRepublisher();
   stopBatchFlushSweeper();
   stopCampaignScheduler();
+  stopAutoModerationScheduler();
 });
 
 await app.listen({

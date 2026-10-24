@@ -43,6 +43,7 @@ const tenantPatchSchema = z.object({
 
 const systemSettingsPatchSchema = z.object({
   managementHost: z.string().max(255).nullable().optional(),
+  aiModerationKillSwitch: z.boolean().optional(),
 });
 
 const tenantRoleSchema = z.enum(["submitter", "broadcaster", "reviewer", "admin"]);
@@ -275,12 +276,10 @@ function tenantDomainSuffixForResponse(config: CampuxConfig) {
 export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, config: CampuxConfig, oneBot?: OneBotRuntime) {
   app.get("/api/system/settings", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
-    if (!isSystemOperator(context)) {
-      return reply.code(403).send({ message: "只有系统运维可以查看全局设置" });
-    }
-
+    if (!isSystemOperator(context)) return reply.code(403).send({ message: "只有系统运维可以查看全局设置" });
     return {
       managementHost: await getManagementHost(),
+      aiModerationKillSwitch: (await prisma.systemSetting.findUnique({ where: { key: "ai_moderation_kill_switch" }, select: { value: true } }))?.value === "true",
     };
   });
 
@@ -296,33 +295,23 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (conflict) return conflict;
     }
 
-    if (body.managementHost !== undefined) {
-      if (normalizedManagementHost) {
-        await prisma.systemSetting.upsert({
-          where: { key: "management_host" },
-          update: { value: normalizedManagementHost },
-          create: { key: "management_host", value: normalizedManagementHost },
-        });
-      } else {
-        await prisma.systemSetting.deleteMany({
-          where: { key: "management_host" },
-        });
-      }
-
-      await writeAuditLog({
-        tenantId: null,
-        actorId: context.user.id,
-        action: "system.settings.update",
-        targetType: "system_setting",
-        targetId: "management_host",
-        detail: {
-          managementHost: normalizedManagementHost,
-        },
+    if (body.aiModerationKillSwitch !== undefined) {
+      await prisma.$transaction(async (tx) => {
+        await tx.systemSetting.upsert({ where: { key: "ai_moderation_kill_switch" }, update: { value: String(body.aiModerationKillSwitch) }, create: { key: "ai_moderation_kill_switch", value: String(body.aiModerationKillSwitch) } });
+        await writeAuditLog({ tenantId: null, actorId: context.user.id, action: "system.ai_moderation.kill_switch", targetType: "system_setting", targetId: "ai_moderation_kill_switch", detail: { enabled: body.aiModerationKillSwitch } }, tx);
       });
     }
-
+    if (body.managementHost !== undefined) {
+      if (normalizedManagementHost) {
+        await prisma.systemSetting.upsert({ where: { key: "management_host" }, update: { value: normalizedManagementHost }, create: { key: "management_host", value: normalizedManagementHost } });
+      } else {
+        await prisma.systemSetting.deleteMany({ where: { key: "management_host" } });
+      }
+      await writeAuditLog({ tenantId: null, actorId: context.user.id, action: "system.settings.update", targetType: "system_setting", targetId: "management_host", detail: { managementHost: normalizedManagementHost } });
+    }
     return {
       managementHost: await getManagementHost(),
+      aiModerationKillSwitch: (await prisma.systemSetting.findUnique({ where: { key: "ai_moderation_kill_switch" }, select: { value: true } }))?.value === "true",
     };
   });
 

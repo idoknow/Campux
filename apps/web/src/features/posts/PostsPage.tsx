@@ -800,6 +800,18 @@ export function PostsPage({
     }
   }
 
+  async function cancelAutoDecision(post: ReviewPostItem) {
+    const analysisId = post.aiAutoDecision?.analysisId;
+    if (!analysisId || busyPostId) return;
+    setBusyPostId(post.id);
+    try {
+      await api(`/api/review/ai-auto-decision/${analysisId}/revert`, { method: "POST" });
+      toast.success("自动决定已拦截，稿件保留在人工审核队列。");
+      await refreshReviewPosts(reviewPagination.page);
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "拦截自动决定失败"); }
+    finally { setBusyPostId(""); }
+  }
+
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
     setBusyPostId(id);
     const reviewed = detailPostId === id ? detailPost : reviewPosts.find((post) => post.id === id);
@@ -1907,6 +1919,7 @@ export function PostsPage({
                     onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
                     onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
                     onDetail={(post) => openPostDetail(post.id)}
+                    onCancelAutoDecision={(post) => void cancelAutoDecision(post)}
                     emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
                   />
                   <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
@@ -2003,6 +2016,7 @@ export function PostsPage({
         open={Boolean(detailPostId)}
         canDirectRecall={isAdmin}
         recallBusy={detailPost ? busyPostId === detailPost.id : false}
+        onCancelAutoDecision={detailPost ? (post) => void cancelAutoDecision(post) : undefined}
         onOpenChange={(open) => {
           if (!open) {
             closePostDetail();
@@ -2231,6 +2245,7 @@ function PostDetailDialog({
   onImagePreview,
   onRecallDirect,
   onRecallDirectSilent,
+  onCancelAutoDecision,
 }: {
   post: ReviewPostItem | null;
   open: boolean;
@@ -2241,6 +2256,7 @@ function PostDetailDialog({
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onRecallDirect?: (post: ReviewPostItem) => void;
   onRecallDirectSilent?: (post: ReviewPostItem) => void;
+  onCancelAutoDecision?: (post: ReviewPostItem) => void;
 }) {
   const images = post ? getPostImages(post.attachments) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
@@ -2272,18 +2288,37 @@ function PostDetailDialog({
               <span>作者 ID：{post.author?.id ?? "未知"}</span>
             </div>
             <PostTimeline timeline={post.timeline} />
+            {post.aiAutoDecision && onCancelAutoDecision ? (
+              <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <Badge className="rounded-full bg-amber-100 text-amber-900 shadow-none dark:bg-amber-900/50 dark:text-amber-100">待执行自动{post.aiAutoDecision.action === "approve" ? "通过" : "拒绝"}</Badge>
+                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">决策理由</span>
+                </div>
+                <p className="whitespace-pre-wrap break-words text-xs leading-5">{post.aiAutoDecision.reason || "未提供理由"}</p>
+                <div>
+                  <Button size="sm" variant="outline" className="border-amber-300 text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-200" disabled={recallBusy} onClick={() => onCancelAutoDecision(post)}>
+                    {recallBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <XIcon className="mr-1 size-4" />}
+                    拦截自动决定，转人工审核
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             {post.aiReview ? (
-              <div className={`mt-3 rounded-md border p-3 text-sm ${post.aiReview.status === "completed" ? "border-violet-200 bg-violet-50" : "border-amber-200 bg-amber-50"}`} aria-label="AI 审核辅助状态">
+              <div className={`grid gap-2 rounded-md border p-3 text-sm ${post.aiReview.status === "completed" ? "border-violet-200 bg-violet-50/70 text-violet-950 dark:border-violet-900/60 dark:bg-violet-950/20 dark:text-violet-100" : "border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100"}`} aria-label="AI 审核辅助状态">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className={`rounded-full shadow-none ${post.aiReview.status === "completed" ? "bg-violet-100 text-violet-900 dark:bg-violet-900/50 dark:text-violet-100" : "bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100"}`}>AI 审核辅助</Badge>
+                  {post.aiReview.status === "completed" && post.aiReview.assessment ? <span className="text-xs font-semibold">仅供参考 · {({ low: "低", medium: "中", high: "高", critical: "严重" } as const)[post.aiReview.assessment.riskLevel]}风险 · 建议：{({ approve: "可考虑通过", revise: "建议修改", reject: "建议拒绝", manual_review: "重点人工复核" } as const)[post.aiReview.assessment.suggestedAction]}</span> : null}
+                </div>
+                {post.aiReview.mode === "auto" ? <p className="text-xs font-semibold leading-5">自动模式安全保护：{post.aiReview.autoDecisionReason ?? "转人工审核"}</p> : null}
                 {post.aiReview.status === "completed" && post.aiReview.assessment ? <>
-                  <p className="font-semibold text-violet-900">AI 审核辅助（仅供参考）· {({ low: "低", medium: "中", high: "高", critical: "严重" } as const)[post.aiReview.assessment.riskLevel]}风险 · 建议：{({ approve: "可考虑通过", revise: "建议修改", reject: "建议拒绝", manual_review: "重点人工复核" } as const)[post.aiReview.assessment.suggestedAction]}</p>
-                  <p className="mt-1 text-violet-900">类别：{post.aiReview.assessment.categories.join("、") || "未分类"} · 置信度 {Math.round(post.aiReview.assessment.confidence * 100)}%</p>
-                  <ul className="mt-1 list-disc pl-5 text-violet-900">{post.aiReview.assessment.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
-                  {post.aiReview.assessment.sensitiveFindings.length ? <div className="mt-2"><p className="font-semibold text-amber-900">敏感信息提示</p>{post.aiReview.assessment.sensitiveFindings.map((finding, index) => <p key={index} className="text-amber-900">{finding.type}：{finding.excerpt} — {finding.reason}</p>)}</div> : null}
-                  {post.aiReview.assessment.maskedText ? <details className="mt-2"><summary className="cursor-pointer font-semibold">查看打码建议</summary><p className="mt-1 whitespace-pre-wrap">{post.aiReview.assessment.maskedText}</p></details> : null}
-                  {post.aiReview.assessment.rewrittenText ? <details className="mt-2"><summary className="cursor-pointer font-semibold">查看改写建议</summary><p className="mt-1 whitespace-pre-wrap">{post.aiReview.assessment.rewrittenText}</p></details> : null}
-                  {post.aiReview.assessment.rejectionReason ? <p className="mt-2">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p> : null}
-                  <p className="mt-2 text-xs text-violet-700">AI 不执行审核决定；请核对原文并由审核员作最终判断。</p>
-                </> : <p className="font-semibold text-amber-900">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>}
+                  <p className="text-xs leading-5">类别：{post.aiReview.assessment.categories.join("、") || "未分类"} <span className="text-violet-600 dark:text-violet-300">·</span> 置信度 {Math.round(post.aiReview.assessment.confidence * 100)}%</p>
+                  <ul className="grid gap-1 pl-4 text-xs leading-5 marker:text-violet-400">{post.aiReview.assessment.reasons.map((reason, index) => <li key={index} className="list-disc">{reason}</li>)}</ul>
+                  {post.aiReview.assessment.sensitiveFindings.length ? <div className="grid gap-1 rounded-md border border-amber-200 bg-amber-50/80 p-2 text-xs leading-5 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><p className="font-bold">敏感信息提示</p>{post.aiReview.assessment.sensitiveFindings.map((finding, index) => <p key={index} className="break-words">{finding.type}：{finding.excerpt} — {finding.reason}</p>)}</div> : null}
+                  {post.aiReview.assessment.maskedText ? <details className="rounded-md border border-violet-100 bg-white/60 px-2 py-1.5 text-xs dark:border-violet-900/50 dark:bg-slate-950/30"><summary className="cursor-pointer font-semibold">查看打码建议</summary><p className="mt-2 whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.maskedText}</p></details> : null}
+                  {post.aiReview.assessment.rewrittenText ? <details className="rounded-md border border-violet-100 bg-white/60 px-2 py-1.5 text-xs dark:border-violet-900/50 dark:bg-slate-950/30"><summary className="cursor-pointer font-semibold">查看改写建议</summary><p className="mt-2 whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.rewrittenText}</p></details> : null}
+                  {post.aiReview.assessment.rejectionReason ? <p className="text-xs leading-5">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p> : null}
+                  <p className="border-t border-violet-200/70 pt-2 text-xs leading-5 text-violet-700 dark:border-violet-800 dark:text-violet-300">AI 不执行审核决定；请核对原文并由审核员作最终判断。</p>
+                </> : <p className="text-xs font-semibold">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>}
               </div>
             ) : null}
             {images.length > 0 ? (
@@ -2383,6 +2418,7 @@ function ReviewList({
   onRecallDirect,
   onRecallDirectSilent,
   onDetail,
+  onCancelAutoDecision,
 }: {
   posts: ReviewPostItem[];
   busyPostId: string;
@@ -2397,6 +2433,7 @@ function ReviewList({
   onRecallDirect: (post: ReviewPostItem) => void;
   onRecallDirectSilent: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
+  onCancelAutoDecision: (post: ReviewPostItem) => void;
 }) {
   if (posts.length === 0) {
     return <EmptyCard title={emptyTitle} />;
@@ -2420,6 +2457,7 @@ function ReviewList({
           onRecallDirect={() => onRecallDirect(post)}
           onRecallDirectSilent={() => onRecallDirectSilent(post)}
           onDetail={() => onDetail(post)}
+          onCancelAutoDecision={() => onCancelAutoDecision(post)}
         />
       ))}
     </div>
@@ -2505,6 +2543,7 @@ function ReviewCard({
   onRecallDirect,
   onRecallDirectSilent,
   onDetail,
+  onCancelAutoDecision,
 }: {
   post: ReviewPostItem;
   palette: string;
@@ -2520,6 +2559,7 @@ function ReviewCard({
   onRecallDirect?: () => void;
   onRecallDirectSilent?: () => void;
   onDetail: () => void;
+  onCancelAutoDecision?: () => void;
 }) {
   const images = getPostImages(post.attachments);
   const authorName = post.author?.displayName ?? "未命名用户";
@@ -2565,12 +2605,23 @@ function ReviewCard({
         {canApproveRecall ? <RecallReasonBlock reason={post.recallReason} /> : null}
         {canApproveRecall && post.recallIgnored ? <IgnoredRecallBlock ignoredAt={post.recallIgnoredAt} /> : null}
 
+        {canReviewPost && post.aiAutoDecision ? (
+          <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Badge className="rounded-full bg-amber-100 text-amber-900 shadow-none dark:bg-amber-900/50 dark:text-amber-100">待执行自动{post.aiAutoDecision.action === "approve" ? "通过" : "拒绝"}</Badge>
+              <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">决策理由</span>
+            </div>
+            <p className="whitespace-pre-wrap break-words text-xs leading-5">{post.aiAutoDecision.reason || "未提供理由"}</p>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
             <span>{formatPostDate(post.createdAt)}</span>
           </div>
           {canReviewPost ? (
             <div className="flex flex-wrap justify-end gap-2">
+              {post.aiAutoDecision && onCancelAutoDecision ? <Button size="sm" variant="outline" className="border-amber-300 text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-200" disabled={busy} onClick={onCancelAutoDecision}>{busy ? <LoaderIcon data-icon="inline-start" className="animate-spin" /> : <XIcon data-icon="inline-start" />}{busy ? "拦截中..." : "拦截自动决定"}</Button> : null}
               <Button size="sm" className="font-medium" disabled={busy} onClick={onApprove}>
                 <CheckIcon data-icon="inline-start" />
                 通过

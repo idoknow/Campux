@@ -106,6 +106,7 @@ model Tenant {
   schoolSnapshots  SchoolModelSnapshot[]
   postAiAnalyses   PostAiAnalysis[]
   aiFeedback       AiFeedback[]
+
   qzoneVisitorSnapshots QZoneVisitorSnapshot[]
   botFriendSnapshots BotFriendSnapshot[]
   publishBatches PublishBatch[]
@@ -825,6 +826,13 @@ model PostAiAnalysis {
   rewrittenText     String?
   maskedText        String?
   rejectionReason   String?
+  autoDecision      String?
+  autoDecisionReason String?
+  autoDecisionAt    DateTime?
+  autoDecisionExecuteAfter DateTime?
+  autoDecisionCancelledAt DateTime?
+  autoDecisionExecutingAt DateTime?
+  autoDecisionLeaseAt DateTime?
   error             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -836,8 +844,10 @@ model PostAiAnalysis {
   @@unique([postId, tenantId, version])
   @@unique([tenantId, id])
   @@index([tenantId, status, createdAt])
+  @@index([tenantId, autoDecision, autoDecisionExecuteAfter])
   @@index([tenantId, postId, createdAt])
 }
+
 
 model AiFeedback {
   id           String   @id @default(uuid())
@@ -849,6 +859,7 @@ model AiFeedback {
   humanAction  String
   humanComment String?
   matched      Boolean
+  categories   Json     @default("[]")
   createdAt    DateTime @default(now())
   tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   post         Post     @relation(fields: [postId, tenantId], references: [id, tenantId], onDelete: Cascade)

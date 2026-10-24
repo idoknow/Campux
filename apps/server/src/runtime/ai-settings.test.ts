@@ -7,6 +7,8 @@ describe("AI settings normalization", () => {
     expect(normalizeAiRules(undefined).aiReviewMode).toBe("off");
     expect(normalizeAiRules({ aiReviewMode: "shadow" }).aiReviewMode).toBe("shadow");
     expect(normalizeAiRules({ aiReviewMode: "assist" }).aiReviewMode).toBe("assist");
+    expect(normalizeAiRules({ aiReviewMode: "auto" }).aiReviewMode).toBe("auto");
+
     expect(normalizeAiRules({ aiReviewMode: "auto_approve" }).aiReviewMode).toBe("off");
   });
 

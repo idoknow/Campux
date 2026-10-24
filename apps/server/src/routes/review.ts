@@ -66,6 +66,25 @@ async function activatePendingTags(transaction: Parameters<Parameters<typeof pri
   }
 }
 
+async function cancelPendingAutoDecisions(transaction: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], tenantId: string, postId: string, actorId: string, reason: string) {
+  const pending = await transaction.postAiAnalysis.findMany({
+    where: { tenantId, postId, mode: "auto", autoDecision: { in: ["approve", "reject"] }, autoDecisionAt: null, autoDecisionCancelledAt: null, autoDecisionLeaseAt: null, autoDecisionExecutingAt: null },
+    select: { id: true, autoDecision: true, autoDecisionReason: true, createdAt: true },
+  });
+  if (pending.length === 0) return 0;
+  const cancelledIds = pending.map((item) => item.id);
+  const cancelledAt = new Date();
+  const result = await transaction.postAiAnalysis.updateMany({
+    where: { id: { in: cancelledIds }, tenantId, autoDecisionAt: null, autoDecisionCancelledAt: null, autoDecisionLeaseAt: null, autoDecisionExecutingAt: null },
+    data: { autoDecisionCancelledAt: cancelledAt, autoDecisionReason: reason },
+  });
+  if (result.count === 0) return 0;
+  const cancelled = pending.filter((item) => item.autoDecisionLeaseAt === null && item.autoDecisionExecutingAt === null);
+  await transaction.postLog.create({ data: { tenantId, postId, oldStatus: "pending_approval", newStatus: "pending_approval", actorId, comment: reason } });
+  await transaction.auditLog.create({ data: { tenantId, actorId, action: "post.auto_decision.cancelled", targetType: "post", targetId: postId, detail: { analysisIds: cancelled.map((item) => item.id), previousDecisions: cancelled.map((item) => ({ analysisId: item.id, action: item.autoDecision, reason: item.autoDecisionReason })), reason } } });
+  return result.count;
+}
+
 export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/review/posts", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
@@ -161,14 +180,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       }),
     ]);
     const assessmentRows = await Promise.all(posts.map((post) => prisma.postAiAnalysis.findFirst({
-      where: { tenantId: context.selectedTenant.id, postId: post.id },
+      where: { tenantId: context.selectedTenant.id, postId: post.id, mode: { in: ["assist", "auto"] } },
       orderBy: [{ version: "desc" }, { createdAt: "desc" }],
     })));
     const assessmentByPost = new Map<string, NonNullable<(typeof assessmentRows)[number]>>(
       posts.map((post, index) => [post.id, assessmentRows[index]] as const).filter((entry): entry is readonly [string, NonNullable<(typeof assessmentRows)[number]>] => Boolean(entry[1])),
     );
 
-    // 解析时间线里出现的操作人（actorId → 用户名/QQ），系统自动操作 actorId 为 null。
+
     const actorIds = [...new Set(posts.flatMap((post) => post.logs.map((log) => log.actorId).filter((id): id is string => Boolean(id))))];
     const actorRows = actorIds.length > 0
       ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, displayName: true, qqUin: true } })
@@ -186,6 +205,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         },
         timeline: toPostTimeline(post.logs, actorMap),
         aiReview: parsePostReviewAnalysisRecord(assessmentByPost.get(post.id)),
+        aiAutoDecision: assessmentByPost.get(post.id)?.autoDecision === "approve" || assessmentByPost.get(post.id)?.autoDecision === "reject" ? { action: assessmentByPost.get(post.id)!.autoDecision!, reason: assessmentByPost.get(post.id)!.autoDecisionReason ?? "", analysisId: assessmentByPost.get(post.id)!.id } : null,
       })),
       pagination: toPagination(query.page, query.limit, total),
     };
@@ -194,23 +214,51 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   app.post("/api/review/ai-feedback/:analysisId", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
     const { analysisId } = z.object({ analysisId: z.string().uuid() }).parse(request.params);
-    const body = z.object({ matched: z.boolean(), humanAction: z.enum(["approve", "reject"]), analysisMode: z.literal("assist"), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
+    const body = z.object({ matched: z.boolean().optional(), humanAction: z.enum(["approve", "reject"]), analysisMode: z.enum(["assist", "auto"]), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
     const saved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
-      const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, post: { select: { tenantId: true, status: true } } } });
       const expectedFinalStatus = body.humanAction === "approve" ? "approved" : "rejected";
-      if (!analysis || analysis.post.tenantId !== context.selectedTenant.id || analysis.post.status !== expectedFinalStatus) return null;
+      const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id, mode: body.analysisMode }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, categories: true, post: { select: { tenantId: true, status: true } } } });
+      if (!analysis || analysis.post.tenantId !== context.selectedTenant.id) return null;
+      const isFinal = analysis.post.status === expectedFinalStatus;
+      const humanDecisionLog = body.analysisMode === "auto" && isFinal
+        ? await transaction.postLog.findFirst({
+            where: { tenantId: context.selectedTenant.id, postId: analysis.postId, oldStatus: "pending_approval", newStatus: { in: ["approved", "rejected"] }, actorId: context.user.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            select: { newStatus: true },
+          })
+        : null;
+      // Auto-mode calibration is only recorded for the reviewer's latest real transition.
+      const hasHumanDecision = body.analysisMode !== "auto" || humanDecisionLog?.newStatus === expectedFinalStatus;
+      if (!isFinal || !hasHumanDecision) return null;
+      const matched = analysis.suggestedAction === body.humanAction;
+      if (body.matched !== undefined && body.matched !== matched) return null;
+      const normalizedCategories = Array.isArray(analysis.categories) ? analysis.categories.filter((category): category is string => typeof category === "string") : [];
       const existing = await transaction.aiFeedback.findFirst({ where: { analysisId, tenantId: context.selectedTenant.id }, select: { id: true, humanAction: true } });
       if (existing && existing.humanAction !== body.humanAction) return null;
       return transaction.aiFeedback.upsert({
         where: { id: existing?.id ?? "__missing__" },
-        create: { tenantId: context.selectedTenant.id, postId: analysis.postId, analysisId, reviewerId: context.user.id, aiAction: analysis.suggestedAction, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched: body.matched },
-        update: { reviewerId: context.user.id, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched: body.matched },
+        create: { tenantId: context.selectedTenant.id, postId: analysis.postId, analysisId, reviewerId: context.user.id, aiAction: analysis.suggestedAction, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched, categories: normalizedCategories },
+        update: { reviewerId: context.user.id, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched, categories: normalizedCategories },
       }).then((feedback) => ({ postId: analysis.postId, feedback }));
     });
     if (!saved.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     if (!saved.value) return reply.code(404).send({ message: "AI 分析记录不存在" });
-    await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched: body.matched, humanAction: body.humanAction } });
+    await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched, humanAction: body.humanAction } });
     return { feedback: saved.value };
+  });
+
+  app.post("/api/review/ai-auto-decision/:analysisId/revert", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "reviewer");
+    const { analysisId } = z.object({ analysisId: z.string().uuid() }).parse(request.params);
+    const lease = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (tx) => {
+      const analysis = await tx.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id }, select: { id: true, postId: true, autoDecision: true, post: { select: { status: true } } } });
+      if (!analysis || (analysis.autoDecision !== "approve" && analysis.autoDecision !== "reject") || analysis.post.status !== "pending_approval") return null;
+      const cancelled = await cancelPendingAutoDecisions(tx, context.selectedTenant.id, analysis.postId, context.user.id, "审核员拦截了待执行的自动审核决定");
+      return cancelled > 0;
+    });
+    if (!lease.active) return reply.code(409).send({ error: "校园墙已暂停或归档" });
+    if (!lease.value) return reply.code(409).send({ error: "自动审核决定已改变或无法撤销" });
+    return { ok: true };
   });
 
   app.post("/api/review/posts/:id/approve", async (request, reply) => {
@@ -232,21 +280,20 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     const approved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
-      await transaction.post.update({
-        where: { id: post.id },
-        data: {
-          status: "approved",
-          logs: {
-            create: {
-              tenantId: context.selectedTenant.id,
-              actorId: context.user.id,
-              oldStatus: post.status,
-              newStatus: "approved",
-              comment: body.comment?.trim() || "审核通过",
-            },
-          },
-        },
+      const updated = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
+        data: { status: "approved" },
       });
+      if (updated.count !== 1) return null;
+      await transaction.postLog.create({ data: {
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        actorId: context.user.id,
+        oldStatus: "pending_approval",
+        newStatus: "approved",
+        comment: body.comment?.trim() || "审核通过",
+      } });
+      await cancelPendingAutoDecisions(transaction, context.selectedTenant.id, post.id, context.user.id, "人工审核通过，自动决策已被人工覆盖");
       await activatePendingTags(transaction, context.selectedTenant.id, post.id, post.pendingTags);
       await transaction.post.update({
         where: { id: post.id },
@@ -265,6 +312,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!approved.active) {
       return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
+    if (!approved.value) return reply.code(409).send({ message: "稿件状态已改变，请刷新后重试" });
     const publishMode = approved.value;
     // 无 Bot 模式：不自动入队，稿件停在「已通过」，由管理员在「待发布」页手动发完后确认。
     const operateMode = await readTenantOperateMode(prisma, context.selectedTenant.id);
@@ -308,15 +356,15 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     const publishMode = await readTenantPublishMode(prisma, context.selectedTenant.id);
     const operateMode = await readTenantOperateMode(prisma, context.selectedTenant.id);
-    let approved = 0;
-
+    const approvedIds: string[] = [];
     for (const post of pending) {
       const approvedPost = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
         const result = await transaction.post.updateMany({
-          where: { id: post.id, status: "pending_approval" },
+          where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
           data: { status: "approved" },
         });
         if (result.count === 0) return false;
+        await cancelPendingAutoDecisions(transaction, context.selectedTenant.id, post.id, context.user.id, "人工审核通过，自动决策已被人工覆盖");
         await transaction.postLog.create({
           data: {
             postId: post.id,
@@ -347,10 +395,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           await enqueuePublishFanout(queue, context.selectedTenant.id, post.id, context.user.id);
         }
       }
-      approved += 1;
+      approvedIds.push(post.id);
     }
 
-    return { ok: true, approved };
+    const events = app.pluginEvents as EventBus | undefined;
+    for (const postId of approvedIds) {
+      events?.emit({ type: "review:approved", tenantId: context.selectedTenant.id, postId, reviewerId: context.user.id });
+    }
+    return { ok: true, approved: approvedIds.length };
   });
 
   app.post("/api/review/posts/:id/reject", async (request, reply) => {
@@ -372,21 +424,20 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     const rejectedPost = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
-      const updated = await transaction.post.update({
-        where: { id: post.id },
-        data: {
-          status: "rejected",
-          logs: {
-            create: {
-              tenantId: context.selectedTenant.id,
-              actorId: context.user.id,
-              oldStatus: post.status,
-              newStatus: "rejected",
-              comment: body.comment?.trim() || "审核拒绝",
-            },
-          },
-        },
+      const updated = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
+        data: { status: "rejected" },
       });
+      if (updated.count !== 1) return null;
+      await transaction.postLog.create({ data: {
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        actorId: context.user.id,
+        oldStatus: "pending_approval",
+        newStatus: "rejected",
+        comment: body.comment?.trim() || "审核拒绝",
+      } });
+      await cancelPendingAutoDecisions(transaction, context.selectedTenant.id, post.id, context.user.id, "人工审核拒绝，自动决策已被人工覆盖");
       await writeAuditLog({
         tenantId: context.selectedTenant.id,
         actorId: context.user.id,
@@ -403,7 +454,8 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!rejectedPost.active) {
       return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
-    const updated = rejectedPost.value;
+    if (!rejectedPost.value) return reply.code(409).send({ message: "稿件状态已改变，请刷新后重试" });
+    const updated = { id: post.id };
     oneBot?.notifyReviewResult(updated.id, "rejected", body.comment?.trim() || "审核拒绝").catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify review rejection");
     });

@@ -41,6 +41,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 
 const statusLabels: Record<TenantStatus, string> = {
   active: "运行中",
@@ -210,6 +211,8 @@ export function OpsPanel({
   const [savingManagementHost, setSavingManagementHost] = useState(false);
   const [hostDraft, setHostDraft] = useState("");
   const [managementHostDraft, setManagementHostDraft] = useState("");
+  const [aiModerationKillSwitch, setAiModerationKillSwitch] = useState(false);
+  const [savingKillSwitch, setSavingKillSwitch] = useState(false);
   const [tenantDomainSuffix, setTenantDomainSuffix] = useState<string | null>(null);
   const [showArchivedTenants, setShowArchivedTenants] = useState(false);
   const [tenantKeyword, setTenantKeyword] = useState("");
@@ -344,8 +347,9 @@ export function OpsPanel({
 
     setLoadingSettings(true);
     try {
-      const data = await api<{ managementHost: string | null }>("/api/system/settings");
+      const data = await api<{ managementHost: string | null; aiModerationKillSwitch: boolean }>("/api/system/settings");
       setManagementHostDraft(data.managementHost ?? "");
+      setAiModerationKillSwitch(data.aiModerationKillSwitch);
     } finally {
       setLoadingSettings(false);
     }
@@ -674,6 +678,23 @@ ${impact}`)) {
       toast.error(caught instanceof Error ? caught.message : "管理端 host 更新失败");
     } finally {
       setSavingManagementHost(false);
+    }
+  }
+
+  async function saveAiModerationKillSwitch(enabled: boolean) {
+    setSavingKillSwitch(true);
+    try {
+      const data = await api<{ managementHost: string | null; aiModerationKillSwitch: boolean }>("/api/system/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ aiModerationKillSwitch: enabled }),
+      });
+      setAiModerationKillSwitch(data.aiModerationKillSwitch);
+      toast.success(enabled ? "全局 AI 自动审核已暂停。" : "全局 AI 自动审核已恢复。");
+      await refreshAudit(1);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "全局紧急开关更新失败");
+    } finally {
+      setSavingKillSwitch(false);
     }
   }
 
@@ -1233,6 +1254,13 @@ ${impact}`)) {
                   <div className="mt-4 grid gap-2">
                     <Input placeholder="app.campux.top 或 localhost:5180" value={managementHostDraft} onChange={(event) => setManagementHostDraft(event.target.value)} />
                     <Button className="font-medium" disabled={savingManagementHost} onClick={() => void saveManagementHost()}>保存管理端 host</Button>
+                  </div>
+                  <div className="mt-5 border-t pt-4">
+                    <label className="flex items-center justify-between gap-3 text-sm font-semibold">
+                      全局 AI 自动审核紧急停止
+                      <Switch checked={aiModerationKillSwitch} disabled={savingKillSwitch || loadingSettings} onCheckedChange={(checked) => void saveAiModerationKillSwitch(checked)} />
+                    </label>
+                    <p className="mt-2 text-xs text-amber-700">仅停止自动通过/拒绝，不关闭审核员人工审核；该开关作用于所有校园墙。</p>
                   </div>
                 </CardContent>
               </Card>

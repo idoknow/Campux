@@ -25,8 +25,11 @@ const CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME = "20260906150000_add_campaign_admin_on
 const BROADCAST_NOTIFICATIONS_MIGRATION_NAME = "20260924120000_add_broadcast_notifications";
 const TENANT_FEEDBACK_MIGRATION_NAME = "20260913140000_add_tenant_feedback";
 const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedback_messages";
+
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
+const AUTO_MODERATION_SCHEDULE_MIGRATION_NAME = "20261024120000_ai_auto_moderation_schedule_quota";
+
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
 const NEW_PRIVATE_MESSAGE_REPLY = `首次私聊会自动注册 Campux 账号。
@@ -765,6 +768,68 @@ function applyPostPendingTagsSqliteMigration(
   logger.info({ migration: POST_PENDING_TAGS_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
+function applyAutoModerationScheduleSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  if (doneNames.has(AUTO_MODERATION_SCHEDULE_MIGRATION_NAME)) {
+    skipped.push(AUTO_MODERATION_SCHEDULE_MIGRATION_NAME);
+    return;
+  }
+
+  const hasTable = (name: string): boolean =>
+    db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== null;
+  // A database predating these AI tables is not yet eligible for this migration.
+  if (!hasTable("Tenant") || !hasTable("PostAiAnalysis") || !hasTable("AiFeedback")) return;
+
+  logger.info({ migration: AUTO_MODERATION_SCHEDULE_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    const analysisColumns = new Set(
+      (db.query(`PRAGMA table_info("PostAiAnalysis")`).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    const additions = [
+      ["autoDecision", "TEXT"],
+      ["autoDecisionReason", "TEXT"],
+      ["autoDecisionAt", "DATETIME"],
+      ["autoDecisionExecuteAfter", "DATETIME"],
+      ["autoDecisionCancelledAt", "DATETIME"],
+      ["autoDecisionExecutingAt", "DATETIME"],
+      ["autoDecisionLeaseAt", "DATETIME"],
+    ] as const;
+    for (const [name, type] of additions) {
+      if (!analysisColumns.has(name)) db.exec(`ALTER TABLE "PostAiAnalysis" ADD COLUMN "${name}" ${type}`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS "PostAiAnalysis_tenantId_autoDecision_autoDecisionExecuteAfter_idx" ON "PostAiAnalysis"("tenantId", "autoDecision", "autoDecisionExecuteAfter")`);
+
+    const feedbackColumns = new Set(
+      (db.query(`PRAGMA table_info("AiFeedback")`).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    if (!feedbackColumns.has("categories")) {
+      db.exec(`ALTER TABLE "AiFeedback" ADD COLUMN "categories" TEXT NOT NULL DEFAULT '[]'`);
+    }
+
+    const violations = db.query("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) throw new Error(`sqlite migration introduced ${violations.length} foreign-key violation(s)`);
+
+    db.run(
+      `INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "started_at", "finished_at", "applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [randomUUID(), checksumOf("auto moderation durable schedule"), AUTO_MODERATION_SCHEDULE_MIGRATION_NAME],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  doneNames.add(AUTO_MODERATION_SCHEDULE_MIGRATION_NAME);
+  applied.push(AUTO_MODERATION_SCHEDULE_MIGRATION_NAME);
+  logger.info({ migration: AUTO_MODERATION_SCHEDULE_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 export function applySqliteBaseline(
   baselineSql: string,
   databaseUrl: string,
@@ -805,6 +870,7 @@ export function applySqliteBaseline(
       db.exec("BEGIN");
       try {
         db.exec(baselineSql);
+
         db.run(
           `INSERT INTO "_prisma_migrations"
              ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
@@ -847,6 +913,7 @@ export function applySqliteBaseline(
     applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyAutoModerationScheduleSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

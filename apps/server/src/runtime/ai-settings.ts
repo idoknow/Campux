@@ -27,7 +27,18 @@ export type AiRules = {
     strictPrivacy?: boolean | undefined;
   } | undefined;
   /** Whether to run review assistance after a post is submitted. */
-  aiReviewMode?: "off" | "shadow" | "assist" | undefined;
+  aiReviewMode?: "off" | "shadow" | "assist" | "auto" | undefined;
+  autoModeration?: {
+    enabled?: boolean | undefined;
+    globalKillSwitch?: boolean | undefined;
+    autoApproveEnabled?: boolean | undefined;
+    autoRejectEnabled?: boolean | undefined;
+    allowedAutoApproveCategories?: string[] | undefined;
+    blockedPatterns?: string[] | undefined;
+    minimumConfidence?: number | undefined;
+    minimumValidatedSamples?: number | undefined;
+    delaySeconds?: number | undefined;
+  } | undefined;
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean | undefined;
   /** 是否启用投稿后的 LLM 自动打标 */
@@ -76,6 +87,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
   timeoutSeconds: 30,
   rules: {
     aiReviewMode: "off",
+    autoModeration: { enabled: false, globalKillSwitch: false, autoApproveEnabled: false, autoRejectEnabled: false, allowedAutoApproveCategories: [], blockedPatterns: [], minimumConfidence: 0.98, minimumValidatedSamples: 100, delaySeconds: 60 },
     privatePostAiEnabled: false,
     postTaggingEnabled: true,
     postTagMaintenanceEnabled: true,
@@ -283,13 +295,29 @@ export function normalizeAiRules(value: unknown): AiRules {
   const candidate = value as Record<string, unknown>;
   return {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
-    aiReviewMode: candidate.aiReviewMode === "shadow" || candidate.aiReviewMode === "assist" ? candidate.aiReviewMode : "off",
+    aiReviewMode: candidate.aiReviewMode === "shadow" || candidate.aiReviewMode === "assist" || candidate.aiReviewMode === "auto" ? candidate.aiReviewMode : "off",
+    autoModeration: normalizeAutoModeration(candidate.autoModeration),
     aiReviewRules: normalizeAiReviewRules(candidate.aiReviewRules),
     postTaggingEnabled: typeof candidate.postTaggingEnabled === "boolean" ? candidate.postTaggingEnabled : defaultAiSettings.rules.postTaggingEnabled,
     postTagMaintenanceEnabled: typeof candidate.postTagMaintenanceEnabled === "boolean" ? candidate.postTagMaintenanceEnabled : defaultAiSettings.rules.postTagMaintenanceEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
     privatePostPrompt: normalizePrivatePostPrompt(candidate.privatePostPrompt),
+  };
+}
+
+function normalizeAutoModeration(value: unknown): NonNullable<AiRules["autoModeration"]> {
+  const candidate = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return {
+    enabled: candidate.enabled === true,
+    globalKillSwitch: candidate.globalKillSwitch === true,
+    autoApproveEnabled: candidate.autoApproveEnabled === true,
+    autoRejectEnabled: candidate.autoRejectEnabled === true,
+    allowedAutoApproveCategories: normalizeStringArray(candidate.allowedAutoApproveCategories).slice(0, 40).map((item) => item.slice(0, 80)),
+    blockedPatterns: normalizeStringArray(candidate.blockedPatterns).slice(0, 100).map((item) => item.slice(0, 160)),
+    minimumConfidence: clampNumber(candidate.minimumConfidence, 0.9, 1, 0.98),
+    minimumValidatedSamples: normalizeNumber(candidate.minimumValidatedSamples, 5, 10000, 100),
+    delaySeconds: normalizeNumber(candidate.delaySeconds, 30, 120, 60),
   };
 }
 
