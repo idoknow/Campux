@@ -352,6 +352,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
         break;
       }
     } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "FST_INVALID_MULTIPART_CONTENT_TYPE") {
+        return reply.code(400).send({ message: "上传请求格式异常，请重新选择文件上传" });
+      }
       if (typeof error === "object" && error !== null && "status" in error && "message" in error) {
         const errorObj = error as { status: number; message: string };
         return reply.code(errorObj.status).send({ message: errorObj.message });

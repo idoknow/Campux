@@ -1215,7 +1215,11 @@ async function schedulePublishAttemptInTransaction(
 }
 
 export async function schedulePublishAttempt(options: SchedulePublishAttemptOptions) {
-  return prisma.$transaction((tx) => schedulePublishAttemptInTransaction(tx, options));
+  // campux:publish 建议锁可能被 fanout 事务（最长 30s）持有，默认 5s 超时会直接过期。
+  return prisma.$transaction((tx) => schedulePublishAttemptInTransaction(tx, options), {
+    maxWait: 15_000,
+    timeout: 60_000,
+  });
 }
 
 async function lockPublishFanout(tx: Prisma.TransactionClient, tenantId: string, ownerKey: string) {
@@ -1229,6 +1233,18 @@ async function lockPublishSchedule(tx: Prisma.TransactionClient, tenantId: strin
   if (supportsAdvisoryLock) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:publish:${tenantId}:${botAccountId}`})::bigint)`;
   }
+}
+
+async function tryLockPublishSchedule(tx: Prisma.TransactionClient, tenantId: string, botAccountId: string) {
+  // 与 lockPublishSchedule 同一把锁，但被占用时立即返回 false 而不是阻塞等待：
+  // 认领事务跑在单并发派发的 runtime queue 里，阻塞会拖住所有租户的无关任务。
+  if (!supportsAdvisoryLock) {
+    return true;
+  }
+  const rows = await tx.$queryRaw<Array<{ locked: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(hashtext(${`campux:publish:${tenantId}:${botAccountId}`})::bigint) AS "locked"
+  `;
+  return rows[0]?.locked === true;
 }
 
 export function enqueueAttempt(queue: RuntimeQueue, tenantId: string, attemptId: string, runAt = new Date()) {
@@ -1362,59 +1378,78 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   }
 
   const now = new Date();
-  const claimResult = await prisma.$transaction(async (tx) => {
-    await lockPublishSchedule(tx, dispatchTarget.tenantId, dispatchTarget.publishTarget.botAccountId);
-    const botAccount = await tx.botAccount.findUnique({
-      where: { id: dispatchTarget.publishTarget.botAccountId },
-      select: { lastPublishStartedAt: true },
-    });
-    const earliestDispatchAt = resolveEarliestPublishDispatchAt({
-      now,
-      intervalSeconds: dispatchTarget.publishTarget.publishDelaySeconds,
-      latestActivityAt: botAccount?.lastPublishStartedAt ?? null,
-    });
-    const claimWhere: Prisma.PublishAttemptWhereInput = {
-      id: attemptId,
-      OR: [
-        {
-          status: "queued",
-          OR: [
-            { nextRunAt: null },
-            { nextRunAt: { lte: now } },
-          ],
-        },
-        {
-          status: "failed",
-          nextRunAt: { lte: now },
-        },
-      ],
-    };
-
-    if (earliestDispatchAt.getTime() > now.getTime()) {
-      const deferred = await tx.publishAttempt.updateMany({
-        where: claimWhere,
-        data: { nextRunAt: earliestDispatchAt },
-      });
-      return { claimed: false, deferredUntil: deferred.count > 0 ? earliestDispatchAt : null };
-    }
-
-    const claimed = await tx.publishAttempt.updateMany({
-      where: claimWhere,
-      data: {
-        status: "running",
-        lastError: null,
-        verbose: JsonNull,
-        nextRunAt: null,
-      },
-    });
-    if (claimed.count > 0) {
-      await tx.botAccount.update({
+  let claimResult:
+    | { lockBusy: true }
+    | { lockBusy: false; claimed: boolean; deferredUntil: Date | null };
+  try {
+    claimResult = await prisma.$transaction(async (tx) => {
+      if (!await tryLockPublishSchedule(tx, dispatchTarget.tenantId, dispatchTarget.publishTarget.botAccountId)) {
+        return { lockBusy: true } as const;
+      }
+      const botAccount = await tx.botAccount.findUnique({
         where: { id: dispatchTarget.publishTarget.botAccountId },
-        data: { lastPublishStartedAt: now },
+        select: { lastPublishStartedAt: true },
       });
-    }
-    return { claimed: claimed.count > 0, deferredUntil: null };
-  });
+      const earliestDispatchAt = resolveEarliestPublishDispatchAt({
+        now,
+        intervalSeconds: dispatchTarget.publishTarget.publishDelaySeconds,
+        latestActivityAt: botAccount?.lastPublishStartedAt ?? null,
+      });
+      const claimWhere: Prisma.PublishAttemptWhereInput = {
+        id: attemptId,
+        OR: [
+          {
+            status: "queued",
+            OR: [
+              { nextRunAt: null },
+              { nextRunAt: { lte: now } },
+            ],
+          },
+          {
+            status: "failed",
+            nextRunAt: { lte: now },
+          },
+        ],
+      };
+
+      if (earliestDispatchAt.getTime() > now.getTime()) {
+        const deferred = await tx.publishAttempt.updateMany({
+          where: claimWhere,
+          data: { nextRunAt: earliestDispatchAt },
+        });
+        return { lockBusy: false as const, claimed: false, deferredUntil: deferred.count > 0 ? earliestDispatchAt : null };
+      }
+
+      const claimed = await tx.publishAttempt.updateMany({
+        where: claimWhere,
+        data: {
+          status: "running",
+          lastError: null,
+          verbose: JsonNull,
+          nextRunAt: null,
+        },
+      });
+      if (claimed.count > 0) {
+        await tx.botAccount.update({
+          where: { id: dispatchTarget.publishTarget.botAccountId },
+          data: { lastPublishStartedAt: now },
+        });
+      }
+      return { lockBusy: false as const, claimed: claimed.count > 0, deferredUntil: null };
+    }, { maxWait: 15_000, timeout: 60_000 });
+  } catch (error) {
+    // 认领失败（数据库不可用、事务过期等）时任务不能被队列丢弃，否则发布尝试
+    // 会停留在 queued 状态且没有任何任务处理它；推迟后整体重走认领流程。
+    queue.rescheduleCurrent(job, new Date(Date.now() + 60_000));
+    logger.warn({ error, attemptId }, "publish attempt claim failed; job rescheduled");
+    return;
+  }
+  if (claimResult.lockBusy) {
+    // 计划锁正被 fanout 等长事务持有：推迟认领，避免事务内阻塞等待拖住整个队列。
+    queue.rescheduleCurrent(job, new Date(Date.now() + 5_000));
+    logger.info({ attemptId, tenantId: dispatchTarget.tenantId }, "publish attempt claim deferred: schedule lock busy");
+    return;
+  }
   if (claimResult.deferredUntil) {
     queue.rescheduleCurrent(job, claimResult.deferredUntil);
     logger.info({ attemptId, nextRunAt: claimResult.deferredUntil }, "publish attempt deferred to enforce per-bot interval");
