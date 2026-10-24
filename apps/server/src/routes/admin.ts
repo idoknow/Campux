@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import { randomInt } from "node:crypto";
 import { z } from "zod";
-import { Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
+import { hashPassword, Prisma, TransactionIsolationLevel, type TenantRole } from "@campux/db";
 import { requireTenantRole } from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import {
@@ -345,6 +346,95 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         operator: ban.operator,
       })),
     };
+  });
+
+  // 管理员重置成员密码：无 Bot 模式下，没绑邮箱也没绑定第三方登录的用户
+  // 无法自助找回密码，这是打破「忘记密码 ↔ 强制绑邮箱」死锁的兜底通道。
+  app.post("/api/admin/members/users/:userId/reset-password", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const params = memberUserParamsSchema.parse(request.params);
+
+    const membership = await prisma.tenantMembership.findFirst({
+      where: {
+        tenantId: context.selectedTenant.id,
+        userId: params.userId,
+      },
+      include: { user: true },
+    });
+    if (!membership) {
+      return reply.code(404).send({ message: "该用户不属于当前校园墙" });
+    }
+
+    const tempPassword = `cp${randomInt(100_000, 999_999)}${randomInt(100_000, 999_999)}`;
+    const passwordHash = await hashPassword(tempPassword);
+
+    // 密码与会话是全局生效的（跨租户），所以这里的边界要比「本墙成员」更严：
+    // 1) 目标只要在任何租户是管理员、或带平台角色，就禁止重置（否则本墙管理员可以
+    //    接管别墙管理员的账号）；
+    // 2) 校验与写入在同一事务里，避免并发改角色绕过；
+    // 3) 用条件更新保证只有本次实际写进去的临时密码才会被返回（并发重置不会返回失效密码）；
+    // 4) 一并撤销该账号的 OAuth 令牌，避免持旧 refresh token 的人继续换发访问令牌。
+    const reset = await retryTransactionSerializationFailures(
+      () =>
+        prisma.$transaction(async (tx) => {
+          // 只允许重置「当前租户是唯一归属」的普通成员：其他租户的成员、任何租户的
+          // 管理员、平台角色都拒绝，避免跨租户账号接管。systemRole 也在事务内读，
+          // 避免校验与写入之间被并发改动。
+          const [target, privilegedOrForeign] = await Promise.all([
+            tx.user.findUnique({ where: { id: membership.userId }, select: { systemRole: true } }),
+            tx.tenantMembership.count({
+              where: {
+                userId: membership.userId,
+                OR: [{ role: "admin" }, { tenantId: { not: context.selectedTenant.id } }],
+              },
+            }),
+          ]);
+          if (!target || privilegedOrForeign > 0 || target.systemRole !== null) {
+            return { ok: false as const, reason: "forbidden" as const };
+          }
+
+          const updated = await tx.user.updateMany({
+            where: { id: membership.userId, tokenVersion: membership.user.tokenVersion },
+            data: { passwordHash, passwordChangeRequired: true, passwordChangeReason: "admin_reset", tokenVersion: { increment: 1 } },
+          });
+          if (updated.count === 0) {
+            return { ok: false as const, reason: "conflict" as const };
+          }
+
+          await tx.accountSession.deleteMany({ where: { userId: membership.userId } });
+          await tx.oAuthAccessToken.updateMany({
+            where: { userId: membership.userId, revokedAt: null },
+            data: { revokedAt: new Date(), refreshExpiresAt: new Date() },
+          });
+          return { ok: true as const };
+        },
+        { isolationLevel: TransactionIsolationLevel.Serializable }),
+      isTransactionSerializationFailure,
+    );
+
+    if (!reset.ok) {
+      return reply.code(409).send({
+        message: reset.reason === "forbidden"
+          ? "不能重置管理员或平台角色的密码（该账号可能是其他校园墙的管理员）"
+          : "该成员刚刚被其他操作改动，请刷新后重试",
+      });
+    }
+
+    // 审计日志写失败不应把已提交的重置吞掉：否则管理员拿不到临时密码、成员也登不上。
+    try {
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "member.password.reset",
+        targetType: "user",
+        targetId: membership.userId,
+        detail: { qqUin: membership.user.qqUin.toString() },
+      });
+    } catch (error) {
+      app.log.warn({ error, userId: membership.userId }, "failed to write audit log for password reset");
+    }
+
+    return { ok: true, qqUin: membership.user.qqUin.toString(), tempPassword };
   });
 
   app.post("/api/admin/members", async (request, reply) => {

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { SystemRole, TenantRole } from "@campux/db";
+import { Prisma, type SystemRole, type TenantRole } from "@campux/db";
 import { prisma } from "./prisma";
 import { isSyntheticSystemOperatorMembership, resolveEffectiveTenantMembership } from "./tenant-access";
 import { findTenantByRequestHost } from "./tenant-host";
@@ -81,21 +81,37 @@ export function getCookie(request: FastifyRequest, name: string) {
   return undefined;
 }
 
-export async function createSession(userId: string, selectedTenantId?: string | null) {
+export async function createSession(userId: string, selectedTenantId?: string | null, verifiedTokenVersion?: number) {
   const token = issueSessionToken();
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + sessionMaxAgeSeconds * 1000);
 
+  // 优先使用「校验密码时」读到的版本号：校验之后发生的改密会让这个会话一出生就失效。
+  const tokenVersion = verifiedTokenVersion
+    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true } }))?.tokenVersion
+    ?? 0;
   await prisma.accountSession.create({
     data: {
       userId,
       tokenHash,
       selectedTenantId: selectedTenantId ?? null,
+      tokenVersion,
       expiresAt,
     },
   });
 
   return token;
+}
+
+/**
+ * 改密后调用：递增账号的密码版本号。会话签发时记录的版本号与当前值不一致即失效，
+ * 因此这一趟会把该账号所有旧会话（含「改密前登录、改密后才建会话」的竞态会话）清掉。
+ */
+export async function bumpTokenVersion(client: Prisma.TransactionClient | typeof prisma, userId: string) {
+  await client.user.update({
+    where: { id: userId },
+    data: { tokenVersion: { increment: 1 } },
+  });
 }
 
 export async function getSessionContext(request: FastifyRequest) {
@@ -133,6 +149,13 @@ export async function getSessionContext(request: FastifyRequest) {
     if (session) {
       await prisma.accountSession.delete({ where: { id: session.id } });
     }
+    return null;
+  }
+
+  // 密码版本号不一致 = 密码被改过（管理员重置 / 自助改密 / 找回密码），旧会话立即失效。
+  // 这同时堵住了「改密前先登录、改密后才建会话」的竞态。
+  if (session.tokenVersion !== session.user.tokenVersion) {
+    await prisma.accountSession.delete({ where: { id: session.id } });
     return null;
   }
 

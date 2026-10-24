@@ -321,6 +321,7 @@ function ForgotPasswordPanel() {
         email?: string;
         providers?: string[];
         devCode?: string;
+        hint?: string;
         expiresInSeconds?: number;
       }>("/api/auth/password/forgot", {
         method: "POST",
@@ -330,10 +331,11 @@ function ForgotPasswordPanel() {
       const ttl = Math.round((data.expiresInSeconds ?? 600) / 60);
       if (data.channel === "identity") {
         setMaskedEmail("");
+        const providers = (data.providers ?? []).join("、");
         setMessage(
           data.devCode
-            ? `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${(data.providers ?? []).join("、")}）验证。本次验证码：${data.devCode}，${ttl} 分钟内有效。`
-            : `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${(data.providers ?? []).join("、")}）验证，${ttl} 分钟内有效。`,
+            ? `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${providers}）验证。本次验证码：${data.devCode}，${ttl} 分钟内有效。`
+            : (data.hint ?? "该账号未绑定 QQ 邮箱，且当前没有可用的验证码投递渠道，请联系校园墙管理员重置密码。"),
         );
         if (data.devCode) setCode(data.devCode);
         return;

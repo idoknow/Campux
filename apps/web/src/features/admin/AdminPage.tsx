@@ -1624,6 +1624,36 @@ function MemberDetailDialog({
   const user = detail?.member.user;
   const title = user ? `${user.displayName ?? user.qqUin} 的用户详情` : "用户详情";
   const postStatusEntries = Object.entries(detail?.stats.postsByStatus ?? {}).filter(([, count]) => count > 0);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetResult, setResetResult] = useState<{ qqUin: string; tempPassword: string } | null>(null);
+
+  // 切换查看对象时清掉上一次的临时密码提示。
+  useEffect(() => {
+    setResetResult(null);
+  }, [detail?.member.user.id]);
+
+  async function resetMemberPassword() {
+    if (!detail) {
+      return;
+    }
+    const name = detail.member.user.displayName ?? detail.member.user.qqUin;
+    if (!window.confirm(`确定要重置 ${name} 的密码吗？该用户的所有登录会话将失效。`)) {
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const data = await api<{ ok: true; qqUin: string; tempPassword: string }>(
+        `/api/admin/members/users/${detail.member.user.id}/reset-password`,
+        { method: "POST" },
+      );
+      setResetResult({ qqUin: data.qqUin, tempPassword: data.tempPassword });
+      toast.success("已重置密码");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "重置失败");
+    } finally {
+      setResetBusy(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1648,8 +1678,19 @@ function MemberDetailDialog({
               <div className="flex flex-wrap gap-2">
                 <Badge variant="secondary">{roleLabels[detail.member.role]}</Badge>
                 {detail.member.user.systemRole ? <Badge variant="outline">平台身份：{detail.member.user.systemRole}</Badge> : null}
+                {detail.member.role !== "admin" && !detail.member.user.systemRole ? (
+                  <Button type="button" size="sm" variant="outline" disabled={resetBusy} onClick={() => void resetMemberPassword()}>
+                    {resetBusy ? "重置中..." : "重置密码"}
+                  </Button>
+                ) : null}
               </div>
             </div>
+
+            {resetResult ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                已重置 QQ {resetResult.qqUin} 的密码为 <code className="rounded bg-white px-1 py-0.5 font-mono text-xs font-bold text-slate-800">{resetResult.tempPassword}</code>，用户登录后会被要求立即修改。请通过其他渠道把临时密码告知本人。
+              </div>
+            ) : null}
 
             <div className="grid gap-2 sm:grid-cols-3">
               <MiniStat label="投稿总数" value={detail.stats.postsTotal} />

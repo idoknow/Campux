@@ -28,7 +28,7 @@ export function toTenantSummary(
   };
 }
 
-export function toPublicUser(user: Pick<User, "id" | "qqUin" | "email" | "displayName" | "systemRole" | "passwordChangeRequired" | "autoFollowOwnPosts">) {
+export function toPublicUser(user: Pick<User, "id" | "qqUin" | "email" | "displayName" | "systemRole" | "passwordChangeRequired" | "passwordChangeReason" | "autoFollowOwnPosts">) {
   return {
     id: user.id,
     qqUin: user.qqUin.toString(),
@@ -36,6 +36,7 @@ export function toPublicUser(user: Pick<User, "id" | "qqUin" | "email" | "displa
     displayName: user.displayName,
     systemRole: user.systemRole,
     passwordChangeRequired: user.passwordChangeRequired,
+    passwordChangeReason: user.passwordChangeReason,
     autoFollowOwnPosts: user.autoFollowOwnPosts,
   };
 }
