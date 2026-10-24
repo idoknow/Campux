@@ -1215,7 +1215,11 @@ async function schedulePublishAttemptInTransaction(
 }
 
 export async function schedulePublishAttempt(options: SchedulePublishAttemptOptions) {
-  return prisma.$transaction((tx) => schedulePublishAttemptInTransaction(tx, options));
+  // campux:publish 建议锁可能被 fanout 事务（最长 30s）持有，默认 5s 超时会直接过期。
+  return prisma.$transaction((tx) => schedulePublishAttemptInTransaction(tx, options), {
+    maxWait: 15_000,
+    timeout: 60_000,
+  });
 }
 
 async function lockPublishFanout(tx: Prisma.TransactionClient, tenantId: string, ownerKey: string) {
@@ -1414,7 +1418,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       });
     }
     return { claimed: claimed.count > 0, deferredUntil: null };
-  });
+    // 认领事务要先抢 campux:publish 建议锁，可能等待 fanout 长事务释放，默认 5s 会过期。
+  }, { maxWait: 15_000, timeout: 60_000 });
   if (claimResult.deferredUntil) {
     queue.rescheduleCurrent(job, claimResult.deferredUntil);
     logger.info({ attemptId, nextRunAt: claimResult.deferredUntil }, "publish attempt deferred to enforce per-bot interval");

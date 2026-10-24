@@ -33,6 +33,25 @@ export function isPrismaKnownRequestError(
   return error instanceof clientModule.Prisma.PrismaClientKnownRequestError;
 }
 
+/**
+ * 判断一个错误是否为「可重试的事务冲突 / 过期」：
+ *   - P2034：Prisma 事务写冲突 / 死锁。
+ *   - P2028：交互式事务超时后仍在其上执行（"Transaction already closed"），事务已整体回滚。
+ *   - P2010：`$executeRaw` / `$queryRaw` 的底层错误不会被映射成 P2034，Postgres 的
+ *     40001（序列化冲突）/ 40P01（死锁）只出现在 message 里（SQLite 是 database is locked）。
+ * 可串行化隔离级别下的并发写入路径（投稿、发布、管理员变更等）靠它决定是否重试。
+ */
+export function isTransactionSerializationFailure(error: unknown): boolean {
+  if (!isPrismaKnownRequestError(error)) {
+    return false;
+  }
+  if (error.code === "P2034" || error.code === "P2028") {
+    return true;
+  }
+  return error.code === "P2010"
+    && /40001|40P01|could not serialize access|deadlock detected|database is locked/i.test(error.message);
+}
+
 export type {
   OAuthAccessToken,
   OAuthAuthorizationCode,

@@ -3,7 +3,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import type { EventBus } from "@campux/plugin";
 import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
-import { Prisma, TransactionIsolationLevel, hashPassword, isPrismaKnownRequestError } from "@campux/db";
+import { Prisma, TransactionIsolationLevel, hashPassword, isTransactionSerializationFailure } from "@campux/db";
 import {
   BotWorkflowError,
   OneBotActionTimeoutError,
@@ -4957,10 +4957,6 @@ function formatQZoneAutoRefreshReason(reason: string) {
     return "发布前发现登录态不可用";
   }
   return "定时检测发现登录态失效";
-}
-
-function isTransactionSerializationFailure(value: unknown) {
-  return isPrismaKnownRequestError(value) && value.code === "P2034";
 }
 
 function normalizeImageFileName(value: unknown) {

@@ -5,7 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { CampuxConfig } from "@campux/config";
-import { TransactionIsolationLevel, isPrismaKnownRequestError } from "@campux/db";
+import { TransactionIsolationLevel, isTransactionSerializationFailure } from "@campux/db";
 import { getStorageDriver } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
 import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
@@ -392,8 +392,11 @@ function isMultipartLimitError(error: unknown): boolean {
     && multipartLimitErrorCodes.has(String(error.code)));
 }
 
-function isTransactionSerializationFailure(value: unknown) {
-  return isPrismaKnownRequestError(value) && value.code === "P2034";
+function isMultipartContentTypeError(error: unknown): boolean {
+  return Boolean(error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "FST_INVALID_MULTIPART_CONTENT_TYPE");
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -1113,16 +1116,20 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
                 },
               });
             },
-            { isolationLevel: TransactionIsolationLevel.Serializable },
+            { isolationLevel: TransactionIsolationLevel.Serializable, maxWait: 15_000, timeout: 60_000 },
           );
           break;
         } catch (caught) {
           if (isTransactionSerializationFailure(caught)) {
             if (attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 10));
               continue;
             }
+            // 序列化冲突意味着事务必然整体回滚，不存在"已提交但未确认"的分支；
+            // 重试耗尽后向用户隐藏 Prisma 内部错误，只回报限流提示。
             postPersistenceState = "rolled-back";
-            throw caught;
+            request.log.warn({ err: caught }, "post create transaction exhausted serialization retries");
+            throw { status: 503, message: "投稿人数较多，请稍后再试" };
           }
 
           // Reconcile by the stable candidate ID before mapping any domain error.
@@ -1221,6 +1228,15 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       // Handle errors
       if (isMultipartLimitError(err)) {
         return reply.code(413).send({ message: "投稿附件或字段超过限制" });
+      }
+
+      // 网页端投稿始终以 multipart/form-data 提交；收到非 multipart 请求说明
+      // 请求来自异常客户端或被中间层改写，记录 Content-Type 便于排查。
+      if (isMultipartContentTypeError(err)) {
+        request.log.warn({
+          contentType: request.headers["content-type"],
+        }, "post submission rejected: request is not multipart");
+        return reply.code(400).send({ message: "投稿请求格式异常，请刷新页面后重试" });
       }
 
       if (err instanceof PendingPostLimitError) {

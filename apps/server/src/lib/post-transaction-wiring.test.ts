@@ -15,7 +15,7 @@ describe("post transaction compensation wiring", () => {
 
   test("consumes converted-GIF claims inside the same Prisma transaction as post creation", () => {
     const transactionStart = source.indexOf("post = await prisma.$transaction(");
-    const transactionEnd = source.indexOf("{ isolationLevel: TransactionIsolationLevel.Serializable }", transactionStart);
+    const transactionEnd = source.indexOf("{ isolationLevel: TransactionIsolationLevel.Serializable", transactionStart);
     const claimConsume = source.indexOf("convertedGifClaimStore.consumeUsing(", transactionStart);
     const postCreate = source.indexOf("const created = await tx.post.create(", transactionStart);
 

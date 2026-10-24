@@ -94,6 +94,9 @@ export async function readSingleVideoUpload(
     if (code === "FST_REQ_FILE_TOO_LARGE") {
       throw new SingleVideoUploadError(413, sizeMessage);
     }
+    if (code === "FST_INVALID_MULTIPART_CONTENT_TYPE") {
+      throw new SingleVideoUploadError(400, missingMessage);
+    }
     if (multipartLimitCodes.has(code)) {
       throw new SingleVideoUploadError(413, shapeMessage);
     }

@@ -1,4 +1,4 @@
-import { isPrismaKnownRequestError, type TenantRole } from "@campux/db";
+import type { TenantRole } from "@campux/db";
 
 export const LAST_TENANT_ADMIN_REMOVAL_MESSAGE = "校园墙必须至少保留一名管理员，请先授权另一名管理员再移除当前管理员";
 export const TENANT_ADMIN_REQUIRED_MESSAGE = "校园墙必须至少有一名管理员，请先添加管理员再恢复运行";
@@ -139,9 +139,8 @@ export function buildTenantAdminUserIds(adminUserIds: string[], creatorUserId: s
   return [...new Set([...adminUserIds, creatorUserId])];
 }
 
-export function isTransactionSerializationFailure(error: unknown) {
-  return isPrismaKnownRequestError(error) && error.code === "P2034";
-}
+// 实现已上移到 @campux/db：同时识别 P2034 与 `$executeRaw` 上抛的 P2010+40001，这里按原位置再导出。
+export { isTransactionSerializationFailure } from "@campux/db";
 
 export async function retryTransactionSerializationFailures<T>(
   operation: () => Promise<T>,
