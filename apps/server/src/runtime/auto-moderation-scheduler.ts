@@ -20,7 +20,6 @@ type DueDecision = {
   postId: string;
   post: { displayId: number };
   action: string | null;
-  autoDecisionExecutingAt: Date | null;
   autoDecisionExecuteAfter: Date | null;
   createdAt: Date;
 };

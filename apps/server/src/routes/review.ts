@@ -69,7 +69,7 @@ async function activatePendingTags(transaction: Parameters<Parameters<typeof pri
 async function cancelPendingAutoDecisions(transaction: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], tenantId: string, postId: string, actorId: string, reason: string) {
   const pending = await transaction.postAiAnalysis.findMany({
     where: { tenantId, postId, mode: "auto", autoDecision: { in: ["approve", "reject"] }, autoDecisionAt: null, autoDecisionCancelledAt: null, autoDecisionLeaseAt: null, autoDecisionExecutingAt: null },
-    select: { id: true, autoDecision: true, autoDecisionReason: true, createdAt: true },
+    select: { id: true, autoDecision: true, autoDecisionReason: true, autoDecisionLeaseAt: true, autoDecisionExecutingAt: true, createdAt: true },
   });
   if (pending.length === 0) return 0;
   const cancelledIds = pending.map((item) => item.id);
@@ -243,7 +243,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     });
     if (!saved.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     if (!saved.value) return reply.code(404).send({ message: "AI 分析记录不存在" });
-    await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched, humanAction: body.humanAction } });
+    await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched: saved.value.feedback.matched, humanAction: body.humanAction } });
     return { feedback: saved.value };
   });
 
