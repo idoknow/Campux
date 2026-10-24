@@ -708,7 +708,7 @@ export function App() {
   }
 
   if (me.user.passwordChangeRequired) {
-    return <RequiredPasswordChangeScreen busy={busy} error={error} onChangePassword={completeRequiredPasswordChange} onLogout={logout} />;
+    return <RequiredPasswordChangeScreen busy={busy} error={error} onChangePassword={completeRequiredPasswordChange} onLogout={logout} reason={me.user.passwordChangeReason} />;
   }
 
   if (me.currentTenant && me.currentMembership && me.activeBan) {

@@ -395,7 +395,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
 
           const updated = await tx.user.updateMany({
             where: { id: membership.userId, tokenVersion: membership.user.tokenVersion },
-            data: { passwordHash, passwordChangeRequired: true, tokenVersion: { increment: 1 } },
+            data: { passwordHash, passwordChangeRequired: true, passwordChangeReason: "admin_reset", tokenVersion: { increment: 1 } },
           });
           if (updated.count === 0) {
             return { ok: false as const, reason: "conflict" as const };

@@ -24,6 +24,7 @@ CREATE TABLE "User" (
     "displayName" TEXT,
     "passwordHash" TEXT NOT NULL,
     "passwordChangeRequired" BOOLEAN NOT NULL DEFAULT false,
+    "passwordChangeReason" TEXT,
     "tokenVersion" INTEGER NOT NULL DEFAULT 0,
     "autoFollowOwnPosts" BOOLEAN NOT NULL DEFAULT true,
     "isTestAccount" BOOLEAN NOT NULL DEFAULT false,

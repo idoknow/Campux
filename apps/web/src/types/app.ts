@@ -86,6 +86,7 @@ export type MeResponse =
         displayName: string | null;
         systemRole: SystemRole | null;
         passwordChangeRequired: boolean;
+        passwordChangeReason: string | null;
         autoFollowOwnPosts: boolean;
       };
       memberships: Membership[];

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeModeButton } from "@/features/theme/ThemeModeControl";
 
-export function RequiredPasswordChangeScreen({ busy, error, onChangePassword, onLogout }: { busy: boolean; error: string; onChangePassword: (newPassword: string) => Promise<void>; onLogout: () => void }) {
+export function RequiredPasswordChangeScreen({ busy, error, onChangePassword, onLogout, reason }: { busy: boolean; error: string; onChangePassword: (newPassword: string) => Promise<void>; onLogout: () => void; reason?: string | null }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
@@ -36,7 +36,11 @@ export function RequiredPasswordChangeScreen({ busy, error, onChangePassword, on
             </span>
             <div>
               <p className="text-lg font-semibold text-slate-950">请先设置新密码</p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">你的账号通过校园墙机器人注册，初始密码是随机密码。首次登录后需要换成你自己的密码。</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {reason === "admin_reset"
+                  ? "管理员重置了你的密码，请设置新密码后再继续使用。"
+                  : "你的账号通过校园墙机器人注册，初始密码是随机密码。首次登录后需要换成你自己的密码。"}
+              </p>
             </div>
           </div>
 

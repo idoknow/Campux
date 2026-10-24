@@ -115,6 +115,11 @@ model User {
   displayName String?
   passwordHash String
   passwordChangeRequired Boolean @default(false)
+  // 标记 passwordChangeRequired 的原因，供前端在强制改密页展示对应提示：
+  //   "admin_reset" = 管理员重置 → 提示「管理员重置了你的密码」
+  //   "bot_registered" = 机器人注册 → 提示「账号通过机器人注册，初始密码随机」
+  //   null = 其他（如自助重置，不会出现此页面）
+  passwordChangeReason String?
   // 密码版本号：每次改密 +1，用于让旧会话一次性失效（管理员重置、自助改密、找回密码）。
   tokenVersion Int                @default(0)
   autoFollowOwnPosts Boolean       @default(true)

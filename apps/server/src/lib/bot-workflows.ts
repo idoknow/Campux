@@ -144,7 +144,7 @@ export async function registerUserViaBot({
             id: existingUser.id,
           },
           data: {
-            ...(shouldSetPassword && passwordHash ? { passwordHash, passwordChangeRequired: true } : {}),
+            ...(shouldSetPassword && passwordHash ? { passwordHash, passwordChangeRequired: true, passwordChangeReason: "bot_registered" } : {}),
             ...(!existingUser.displayName && displayName ? { displayName } : {}),
           },
         })
@@ -153,6 +153,7 @@ export async function registerUserViaBot({
             qqUin: BigInt(userQqUin),
             passwordHash: passwordHash ?? (await hashPassword(password)),
             passwordChangeRequired: true,
+            passwordChangeReason: "bot_registered",
             ...(displayName ? { displayName } : {}),
           },
         });
@@ -242,6 +243,7 @@ export async function resetPasswordViaBot({
       data: {
         passwordHash,
         passwordChangeRequired: true,
+        passwordChangeReason: "bot_registered",
       },
     });
     await tx.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
