@@ -95,17 +95,26 @@ export async function checkQZoneCookieHealth(cookies: Record<string, string>, fa
       ? payload.message
       : typeof payload?.msg === "string" ? payload.msg : "";
     const code = typeof payload?.code === "number" ? payload.code : null;
-    if (code !== null && code !== 0 && !isQZoneLoginFailureMessage(message)) {
-      // QZone 返回了可解析的业务错误负载（限流/风控等）：不能证明登录态失效，按检测暂时不可用处理。
+    if (isQZoneLoginFailureMessage(message)) {
       // 只有 message 命中登录失效特征（实测如 code: -87998, "login error"）才判定失效。
+      return {
+        status: "invalid" as const,
+        message: message || "QZone 没有返回有效访客数据",
+      };
+    }
+    if (code !== null && code !== 0) {
+      // QZone 返回了可解析的业务错误负载（限流/风控等）：不能证明登录态失效，按检测暂时不可用处理。
       return {
         status: "transient",
         message: `登录态检测暂时不可用：QZone 返回业务错误码 ${code}${message ? `（${message}）` : ""}`,
       };
     }
+    // code 为 0（或缺失）却没有访客数据：QZone 明确说请求成功（实测 message 为 "succ"），
+    // 数据缺失来自接口形状变化/访客权限受限/风控空数据，登录态本身是好的。判为失效会
+    // 触发无意义的协议刷新-告警循环（刷新后再检测仍是同样结果）。带上响应片段便于诊断。
     return {
-      status: "invalid" as const,
-      message: message || "QZone 没有返回有效访客数据",
+      status: "transient",
+      message: `登录态检测暂时不可用：QZone 返回成功但没有访客数据${describeQZonePayloadSnippet(text)}`,
     };
   } catch (caught) {
     // 超时/网络异常属于检测本身的失败，不能据此判定登录态失效。
@@ -347,6 +356,12 @@ function isQZoneLoginFailureMessage(message: string) {
     message.includes("重新登录") ||
     message.includes("请登录")
   );
+}
+
+/** 截取 QZone 原始响应片段放进 healthMessage，便于在告警里直接看到 QZone 实际返回了什么。 */
+function describeQZonePayloadSnippet(text: string) {
+  const snippet = text.replace(/\s+/g, " ").trim().slice(0, 120);
+  return snippet ? `（响应片段：${snippet}）` : "";
 }
 
 function normalizeQqUin(value: string) {
