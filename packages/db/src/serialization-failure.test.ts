@@ -17,6 +17,12 @@ describe("isTransactionSerializationFailure", () => {
     expect(isTransactionSerializationFailure(expired)).toBe(true);
   });
 
+  test("ignores P2028 errors that do not indicate transaction expiry", () => {
+    // 事务 API 其他故障的提交结果未知（可能已提交），重试会重放已提交的工作
+    expect(isTransactionSerializationFailure(knownError("P2028", "Transaction API error: connection reset during commit"))).toBe(false);
+    expect(isTransactionSerializationFailure(knownError("P2028", ""))).toBe(false);
+  });
+
   test("matches P2010 raw query failures carrying Postgres 40001", () => {
     // $executeRaw 的底层序列化冲突不会被 Prisma 映射为 P2034，只会包在 P2010 的 message 里
     const error = knownError(
