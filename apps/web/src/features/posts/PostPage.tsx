@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { FONT_OPTIONS, IMAGE_UPLOAD_SOURCE_HARD_MAX_SIZE_MB, isDefaultFont } from "@campux/domain";
@@ -82,6 +82,19 @@ export function PostPage({
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const preflight = useMemo(() => {
+    const text = postText.trim();
+    const normalized = text.toLowerCase();
+    const warnings: string[] = [];
+    if (/\\b[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}\\b/i.test(text)) warnings.push("稿件可能包含邮箱地址");
+    if (/(?:1[3-9]\\d{9})|\\b\\d{3,4}[- ]?\\d{7,8}\\b/.test(text)) warnings.push("稿件可能包含电话号码");
+    if (/(?:qq|微信|vx|wechat)\\s*[:：]?\\s*[a-z0-9_-]{5,}/i.test(text)) warnings.push("稿件可能包含社交账号");
+    const missing: string[] = [];
+    if (/求助|寻找|失物|招领|活动|报名/.test(normalized) && !/(时间|日期|号|点)/.test(text)) missing.push("时间");
+    if (/求助|寻找|失物|招领|活动|报名/.test(normalized) && !/(地点|地址|校区|楼)/.test(text)) missing.push("地点");
+    return { warnings, missing };
+  }, [postText]);
+
   const svgAvatars = metadata.availableAvatars.length > 0
     ? metadata.availableAvatars
     : (builtInSvgAvatarFilenames ?? []).map((filename) => ({ id: filename, svg: `/api/svg/${encodeURIComponent(filename)}`, label: filename.replace(/\.svg$/, "") }));
@@ -347,6 +360,11 @@ export function PostPage({
           onPaste={pasteImages}
           disabled={busy}
         />
+        {postMode === "post" && postText.trim() ? <div className="mt-2 grid gap-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status" aria-live="polite">
+          {preflight.warnings.map((warning) => <p key={warning}>隐私提醒：{warning}，请确认是否应公开。</p>)}
+          {preflight.missing.length ? <p>信息提醒：这类稿件可补充{preflight.missing.join("、")}，让审核和读者更容易理解。仅作提示，不会阻止投稿。</p> : null}
+          {!preflight.warnings.length && !preflight.missing.length ? <p>投稿前检查已完成；请确认稿件中不含不希望公开的个人信息。</p> : null}
+        </div> : null}
 
         <div className="mt-3 flex flex-wrap gap-2">
           {sortedAttachments.map((item) => (

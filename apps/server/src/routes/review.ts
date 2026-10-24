@@ -180,7 +180,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       }),
     ]);
     const assessmentRows = await Promise.all(posts.map((post) => prisma.postAiAnalysis.findFirst({
-      where: { tenantId: context.selectedTenant.id, postId: post.id, mode: { in: ["assist", "auto"] } },
+      where: { tenantId: context.selectedTenant.id, postId: post.id, mode: { in: ["assist", "auto", "shadow"] } },
       orderBy: [{ version: "desc" }, { createdAt: "desc" }],
     })));
     const assessmentByPost = new Map<string, NonNullable<(typeof assessmentRows)[number]>>(
@@ -214,7 +214,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
   app.post("/api/review/ai-feedback/:analysisId", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "reviewer");
     const { analysisId } = z.object({ analysisId: z.string().uuid() }).parse(request.params);
-    const body = z.object({ matched: z.boolean().optional(), humanAction: z.enum(["approve", "reject"]), analysisMode: z.enum(["assist", "auto"]), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
+    const body = z.object({ matched: z.boolean().optional(), humanAction: z.enum(["approve", "reject"]), analysisMode: z.enum(["assist", "auto", "shadow"]), humanComment: z.string().max(500).nullable().optional() }).parse(request.body);
     const saved = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
       const expectedFinalStatus = body.humanAction === "approve" ? "approved" : "rejected";
       const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id, mode: body.analysisMode }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, categories: true, post: { select: { tenantId: true, status: true } } } });

@@ -812,6 +812,15 @@ export function PostsPage({
     finally { setBusyPostId(""); }
   }
 
+  async function submitAiFeedback(post: ReviewPostItem, humanAction: "approve" | "reject", matched: boolean) {
+    const analysisId = post.aiReview?.analysisId;
+    if (!analysisId || !post.aiReview?.assessment) return;
+    try {
+      await api(`/api/review/ai-feedback/${analysisId}`, { method: "POST", body: JSON.stringify({ matched, humanAction, analysisMode: post.aiReview.mode }) });
+      toast.success(matched ? "已记录 AI 判断正确" : "已记录人工纠正，作为后续改进样本");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "AI 反馈保存失败"); }
+  }
+
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
     setBusyPostId(id);
     const reviewed = detailPostId === id ? detailPost : reviewPosts.find((post) => post.id === id);
@@ -2016,7 +2025,9 @@ export function PostsPage({
         open={Boolean(detailPostId)}
         canDirectRecall={isAdmin}
         recallBusy={detailPost ? busyPostId === detailPost.id : false}
-        {...(detailPost ? { onCancelAutoDecision: (post: ReviewPostItem) => void cancelAutoDecision(post) } : {})}
+        {...(detailPost ? { onCancelAutoDecision: (post: ReviewPostItem) => cancelAutoDecision(post) } : {})}
+        onAiFeedback={submitAiFeedback}
+        isAdmin={isAdmin}
         onOpenChange={(open) => {
           if (!open) {
             closePostDetail();
@@ -2235,6 +2246,23 @@ function defaultPagination(): Pagination {
   };
 }
 
+function AddAiEntityButton({ findings, analysisId }: { findings: Array<{ type: string; excerpt: string }>; analysisId: string }) {
+  const candidates = findings.filter((finding) => finding.excerpt.trim()).slice(0, 5);
+  const [selected, setSelected] = useState(0);
+  const [busy, setBusy] = useState(false);
+  if (candidates.length === 0) return null;
+  const finding = candidates[selected] ?? candidates[0]!;
+  const add = async () => {
+    setBusy(true);
+    try {
+      await api("/api/admin/ai-review/entities/evidence", { method: "POST", body: JSON.stringify({ type: finding.type, name: finding.excerpt.trim(), analysisId, sensitivity: "normal" }) });
+      toast.success("已累计一条候选证据；符合提升条件后会进入校园实体模型。");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "添加实体失败"); }
+    finally { setBusy(false); }
+  };
+  return <div className="flex flex-wrap items-center gap-2 border-t border-violet-200/70 pt-2"><span className="text-xs font-semibold">误判实体：</span><select aria-label="选择误判实体" className="h-8 max-w-48 rounded border border-slate-200 bg-white px-2 text-xs" value={selected} onChange={(event) => setSelected(Number(event.target.value))}>{candidates.map((item, index) => <option key={`${item.type}-${item.excerpt}-${index}`} value={index}>{item.excerpt}</option>)}</select><Button size="sm" variant="outline" disabled={busy} onClick={() => void add()}>{busy ? "添加中…" : "加入屏蔽词典"}</Button></div>;
+}
+
 function PostDetailDialog({
   post,
   open,
@@ -2246,17 +2274,21 @@ function PostDetailDialog({
   onRecallDirect,
   onRecallDirectSilent,
   onCancelAutoDecision,
+  onAiFeedback,
+  isAdmin = false,
 }: {
   post: ReviewPostItem | null;
   open: boolean;
   canDirectRecall?: boolean;
   recallBusy?: boolean;
+  isAdmin?: boolean;
   onOpenChange: (open: boolean) => void;
   onPreview: (post: ReviewPostItem) => void;
   onImagePreview: (post: ReviewPostItem, images: PostImage[], index: number) => void;
   onRecallDirect?: (post: ReviewPostItem) => void;
   onRecallDirectSilent?: (post: ReviewPostItem) => void;
   onCancelAutoDecision?: (post: ReviewPostItem) => void;
+  onAiFeedback: (post: ReviewPostItem, action: "approve" | "reject", matched: boolean) => void;
 }) {
   const images = post ? getPostImages(post.attachments) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
@@ -2306,7 +2338,7 @@ function PostDetailDialog({
             {post.aiReview ? (
               <div className={`grid gap-2 rounded-md border p-3 text-sm ${post.aiReview.status === "completed" ? "border-violet-200 bg-violet-50/70 text-violet-950 dark:border-violet-900/60 dark:bg-violet-950/20 dark:text-violet-100" : "border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100"}`} aria-label="AI 审核辅助状态">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge className={`rounded-full shadow-none ${post.aiReview.status === "completed" ? "bg-violet-100 text-violet-900 dark:bg-violet-900/50 dark:text-violet-100" : "bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100"}`}>AI 审核辅助</Badge>
+                  {post.aiReview.mode === "shadow" ? <Badge className="rounded-full bg-sky-100 text-sky-900 shadow-none dark:bg-sky-900/50 dark:text-sky-100">影子模式 · 仅供对比</Badge> : <Badge className={`rounded-full shadow-none ${post.aiReview.status === "completed" ? "bg-violet-100 text-violet-900 dark:bg-violet-900/50 dark:text-violet-100" : "bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100"}`}>AI 审核辅助</Badge>}
                   {post.aiReview.status === "completed" && post.aiReview.assessment ? <span className="text-xs font-semibold">仅供参考 · {({ low: "低", medium: "中", high: "高", critical: "严重" } as const)[post.aiReview.assessment.riskLevel]}风险 · 建议：{({ approve: "可考虑通过", revise: "建议修改", reject: "建议拒绝", manual_review: "重点人工复核" } as const)[post.aiReview.assessment.suggestedAction]}</span> : null}
                 </div>
                 {post.aiReview.mode === "auto" ? <p className="text-xs font-semibold leading-5">自动模式安全保护：{post.aiReview.autoDecisionReason ?? "转人工审核"}</p> : null}
@@ -2314,9 +2346,12 @@ function PostDetailDialog({
                   <p className="text-xs leading-5">类别：{post.aiReview.assessment.categories.join("、") || "未分类"} <span className="text-violet-600 dark:text-violet-300">·</span> 置信度 {Math.round(post.aiReview.assessment.confidence * 100)}%</p>
                   <ul className="grid gap-1 pl-4 text-xs leading-5 marker:text-violet-400">{post.aiReview.assessment.reasons.map((reason, index) => <li key={index} className="list-disc">{reason}</li>)}</ul>
                   {post.aiReview.assessment.sensitiveFindings.length ? <div className="grid gap-1 rounded-md border border-amber-200 bg-amber-50/80 p-2 text-xs leading-5 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><p className="font-bold">敏感信息提示</p>{post.aiReview.assessment.sensitiveFindings.map((finding, index) => <p key={index} className="break-words">{finding.type}：{finding.excerpt} — {finding.reason}</p>)}</div> : null}
-                  {post.aiReview.assessment.maskedText ? <details className="rounded-md border border-violet-100 bg-white/60 px-2 py-1.5 text-xs dark:border-violet-900/50 dark:bg-slate-950/30"><summary className="cursor-pointer font-semibold">查看打码建议</summary><p className="mt-2 whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.maskedText}</p></details> : null}
-                  {post.aiReview.assessment.rewrittenText ? <details className="rounded-md border border-violet-100 bg-white/60 px-2 py-1.5 text-xs dark:border-violet-900/50 dark:bg-slate-950/30"><summary className="cursor-pointer font-semibold">查看改写建议</summary><p className="mt-2 whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.rewrittenText}</p></details> : null}
-                  {post.aiReview.assessment.rejectionReason ? <p className="text-xs leading-5">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p> : null}
+                  {post.aiReview.assessment.maskedText ? <div className="grid gap-2 rounded-md border border-violet-100 bg-white/60 p-2 text-xs dark:border-violet-900/50 dark:bg-slate-950/30"><p className="font-semibold">打码建议</p><p className="whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.maskedText}</p><Button size="sm" variant="outline" className="w-fit" onClick={() => void navigator.clipboard.writeText(post.aiReview!.assessment!.maskedText!).then(() => toast.success("已复制打码建议")).catch(() => toast.error("复制失败"))}>复制打码建议</Button></div> : null}
+                  {post.aiReview.assessment.rewrittenText ? <div className="grid gap-2 rounded-md border border-violet-100 bg-white/60 p-2 text-xs dark:border-violet-900/50 dark:bg-slate-950/30"><p className="font-semibold">改写建议</p><p className="whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.rewrittenText}</p><Button size="sm" variant="outline" className="w-fit" onClick={() => { void navigator.clipboard.writeText(post.aiReview!.assessment!.rewrittenText!).then(() => toast.success("已复制改写建议")).catch(() => toast.error("复制失败")); }}>复制改写建议</Button></div> : null}
+                  {post.aiReview.assessment.rejectionReason ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs leading-5">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p><Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(post.aiReview!.assessment!.rejectionReason!).then(() => toast.success("已复制拒绝理由")).catch(() => toast.error("复制失败"))}>复制理由</Button></div> : null}
+
+                  <div className="flex flex-wrap gap-2 border-t border-violet-200/70 pt-2"><Button size="sm" variant="outline" onClick={() => onAiFeedback(post, post.aiReview!.assessment!.suggestedAction === "reject" ? "reject" : "approve", true)}>AI 判断正确</Button><Button size="sm" variant="outline" onClick={() => onAiFeedback(post, post.aiReview!.assessment!.suggestedAction === "reject" ? "approve" : "reject", false)}>人工纠正 / AI 误判</Button></div>
+                  {isAdmin ? <AddAiEntityButton findings={post.aiReview.assessment.sensitiveFindings} analysisId={post.aiReview.analysisId ?? ""} /> : null}
                   <p className="border-t border-violet-200/70 pt-2 text-xs leading-5 text-violet-700 dark:border-violet-800 dark:text-violet-300">AI 不执行审核决定；请核对原文并由审核员作最终判断。</p>
                 </> : <p className="text-xs font-semibold">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>}
               </div>

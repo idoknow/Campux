@@ -18,7 +18,7 @@ export type PostReviewAssessment = {
   rewrittenText: string | null;
   rejectionReason: string | null;
 };
-export type PersistedPostReview = { mode: "assist" | "auto"; status: "completed" | "failed" | "unavailable"; assessment?: PostReviewAssessment; analysisId?: string | undefined; autoDecision?: string | null | undefined; autoDecisionReason?: string | null | undefined };
+export type PersistedPostReview = { mode: "assist" | "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; assessment?: PostReviewAssessment; analysisId?: string | undefined; autoDecision?: string | null | undefined; autoDecisionReason?: string | null | undefined };
 const activeReviewRequests = new Map<string, number>();
 const MAX_ACTIVE_REVIEW_REQUESTS_PER_TENANT = 2;
 
@@ -45,19 +45,19 @@ export function parsePostReviewAssessment(raw: string): PostReviewAssessment | n
 }
 
 export function parsePostReviewAnalysisRecord(record: { id: string; mode: string; status: string; riskLevel: string | null; confidence: number | null; categories: unknown; sensitiveFindings: unknown; suggestedAction: string | null; reasons: unknown; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null; autoDecision?: string | null | undefined; autoDecisionReason?: string | null | undefined } | null | undefined): PersistedPostReview | null {
-  if (!record || (record.mode !== "assist" && record.mode !== "auto")) return null;
+  if (!record || (record.mode !== "assist" && record.mode !== "auto" && record.mode !== "shadow")) return null;
   if (record.status !== "completed") {
-    if (record.status === "failed" || record.status === "unavailable") return { mode: record.mode, status: record.status, analysisId: record.id, ...(record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}) };
+    if (record.status === "failed" || record.status === "unavailable") return { mode: record.mode, status: record.status, analysisId: record.id, ...(record.mode === "auto" && record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.mode === "auto" && record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}) };
     return null;
   }
   const assessment = parsePostReviewAssessment(JSON.stringify({ riskLevel: record.riskLevel, categories: record.categories, sensitiveFindings: record.sensitiveFindings, suggestedAction: record.suggestedAction, reasons: record.reasons, confidence: record.confidence, maskedText: record.maskedText, rewrittenText: record.rewrittenText, rejectionReason: record.rejectionReason }));
-  return assessment ? { mode: record.mode, status: "completed", assessment, analysisId: record.id, ...(record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}) } : null;
+  return assessment ? { mode: record.mode, status: "completed", assessment, analysisId: record.id, ...(record.mode === "auto" && record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.mode === "auto" && record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}) } : null;
 }
 
 export function parsePersistedPostReviewDetail(detail: unknown): PersistedPostReview | null {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
   const candidate = detail as Record<string, unknown>;
-  if ((candidate.mode !== "assist" && candidate.mode !== "auto") || !(candidate.status === "completed" || candidate.status === "failed" || candidate.status === "unavailable")) return null;
+  if ((candidate.mode !== "assist" && candidate.mode !== "auto" && candidate.mode !== "shadow") || !(candidate.status === "completed" || candidate.status === "failed" || candidate.status === "unavailable")) return null;
   const assessment = candidate.status === "completed" ? parsePostReviewAssessment(JSON.stringify(candidate.assessment)) : undefined;
   if (candidate.status === "completed" && !assessment) return null;
   return { mode: candidate.mode, status: candidate.status, ...(assessment ? { assessment } : {}) } as PersistedPostReview;
@@ -103,7 +103,7 @@ export async function readBoundedLlmResponse(response: Response, maxBytes = 64 *
   return new TextDecoder().decode(bytes);
 }
 
-async function writeAssistAssessment(options: { tenantId: string; postId: string; status: "completed" | "failed" | "unavailable"; provider: string; model: string; assessment?: PostReviewAssessment; snapshotId?: string | null; mode?: "assist" | "auto"; autoDecisionReason?: string }) {
+async function writeAssistAssessment(options: { tenantId: string; postId: string; status: "completed" | "failed" | "unavailable"; provider: string; model: string; assessment?: PostReviewAssessment; snapshotId?: string | null; mode?: "assist" | "shadow" | "auto"; autoDecisionReason?: string }) {
   return runWithActiveTenantLease(prisma, options.tenantId, async (transaction) => {
     const pending = await transaction.post.findFirst({ where: { id: options.postId, tenantId: options.tenantId, status: "pending_approval" }, select: { id: true } });
     if (!pending) return false;
@@ -125,9 +125,17 @@ async function writeAssistAssessment(options: { tenantId: string; postId: string
   });
 }
 
-async function writeAutoAssessment(input: { tenantId: string; postId: string; postText: string; status: "completed" | "failed" | "unavailable"; provider: string; model: string; snapshotId: string | null; assessment?: PostReviewAssessment; settings: Awaited<ReturnType<typeof readTenantAiSettings>> }) {
+export function writeAutoAssessmentDecision(input: { mode: "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; assessment?: { suggestedAction: "approve" | "revise" | "reject" | "manual_review" }; executeAfter?: Date }): { mode: "auto" | "shadow"; autoDecision: "approve" | "reject" | "manual_review" | null; autoDecisionExecuteAfter: Date | null } {
+  return { mode: input.mode, autoDecision: input.mode === "auto" ? input.status === "completed" && input.assessment?.suggestedAction === "approve" ? "approve" : input.status === "completed" && input.assessment?.suggestedAction === "reject" ? "reject" : "manual_review" : null, autoDecisionExecuteAfter: input.mode === "auto" ? input.executeAfter ?? null : null };
+}
+
+export async function writeAutoAssessment(input: { tenantId: string; postId: string; postText: string; status: "completed" | "failed" | "unavailable"; provider: string; model: string; snapshotId: string | null; assessment?: PostReviewAssessment; settings: Awaited<ReturnType<typeof readTenantAiSettings>>; mode?: "auto" | "shadow" }) {
   return runWithActiveTenantLease(prisma, input.tenantId, async (tx) => {
     if (!await tx.post.findFirst({ where: { id: input.postId, tenantId: input.tenantId, status: "pending_approval" }, select: { id: true } })) return false;
+    let executeAfter: Date | null = null;
+    let finalDecision: { action: "approve" | "reject" | "manual_review"; reason: string } = { action: "manual_review", reason: "影子模式不执行自动决定" };
+    let latest: { version: number } | null = null;
+    if (input.mode !== "shadow") {
     const policy = input.settings.rules.autoModeration;
     const global = await tx.systemSetting.findUnique({ where: { key: "ai_moderation_kill_switch" }, select: { value: true } });
     // Only resolved, meaningfully labeled feedback can calibrate automation. A
@@ -153,17 +161,21 @@ async function writeAutoAssessment(input: { tenantId: string; postId: string; po
     }
     const configured = { enabled: policy?.enabled === true, globalKillSwitch: policy?.globalKillSwitch === true || global?.value === "true", autoApproveEnabled: policy?.autoApproveEnabled === true, autoRejectEnabled: policy?.autoRejectEnabled === true, allowedAutoApproveCategories: policy?.allowedAutoApproveCategories ?? [], blockedPatterns: policy?.blockedPatterns ?? [], minimumConfidence: policy?.minimumConfidence ?? 0.98, minimumValidatedSamples: policy?.minimumValidatedSamples ?? 100, delaySeconds: policy?.delaySeconds ?? 60 };
     const decision = input.status === "completed" && input.assessment ? getAutoModerationGate(configured, input.assessment, { validatedSamples: calibrationSamples, matchedCategoryRates }, input.postText) : { action: "manual_review" as const, reason: "AI 分析不可用" };
-    const latest = await tx.postAiAnalysis.findFirst({ where: { tenantId: input.tenantId, postId: input.postId }, orderBy: { version: "desc" }, select: { version: true } });
-    let executeAfter: Date | null = null;
-    let finalDecision: typeof decision = decision;
+    latest = await tx.postAiAnalysis.findFirst({ where: { tenantId: input.tenantId, postId: input.postId }, orderBy: { version: "desc" }, select: { version: true } });
+    finalDecision = decision;
     if (decision.action !== "manual_review") {
       executeAfter = new Date(Date.now() + configured.delaySeconds * 1000);
     }
-    const stored = await tx.postAiAnalysis.create({ data: { tenantId: input.tenantId, postId: input.postId, version: (latest?.version ?? 0) + 1, provider: input.provider, model: input.model, modelSnapshotId: input.snapshotId, mode: "auto", status: input.status, autoDecision: finalDecision.action, autoDecisionReason: finalDecision.reason, autoDecisionExecuteAfter: executeAfter, ...(input.assessment ? { riskLevel: input.assessment.riskLevel, confidence: input.assessment.confidence, categories: input.assessment.categories, sensitiveFindings: input.assessment.sensitiveFindings, suggestedAction: input.assessment.suggestedAction, reasons: input.assessment.reasons, maskedText: input.assessment.maskedText, rewrittenText: input.assessment.rewrittenText, rejectionReason: input.assessment.rejectionReason } : {}) } });
-    if (executeAfter) await writeAuditLog({ tenantId: input.tenantId, action: `post.auto_moderation.${finalDecision.action}.staged`, targetType: "post", targetId: input.postId, detail: { analysisId: stored.id, executeAfter, reason: finalDecision.reason } }, tx);
+    }
+    const analysisMode = input.mode ?? "auto";
+    latest ??= await tx.postAiAnalysis.findFirst({ where: { tenantId: input.tenantId, postId: input.postId }, orderBy: { version: "desc" }, select: { version: true } });
+    const fields = writeAutoAssessmentDecision({ mode: analysisMode, status: input.status, ...(input.assessment ? { assessment: input.assessment } : {}), ...(executeAfter ? { executeAfter } : {}) });
+    const stored = await tx.postAiAnalysis.create({ data: { tenantId: input.tenantId, postId: input.postId, version: (latest?.version ?? 0) + 1, provider: input.provider, model: input.model, modelSnapshotId: input.snapshotId, mode: fields.mode, status: input.status, autoDecision: fields.autoDecision, autoDecisionReason: fields.autoDecision === null ? null : finalDecision.reason, autoDecisionExecuteAfter: fields.autoDecisionExecuteAfter, ...(input.assessment ? { riskLevel: input.assessment.riskLevel, confidence: input.assessment.confidence, categories: input.assessment.categories, sensitiveFindings: input.assessment.sensitiveFindings, suggestedAction: input.assessment.suggestedAction, reasons: input.assessment.reasons, maskedText: input.assessment.maskedText, rewrittenText: input.assessment.rewrittenText, rejectionReason: input.assessment.rejectionReason } : {}) } });
+    if (analysisMode === "auto" && executeAfter) await writeAuditLog({ tenantId: input.tenantId, action: `post.auto_moderation.${finalDecision.action}.staged`, targetType: "post", targetId: input.postId, detail: { analysisId: stored.id, executeAfter, reason: finalDecision.reason } }, tx);
     return true;
   });
 }
+
 
 export async function assessPostForReview(options: { tenantId: string; postId: string; logger: FastifyBaseLogger }) {
   const result = await withTenantReviewSlot(options.tenantId, async () => {
@@ -172,11 +184,6 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
     const settings = await readTenantAiSettings(options.tenantId);
     const mode = settings.rules.aiReviewMode ?? "off";
     if (mode === "off") return;
-    if (mode === "shadow") {
-      // Shadow runs are recorded for evaluation but intentionally never surfaced to reviewers.
-      options.logger.info({ tenantId: options.tenantId, postId: options.postId }, "AI review shadow mode is not exposed in reviewer UI");
-      return;
-    }
     let status: "completed" | "failed" | "unavailable" = "failed";
     let assessment: PostReviewAssessment | undefined;
     let snapshotId: string | null = null;
@@ -186,7 +193,7 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
       if (!apiKey) status = "unavailable";
       else {
         try {
-          const entities = await prisma.schoolEntity.findMany({ where: { tenantId: options.tenantId }, orderBy: [{ sensitivity: "desc" }, { updatedAt: "desc" }], take: 80 });
+          const entities = await prisma.schoolEntity.findMany({ where: { tenantId: options.tenantId, source: { not: "ai_candidate" } }, orderBy: [{ sensitivity: "desc" }, { updatedAt: "desc" }], take: 80 });
           const rules = (settings.rules as Record<string, unknown>).aiReviewRules;
           const snapshot = await prisma.schoolModelSnapshot.findFirst({ where: { tenantId: options.tenantId }, orderBy: { version: "desc" } });
           snapshotId = snapshot?.id ?? null;
@@ -236,16 +243,21 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
         if (created.active) snapshotId = created.value.id;
       }
     }
+    if (mode === "shadow") {
+      try { await writeAutoAssessment({ tenantId: options.tenantId, postId: options.postId, postText: post.text, status, provider: settings.provider, model: settings.model, snapshotId, ...(assessment ? { assessment } : {}), settings, mode: "shadow" }); }
+      catch (error) { options.logger.warn({ errorName: error instanceof Error ? error.name : "UnknownError", postId: options.postId, tenantId: options.tenantId }, "AI shadow analysis persistence failed"); }
+      return;
+    }
     if (mode === "auto") {
-      await writeAutoAssessment({ tenantId: options.tenantId, postId: options.postId, postText: post.text, status, provider: settings.provider, model: settings.model, snapshotId, ...(assessment ? { assessment } : {}), settings });
+      await writeAutoAssessment({ tenantId: options.tenantId, postId: options.postId, postText: post.text, status, provider: settings.provider, model: settings.model, snapshotId, ...(assessment ? { assessment } : {}), settings, mode: "auto" });
       return;
     }
     await writeAssistAssessment({ tenantId: options.tenantId, postId: options.postId, status, provider: settings.provider, model: settings.model, snapshotId, ...(assessment ? { assessment } : {}) });
   });
   if (result === null) {
     const settings = await readTenantAiSettings(options.tenantId);
-    if (settings.rules.aiReviewMode === "assist" || settings.rules.aiReviewMode === "auto") {
-      if (settings.rules.aiReviewMode === "auto") await writeAutoAssessment({ tenantId: options.tenantId, postId: options.postId, postText: "", status: "unavailable", provider: settings.provider, model: settings.model, snapshotId: null, settings });
+    if (settings.rules.aiReviewMode === "assist" || settings.rules.aiReviewMode === "auto" || settings.rules.aiReviewMode === "shadow") {
+      if (settings.rules.aiReviewMode === "auto" || settings.rules.aiReviewMode === "shadow") await writeAutoAssessment({ tenantId: options.tenantId, postId: options.postId, postText: "", status: "unavailable", provider: settings.provider, model: settings.model, snapshotId: null, settings, mode: settings.rules.aiReviewMode });
       else await writeAssistAssessment({ tenantId: options.tenantId, postId: options.postId, status: "unavailable", provider: settings.provider, model: settings.model });
     }
   }

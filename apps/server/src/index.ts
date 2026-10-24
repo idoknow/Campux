@@ -23,6 +23,7 @@ import { registerFollowedPostCommentScheduler } from "./runtime/followed-post-co
 import { registerBatchFlushSweeper, stopBatchFlushSweeper } from "./runtime/publish-batching";
 import { startCampaignScheduler } from "./runtime/campaign-scheduler";
 import { startAutoModerationScheduler } from "./runtime/auto-moderation-scheduler";
+import { registerSchoolModelRefreshScheduler } from "./runtime/school-model-refresh";
 import { registerTelemetryReporter } from "./runtime/telemetry";
 import { prisma } from "./lib/prisma";
 import { registerAboutRoutes } from "./routes/about";
@@ -242,6 +243,7 @@ const stopTelemetryReporter = registerTelemetryReporter({ logger: app.log, confi
 const stopFailedPublishAttemptRepublisher = registerFailedPublishAttemptRepublisher(queue, app.log);
 registerBatchFlushSweeper(queue, app.log);
 const stopCampaignScheduler = startCampaignScheduler();
+const stopSchoolModelRefreshScheduler = registerSchoolModelRefreshScheduler({ logger: app.log });
 const stopAutoModerationScheduler = startAutoModerationScheduler(app.log, { queue, oneBot, pluginEvents: pluginRegistry.getEventBus() });
 
 app.addHook("onClose", async () => {
@@ -255,6 +257,7 @@ app.addHook("onClose", async () => {
   stopFailedPublishAttemptRepublisher();
   stopBatchFlushSweeper();
   stopCampaignScheduler();
+  stopSchoolModelRefreshScheduler();
   stopAutoModerationScheduler();
 });
 

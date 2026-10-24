@@ -3,6 +3,9 @@
 -- this migration before recording it as applied. Existing incompatible objects
 -- deliberately fail rather than being silently accepted.
 DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'SchoolEntity' AND column_name = 'sensitivity') THEN
+        ALTER TABLE "SchoolEntity" ADD COLUMN "sensitivity" TEXT NOT NULL DEFAULT 'normal';
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'AiFeedback' AND column_name = 'categories') THEN
         ALTER TABLE "AiFeedback" ADD COLUMN "categories" JSONB NOT NULL DEFAULT '[]';
     END IF;
