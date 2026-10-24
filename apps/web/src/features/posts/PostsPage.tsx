@@ -2016,7 +2016,7 @@ export function PostsPage({
         open={Boolean(detailPostId)}
         canDirectRecall={isAdmin}
         recallBusy={detailPost ? busyPostId === detailPost.id : false}
-        onCancelAutoDecision={detailPost ? (post) => void cancelAutoDecision(post) : undefined}
+        {...(detailPost ? { onCancelAutoDecision: (post: ReviewPostItem) => void cancelAutoDecision(post) } : {})}
         onOpenChange={(open) => {
           if (!open) {
             closePostDetail();
