@@ -138,11 +138,14 @@ async function writeAutoAssessment(input: { tenantId: string; postId: string; po
       where: { tenantId: input.tenantId, humanAction: { not: "" }, aiAction: { not: "" } },
       select: { humanAction: true, aiAction: true, matched: true, categories: true },
     });
+    const labeledFeedback = feedback.flatMap((item) => {
+      const value: unknown = (item as typeof item & { categories?: unknown }).categories;
+      return Array.isArray(value) && value.every((category): category is string => typeof category === "string") ? [{ item, categories: value }] : [];
+    });
     const calibrationSamples = feedback.length;
-    const labeledFeedback = feedback.filter((item) => item.categories.length > 0);
     const matchedCategoryRates: Record<string, { total: number; matched: number }> = {};
-    for (const item of labeledFeedback) {
-      for (const category of new Set(item.categories)) {
+    for (const { item, categories } of labeledFeedback) {
+      for (const category of new Set(categories)) {
         const rate = matchedCategoryRates[category] ??= { total: 0, matched: 0 };
         rate.total += 1;
         if (item.matched && item.humanAction === item.aiAction) rate.matched += 1;

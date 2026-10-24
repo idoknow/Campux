@@ -116,7 +116,7 @@ async function recoverApprovedPosts(logger: FastifyBaseLogger, options: { queue?
   }
 }
 
-async function executeDueDecision(item: DueDecision & { action: string | null }, logger: FastifyBaseLogger, options: { queue?: RuntimeQueue; oneBot?: { notifyReviewResult(postId: string, status: "approved" | "rejected", comment?: string | null): Promise<void> } }): Promise<void> {
+async function executeDueDecision(item: DueDecision & { action: string | null }, logger: FastifyBaseLogger, options: { queue?: RuntimeQueue; pluginEvents?: EventBus; oneBot?: { notifyReviewResult(postId: string, status: "approved" | "rejected", comment?: string | null): Promise<void> } }): Promise<void> {
   if (item.action !== "approve" && item.action !== "reject") return;
   try {
     const outcome = await runWithActiveTenantLease(prisma, item.tenantId, async (tx) => {
@@ -132,16 +132,19 @@ async function executeDueDecision(item: DueDecision & { action: string | null },
         await tx.postAiAnalysis.updateMany({ where: { id: item.id, tenantId: item.tenantId, postId: item.postId, autoDecisionLeaseAt: now, autoDecisionExecutingAt: now, autoDecisionCancelledAt: null, autoDecisionAt: null }, data: { autoDecisionCancelledAt: now, autoDecisionLeaseAt: null, autoDecisionExecutingAt: null, autoDecisionReason: reason } });
         return false;
       };
-      if (!post || settings.rules.aiReviewMode !== "auto" || policy?.enabled !== true || policy.globalKillSwitch === true || global?.value === "true" || (item.action === "approve" ? policy.autoApproveEnabled !== true : policy.autoRejectEnabled !== true)) {
+      if (!post || settings.rules.aiReviewMode !== "auto" || policy?.enabled !== true || policy.globalKillSwitch || global?.value === "true" || (item.action === "approve" ? policy.autoApproveEnabled !== true : policy.autoRejectEnabled !== true)) {
         return cancelDecision("自动审核紧急停止或策略已关闭，已取消待执行决定");
       }
       // Re-assess every staged decision against the current policy, current post
       // body and current feedback calibration. Stale
       // decisions never execute merely because their delay has elapsed.
       const feedback = await tx.aiFeedback.findMany({ where: { tenantId: item.tenantId, humanAction: { not: "" }, aiAction: { not: "" } }, select: { humanAction: true, aiAction: true, matched: true, categories: true } });
-      const labeled = feedback.filter((entry) => entry.categories.length > 0);
+      const labeled = feedback.flatMap((entry) => {
+        const value: unknown = (entry as typeof entry & { categories?: unknown }).categories;
+        return Array.isArray(value) && value.every((category): category is string => typeof category === "string") ? [{ entry, categories: value }] : [];
+      });
       const rates: Record<string, { total: number; matched: number }> = {};
-      for (const entry of labeled) for (const category of new Set(entry.categories)) {
+      for (const { entry, categories } of labeled) for (const category of new Set(categories)) {
         const rate = rates[category] ??= { total: 0, matched: 0 };
         rate.total += 1;
         if (entry.matched && entry.humanAction === entry.aiAction) rate.matched += 1;
@@ -151,7 +154,7 @@ async function executeDueDecision(item: DueDecision & { action: string | null },
         return cancelDecision("原始 AI 评估不完整，待执行决定已取消");
       }
       const currentAssessment = { riskLevel: fresh.riskLevel, confidence: fresh.confidence, categories: fresh.categories, sensitiveFindings: fresh.sensitiveFindings, suggestedAction: fresh.suggestedAction, reasons: [], maskedText: null, rewrittenText: null, rejectionReason: null } as const;
-      const currentPolicy = { enabled: policy.enabled, globalKillSwitch: policy.globalKillSwitch === true || global?.value === "true", autoApproveEnabled: policy.autoApproveEnabled === true, autoRejectEnabled: policy.autoRejectEnabled === true, allowedAutoApproveCategories: policy.allowedAutoApproveCategories, blockedPatterns: policy.blockedPatterns, minimumConfidence: policy.minimumConfidence, minimumValidatedSamples: policy.minimumValidatedSamples, delaySeconds: policy.delaySeconds };
+      const currentPolicy = { enabled: policy?.enabled === true, globalKillSwitch: Boolean(policy?.globalKillSwitch) || global?.value === "true", autoApproveEnabled: policy?.autoApproveEnabled === true, autoRejectEnabled: policy?.autoRejectEnabled === true, allowedAutoApproveCategories: policy?.allowedAutoApproveCategories ?? [], blockedPatterns: policy?.blockedPatterns ?? [], minimumConfidence: policy?.minimumConfidence ?? 0.98, minimumValidatedSamples: policy?.minimumValidatedSamples ?? 100, delaySeconds: policy?.delaySeconds ?? 60 };
       const reevaluated = getAutoModerationGate(currentPolicy, currentAssessment as never, { validatedSamples: feedback.length, matchedCategoryRates: rates }, post.text);
       if (reevaluated.action !== item.action) {
         return cancelDecision("执行前当前策略或人工校准已变化，原待执行决定已取消");
