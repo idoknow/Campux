@@ -35,8 +35,8 @@ const reviewQuerySchema = z.object({
 
 export function isFinalizedAiFeedbackOutcome(postStatus: string, humanAction: "approve" | "reject"): boolean {
   return humanAction === "approve"
-    ? postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed" || postStatus === "cancelled"
-    : postStatus === "rejected" || postStatus === "cancelled";
+    ? postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed"
+    : postStatus === "rejected";
 }
 
 function parsePendingTagNames(raw: string | null | undefined): string[] {
