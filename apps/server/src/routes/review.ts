@@ -33,8 +33,10 @@ const reviewQuerySchema = z.object({
 });
 
 
-export function isFinalizedAiFeedbackOutcome(postStatus: string): boolean {
-  return postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed" || postStatus === "rejected";
+export function isFinalizedAiFeedbackOutcome(postStatus: string, humanAction: "approve" | "reject"): boolean {
+  return humanAction === "approve"
+    ? postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed"
+    : postStatus === "rejected";
 }
 
 function parsePendingTagNames(raw: string | null | undefined): string[] {
@@ -229,17 +231,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       const expectedFinalStatus = body.humanAction === "approve" ? "approved" : "rejected";
       const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id, mode: body.analysisMode }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, categories: true, post: { select: { tenantId: true, status: true } } } });
       if (!analysis || analysis.post.tenantId !== context.selectedTenant.id) return null;
-      const isFinal = isFinalizedAiFeedbackOutcome(analysis.post.status);
-      const humanDecisionLog = body.analysisMode === "auto" && isFinal
-        ? await transaction.postLog.findFirst({
-            where: { tenantId: context.selectedTenant.id, postId: analysis.postId, oldStatus: "pending_approval", newStatus: { in: ["approved", "rejected"] }, actorId: context.user.id },
-            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-            select: { newStatus: true },
-          })
-        : null;
-      // Auto-mode calibration is only recorded for the reviewer's latest real transition.
-      const hasHumanDecision = body.analysisMode !== "auto" || humanDecisionLog?.newStatus === expectedFinalStatus;
-      if (!isFinal || !hasHumanDecision) return { kind: "not_finalized" as const };
+      const isFinal = isFinalizedAiFeedbackOutcome(analysis.post.status, body.humanAction);
+      if (!isFinal) {
+        return body.analysisMode === "auto" && analysis.post.status === "approved" && body.humanAction === "reject"
+          ? { kind: "action_mismatch" as const }
+          : { kind: "not_finalized" as const };
+      }
       const matched = analysis.suggestedAction === body.humanAction;
       if (body.matched !== undefined && body.matched !== matched) return { kind: "invalid_feedback" as const };
       const normalizedCategories = Array.isArray(analysis.categories) ? analysis.categories.filter((category): category is string => typeof category === "string") : [];
@@ -254,6 +251,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!saved.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     if (!saved.value) return reply.code(404).send({ message: "AI 分析记录不存在" });
     if (saved.value.kind === "not_finalized") return reply.code(409).send({ message: "请先完成人工审核，再提交 AI 反馈" });
+    if (saved.value.kind === "action_mismatch") return reply.code(409).send({ message: "反馈结论与稿件审核结果不一致；请按实际人工审核结论反馈" });
     if (saved.value.kind === "invalid_feedback") return reply.code(409).send({ message: "AI 反馈与分析结果不一致" });
     await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched: saved.value.feedback.matched, humanAction: body.humanAction } });
     return { feedback: saved.value };

@@ -2,13 +2,18 @@ import { describe, expect, it } from "bun:test";
 import { isFinalizedAiFeedbackOutcome } from "./review";
 
 describe("isFinalizedAiFeedbackOutcome", () => {
-  it("accepts finalized outcomes but rejects pending and cancelled posts", () => {
-    expect(isFinalizedAiFeedbackOutcome("approved")).toBe(true);
-    expect(isFinalizedAiFeedbackOutcome("published")).toBe(true);
-    expect(isFinalizedAiFeedbackOutcome("publishing")).toBe(true);
-    expect(isFinalizedAiFeedbackOutcome("partially_failed")).toBe(true);
-    expect(isFinalizedAiFeedbackOutcome("rejected")).toBe(true);
-    expect(isFinalizedAiFeedbackOutcome("pending_approval")).toBe(false);
-    expect(isFinalizedAiFeedbackOutcome("cancelled")).toBe(false);
+  it("accepts only outcome statuses matching the submitted action", () => {
+    expect(isFinalizedAiFeedbackOutcome("approved", "approve")).toBe(true);
+    expect(isFinalizedAiFeedbackOutcome("published", "approve")).toBe(true);
+    expect(isFinalizedAiFeedbackOutcome("publishing", "approve")).toBe(true);
+    expect(isFinalizedAiFeedbackOutcome("partially_failed", "approve")).toBe(true);
+    expect(isFinalizedAiFeedbackOutcome("rejected", "reject")).toBe(true);
+    expect(isFinalizedAiFeedbackOutcome("published", "reject")).toBe(false);
+    expect(isFinalizedAiFeedbackOutcome("approved", "reject")).toBe(false);
+    expect(isFinalizedAiFeedbackOutcome("rejected", "approve")).toBe(false);
+    expect(isFinalizedAiFeedbackOutcome("pending_approval", "approve")).toBe(false);
+    expect(isFinalizedAiFeedbackOutcome("pending_approval", "reject")).toBe(false);
+    expect(isFinalizedAiFeedbackOutcome("cancelled", "approve")).toBe(false);
+    expect(isFinalizedAiFeedbackOutcome("cancelled", "reject")).toBe(false);
   });
 });
