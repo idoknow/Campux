@@ -34,7 +34,9 @@ const reviewQuerySchema = z.object({
 
 
 export function isFinalizedAiFeedbackOutcome(postStatus: string, humanAction: "approve" | "reject"): boolean {
-  return humanAction === "approve" ? postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed" : postStatus === "rejected";
+  return humanAction === "approve"
+    ? postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed" || postStatus === "cancelled"
+    : postStatus === "rejected" || postStatus === "cancelled";
 }
 
 function parsePendingTagNames(raw: string | null | undefined): string[] {
@@ -209,7 +211,13 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         },
         timeline: toPostTimeline(post.logs, actorMap),
         aiReview: parsePostReviewAnalysisRecord(assessmentByPost.get(post.id)),
-        aiAutoDecision: assessmentByPost.get(post.id)?.autoDecision === "approve" || assessmentByPost.get(post.id)?.autoDecision === "reject" ? { action: assessmentByPost.get(post.id)!.autoDecision!, reason: assessmentByPost.get(post.id)!.autoDecisionReason ?? "", analysisId: assessmentByPost.get(post.id)!.id } : null,
+        aiAutoDecision: (() => {
+          const record = assessmentByPost.get(post.id);
+          if (!record || (record.autoDecision !== "approve" && record.autoDecision !== "reject")) return null;
+          const action = record.autoDecision;
+          const review = parsePostReviewAnalysisRecord(record);
+          return { action, reason: record.autoDecisionReason ?? "", analysisId: record.id, ...(review?.autoModerationTrace ? { trace: review.autoModerationTrace } : {}) };
+        })(),
       })),
       pagination: toPagination(query.page, query.limit, total),
     };
@@ -233,9 +241,9 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         : null;
       // Auto-mode calibration is only recorded for the reviewer's latest real transition.
       const hasHumanDecision = body.analysisMode !== "auto" || humanDecisionLog?.newStatus === expectedFinalStatus;
-      if (!isFinal || !hasHumanDecision) return null;
+      if (!isFinal || !hasHumanDecision) return { kind: "not_finalized" as const };
       const matched = analysis.suggestedAction === body.humanAction;
-      if (body.matched !== undefined && body.matched !== matched) return null;
+      if (body.matched !== undefined && body.matched !== matched) return { kind: "invalid_feedback" as const };
       const normalizedCategories = Array.isArray(analysis.categories) ? analysis.categories.filter((category): category is string => typeof category === "string") : [];
       const existing = await transaction.aiFeedback.findFirst({ where: { analysisId, tenantId: context.selectedTenant.id }, select: { id: true, humanAction: true } });
       if (existing && existing.humanAction !== body.humanAction) return null;
@@ -243,10 +251,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         where: { id: existing?.id ?? "__missing__" },
         create: { tenantId: context.selectedTenant.id, postId: analysis.postId, analysisId, reviewerId: context.user.id, aiAction: analysis.suggestedAction, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched, categories: normalizedCategories },
         update: { reviewerId: context.user.id, humanAction: body.humanAction, humanComment: body.humanComment ?? null, matched, categories: normalizedCategories },
-      }).then((feedback) => ({ postId: analysis.postId, feedback }));
+      }).then((feedback) => ({ kind: "saved" as const, postId: analysis.postId, feedback }));
     });
     if (!saved.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     if (!saved.value) return reply.code(404).send({ message: "AI 分析记录不存在" });
+    if (saved.value.kind === "not_finalized") return reply.code(409).send({ message: "请先完成人工审核，再提交 AI 反馈" });
+    if (saved.value.kind === "invalid_feedback") return reply.code(409).send({ message: "AI 反馈与分析结果不一致" });
     await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "post.ai_review.feedback", targetType: "post", targetId: saved.value.postId, detail: { analysisId, matched: saved.value.feedback.matched, humanAction: body.humanAction } });
     return { feedback: saved.value };
   });

@@ -53,6 +53,45 @@ def evaluate(rows: list[dict]) -> dict:
     return {"schema_version": 1, "tenants": tenants}
 
 
+POLICY_TARGETS = {
+    "expected_model_advice": "model_advice",
+    "expected_server_action": "server_action",
+}
+
+
+def evaluate_policy_cases(rows: list[dict], predictions: list[dict] | None = None) -> dict:
+    """Compare policy fixture labels with supplied local predictions, emitting counts only."""
+    actual_rows = predictions if predictions is not None else rows
+    if len(rows) != len(actual_rows):
+        raise ValueError("policy cases and predictions must have equal length")
+    targets = {}
+    totals = Counter()
+    for expected_key, actual_key in POLICY_TARGETS.items():
+        confusion = Counter()
+        labeled = 0
+        for case, result in zip(rows, actual_rows):
+            expected = case.get(expected_key)
+            actual = result.get(actual_key)
+            if actual is None and isinstance(result.get("prediction"), dict):
+                actual = result["prediction"].get(actual_key)
+            if not isinstance(expected, str) or not expected:
+                raise ValueError(f"each policy case requires a non-empty {expected_key}")
+            if not isinstance(actual, str) or not actual:
+                continue
+            labeled += 1
+            confusion[f"{expected}->{actual}"] += 1
+            totals[f"{expected}->{actual}"] += 1
+        targets[expected_key.removeprefix("expected_")] = {
+            "total": len(rows), "labeled": labeled,
+            "matched": sum(count for pair, count in confusion.items() if pair.split("->", 1)[0] == pair.split("->", 1)[1]),
+            "confusion": dict(sorted(confusion.items())),
+            "mismatches": sum(count for pair, count in confusion.items() if pair.split("->", 1)[0] != pair.split("->", 1)[1]),
+        }
+    return {"schema_version": 1, "policy_targets": targets,
+            "aggregate": {"confusion": dict(sorted(totals.items())), "labeled": sum(v["labeled"] for v in targets.values()),
+                          "mismatches": sum(v["mismatches"] for v in targets.values())}}
+
+
 def read_jsonl(path: Path) -> list[dict]:
     if path.stat().st_size > MAX_INPUT_BYTES:
         raise ValueError(f"input exceeds {MAX_INPUT_BYTES} bytes")
@@ -72,16 +111,28 @@ def main(argv=None, provider: Callable[[dict], dict] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="JSONL export; never connects to a database")
     parser.add_argument("--output", type=Path, help="write aggregate-only JSON report")
+    parser.add_argument("--predictions", type=Path, help="separate offline JSONL results, one object per case")
+    parser.add_argument("--policy-cases", action="store_true", help="evaluate policy fixture labels from offline prediction fields")
     parser.add_argument("--provider", action="store_true", help="run supplied local adapter per row; unavailable in CLI unless embedded")
     args = parser.parse_args(argv)
     try:
         rows = read_jsonl(args.input)
+        if args.predictions:
+            if not args.policy_cases:
+                raise ValueError("--predictions requires --policy-cases")
+            predictions = read_jsonl(args.predictions)
+            report_data = evaluate_policy_cases(rows, predictions)
+        elif args.policy_cases:
+            report_data = evaluate_policy_cases(rows)
+        else:
+            report_data = evaluate(rows)
         if args.provider:
             if provider is None:
                 raise ValueError("provider adapter must be supplied by an embedding; no network provider is built in")
             for row in rows:
                 row["prediction"] = provider(provider_payload(row))
-        report = json.dumps(evaluate(rows), ensure_ascii=False, indent=2) + "\n"
+            report_data = evaluate_policy_cases(rows) if args.policy_cases else evaluate(rows)
+        report = json.dumps(report_data, ensure_ascii=False, indent=2) + "\n"
         if args.output:
             args.output.write_text(report, encoding="utf-8")
         else:

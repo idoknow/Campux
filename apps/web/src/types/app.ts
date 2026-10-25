@@ -433,6 +433,12 @@ export type PostTimelineEntry = {
   createdAt: string;
 };
 
+export type AutoModerationTrace = {
+  rules: Array<{ ruleId: string; outcome: "pass" | "fail" | "indeterminate"; explanation: string; matchSemantics?: "literal_substring" }>;
+  finalAction: "approve" | "reject" | "manual_review";
+  explanation: string;
+};
+
 export type ReviewPostItem = PostItem & {
   author: {
     id: string;
@@ -441,7 +447,7 @@ export type ReviewPostItem = PostItem & {
   } | null;
   timeline?: PostTimelineEntry[];
   aiReview?: { mode: "assist" | "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; analysisId?: string; autoDecisionReason?: string | null; assessment?: { riskLevel: "low" | "medium" | "high" | "critical"; categories: string[]; sensitiveFindings: Array<{ type: string; excerpt: string; reason: string }>; suggestedAction: "approve" | "revise" | "reject" | "manual_review"; reasons: string[]; confidence: number; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null } } | null;
-  aiAutoDecision?: { action: string; reason: string; analysisId: string } | null;
+  aiAutoDecision?: { action: string; reason: string; analysisId: string; trace?: AutoModerationTrace } | null;
 };
 
 export type PublishedFeedAuthor = {

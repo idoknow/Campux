@@ -1,5 +1,7 @@
 import importlib.util
+import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +10,49 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 class EvaluationTests(unittest.TestCase):
+    def test_policy_labels_separate_targets_and_privacy(self):
+        cases = [
+            {"id":"secret-id", "text":"secret text", "rationale":"secret reason", "expected_model_advice":"normal_allow", "expected_server_action":"allow"},
+            {"id":"another-secret", "text":"private", "rationale":"private reason", "expected_model_advice":"proposed_reject", "expected_server_action":"manual_review"},
+        ]
+        predictions = [
+            {"model_advice":"normal_allow", "server_action":"reject"},
+            {"model_advice":"mandatory_human_review", "server_action":"manual_review"},
+        ]
+        report = MODULE.evaluate_policy_cases(cases, predictions)
+        self.assertEqual(report["policy_targets"]["model_advice"]["matched"], 1)
+        self.assertEqual(report["policy_targets"]["model_advice"]["mismatches"], 1)
+        self.assertEqual(report["policy_targets"]["server_action"]["matched"], 1)
+        self.assertEqual(report["policy_targets"]["server_action"]["mismatches"], 1)
+        rendered = json.dumps(report)
+        for secret in ("secret-id", "another-secret", "secret text", "secret reason", "private reason"):
+            self.assertNotIn(secret, rendered)
+
+    def test_fixture_labels_are_consumed_without_predictions(self):
+        fixture = Path(__file__).parent / "fixtures" / "ai-review-policy-cases.jsonl"
+        cases = MODULE.read_jsonl(fixture)
+        report = MODULE.evaluate_policy_cases(cases)
+        self.assertEqual(report["policy_targets"]["model_advice"]["total"], len(cases))
+        self.assertEqual(report["policy_targets"]["model_advice"]["labeled"], 0)
+        self.assertEqual(report["policy_targets"]["server_action"]["labeled"], 0)
+
+    def test_policy_cli_reads_separate_prediction_file_and_emits_aggregate_only_report(self):
+        from contextlib import redirect_stdout
+        fixture = Path(__file__).parent / "fixtures" / "ai-review-policy-cases.jsonl"
+        cases = MODULE.read_jsonl(fixture)
+        predicted = [{"model_advice": c["expected_model_advice"], "server_action": c["expected_server_action"], "text": "private output"} for c in cases]
+        with tempfile.TemporaryDirectory() as directory:
+            prediction_file = Path(directory) / "predictions.jsonl"
+            prediction_file.write_text("".join(json.dumps(row) + "\n" for row in predicted), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = MODULE.main([str(fixture), "--policy-cases", "--predictions", str(prediction_file)])
+        self.assertEqual(code, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["policy_targets"]["model_advice"]["matched"], 20)
+        self.assertEqual(report["policy_targets"]["server_action"]["matched"], 20)
+        self.assertNotIn("allow-event-notice", output.getvalue())
+        self.assertNotIn("private output", output.getvalue())
     def test_tenant_metrics_confusion_and_mismatches(self):
         rows = [
             {"tenant_id":"a", "human_action":"approve", "prediction":{"suggestedAction":"approve","categories":["x"]}},

@@ -1248,11 +1248,12 @@ export function AdminPage({
                           <SelectItem value="auto">自动决策（有风险）</SelectItem>
                         </SelectContent>
                       </Select>
-                      <span className="text-xs font-normal text-slate-500">模型只生成建议；自动通过/拒绝由下方策略门控，延迟执行，未满足校准条件时回到人工。</span>
+                      <span className="text-xs font-normal text-slate-500">模型只生成建议，不是最终决定。服务端按自动审核开关、紧急暂停、策略与类别、置信度/校准门槛及延迟进行门控；不符合条件或无法自动处理时转人工。接口未提供单条稿件的逐项门控命中明细。</span>
                     </label>
+                    <p className="text-xs leading-5 text-slate-600">建议与执行分开：AI 生成审核建议；是否自动执行由服务端安全门控决定。未通过门控、模式非自动或分析不可用时，仍由审核员按常规流程处理。这里展示现有配置，不代表单条稿件的实际命中记录。</p>
                     <div className="mt-3 grid gap-3 rounded-lg border p-3">
                     <p className="text-sm font-semibold">自动决策参数 · {aiForm?.aiReviewMode === "auto" ? "当前模式生效" : "仅在自动决策模式生效"}</p>
-                    {aiForm?.aiReviewMode === "auto" ? <p className="text-xs text-amber-800">自动决策可能自动通过或拒绝投稿；保存前请确认下方策略、校准门槛和每日上限。</p> : null}
+                    {aiForm?.aiReviewMode === "auto" ? <p className="text-xs text-amber-800">自动决策可能自动通过或拒绝投稿；保存前请确认下方策略、校准门槛和延迟设置。</p> : null}
                     <label className="flex items-center justify-between text-sm">启用自动审核<Switch checked={aiForm?.autoModeration.enabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, enabled: checked } })} /></label>
                     <label className="flex items-center justify-between text-sm">墙内紧急暂停<Switch checked={aiForm?.autoModeration.globalKillSwitch ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, globalKillSwitch: checked } })} /></label>
                     <label className="flex items-center justify-between text-sm">自动通过低风险白名单类别<Switch checked={aiForm?.autoModeration.autoApproveEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoApproveEnabled: checked } })} /></label>

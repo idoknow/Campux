@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, readBoundedLlmResponse } from "./post-review";
+import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
 
 describe("withTenantReviewSlot", () => {
@@ -23,9 +23,26 @@ describe("parsePostReviewAssessment", () => {
     expect(parsePostReviewAnalysisRecord(shadowRecord)).toEqual(expect.objectContaining({ mode: "shadow", status: "completed" }));
     expect(parsePostReviewAnalysisRecord({ ...shadowRecord, mode: "assist" })).toEqual(expect.objectContaining({ mode: "assist", status: "completed" }));
   });
+  it("accepts legacy v1 shape and normalizes schemaVersion", () => {
+    const parsed = parsePostReviewAssessment('{"riskLevel":"low","categories":[],"sensitiveFindings":[],"suggestedAction":"manual_review","reasons":["review"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null}');
+    expect(parsed?.schemaVersion).toBe(1);
+    expect(parsePostReviewAssessment('{"schemaVersion":2,"riskLevel":"low","categories":[],"sensitiveFindings":[],"suggestedAction":"manual_review","reasons":["review"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toBeNull();
+  });
+
+  it("requires exact source grounding for findings, including Unicode", () => {
+    const parsed = parsePostReviewAssessment('{"riskLevel":"low","categories":[],"sensitiveFindings":[{"type":"privacy","excerpt":"李雷🌱","reason":"reason"}],"suggestedAction":"manual_review","reasons":["free-form reason"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')!;
+    expect(validatePostReviewEvidence("原文：李雷🌱。", parsed)).not.toBeNull();
+    const invalidAssessment = {
+      ...parsed!,
+      sensitiveFindings: [{ type: "privacy", excerpt: "LiLei", reason: "name" }],
+    };
+    expect(validatePostReviewEvidence("LiLeis is not an exact token", invalidAssessment)).toBeNull();
+    expect(validatePostReviewEvidence("Mention LiLei here", invalidAssessment)).not.toBeNull();
+  });
+
   it("accepts only a bounded advisory assessment", () => {
     expect(parsePostReviewAssessment('{"riskLevel":"high","categories":["骚扰攻击"],"sensitiveFindings":[],"suggestedAction":"manual_review","reasons":["包含针对性攻击"],"confidence":0.92,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toEqual({
-      riskLevel: "high", categories: ["骚扰攻击"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["包含针对性攻击"], confidence: 0.92, maskedText: null, rewrittenText: null, rejectionReason: null,
+      schemaVersion: 1, riskLevel: "high", categories: ["骚扰攻击"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["包含针对性攻击"], confidence: 0.92, maskedText: null, rewrittenText: null, rejectionReason: null,
     });
   });
   it("rejects malformed, unsupported, and out-of-range model output", () => {

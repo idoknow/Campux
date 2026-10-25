@@ -8,6 +8,7 @@ import { getAutoModerationGate } from "./auto-moderation";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 
 export type PostReviewAssessment = {
+  schemaVersion?: 1;
   riskLevel: "low" | "medium" | "high" | "critical";
   categories: string[];
   sensitiveFindings: Array<{ type: string; excerpt: string; reason: string }>;
@@ -18,7 +19,30 @@ export type PostReviewAssessment = {
   rewrittenText: string | null;
   rejectionReason: string | null;
 };
-export type PersistedPostReview = { mode: "assist" | "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; assessment?: PostReviewAssessment; analysisId?: string | undefined; autoDecision?: string | null | undefined; autoDecisionReason?: string | null | undefined };
+export type PersistedPostReview = { mode: "assist" | "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; assessment?: PostReviewAssessment; analysisId?: string | undefined; autoDecision?: string | null | undefined; autoDecisionReason?: string | null | undefined; autoModerationTrace?: import("./auto-moderation").AutoModerationTrace };
+
+type StoredReviewReasons = { reasons: unknown; autoModerationTrace?: unknown };
+function unpackStoredReasons(value: unknown): { reasons: unknown; autoModerationTrace?: unknown } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const wrapper = value as Record<string, unknown>;
+    if (wrapper.schemaVersion === 1 && Object.keys(wrapper).every((key) => ["schemaVersion", "reasons", "autoModerationTrace"].includes(key))) return { reasons: wrapper.reasons, ...(wrapper.autoModerationTrace !== undefined ? { autoModerationTrace: wrapper.autoModerationTrace } : {}) };
+  }
+  return { reasons: value };
+}
+function parseAutoModerationTrace(raw: unknown): import("./auto-moderation").AutoModerationTrace | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  const actions = ["approve", "reject", "manual_review"];
+  if (!actions.includes(String(value.finalAction)) || typeof value.explanation !== "string" || value.explanation.length > 500 || !Array.isArray(value.rules) || value.rules.length > 32) return undefined;
+  const rules = value.rules.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const rule = entry as Record<string, unknown>;
+    if (typeof rule.ruleId !== "string" || rule.ruleId.length > 100 || !(rule.outcome === "pass" || rule.outcome === "fail" || rule.outcome === "indeterminate") || typeof rule.explanation !== "string" || rule.explanation.length > 500 || (rule.matchSemantics !== undefined && rule.matchSemantics !== "literal_substring")) return [];
+    return [{ ruleId: rule.ruleId, outcome: rule.outcome as "pass" | "fail" | "indeterminate", explanation: rule.explanation, ...(rule.matchSemantics ? { matchSemantics: "literal_substring" as const } : {}) }];
+  });
+  if (rules.length !== value.rules.length) return undefined;
+  return { rules, finalAction: value.finalAction as "approve" | "reject" | "manual_review", explanation: value.explanation };
+}
 const activeReviewRequests = new Map<string, number>();
 const MAX_ACTIVE_REVIEW_REQUESTS_PER_TENANT = 2;
 
@@ -27,8 +51,9 @@ export function parsePostReviewAssessment(raw: string): PostReviewAssessment | n
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const value = parsed as Record<string, unknown>;
-    const allowed = new Set(["riskLevel", "categories", "sensitiveFindings", "suggestedAction", "reasons", "confidence", "maskedText", "rewrittenText", "rejectionReason"]);
+    const allowed = new Set(["schemaVersion", "riskLevel", "categories", "sensitiveFindings", "suggestedAction", "reasons", "confidence", "maskedText", "rewrittenText", "rejectionReason"]);
     if (Object.keys(value).some((key) => !allowed.has(key))) return null;
+    if (value.schemaVersion !== undefined && value.schemaVersion !== 1) return null;
     if (!(value.riskLevel === "low" || value.riskLevel === "medium" || value.riskLevel === "high" || value.riskLevel === "critical")) return null;
     if (!(value.suggestedAction === "approve" || value.suggestedAction === "revise" || value.suggestedAction === "reject" || value.suggestedAction === "manual_review")) return null;
     if (!Array.isArray(value.categories) || value.categories.length > 8 || !value.categories.every((item) => typeof item === "string" && item.length > 0 && item.length <= 60)) return null;
@@ -40,8 +65,29 @@ export function parsePostReviewAssessment(raw: string): PostReviewAssessment | n
     })) return null;
     if (typeof value.confidence !== "number" || !Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) return null;
     for (const key of ["maskedText", "rewrittenText", "rejectionReason"] as const) if (value[key] !== null && (typeof value[key] !== "string" || value[key].length > 3000)) return null;
-    return value as unknown as PostReviewAssessment;
+    return { ...value, schemaVersion: 1 } as unknown as PostReviewAssessment;
   } catch { return null; }
+}
+
+export function validatePostReviewEvidence(rawText: string, assessment: PostReviewAssessment | Omit<PostReviewAssessment, "schemaVersion">): PostReviewAssessment | null {
+  const hasUnsupportedEvidence = assessment.sensitiveFindings.some((finding) => {
+    const source = typeof finding.excerpt === "string" ? finding.excerpt : "";
+    if (!source || !rawText.includes(source)) return true;
+    // Chinese / non-token snippets use exact literal source matching; Latin words require token boundaries.
+    if (/[\u3400-\u9fff]/u.test(source) || !/^[\p{L}\p{N}_]+$/u.test(source)) return false;
+    let offset = rawText.indexOf(source);
+    while (offset !== -1) {
+      const before = rawText.slice(0, offset);
+      const after = rawText.slice(offset + source.length);
+      const left = before.match(/[\p{L}\p{N}_]+$/u)?.[0] ?? "";
+      const right = after.match(/^[\p{L}\p{N}_]+/u)?.[0] ?? "";
+      if ((!left || !/^[A-Za-z0-9_]+$/.test(left)) && (!right || !/^[A-Za-z0-9_]+$/.test(right))) return false;
+      offset = rawText.indexOf(source, offset + 1);
+    }
+    return true;
+  });
+  if (hasUnsupportedEvidence) return null;
+  return { ...assessment, schemaVersion: 1 } as PostReviewAssessment;
 }
 
 export function parsePostReviewAnalysisRecord(record: { id: string; mode: string; status: string; riskLevel: string | null; confidence: number | null; categories: unknown; sensitiveFindings: unknown; suggestedAction: string | null; reasons: unknown; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null; autoDecision?: string | null | undefined; autoDecisionReason?: string | null | undefined } | null | undefined): PersistedPostReview | null {
@@ -50,8 +96,9 @@ export function parsePostReviewAnalysisRecord(record: { id: string; mode: string
     if (record.status === "failed" || record.status === "unavailable") return { mode: record.mode, status: record.status, analysisId: record.id, ...(record.mode === "auto" && record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.mode === "auto" && record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}) };
     return null;
   }
-  const assessment = parsePostReviewAssessment(JSON.stringify({ riskLevel: record.riskLevel, categories: record.categories, sensitiveFindings: record.sensitiveFindings, suggestedAction: record.suggestedAction, reasons: record.reasons, confidence: record.confidence, maskedText: record.maskedText, rewrittenText: record.rewrittenText, rejectionReason: record.rejectionReason }));
-  return assessment ? { mode: record.mode, status: "completed", assessment, analysisId: record.id, ...(record.mode === "auto" && record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.mode === "auto" && record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}) } : null;
+  const storedReasons = unpackStoredReasons(record.reasons);
+  const assessment = parsePostReviewAssessment(JSON.stringify({ riskLevel: record.riskLevel, categories: record.categories, sensitiveFindings: record.sensitiveFindings, suggestedAction: record.suggestedAction, reasons: storedReasons.reasons, confidence: record.confidence, maskedText: record.maskedText, rewrittenText: record.rewrittenText, rejectionReason: record.rejectionReason }));
+  return assessment ? { mode: record.mode, status: "completed", assessment, analysisId: record.id, ...(record.mode === "auto" && record.autoDecision !== undefined ? { autoDecision: record.autoDecision } : {}), ...(record.mode === "auto" && record.autoDecisionReason !== undefined ? { autoDecisionReason: record.autoDecisionReason } : {}), ...(record.mode === "auto" ? (() => { const trace = parseAutoModerationTrace(storedReasons.autoModerationTrace); return trace ? { autoModerationTrace: trace } : {}; })() : {}) } : null;
 }
 
 export function parsePersistedPostReviewDetail(detail: unknown): PersistedPostReview | null {
@@ -60,7 +107,7 @@ export function parsePersistedPostReviewDetail(detail: unknown): PersistedPostRe
   if ((candidate.mode !== "assist" && candidate.mode !== "auto" && candidate.mode !== "shadow") || !(candidate.status === "completed" || candidate.status === "failed" || candidate.status === "unavailable")) return null;
   const assessment = candidate.status === "completed" ? parsePostReviewAssessment(JSON.stringify(candidate.assessment)) : undefined;
   if (candidate.status === "completed" && !assessment) return null;
-  return { mode: candidate.mode, status: candidate.status, ...(assessment ? { assessment } : {}) } as PersistedPostReview;
+  return { mode: candidate.mode, status: candidate.status, ...(assessment ? { assessment } : {}), ...(candidate.mode === "auto" ? (() => { const trace = parseAutoModerationTrace(candidate.autoModerationTrace); return trace ? { autoModerationTrace: trace } : {}; })() : {}) } as PersistedPostReview;
 }
 
 export async function withTenantReviewSlot<T>(tenantId: string, operation: () => Promise<T>): Promise<T | null> {
@@ -133,7 +180,7 @@ export async function writeAutoAssessment(input: { tenantId: string; postId: str
   return runWithActiveTenantLease(prisma, input.tenantId, async (tx) => {
     if (!await tx.post.findFirst({ where: { id: input.postId, tenantId: input.tenantId, status: "pending_approval" }, select: { id: true } })) return false;
     let executeAfter: Date | null = null;
-    let finalDecision: { action: "approve" | "reject" | "manual_review"; reason: string } = { action: "manual_review", reason: "影子模式不执行自动决定" };
+    let finalDecision: import("./auto-moderation").AutoModerationDecision = { action: "manual_review", reason: "影子模式不执行自动决定", trace: { rules: [], finalAction: "manual_review", explanation: "影子模式不执行自动决定" } };
     let latest: { version: number } | null = null;
     if (input.mode !== "shadow") {
     const policy = input.settings.rules.autoModeration;
@@ -160,7 +207,7 @@ export async function writeAutoAssessment(input: { tenantId: string; postId: str
       }
     }
     const configured = { enabled: policy?.enabled === true, globalKillSwitch: policy?.globalKillSwitch === true || global?.value === "true", autoApproveEnabled: policy?.autoApproveEnabled === true, autoRejectEnabled: policy?.autoRejectEnabled === true, allowedAutoApproveCategories: policy?.allowedAutoApproveCategories ?? [], blockedPatterns: policy?.blockedPatterns ?? [], minimumConfidence: policy?.minimumConfidence ?? 0.98, minimumValidatedSamples: policy?.minimumValidatedSamples ?? 100, delaySeconds: policy?.delaySeconds ?? 60 };
-    const decision = input.status === "completed" && input.assessment ? getAutoModerationGate(configured, input.assessment, { validatedSamples: calibrationSamples, matchedCategoryRates }, input.postText) : { action: "manual_review" as const, reason: "AI 分析不可用" };
+    const decision = input.status === "completed" && input.assessment ? getAutoModerationGate(configured, input.assessment, { validatedSamples: calibrationSamples, matchedCategoryRates }, input.postText) : { action: "manual_review" as const, reason: "AI 分析不可用", trace: { rules: [], finalAction: "manual_review" as const, explanation: "AI 分析不可用" } };
     latest = await tx.postAiAnalysis.findFirst({ where: { tenantId: input.tenantId, postId: input.postId }, orderBy: { version: "desc" }, select: { version: true } });
     finalDecision = decision;
     if (decision.action !== "manual_review") {
@@ -170,7 +217,8 @@ export async function writeAutoAssessment(input: { tenantId: string; postId: str
     const analysisMode = input.mode ?? "auto";
     latest ??= await tx.postAiAnalysis.findFirst({ where: { tenantId: input.tenantId, postId: input.postId }, orderBy: { version: "desc" }, select: { version: true } });
     const fields = writeAutoAssessmentDecision({ mode: analysisMode, status: input.status, ...(input.assessment ? { assessment: input.assessment } : {}), ...(executeAfter ? { executeAfter } : {}) });
-    const stored = await tx.postAiAnalysis.create({ data: { tenantId: input.tenantId, postId: input.postId, version: (latest?.version ?? 0) + 1, provider: input.provider, model: input.model, modelSnapshotId: input.snapshotId, mode: fields.mode, status: input.status, autoDecision: fields.autoDecision, autoDecisionReason: fields.autoDecision === null ? null : finalDecision.reason, autoDecisionExecuteAfter: fields.autoDecisionExecuteAfter, ...(input.assessment ? { riskLevel: input.assessment.riskLevel, confidence: input.assessment.confidence, categories: input.assessment.categories, sensitiveFindings: input.assessment.sensitiveFindings, suggestedAction: input.assessment.suggestedAction, reasons: input.assessment.reasons, maskedText: input.assessment.maskedText, rewrittenText: input.assessment.rewrittenText, rejectionReason: input.assessment.rejectionReason } : {}) } });
+    const persistedReasons = input.assessment ? analysisMode === "auto" && input.mode !== "shadow" ? { schemaVersion: 1, reasons: input.assessment.reasons, autoModerationTrace: finalDecision.trace } : input.assessment.reasons : undefined;
+    const stored = await tx.postAiAnalysis.create({ data: { tenantId: input.tenantId, postId: input.postId, version: (latest?.version ?? 0) + 1, provider: input.provider, model: input.model, modelSnapshotId: input.snapshotId, mode: fields.mode, status: input.status, autoDecision: fields.autoDecision, autoDecisionReason: fields.autoDecision === null ? null : finalDecision.reason, autoDecisionExecuteAfter: fields.autoDecisionExecuteAfter, ...(input.assessment ? { riskLevel: input.assessment.riskLevel, confidence: input.assessment.confidence, categories: input.assessment.categories, sensitiveFindings: input.assessment.sensitiveFindings, suggestedAction: input.assessment.suggestedAction, reasons: persistedReasons!, maskedText: input.assessment.maskedText, rewrittenText: input.assessment.rewrittenText, rejectionReason: input.assessment.rejectionReason } : {}) } });
     if (analysisMode === "auto" && executeAfter) await writeAuditLog({ tenantId: input.tenantId, action: `post.auto_moderation.${finalDecision.action}.staged`, targetType: "post", targetId: input.postId, detail: { analysisId: stored.id, executeAfter, reason: finalDecision.reason } }, tx);
     return true;
   });
@@ -213,8 +261,9 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
             if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new Error("LLM response envelope invalid");
             const content = (envelope as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
             if (typeof content !== "string") throw new Error("LLM result missing");
-            assessment = parsePostReviewAssessment(content) ?? undefined;
-            if (!assessment) throw new Error("LLM review schema invalid");
+            const parsedAssessment = parsePostReviewAssessment(content);
+            assessment = parsedAssessment ? validatePostReviewEvidence(post.text, parsedAssessment) ?? undefined : undefined;
+            if (!assessment) throw new Error("LLM review schema or evidence invalid");
             status = "completed";
           } finally { clearTimeout(timeout); }
         } catch (error) {
