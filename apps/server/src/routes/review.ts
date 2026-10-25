@@ -33,6 +33,10 @@ const reviewQuerySchema = z.object({
 });
 
 
+export function isFinalizedAiFeedbackOutcome(postStatus: string, humanAction: "approve" | "reject"): boolean {
+  return humanAction === "approve" ? postStatus === "approved" || postStatus === "published" || postStatus === "publishing" || postStatus === "partially_failed" : postStatus === "rejected";
+}
+
 function parsePendingTagNames(raw: string | null | undefined): string[] {
   if (!raw) return [];
   return raw.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 5);
@@ -219,7 +223,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       const expectedFinalStatus = body.humanAction === "approve" ? "approved" : "rejected";
       const analysis = await transaction.postAiAnalysis.findFirst({ where: { id: analysisId, tenantId: context.selectedTenant.id, mode: body.analysisMode }, select: { id: true, tenantId: true, postId: true, suggestedAction: true, categories: true, post: { select: { tenantId: true, status: true } } } });
       if (!analysis || analysis.post.tenantId !== context.selectedTenant.id) return null;
-      const isFinal = analysis.post.status === expectedFinalStatus;
+      const isFinal = isFinalizedAiFeedbackOutcome(analysis.post.status, body.humanAction);
       const humanDecisionLog = body.analysisMode === "auto" && isFinal
         ? await transaction.postLog.findFirst({
             where: { tenantId: context.selectedTenant.id, postId: analysis.postId, oldStatus: "pending_approval", newStatus: { in: ["approved", "rejected"] }, actorId: context.user.id },
