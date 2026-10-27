@@ -17,7 +17,12 @@ import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
 import { isQZoneProtocolAutoRefreshCooldownError, isQZoneProtocolAutoRefreshTransientError } from "../lib/qzone-auto-refresh";
 import { joinBatchCaptions } from "./publish-batching";
 import { generatePublishSummary } from "./publish-summary";
-import { readTenantPublishLlmSummaryEnabled } from "../lib/tenant-metadata";
+import {
+  countTenantSuccessfulPublishes,
+  readTenantPublishRateLimits,
+  nextPublishRateLimitWindowEnd,
+  readTenantPublishLlmSummaryEnabled,
+} from "../lib/tenant-metadata";
 import { imageStorageHardMaxBytes } from "../lib/image-upload-policy";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { createPersonalQqForumThread, PersonalQqPublishOutcomeUnknownError } from "./personal-qq";
@@ -1116,6 +1121,21 @@ export function resolveEarliestPublishDispatchAt(options: {
   return new Date(Math.max(options.now.getTime(), latestActivityAtMs + intervalMs));
 }
 
+export async function resolveTenantPublishQuotaDeferral(tenantId: string, now: Date, client: PublishScheduleClient = prisma): Promise<Date | null> {
+  const limits = await readTenantPublishRateLimits(client, tenantId);
+  const hourStart = new Date(now);
+  hourStart.setMinutes(0, 0, 0);
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  const [hourlyCount, dailyCount] = await Promise.all([
+    limits.hourly > 0 ? countTenantSuccessfulPublishes(client, tenantId, hourStart, nextPublishRateLimitWindowEnd(now, "hour")) : 0,
+    limits.daily > 0 ? countTenantSuccessfulPublishes(client, tenantId, dayStart, nextPublishRateLimitWindowEnd(now, "day")) : 0,
+  ]);
+  if (limits.hourly > 0 && hourlyCount >= limits.hourly) return nextPublishRateLimitWindowEnd(now, "hour");
+  if (limits.daily > 0 && dailyCount >= limits.daily) return nextPublishRateLimitWindowEnd(now, "day");
+  return null;
+}
+
 export async function resolveNextPublishRunAt(options: {
   tenantId: string;
   botAccountId: string;
@@ -1386,6 +1406,34 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       if (!await tryLockPublishSchedule(tx, dispatchTarget.tenantId, dispatchTarget.publishTarget.botAccountId)) {
         return { lockBusy: true } as const;
       }
+      const latestAttempt = await tx.publishAttempt.findUnique({
+        where: { id: attemptId },
+        select: { status: true },
+      });
+      if (!latestAttempt || (latestAttempt.status !== "queued" && latestAttempt.status !== "failed")) {
+        return { lockBusy: false as const, claimed: false, deferredUntil: null };
+      }
+      const limits = await readTenantPublishRateLimits(tx, dispatchTarget.tenantId);
+      const hourStart = new Date(now);
+      hourStart.setMinutes(0, 0, 0);
+      const dayStart = new Date(now);
+      dayStart.setHours(0, 0, 0, 0);
+      const [hourlyCount, dailyCount] = await Promise.all([
+        limits.hourly > 0 ? countTenantSuccessfulPublishes(tx, dispatchTarget.tenantId, hourStart, nextPublishRateLimitWindowEnd(now, "hour")) : 0,
+        limits.daily > 0 ? countTenantSuccessfulPublishes(tx, dispatchTarget.tenantId, dayStart, nextPublishRateLimitWindowEnd(now, "day")) : 0,
+      ]);
+      const quotaDeferredUntil = limits.hourly > 0 && hourlyCount >= limits.hourly
+        ? nextPublishRateLimitWindowEnd(now, "hour")
+        : limits.daily > 0 && dailyCount >= limits.daily
+          ? nextPublishRateLimitWindowEnd(now, "day")
+          : null;
+      if (quotaDeferredUntil) {
+        const deferred = await tx.publishAttempt.updateMany({
+          where: { id: attemptId, status: { in: ["queued", "failed"] } },
+          data: { status: "queued", nextRunAt: quotaDeferredUntil, lastError: null },
+        });
+        return { lockBusy: false as const, claimed: false, deferredUntil: deferred.count > 0 ? quotaDeferredUntil : null };
+      }
       const botAccount = await tx.botAccount.findUnique({
         where: { id: dispatchTarget.publishTarget.botAccountId },
         select: { lastPublishStartedAt: true },
@@ -1442,6 +1490,11 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     // 会停留在 queued 状态且没有任何任务处理它；推迟后整体重走认领流程。
     queue.rescheduleCurrent(job, new Date(Date.now() + 60_000));
     logger.warn({ error, attemptId }, "publish attempt claim failed; job rescheduled");
+    return;
+  }
+  if (!claimResult.lockBusy && claimResult.deferredUntil) {
+    queue.rescheduleCurrent(job, claimResult.deferredUntil);
+    logger.info({ attemptId, nextRunAt: claimResult.deferredUntil }, "publish attempt deferred by tenant hourly/daily rate limit");
     return;
   }
   if (claimResult.lockBusy) {
@@ -1709,7 +1762,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
               data: {
                 tenantId: attempt.tenantId,
                 postId: target.id,
-                newStatus: "publishing",
+                newStatus: "published",
                 comment: `${attempt.publishTarget.displayName} QQ 频道帖子发表成功：${result.externalId}`,
               },
             });
@@ -1858,7 +1911,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
             data: {
               tenantId: attempt.tenantId,
               postId: target.id,
-              newStatus: "publishing",
+              newStatus: "published",
               comment: `${attempt.publishTarget.displayName} 发布成功：${result.externalId}`,
             },
           });
@@ -2379,19 +2432,22 @@ async function updatePostAggregateStatus(postId: string, tenantId: string, oldSt
   if (result.count !== 1) {
     return;
   }
-  await client.postLog.create({
-      data: {
-        tenantId,
-        postId,
-        oldStatus,
-        newStatus,
-        comment,
-      },
-  });
-
   if (newStatus === "published") {
+    await client.postLog.create({
+      data: { tenantId, postId, oldStatus, newStatus, comment },
+    });
     await autoFollowOwnPostOnPublish(postId, tenantId, client).catch(() => undefined);
+    return;
   }
+  await client.postLog.create({
+    data: {
+      tenantId,
+      postId,
+      oldStatus,
+      newStatus,
+      comment,
+    },
+  });
 }
 
 /**

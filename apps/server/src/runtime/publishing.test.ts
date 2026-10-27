@@ -17,8 +17,27 @@ import {
   shouldAutomaticallyRequeueFailedAttempt,
   shouldAppendQqForumQZoneLink,
   shouldWaitForQZoneAttempt,
+  resolveTenantPublishQuotaDeferral,
 } from "./publishing";
 
+describe("tenant publish rate limit deferral", () => {
+  it("defers quota-limited publishes until the next natural hour", async () => {
+    const now = new Date("2026-07-24T13:42:00.000Z");
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
+      postLog: { findMany: async () => [{ postId: "p1" }] },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T14:00:00.000Z"));
+  });
+
+  it("leaves independently disabled rate limits unrestricted", async () => {
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 0, daily: 0 } }) },
+      postLog: { findMany: async () => { throw new Error("should not count posts"); } },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T13:42:00.000Z"), client)).resolves.toBeNull();
+  });
+});
 describe("publishing recovery and error logging", () => {
   const now = new Date("2026-07-24T00:00:00.000Z").getTime();
 

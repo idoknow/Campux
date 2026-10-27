@@ -70,6 +70,8 @@ type TenantSettingsForm = {
   banner: string;
   logoUrl: string;
   pendingPostLimit: number;
+  publishRateLimitHourly: number;
+  publishRateLimitDaily: number;
   postRulesText: string;
   services: ServiceEntryDraft[];
   imageCompressionEnabled: boolean;
@@ -385,7 +387,7 @@ export function AdminPage({
     const nextForm = toForm(selectedTenant, metadata);
     setForm(nextForm);
     setImageMaxSizeDraft(String(nextForm.imageMaxSizeMb));
-  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled, metadata.operateMode]);
+  }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.publishRateLimits.hourly, metadata.publishRateLimits.daily, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled, metadata.operateMode]);
 
   useEffect(() => {
     if (activeTab !== "metadata") return;
@@ -554,6 +556,10 @@ export function AdminPage({
   }
 
   async function saveSettings() {
+    if (form.publishRateLimitHourly > 0 && form.publishRateLimitDaily > 0 && form.publishRateLimitHourly * 12 > form.publishRateLimitDaily) {
+      toast.error("每小时上限 × 12 不能超过每日上限");
+      return;
+    }
     const imageMaxSizeMb = normalizeImageMaxSizeDraft(imageMaxSizeDraft, form.imageMaxSizeMb);
     setImageMaxSizeDraft(String(imageMaxSizeMb));
     setBusy(true);
@@ -567,6 +573,8 @@ export function AdminPage({
           banner: form.banner,
           logoUrl: form.logoUrl.trim(),
           pendingPostLimit: form.pendingPostLimit,
+          publishRateLimitHourly: form.publishRateLimitHourly,
+          publishRateLimitDaily: form.publishRateLimitDaily,
           postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
           services: prepareServiceEntriesForSave(form.services),
           imageCompressionEnabled: form.imageCompressionEnabled,
@@ -1987,6 +1995,23 @@ function MetadataPanel({
             />
             <span className="text-xs font-normal text-slate-500">0 表示不限制，默认建议 1 条。</span>
           </label>
+          <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
+            <p className="text-sm font-semibold text-slate-900">自动发布频率限制</p>
+            <p className="text-xs text-slate-500">按校园墙统计成功发布的独立稿件数，多发布目标同一稿件只计一次。触顶后自动等到下一自然小时或自然日继续；0 表示不设该项上限。</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-sm font-medium">
+                每小时上限
+                <Input type="number" min={0} max={10000} value={form.publishRateLimitHourly} disabled={busy} onChange={(event) => onFormChange({ ...form, publishRateLimitHourly: Number(event.target.value) })} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium">
+                每日上限
+                <Input type="number" min={0} max={10000} value={form.publishRateLimitDaily} disabled={busy} onChange={(event) => onFormChange({ ...form, publishRateLimitDaily: Number(event.target.value) })} />
+              </label>
+            </div>
+            {form.publishRateLimitHourly > 0 && form.publishRateLimitDaily > 0 && form.publishRateLimitHourly * 12 > form.publishRateLimitDaily && (
+              <p className="text-xs text-rose-600">每小时上限 × 12 不能超过每日上限。</p>
+            )}
+          </div>
           <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <label className="grid gap-1 text-sm font-medium md:max-w-xs">
               单张投稿图片上限 (MB)
@@ -4137,6 +4162,8 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     banner: metadata.banner,
     logoUrl: metadata.logoUrl,
     pendingPostLimit: metadata.pendingPostLimit,
+    publishRateLimitHourly: metadata.publishRateLimits.hourly,
+    publishRateLimitDaily: metadata.publishRateLimits.daily,
     postRulesText: metadata.postRules.join("\n"),
     services: toCustomServiceEntryDrafts(metadata.services),
     imageCompressionEnabled: metadata.imageCompression.enabled,

@@ -104,6 +104,7 @@ export type TenantMetadata = {
   logoUrl: string;
   postRules: string[];
   pendingPostLimit: number;
+  publishRateLimits: { hourly: number; daily: number };
   services: Array<{
     title: string;
     description?: string;

@@ -7,6 +7,53 @@ type MetadataClient = typeof prisma | Prisma.TransactionClient;
 export const defaultPendingPostLimit = 1;
 export const maxPendingPostLimit = 50;
 export const pendingPostLimitMetadataKey = "pending_post_limit";
+export const publishRateLimitMetadataKey = "publish_rate_limit";
+export const publishRateLimitDefaults = { hourly: 0, daily: 0 } as const;
+export const publishRateLimitMaximum = 10_000;
+
+export type PublishRateLimits = { hourly: number; daily: number };
+
+export function normalizePublishRateLimits(value: unknown): PublishRateLimits {
+  if (!value || typeof value !== "object") return { ...publishRateLimitDefaults };
+  const record = value as Record<string, unknown>;
+  const normalize = (item: unknown) => {
+    const numeric = typeof item === "number" ? item : typeof item === "string" && item.trim() !== "" ? Number(item) : NaN;
+    return Number.isInteger(numeric) && numeric >= 0 && numeric <= publishRateLimitMaximum ? numeric : 0;
+  };
+  const limits = { hourly: normalize(record.hourly), daily: normalize(record.daily) };
+  return isValidPublishRateLimits(limits) ? limits : { ...publishRateLimitDefaults };
+}
+
+export function isValidPublishRateLimits(limits: PublishRateLimits) {
+  return (limits.hourly === 0 || limits.daily === 0 || limits.hourly * 12 <= limits.daily);
+}
+
+export function nextPublishRateLimitWindowEnd(now: Date, period: "hour" | "day") {
+  const next = new Date(now);
+  if (period === "hour") {
+    next.setMinutes(0, 0, 0);
+    next.setHours(next.getHours() + 1);
+  } else {
+    next.setHours(0, 0, 0, 0);
+    next.setDate(next.getDate() + 1);
+  }
+  return next;
+}
+
+export async function readTenantPublishRateLimits(client: MetadataClient, tenantId: string): Promise<PublishRateLimits> {
+  const entry = await client.tenantMetadata.findUnique({ where: { tenantId_key: { tenantId, key: publishRateLimitMetadataKey } }, select: { value: true } });
+  return normalizePublishRateLimits(entry?.value);
+}
+
+export async function countTenantSuccessfulPublishes(client: MetadataClient, tenantId: string, since: Date, before: Date) {
+  const rows = await client.postLog.findMany({
+    where: { tenantId, newStatus: "published", createdAt: { gte: since, lt: before } },
+    select: { postId: true },
+    distinct: ["postId"],
+  });
+  return rows.length;
+}
+
 
 export const imageCompressionEnabledKey = "image_compression_enabled";
 export const imageCompressionQualityKey = "image_compression_quality";

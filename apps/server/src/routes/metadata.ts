@@ -15,6 +15,12 @@ import {
   maxPendingPostLimit,
   normalizePendingPostLimit,
   pendingPostLimitMetadataKey,
+  publishRateLimitMetadataKey,
+  isValidPublishRateLimits,
+  normalizePublishRateLimits,
+  countTenantSuccessfulPublishes,
+  readTenantPublishRateLimits,
+  nextPublishRateLimitWindowEnd,
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
@@ -55,6 +61,7 @@ const publicMetadataKeys = [
   "post_rules",
   "services",
   pendingPostLimitMetadataKey,
+  publishRateLimitMetadataKey,
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
@@ -82,6 +89,8 @@ const patchMetadataSchema = z.object({
   logoUrl: z.string().trim().max(1000).refine((value) => value === "" || /^https?:\/\//i.test(value) || value.startsWith("/"), "Logo URL 必须是 http(s) 或站内路径").optional(),
   postRules: z.array(z.string().min(1)).optional(),
   pendingPostLimit: z.number().int().min(0).max(maxPendingPostLimit).optional(),
+  publishRateLimitHourly: z.number().int().min(0).max(10_000).optional(),
+  publishRateLimitDaily: z.number().int().min(0).max(10_000).optional(),
   services: z.array(
     z.object({
       title: z.string().min(1),
@@ -126,6 +135,7 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     logoUrl: typeof record.logo_url === "string" ? record.logo_url : "",
     postRules: Array.isArray(record.post_rules) ? record.post_rules.filter((rule) => typeof rule === "string") : [],
     pendingPostLimit: normalizePendingPostLimit(record[pendingPostLimitMetadataKey]),
+    publishRateLimits: { hourly: 0, daily: 0 },
     services: Array.isArray(record.services) ? record.services : [],
     imageCompression: {
       enabled: normalizeEnabled(record[imageCompressionEnabledKey]),
@@ -216,6 +226,7 @@ async function readPublicMetadata(tenantId: string) {
   });
 
   const metadata = normalizeMetadata(entries);
+  metadata.publishRateLimits = await readTenantPublishRateLimits(prisma, tenantId);
   // 插件开关从 tenant_metadata.plugin_config 读取，保留对前端公开 metadata 的
   // 字段兼容性（投稿页、稿件事件的开关均走这里）。
   try {
@@ -424,7 +435,7 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       });
     }
 
-    const updates: Array<{ key: string; value: string | number | string[] | boolean | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
+    const updates: Array<{ key: string; value: string | number | string[] | boolean | { hourly: number; daily: number } | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
     if (body.brand !== undefined) {
       updates.push({ key: "brand", value: body.brand });
     }
@@ -436,6 +447,17 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.postRules !== undefined) {
       updates.push({ key: "post_rules", value: body.postRules });
+    }
+    if (body.publishRateLimitHourly !== undefined || body.publishRateLimitDaily !== undefined) {
+      const current = await readTenantPublishRateLimits(prisma, context.selectedTenant.id);
+      const next = {
+        hourly: body.publishRateLimitHourly ?? current.hourly,
+        daily: body.publishRateLimitDaily ?? current.daily,
+      };
+      if (!isValidPublishRateLimits(next)) {
+        return reply.code(400).send({ message: "每小时上限 × 12 不能超过每日上限" });
+      }
+      updates.push({ key: publishRateLimitMetadataKey, value: next });
     }
     if (body.pendingPostLimit !== undefined) {
       updates.push({ key: pendingPostLimitMetadataKey, value: body.pendingPostLimit });
