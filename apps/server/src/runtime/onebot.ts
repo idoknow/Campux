@@ -259,24 +259,89 @@ type OneBotMessageEvent = {
 
 const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
 
-const reviewHelp = [
-  "审核命令：",
-  "#通过 <稿件id>",
-  "#全部通过",
-  "#审核队列",
-  "#拒绝 <理由> <稿件id>",
-  "#重发 <稿件id>",
-  "#回复 <内容> （引用转发私信后使用）",
-  "#发布 <内容> （可附带图片，选择直接发布或以墙的身份投稿发布）",
-  "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
-  "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
-  "#解封 <QQ号> 或 unban <QQ号>",
-  "#毕业通过 <毕业去向编号>",
-  "#毕业拒绝 <理由> <毕业去向编号>",
-  "#好友数",
-  "#登录 或 #刷新qzone cookies",
-  "#扫码登录",
-].join("\n");
+/** 审核群指令依赖的租户插件开关。 */
+export type ReviewPluginFlags = {
+  graduation: boolean;
+  campaigns: boolean;
+};
+
+type TenantPluginConfig = Awaited<ReturnType<typeof readTenantPluginConfig>>;
+
+export function toReviewPluginFlags(config: Pick<TenantPluginConfig, "graduation" | "campaigns">): ReviewPluginFlags {
+  return { graduation: config.graduation.enabled, campaigns: config.campaigns.enabled };
+}
+
+/**
+ * 把 Bot 多彩消息配置同步到 bot-messages 模块，并返回实际启用标志。
+ * 同步调用，便于与 readTenantPluginConfig 共用同一次读取。
+ */
+function applyBotStylishMessages(config: TenantPluginConfig): boolean {
+  const mapping: Record<string, string[]> = {};
+  for (const entry of config.botStylishMessages.messageTypes) {
+    if (entry.enabled && entry.messages.length > 0) {
+      mapping[entry.type] = entry.messages;
+    }
+  }
+  setBotCustomStylishMessages(mapping);
+  return config.botStylishMessages.enabled;
+}
+
+/**
+ * 审核群帮助文本。核心指令恒定，插件指令只在对应插件启用时展示，
+ * 避免墙里没开插件却把 #毕业通过 / #投票通过 列在帮助里。
+ */
+export function buildReviewHelp(flags: ReviewPluginFlags | null): string {
+  return [
+    "审核命令：",
+    "#通过 <稿件id>",
+    "#全部通过",
+    "#审核队列",
+    "#拒绝 <理由> <稿件id>",
+    "#重发 <稿件id>",
+    "#回复 <内容> （引用转发私信后使用）",
+    "#发布 <内容> （可附带图片，选择直接发布或以墙的身份投稿发布）",
+    "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
+    "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
+    "#解封 <QQ号> 或 unban <QQ号>",
+    ...(flags?.graduation ? ["#毕业通过 <毕业去向编号>", "#毕业拒绝 <理由> <毕业去向编号>"] : []),
+    ...(flags?.campaigns ? ["#投票通过 <竞选编号>", "#投票拒绝 <理由> <竞选编号>"] : []),
+    "#好友数",
+    "#登录 或 #刷新qzone cookies",
+    "#扫码登录",
+  ].join("\n");
+}
+
+/**
+ * 审核群指令 → 所属预设插件。预设插件只在网页路由与前端做了开关检查，
+ * 指令层必须同样拦截，否则插件关闭后仍能从群里处理对应记录（网页端同一操作是 403）。
+ */
+const reviewPluginCommandOwners = new Map<string, { plugin: keyof ReviewPluginFlags; label: string }>([
+  ["毕业通过", { plugin: "graduation", label: "毕业去向" }],
+  ["毕业拒绝", { plugin: "graduation", label: "毕业去向" }],
+  ["投票通过", { plugin: "campaigns", label: "投票竞选" }],
+  ["投票拒绝", { plugin: "campaigns", label: "投票竞选" }],
+]);
+
+/**
+ * 插件未启用时返回给审核群的提示；核心指令返回 null。
+ * flags 为 null 表示配置读取失败：保持失败关闭，但给出可区分的原因。
+ */
+export function resolveReviewPluginCommandBlock(commandName: string, flags: ReviewPluginFlags | null): string | null {
+  const owner = reviewPluginCommandOwners.get(commandName);
+  if (!owner) {
+    return null;
+  }
+  if (!flags) {
+    return `暂时无法读取本墙的插件配置，${commandName} 指令未执行，请稍后重试。`;
+  }
+  if (flags[owner.plugin]) {
+    return null;
+  }
+  return `本墙未开启「${owner.label}」插件，${commandName} 指令暂不可用；请在 管理 → 插件 中启用后重试。`;
+}
+
+/** 与 BotAccount.reviewGroupMessageReply 的数据库默认值一致，用于识别「管理员没有改过」的默认文本。 */
+const defaultReviewGroupMessageReply = "审核命令：\n#通过 <稿件id>\n#拒绝 <理由> <稿件id>\n#重发 <稿件id>\n#登录 或 #刷新qzone cookies\n#扫码登录";
 
 function readRecallReason(comment: string | undefined): string | null {
   const prefix = "用户申请撤回：";
@@ -358,21 +423,29 @@ export class OneBotRuntime {
     // 多彩消息唯一开关 = 插件配置里的 enabled（旧 TenantMetadata 开关已移除，
     // 插件配置页是唯一管理入口）。
     try {
-      const config = await readTenantPluginConfig(prisma, tenantId);
-      const mapping: Record<string, string[]> = {};
-      for (const entry of config.botStylishMessages.messageTypes) {
-        if (entry.enabled && entry.messages.length > 0) {
-          mapping[entry.type] = entry.messages;
-        }
-      }
-      setBotCustomStylishMessages(mapping);
       // 并发注意：自定义语句表是模块级全局，resolve 完成后应紧接着同步调用
       // format* 函数，中间不得插入 await，否则多租户并发时可能串用他人语句。
-      return config.botStylishMessages.enabled;
+      return applyBotStylishMessages(await readTenantPluginConfig(prisma, tenantId));
     } catch {
       setBotCustomStylishMessages(null);
       return false;
     }
+  }
+
+  /** 读取租户插件配置；失败时记录日志并返回 null（调用方据此失败关闭）。 */
+  private async readPluginConfigSafe(tenantId: string): Promise<TenantPluginConfig | null> {
+    try {
+      return await readTenantPluginConfig(prisma, tenantId);
+    } catch (error) {
+      this.logger.warn({ error, tenantId }, "failed to read tenant plugin config for review commands");
+      return null;
+    }
+  }
+
+  /** 审核群指令依赖的插件开关；配置读取失败返回 null，与「插件关闭」区分开。 */
+  private async resolveReviewPluginFlags(tenantId: string): Promise<ReviewPluginFlags | null> {
+    const config = await this.readPluginConfigSafe(tenantId);
+    return config ? toReviewPluginFlags(config) : null;
   }
 
   close() {
@@ -3262,7 +3335,23 @@ export class OneBotRuntime {
     }
 
     try {
-      const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
+      // 一次读取同时拿到审核指令开关与多彩消息语句，避免每条指令多查一次配置。
+      // 注意：applyBotStylishMessages 之后到 format* 调用之间不能插入额外 await
+      //（自定义语句表是模块级全局，多租户并发会串用）。
+      const pluginConfig = await this.readPluginConfigSafe(bot.tenantId);
+      const reviewPluginFlags = pluginConfig ? toReviewPluginFlags(pluginConfig) : null;
+      const pluginBlockedMessage = resolveReviewPluginCommandBlock(command.name, reviewPluginFlags);
+      if (pluginBlockedMessage) {
+        await this.sendGroupMessage(botQqUin, groupId, pluginBlockedMessage);
+        return;
+      }
+      const reviewHelp = buildReviewHelp(reviewPluginFlags);
+      let stylishEnabled = false;
+      if (pluginConfig) {
+        stylishEnabled = applyBotStylishMessages(pluginConfig);
+      } else {
+        setBotCustomStylishMessages(null);
+      }
 
       if (command.name === "全部通过") {
         const result = await approveAllPendingPostsViaBot({
@@ -3753,7 +3842,13 @@ export class OneBotRuntime {
     if (!bot?.reviewGroupId || bot.reviewGroupId !== groupId) {
       return;
     }
-    await this.sendGroupMessage(botQqUin, groupId, bot.reviewGroupMessageReply || reviewHelp).catch((error) => {
+    const savedReply = bot.reviewGroupMessageReply?.trim();
+    // 管理员自定义过就照旧用自定义文本；仍是数据库默认文本时改用按插件开关生成的帮助，
+    // 避免默认提示里既缺已启用插件的指令、又宣传已关闭的指令。
+    const reviewHelp = savedReply && savedReply !== defaultReviewGroupMessageReply
+      ? savedReply
+      : buildReviewHelp(await this.resolveReviewPluginFlags(bot.tenantId));
+    await this.sendGroupMessage(botQqUin, groupId, reviewHelp).catch((error) => {
       this.logger.warn({ error, botQqUin, groupId }, "failed to send review group auto reply");
     });
   }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { parsePrivatePostConfirmText } from "../lib/private-posting";
 import {
+  buildReviewHelp,
   isPrivatePostAiIntakeActive,
   shouldAppendPrivatePostContentForSemantic,
   shouldApplyPrivatePostSemanticText,
@@ -18,6 +19,7 @@ import {
   parseUnbanCommandArgs,
   resolvePrivatePostModeSelectionFromSemantic,
   resolvePrivatePostSemanticAction,
+  resolveReviewPluginCommandBlock,
   shouldHandleReviewGroupCommandForBot,
 } from "./onebot";
 
@@ -663,5 +665,78 @@ describe("private post semantic mode selection", () => {
 
   test("非待审核私聊投稿不触发新稿审核通知", () => {
     expect(shouldNotifyReviewGroupAfterPrivatePostCreate({ status: "approved" })).toBe(false);
+  });
+});
+
+describe("审核群帮助文本按插件开关裁剪", () => {
+  test("插件全关时不出现毕业与投票指令", () => {
+    const help = buildReviewHelp({ graduation: false, campaigns: false });
+    expect(help).toContain("#通过 <稿件id>");
+    expect(help).toContain("#登录 或 #刷新qzone cookies");
+    expect(help).not.toContain("#毕业通过");
+    expect(help).not.toContain("#投票通过");
+  });
+
+  test("启用毕业去向只补毕业指令", () => {
+    const help = buildReviewHelp({ graduation: true, campaigns: false });
+    expect(help).toContain("#毕业通过 <毕业去向编号>");
+    expect(help).toContain("#毕业拒绝 <理由> <毕业去向编号>");
+    expect(help).not.toContain("#投票通过");
+  });
+
+  test("启用投票竞选补投票指令", () => {
+    const help = buildReviewHelp({ graduation: false, campaigns: true });
+    expect(help).toContain("#投票通过 <竞选编号>");
+    expect(help).toContain("#投票拒绝 <理由> <竞选编号>");
+    expect(help).not.toContain("#毕业通过");
+  });
+});
+
+describe("插件未启用时拦截审核群指令", () => {
+  test("核心稿件指令不受插件开关影响", () => {
+    expect(resolveReviewPluginCommandBlock("通过", { graduation: false, campaigns: false })).toBeNull();
+    expect(resolveReviewPluginCommandBlock("审核队列", { graduation: false, campaigns: false })).toBeNull();
+  });
+
+  test("毕业去向未开启时拦截毕业指令并提示", () => {
+    const message = resolveReviewPluginCommandBlock("毕业通过", { graduation: false, campaigns: true });
+    expect(message).toContain("毕业去向");
+    expect(message).toContain("未开启");
+  });
+
+  test("投票竞选未开启时拦截投票指令", () => {
+    expect(resolveReviewPluginCommandBlock("投票拒绝", { graduation: true, campaigns: false })).toContain("投票竞选");
+  });
+
+  test("插件开启后放行对应指令", () => {
+    expect(resolveReviewPluginCommandBlock("毕业拒绝", { graduation: true, campaigns: false })).toBeNull();
+    expect(resolveReviewPluginCommandBlock("投票通过", { graduation: false, campaigns: true })).toBeNull();
+  });
+
+  test("开启状态与拦截状态成对出现，避免漏登记时测试仍通过", () => {
+    const gated = [
+      ["毕业通过", "graduation"],
+      ["毕业拒绝", "graduation"],
+      ["投票通过", "campaigns"],
+      ["投票拒绝", "campaigns"],
+    ] as const;
+    for (const [command, plugin] of gated) {
+      const flags = { graduation: plugin === "graduation", campaigns: plugin === "campaigns" };
+      expect(resolveReviewPluginCommandBlock(command, flags)).toBeNull();
+      expect(resolveReviewPluginCommandBlock(command, { ...flags, [plugin]: false })).not.toBeNull();
+    }
+  });
+
+  test("未知指令（含对象原型属性）不被误拦截", () => {
+    for (const command of ["构造", "constructor", "toString", "__proto__"]) {
+      expect(resolveReviewPluginCommandBlock(command, { graduation: false, campaigns: false })).toBeNull();
+    }
+  });
+
+  test("配置读取失败时提示可区分，且核心指令不受影响", () => {
+    expect(resolveReviewPluginCommandBlock("通过", null)).toBeNull();
+    const blocked = resolveReviewPluginCommandBlock("毕业通过", null);
+    expect(blocked).toContain("暂时无法读取");
+    expect(blocked).not.toContain("未开启");
   });
 });
