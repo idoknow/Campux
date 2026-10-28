@@ -286,6 +286,28 @@ function readRecallReason(comment: string | undefined): string | null {
   return comment.slice(prefix.length).trim() || null;
 }
 
+/**
+ * Classify a OneBot connection liveness probe.
+ *
+ * `stale` means the socket is no longer the registered connection: a reconnect
+ * replaced it, or its own close handler already ran. That is a per-socket
+ * condition and MUST NOT tear the tenant down — doing so also kills the fresh
+ * connection and permanently deactivates the interaction fence, after which
+ * every reconnect is rejected with `tenant inactive` until an operator pauses
+ * and resumes the tenant.
+ */
+export type ConnectionLiveness = "ok" | "stale" | "tenant-gone";
+
+export function classifyConnectionLiveness(input: {
+  present: boolean;
+  fenceCurrent: boolean;
+  tenantActive: boolean;
+}): ConnectionLiveness {
+  if (!input.present) return "stale";
+  if (!input.fenceCurrent || !input.tenantActive) return "tenant-gone";
+  return "ok";
+}
+
 export class OneBotRuntime {
   private readonly interactionFence = new TenantInteractionGenerationFence();
   private readonly connections = new Set<OneBotConnection>();
@@ -4258,18 +4280,31 @@ export class OneBotRuntime {
   }
 
   private async ensureConnectionTenantActive(connection: OneBotConnection) {
-    if (
-      this.connections.has(connection)
-      && this.interactionFence.isCurrent(connection.permit)
-      && await isTenantRuntimeActive(prisma, connection.tenantId)
-      && this.connections.has(connection)
-      && this.interactionFence.isCurrent(connection.permit)
-    ) {
-      return true;
+    if (!this.connections.has(connection)) {
+      // Superseded by a reconnect (or closed) — only this socket dies.
+      connection.socket.close?.(1008, "connection stale");
+      return false;
     }
-    this.disconnectTenant(connection.tenantId);
-    this.logger.info({ tenantId: connection.tenantId, botAccountId: connection.botAccountId }, "onebot interaction blocked for inactive tenant");
-    return false;
+    const tenantActive = await isTenantRuntimeActive(prisma, connection.tenantId);
+    // Re-read the registration and the fence AFTER the await: a reconnect may
+    // have replaced this socket while the DB probe was in flight, which makes
+    // both probe inputs stale for it. Acting on a stale "tenant-gone" verdict
+    // would deactivate the renewed fence and kill the fresh socket.
+    if (!this.connections.has(connection)) {
+      connection.socket.close?.(1008, "connection superseded");
+      return false;
+    }
+    const verdict = classifyConnectionLiveness({
+      present: true,
+      fenceCurrent: this.interactionFence.isCurrent(connection.permit),
+      tenantActive,
+    });
+    if (verdict === "tenant-gone") {
+      this.disconnectTenant(connection.tenantId);
+      this.logger.info({ tenantId: connection.tenantId, botAccountId: connection.botAccountId }, "onebot interaction blocked for inactive tenant");
+      return false;
+    }
+    return true;
   }
 
   private async markBotSeen(connection: OneBotConnection) {
