@@ -591,7 +591,9 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       // If persistence fails, the catch path below reconciles the fence to the
       // authoritative persisted status.
       runtimeTransitionAttempted = true;
-      oneBot?.disconnectTenant(params.tenantId);
+      // 先等它把缓冲里的私聊发完再改状态：状态一旦提交，findEnabledBot 就会判定墙已停用，
+      // 缓冲会被重排然后又被清掉，等于悄悄丢消息。
+      await oneBot?.disconnectTenant(params.tenantId);
     }
     const persistTenant = () => retryTransactionSerializationFailures(
       () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -644,7 +646,7 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         if (persisted?.status === "active") {
           oneBot?.activateTenant(params.tenantId);
         } else if (persisted) {
-          oneBot?.disconnectTenant(params.tenantId);
+          void oneBot?.disconnectTenant(params.tenantId);
         }
       }
       if (error instanceof TenantDomainCompensationError) {

@@ -218,6 +218,8 @@ type PrivateForwardBuffer = {
   userNickname: string;
   messages: PrivateForwardEntry[];
   timer: Timer | null;
+  /** 转发失败后的重试次数，超过上限才放弃并记 error 日志。 */
+  attempts?: number;
 };
 
 type PrivatePostAggregateBuffer = {
@@ -263,6 +265,113 @@ const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
 export function resolvePrivateForwardGroupId(bot: { privateForwardGroupId?: string | null }): string | null {
   const target = bot.privateForwardGroupId?.trim();
   return target ? target : null;
+}
+
+/**
+ * 构造合并转发的消息节点。发送者身份三套字段全带：NapCat/SnowLuma 读
+ * user_id/qq/nickname，go-cqhttp/Lagrange 读 uin/name。只给 uin/name 时
+ * 协议端取不到昵称，整条聊天记录会退化成墙号自己发的（用户看到的「转发给自己」）。
+ */
+export function buildForwardNodes(
+  user: { qqUin: string; nickname: string },
+  entries: PrivateForwardEntry[],
+  options: { degradeUnsupported?: boolean } = {},
+) {
+  return entries.map((entry) => {
+    const rawSegments = entry.segments.length > 0
+      ? entry.segments
+      : [{ type: "text", data: { text: entry.text } }];
+    return {
+      type: "node" as const,
+      data: {
+        name: user.nickname,
+        nickname: user.nickname,
+        uin: user.qqUin,
+        user_id: user.qqUin,
+        qq: user.qqUin,
+        // time 在各端类型不一致（OneBot 规范是数字、NapCat 声明字符串），且都属可选，
+        // 省略它避免个别实现因类型不符拒收整条合并转发。
+        content: sanitizeForwardSegments(rawSegments, options),
+      },
+    };
+  });
+}
+
+/**
+ * 合并转发失败是否属于「确定没发出去」：只有协议端明确回错才算。
+ * 超时 / 连接断开都是「可能已送达」，重发会让群里收到重复的聊天记录。
+ */
+export function isDefinitiveForwardRejection(error: unknown): boolean {
+  if (!(error instanceof BotWorkflowError)) return false;
+  if (error instanceof OneBotActionTimeoutError) return false;
+  if (error instanceof OneBotConnectionUnavailableError) return false;
+  return true;
+}
+
+/**
+ * 降级成普通群消息时用的段净化：私聊里的 at / reply 在群聊里不能原样发
+ * （at 会真的 @ 到群成员、reply 指向私聊和不存在的消息），统一换成文本。
+ */
+export function sanitizeSegmentsForGroupSend(segments: OneBotMessageSegment[]): OneBotMessageSegment[] {
+  const normalized = segments.flatMap((segment): OneBotMessageSegment[] => {
+    const data = segment.data ?? {};
+    if (segment.type === "at") {
+      const label = String(data.card ?? data.name ?? data.qq ?? "").trim();
+      return [{ type: "text", data: { text: label ? `@${label}` : "@某人" } }];
+    }
+    if (segment.type === "reply") {
+      return [{ type: "text", data: { text: "[引用消息]" } }];
+    }
+    if (segment.type === "node") {
+      return [{ type: "text", data: { text: "[聊天记录]" } }];
+    }
+    return [segment];
+  });
+  return sanitizeForwardSegments(normalized);
+}
+
+/**
+ * 清理合并转发节点里 QQ 显示不出来的段。
+ * 默认只处理商城表情 / 超级表情 / markdown / 空图片，其余（图片、视频、分享卡片、名片、
+ * 文件、语音、链接）原样透传，保证「原样转发」。
+ * `degradeUnsupported` 用于协议端明确拒收后的第二次尝试：把语音/文件/嵌套聊天记录
+ * 这类跨会话不支持的元素换成文本，尽量把整轮消息送出去。
+ */
+export function sanitizeForwardSegments(
+  segments: OneBotMessageSegment[],
+  options: { degradeUnsupported?: boolean } = {},
+): OneBotMessageSegment[] {
+  return segments.flatMap((segment): OneBotMessageSegment[] => {
+    const type = segment.type ?? "";
+    const data = segment.data ?? {};
+    const asText = (text: string): OneBotMessageSegment[] => [{ type: "text", data: { text } }];
+    switch (type) {
+      case "mface":
+        return asText(`[${String(data.summary ?? "超级表情")}]`);
+      case "markdown":
+        return asText("[Markdown消息]");
+      case "image": {
+        if (String(data.file ?? "") === "marketface") {
+          return asText(`[${String(data.summary ?? "商城表情")}]`);
+        }
+        if (!data.file && !data.url && !data.path) {
+          return asText("[图片]");
+        }
+        return [segment];
+      }
+      case "record":
+      case "ptt":
+        return options.degradeUnsupported ? asText("[语音]") : [segment];
+      case "file":
+        return options.degradeUnsupported
+          ? asText(`[文件] ${String(data.name ?? data.file ?? "").trim()}`.replace(/\s+$/, ""))
+          : [segment];
+      case "forward":
+        return options.degradeUnsupported ? asText("[聊天记录]") : [segment];
+      default:
+        return [segment];
+    }
+  });
 }
 
 /** 审核群指令依赖的租户插件开关。 */
@@ -398,6 +507,9 @@ export class OneBotRuntime {
   private readonly pendingActions = new Map<string, PendingAction>();
   private readonly privateAutoReplyAt = new Map<string, number>();
   private readonly privateForwardBuffers = new Map<string, PrivateForwardBuffer>();
+  /** 正在发送中的转发任务，close() 时要等它们结束，否则缓冲已出队、消息会丢。 */
+  private readonly privateForwardFlushes = new Map<string, Promise<void>>();
+  private closing = false;
   private readonly privatePostAggregateBuffers = new Map<string, PrivatePostAggregateBuffer>();
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostPendingConfirms = new Map<string, PrivatePostPendingConfirm>();
@@ -467,7 +579,14 @@ export class OneBotRuntime {
     return config ? toReviewPluginFlags(config) : null;
   }
 
-  close() {
+  async close() {
+    // 先把缓冲里的私聊尽量转出去，再停心跳/拒绝挂起动作（滚动重启不丢消息）
+    this.closing = true;
+    await this.drainPrivateForwardBuffers();
+    for (const [key, buffer] of Array.from(this.privateForwardBuffers)) {
+      if (buffer.timer) clearTimeout(buffer.timer);
+      this.privateForwardBuffers.delete(key);
+    }
     if (this.reviewQueueReminderTimer) {
       clearInterval(this.reviewQueueReminderTimer);
     }
@@ -480,7 +599,35 @@ export class OneBotRuntime {
     }
   }
 
-  disconnectTenant(tenantId: string) {
+  /**
+   * 进程关闭前把缓冲里的私聊全部发一次；同时等待已经开始发送（已出队）的任务，
+   * 否则 close() 之后这些消息会随挂起动作一起被拒绝。失败只记日志，不阻断关闭。
+   */
+  async drainPrivateForwardBuffers() {
+    for (let round = 0; round < 3; round += 1) {
+      const keys = Array.from(this.privateForwardBuffers.keys());
+      const tasks = [
+        ...keys.map((key) => this.flushPrivateForwardBuffer(key).catch(() => undefined)),
+        ...Array.from(this.privateForwardFlushes.values()),
+      ];
+      if (tasks.length === 0) return;
+      await Promise.allSettled(tasks);
+      if (this.privateForwardBuffers.size === 0 && this.privateForwardFlushes.size === 0) return;
+    }
+  }
+
+  async disconnectTenant(tenantId: string) {
+    // 先把该墙还在缓冲里的私聊发出去，再退栅栏/关连接——断开之后 callAction 必然失败
+    const pendingKeys = Array.from(this.privateForwardBuffers.entries())
+      .filter(([, buffer]) => buffer.tenantId === tenantId)
+      .map(([key]) => key);
+    for (const key of pendingKeys) {
+      const buffer = this.privateForwardBuffers.get(key);
+      if (buffer?.timer) clearTimeout(buffer.timer);
+    }
+    if (pendingKeys.length > 0) {
+      await Promise.all(pendingKeys.map((key) => this.flushPrivateForwardBuffer(key).catch(() => undefined)));
+    }
     this.interactionFence.deactivate(tenantId);
     for (const connection of Array.from(this.connections)) {
       if (connection.tenantId !== tenantId) {
@@ -489,7 +636,7 @@ export class OneBotRuntime {
       connection.socket.close?.(1008, "tenant inactive");
       this.connections.delete(connection);
     }
-    for (const [key, buffer] of this.privateForwardBuffers) {
+    for (const [key, buffer] of Array.from(this.privateForwardBuffers)) {
       if (buffer.tenantId === tenantId) {
         if (buffer.timer) clearTimeout(buffer.timer);
         this.privateForwardBuffers.delete(key);
@@ -4103,6 +4250,7 @@ export class OneBotRuntime {
       this.logger.warn({ error, botId: bot.id }, "failed to increment private message counter");
     });
 
+    // 一个 QQ 号只能绑定一个墙（Campux 的约束），所以 botQqUin 已经能唯一定位租户
     const key = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     let buffer = this.privateForwardBuffers.get(key);
     if (!buffer) {
@@ -4134,7 +4282,17 @@ export class OneBotRuntime {
     }, 60_000);
   }
 
-  private async flushPrivateForwardBuffer(key: string) {
+  private flushPrivateForwardBuffer(key: string): Promise<void> {
+    const existing = this.privateForwardFlushes.get(key);
+    if (existing) return existing;
+    const task = this.executePrivateForwardFlush(key).finally(() => {
+      if (this.privateForwardFlushes.get(key) === task) this.privateForwardFlushes.delete(key);
+    });
+    this.privateForwardFlushes.set(key, task);
+    return task;
+  }
+
+  private async executePrivateForwardFlush(key: string) {
     const buffer = this.privateForwardBuffers.get(key);
     if (!buffer || buffer.messages.length === 0) {
       this.privateForwardBuffers.delete(key);
@@ -4155,60 +4313,65 @@ export class OneBotRuntime {
       const bot = await findEnabledBot(buffer.botQqUin).catch(() => null);
       const forwardGroupId = bot ? resolvePrivateForwardGroupId(bot) : null;
       if (!forwardGroupId) {
+        // 墙号查不到（停用/重启窗口）：稍后重试；墙号正常但没配转发群 = 明确不转发，直接结束
+        if (!bot) this.requeuePrivateForwardBuffer(key, buffer);
         return;
       }
 
-      // 构建合并转发消息节点
-      const nodes: Array<{
-        type: "node";
-        data: {
-          name: string;
-          uin: string;
-          time?: number;
-          content: OneBotMessageSegment[];
-        };
-      }> = [];
-
-      for (const entry of buffer.messages) {
-        // 如果保留了原始消息段（face/image 等），直接使用；否则降级为纯文本
-        // 合并转发中不支持的段（mface/marketface/markdown）替换为文本提示
-        const rawSegments =
-          entry.segments.length > 0
-            ? entry.segments
-            : [{ type: "text", data: { text: entry.text } }];
-        const content = this.sanitizeForwardSegments(rawSegments);
-
-        nodes.push({
-          type: "node",
-          data: {
-            name: buffer.userNickname,
-            uin: buffer.userQqUin,
-            time: entry.time,
-            content,
-          },
-        });
-      }
-
-      // 使用合并转发发送
+      // 先按原样转发（图片、视频、分享卡片、名片、文件、链接一律不改写）；被协议端明确
+      // 拒收时再退一步，把跨会话发不出去的元素换成文本；两次都拒才降级普通群消息。
+      const forwardUser = { qqUin: buffer.userQqUin, nickname: buffer.userNickname };
+      const attempts = [
+        { label: "原样", nodes: buildForwardNodes(forwardUser, buffer.messages) },
+        { label: "媒体降级", nodes: buildForwardNodes(forwardUser, buffer.messages, { degradeUnsupported: true }) },
+      ];
       let msgId: string | null = null;
-      try {
-        const data = await this.callAction(buffer.botQqUin, "send_group_forward_msg", {
-          group_id: Number(forwardGroupId),
-          messages: nodes,
-        });
-        msgId = this.extractMessageId(data);
-      } catch (error) {
-        // 合并转发失败时降级为普通消息
-        this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "合并转发失败，降级为普通消息发送");
-        const lines = [
-          `📩 ${buffer.userNickname}（${buffer.userQqUin}）发来私聊消息：`,
-          ...buffer.messages.map((entry, i) => `${i + 1}. ${escapeCqCode(entry.text)}`),
+      let resultUnknown = false;
+      for (const attempt of attempts) {
+        try {
+          const data = await this.callAction(buffer.botQqUin, "send_group_forward_msg", {
+            group_id: Number(forwardGroupId),
+            messages: attempt.nodes,
+          });
+          msgId = this.extractMessageId(data);
+          break;
+        } catch (error) {
+          if (!isDefinitiveForwardRejection(error)) {
+            // 超时/断连：可能已送达，交给重试队列，不静默丢弃
+            this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "合并转发结果未知，稍后重试");
+            resultUnknown = true;
+            break;
+          }
+          this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin, mode: attempt.label }, "合并转发被拒绝");
+        }
+      }
+      if (!msgId && resultUnknown) {
+        this.requeuePrivateForwardBuffer(key, buffer);
+        return;
+      }
+      if (!msgId) {
+        // 两次合并转发都被拒：降级为普通群消息，图片保留、at/reply 换成文本
+        const fallbackSegments: OneBotMessageSegment[] = [
+          { type: "text", data: { text: `📩 ${buffer.userNickname}（${buffer.userQqUin}）发来私聊消息：` } },
         ];
-        const fallbackData = await this.callAction(buffer.botQqUin, "send_group_msg", {
-          group_id: Number(forwardGroupId),
-          message: lines.join("\n"),
+        buffer.messages.forEach((entry, index) => {
+          const content = sanitizeSegmentsForGroupSend(
+            entry.segments.length > 0 ? entry.segments : [{ type: "text", data: { text: entry.text } }],
+          );
+          fallbackSegments.push({ type: "text", data: { text: `\n\n${index + 1}. ` } });
+          fallbackSegments.push(...content);
         });
-        msgId = this.extractMessageId(fallbackData);
+        try {
+          const fallbackData = await this.callAction(buffer.botQqUin, "send_group_msg", {
+            group_id: Number(forwardGroupId),
+            message: fallbackSegments,
+          });
+          msgId = this.extractMessageId(fallbackData);
+        } catch (fallbackError) {
+          this.logger.warn({ error: fallbackError, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "降级群发失败，稍后重试");
+          this.requeuePrivateForwardBuffer(key, buffer);
+          return;
+        }
       }
 
       if (msgId && this.interactionFence.isCurrent(permit)) {
@@ -4220,28 +4383,42 @@ export class OneBotRuntime {
   }
 
   /**
-   * 清理合并转发节点中可能不被 QQ 支持的段。
-   * mface（商城表情/超级表情）、marketface image、markdown 等在合并转发中可能显示为
-   * "此消息不支持查看"。将这些段替换为文本提示，保留其他段不变。
+   * 转发失败后把整段缓冲放回队列稍后重试，避免私聊消息被静默丢弃。
+   * 只有在超过重试上限时才放弃并记 error 日志（运维可在日志里看到）。
    */
-  private sanitizeForwardSegments(segments: OneBotMessageSegment[]): OneBotMessageSegment[] {
-    return segments.flatMap((seg) => {
-      // mface 类型段（商城表情/超级表情）
-      if (seg.type === "mface") {
-        const summary = String(seg.data?.summary ?? "[超级表情]");
-        return [{ type: "text", data: { text: `[${summary}]` } }];
-      }
-      // image 中的 marketface（商城表情以 image 段上报）
-      if (seg.type === "image" && String(seg.data?.file ?? "") === "marketface") {
-        const summary = String(seg.data?.summary ?? "[商城表情]");
-        return [{ type: "text", data: { text: `[${summary}]` } }];
-      }
-      // markdown 段在双层合并转发中无法发送
-      if (seg.type === "markdown") {
-        return [{ type: "text", data: { text: "[Markdown消息]" } }];
-      }
-      return [seg];
-    });
+  private requeuePrivateForwardBuffer(key: string, buffer: PrivateForwardBuffer) {
+    if (this.closing) {
+      this.logger.warn(
+        { botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin, messageCount: buffer.messages.length },
+        "服务关闭中，私聊转发停止重试",
+      );
+      return;
+    }
+    const attempts = (buffer.attempts ?? 0) + 1;
+    if (attempts > 3) {
+      this.logger.error(
+        { botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin, messageCount: buffer.messages.length },
+        "私聊消息转发重试 3 次仍失败，已放弃（消息内容见上一条 warn 日志）",
+      );
+      return;
+    }
+    // 期间同一用户又发了新消息：把旧消息并到新缓冲前面，避免覆盖新缓冲造成新的丢消息
+    const existing = this.privateForwardBuffers.get(key);
+    if (existing) {
+      // 并入新缓冲时把已用掉的重试次数带过去，否则反复来新消息会让旧批次无限重试、
+      // 永远到不了失败上限，也不会留下 error 日志。
+      existing.messages = [...buffer.messages, ...existing.messages];
+      existing.attempts = Math.max(existing.attempts ?? 0, attempts);
+      return;
+    }
+    buffer.attempts = attempts;
+    if (buffer.timer) clearTimeout(buffer.timer);
+    buffer.timer = setTimeout(() => {
+      this.flushPrivateForwardBuffer(key).catch((error) => {
+        this.logger.warn({ error, botQqUin: buffer.botQqUin, userQqUin: buffer.userQqUin }, "私聊消息转发重试失败");
+      });
+    }, 30_000);
+    this.privateForwardBuffers.set(key, buffer);
   }
 
   /**
@@ -4442,7 +4619,7 @@ export class OneBotRuntime {
       tenantActive,
     });
     if (verdict === "tenant-gone") {
-      this.disconnectTenant(connection.tenantId);
+      void this.disconnectTenant(connection.tenantId);
       this.logger.info({ tenantId: connection.tenantId, botAccountId: connection.botAccountId }, "onebot interaction blocked for inactive tenant");
       return false;
     }

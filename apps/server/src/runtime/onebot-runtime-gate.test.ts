@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { OneBotRuntime } from "./onebot";
 
 describe("OneBot inactive tenant runtime gate", () => {
-  test("disconnectTenant closes every tenant connection and removes it from runtime state", () => {
+  test("disconnectTenant closes every tenant connection and removes it from runtime state", async () => {
     const closeInactive = mock(() => undefined);
     const closeActive = mock(() => undefined);
     const runtime = new OneBotRuntime({} as never, { info: () => undefined } as never);
@@ -22,14 +22,14 @@ describe("OneBot inactive tenant runtime gate", () => {
       selfId: null,
     });
 
-    runtime.disconnectTenant("tenant-paused");
+    await runtime.disconnectTenant("tenant-paused");
 
     expect(closeInactive).toHaveBeenCalledWith(1008, "tenant inactive");
     expect(closeActive).not.toHaveBeenCalled();
     expect(connections.size).toBe(1);
   });
 
-  test("disconnectTenant cancels delayed interaction buffers and clears drafts", () => {
+  test("disconnectTenant cancels delayed interaction buffers and clears drafts", async () => {
     const runtime = new OneBotRuntime({} as never, { info: () => undefined } as never);
     const rejectPendingAction = mock(() => undefined);
     const state = runtime as unknown as {
@@ -55,7 +55,7 @@ describe("OneBot inactive tenant runtime gate", () => {
       reject: rejectPendingAction,
     });
 
-    runtime.disconnectTenant("tenant-paused");
+    await runtime.disconnectTenant("tenant-paused");
 
     expect(state.privateForwardBuffers.size).toBe(0);
     expect(state.privatePostAggregateBuffers.size).toBe(0);
@@ -100,7 +100,7 @@ describe("OneBot inactive tenant runtime gate", () => {
 
     const action = runtime.callAction("10001", "send_private_msg", {});
     await gateEntered;
-    runtime.disconnectTenant("tenant-paused");
+    await runtime.disconnectTenant("tenant-paused");
     releaseGate();
 
     await expect(action).rejects.toThrow("校园墙已暂停或归档");

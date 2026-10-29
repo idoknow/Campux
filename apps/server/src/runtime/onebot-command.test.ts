@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { parsePrivatePostConfirmText } from "../lib/private-posting";
+import { BotWorkflowError, OneBotActionTimeoutError, OneBotConnectionUnavailableError } from "../lib/bot-workflows";
 import {
   buildReviewHelp,
   isPrivatePostAiIntakeActive,
@@ -23,6 +24,10 @@ import {
   resolveReviewPluginCommandBlock,
   shouldHandleReviewGroupCommandForBot,
   stripPrivateReplyHelpLines,
+  buildForwardNodes,
+  sanitizeForwardSegments,
+  sanitizeSegmentsForGroupSend,
+  isDefinitiveForwardRejection,
 } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
@@ -775,5 +780,121 @@ describe("自定义审核群提示过滤 #回复", () => {
 
   test("没有 #回复 行时原样返回（去掉首尾空白）", () => {
     expect(stripPrivateReplyHelpLines("  审核命令：\n#通过 <稿件id>  ")).toBe("审核命令：\n#通过 <稿件id>");
+  });
+});
+
+describe("私聊合并转发的节点与消息段", () => {
+  test("节点带三套发送者身份字段，群里才显示用户昵称与头像", () => {
+    const [node] = buildForwardNodes({ qqUin: "12345", nickname: "小明" }, [
+      { time: 1700000000, text: "在吗", segments: [] },
+    ]);
+    if (!node) throw new Error("expected one forward node");
+    expect(node.data).toMatchObject({
+      user_id: "12345",
+      qq: "12345",
+      uin: "12345",
+      nickname: "小明",
+      name: "小明",
+    });
+    expect(node.data.content).toEqual([{ type: "text", data: { text: "在吗" } }]);
+  });
+
+  test("图片段原样保留，不会被降级成文字", () => {
+    const [node] = buildForwardNodes({ qqUin: "1", nickname: "x" }, [
+      { time: 1, text: "", segments: [{ type: "image", data: { file: "https://example.com/a.jpg" } }] },
+    ]);
+    if (!node) throw new Error("expected one forward node");
+    expect(node.data.content).toEqual([{ type: "image", data: { file: "https://example.com/a.jpg" } }]);
+  });
+
+  test("分享卡片段原样透传，保留卡片样式", () => {
+    const card = { type: "json", data: { data: JSON.stringify({ prompt: "校园墙" }) } };
+    expect(sanitizeForwardSegments([card])).toEqual([card]);
+  });
+
+  test("没有 file/url 的图片段降级为 [图片]", () => {
+    expect(sanitizeForwardSegments([{ type: "image", data: {} }])).toEqual([
+      { type: "text", data: { text: "[图片]" } },
+    ]);
+  });
+
+
+
+
+  test("普通文本与 @ 段保持原样", () => {
+    const segments = [
+      { type: "text", data: { text: "看一下" } },
+      { type: "at", data: { qq: "12345" } },
+    ];
+    expect(sanitizeForwardSegments(segments)).toEqual(segments);
+  });
+});
+
+describe("群发兜底段的净化", () => {
+  test("at 不留在群消息里，避免 @ 到群成员", () => {
+    expect(sanitizeSegmentsForGroupSend([{ type: "at", data: { qq: "12345", name: "小明" } }])).toEqual([
+      { type: "text", data: { text: "@小明" } },
+    ]);
+  });
+
+  test("私聊里的 reply 引用不能原样进群", () => {
+    expect(sanitizeSegmentsForGroupSend([{ type: "reply", data: { id: "99" } }])).toEqual([
+      { type: "text", data: { text: "[引用消息]" } },
+    ]);
+  });
+
+  test("图片仍然保留", () => {
+    const image = { type: "image", data: { file: "https://example.com/b.jpg" } };
+    expect(sanitizeSegmentsForGroupSend([image])).toEqual([image]);
+  });
+});
+
+
+describe("合并转发失败是否可重试", () => {
+  test("协议端明确回错才算确定没发出去", () => {
+    expect(isDefinitiveForwardRejection(new BotWorkflowError("send_group_forward_msg 返回 1200", 502))).toBe(true);
+  });
+
+  test("超时不能重试：消息可能已经发出去了", () => {
+    expect(isDefinitiveForwardRejection(new OneBotActionTimeoutError("超时"))).toBe(false);
+  });
+
+  test("连接断开同样不能重试", () => {
+    expect(isDefinitiveForwardRejection(new OneBotConnectionUnavailableError("连接已断开"))).toBe(false);
+  });
+
+  test("普通错误（网络层、未知异常）不重试", () => {
+    expect(isDefinitiveForwardRejection(new Error("socket hang up"))).toBe(false);
+  });
+});
+
+describe("原样转发与媒体降级", () => {
+  const image = { type: "image", data: { file: "https://example.com/a.jpg" } };
+  const video = { type: "video", data: { file: "https://example.com/a.mp4" } };
+  const card = { type: "json", data: { data: JSON.stringify({ prompt: "分享" }) } };
+  const contact = { type: "contact", data: { type: "qq", id: "12345" } };
+  const file = { type: "file", data: { name: "成绩单.pdf", file: "/x/y.pdf" } };
+  const record = { type: "record", data: { file: "/x/y.amr" } };
+
+  test("默认模式：图片/视频/卡片/名片/文件/语音全部原样透传", () => {
+    expect(sanitizeForwardSegments([image, video, card, contact, file, record])).toEqual([
+      image,
+      video,
+      card,
+      contact,
+      file,
+      record,
+    ]);
+  });
+
+  test("媒体降级模式：只把跨会话发不出去的换成文本，图片视频卡片名片保留", () => {
+    expect(sanitizeForwardSegments([image, video, card, contact, file, record], { degradeUnsupported: true })).toEqual([
+      image,
+      video,
+      card,
+      contact,
+      { type: "text", data: { text: "[文件] 成绩单.pdf" } },
+      { type: "text", data: { text: "[语音]" } },
+    ]);
   });
 });
