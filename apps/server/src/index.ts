@@ -218,7 +218,7 @@ if (existsSync(webDistDir)) {
 }
 
 app.addHook("onClose", async () => {
-  oneBot.close();
+  await oneBot.close();
   await queue.stop();
   await pluginRegistry.closeAll();
   await prisma.$disconnect();
@@ -231,7 +231,7 @@ const stopTenantLifecycleScheduler = registerTenantLifecycleScheduler({
   logger: app.log,
   config,
   onTenantDeactivating: (tenantId) => {
-    oneBot.disconnectTenant(tenantId);
+    void oneBot.disconnectTenant(tenantId);
     return () => oneBot.activateTenant(tenantId);
   },
 });
