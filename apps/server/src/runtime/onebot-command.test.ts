@@ -22,6 +22,7 @@ import {
   resolvePrivatePostSemanticAction,
   resolveReviewPluginCommandBlock,
   shouldHandleReviewGroupCommandForBot,
+  stripPrivateReplyHelpLines,
 } from "./onebot";
 
 describe("parseCommand prefix handling", () => {
@@ -685,6 +686,16 @@ describe("审核群帮助文本按插件开关裁剪", () => {
     expect(help).not.toContain("#投票通过");
   });
 
+  test("默认在审核群展示 #回复", () => {
+    expect(buildReviewHelp({ graduation: false, campaigns: false })).toContain("#回复 <内容>");
+  });
+
+  test("私聊转发到其他群时审核群帮助不再出现 #回复", () => {
+    const help = buildReviewHelp({ graduation: false, campaigns: false }, { includePrivateReply: false });
+    expect(help).not.toContain("#回复");
+    expect(help).toContain("#通过 <稿件id>");
+  });
+
   test("启用投票竞选补投票指令", () => {
     const help = buildReviewHelp({ graduation: false, campaigns: true });
     expect(help).toContain("#投票通过 <竞选编号>");
@@ -753,5 +764,16 @@ describe("私聊消息转发群号解析", () => {
   test("配置了群号则转发到该群，与审核群无关", () => {
     expect(resolvePrivateForwardGroupId({ privateForwardGroupId: "123456" })).toBe("123456");
     expect(resolvePrivateForwardGroupId({ privateForwardGroupId: " 789012 " })).toBe("789012");
+  });
+});
+
+describe("自定义审核群提示过滤 #回复", () => {
+  test("转发到其他群时去掉 #回复 行", () => {
+    const text = "审核命令：\n#通过 <稿件id>\n#回复 <内容>（引用转发）\n#扫码登录";
+    expect(stripPrivateReplyHelpLines(text)).toBe("审核命令：\n#通过 <稿件id>\n#扫码登录");
+  });
+
+  test("没有 #回复 行时原样返回（去掉首尾空白）", () => {
+    expect(stripPrivateReplyHelpLines("  审核命令：\n#通过 <稿件id>  ")).toBe("审核命令：\n#通过 <稿件id>");
   });
 });

@@ -295,8 +295,12 @@ function applyBotStylishMessages(config: TenantPluginConfig): boolean {
 /**
  * 审核群帮助文本。核心指令恒定，插件指令只在对应插件启用时展示，
  * 避免墙里没开插件却把 #毕业通过 / #投票通过 列在帮助里。
+ * `includePrivateReply`：只有当前群承担私聊转发（即转发的目标群就是本群）时才列出 #回复。
  */
-export function buildReviewHelp(flags: ReviewPluginFlags | null): string {
+export function buildReviewHelp(
+  flags: ReviewPluginFlags | null,
+  options: { includePrivateReply?: boolean } = {},
+): string {
   return [
     "审核命令：",
     "#通过 <稿件id>",
@@ -304,7 +308,7 @@ export function buildReviewHelp(flags: ReviewPluginFlags | null): string {
     "#审核队列",
     "#拒绝 <理由> <稿件id>",
     "#重发 <稿件id>",
-    "#回复 <内容> （引用转发私信后使用）",
+    ...(options.includePrivateReply === false ? [] : ["#回复 <内容> （引用转发私信后使用）"]),
     "#发布 <内容> （可附带图片，选择直接发布或以墙的身份投稿发布）",
     "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
     "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
@@ -344,6 +348,15 @@ export function resolveReviewPluginCommandBlock(commandName: string, flags: Revi
     return null;
   }
   return `本墙未开启「${owner.label}」插件，${commandName} 指令暂不可用；请在 管理 → 插件 中启用后重试。`;
+}
+
+/** 去掉管理员自定义提示里已经不属于本群的 #回复 行。 */
+export function stripPrivateReplyHelpLines(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#回复"))
+    .join("\n")
+    .trim();
 }
 
 /** 与 BotAccount.reviewGroupMessageReply 的数据库默认值一致，用于识别「管理员没有改过」的默认文本。 */
@@ -3250,7 +3263,15 @@ export class OneBotRuntime {
     }
 
     const bot = await findEnabledBot(botQqUin).catch(() => null);
-    if (!bot || normalizeId(bot.reviewGroupId ?? undefined) !== groupId) {
+    if (!bot) {
+      return;
+    }
+    const reviewGroupId = normalizeId(bot.reviewGroupId ?? undefined);
+    const privateForwardGroupId = resolvePrivateForwardGroupId(bot);
+    const isReviewGroup = reviewGroupId === groupId;
+    // 私聊消息转发到哪个群，就由哪个群承担 #回复（转发关闭时没有群可回复）。
+    const isPrivateReplyGroup = privateForwardGroupId !== null && normalizeId(privateForwardGroupId) === groupId;
+    if (!isReviewGroup && !isPrivateReplyGroup) {
       return;
     }
 
@@ -3274,6 +3295,11 @@ export class OneBotRuntime {
     // 仅引用而不 @ 时指令不生效。
     if (!command && isMentioningBot(event, botQqUin)) {
       command = parseReviewGroupShortCommand(plainText);
+    }
+
+    // 私聊转发群只处理 #回复，其余审核指令仍然只属于审核群。
+    if (!isReviewGroup && command?.name !== "回复") {
+      return;
     }
 
 
@@ -3330,7 +3356,8 @@ export class OneBotRuntime {
     }
 
     // 如果消息 @ 了其他 bot 但不是当前 bot，跳过（对应 bot 会处理）。未 @ 的审核群命令只由租户首选审核通知 Bot 响应，避免多 Bot 重复回复。
-    if (!shouldHandleReviewGroupCommandForBot({
+    // 私聊转发群不做这层去重：同一群里可能有多个墙号，由 privateForwardMsgIdMap 判定该条转发属于哪个墙号。
+    if (isReviewGroup && !shouldHandleReviewGroupCommandForBot({
       currentBotId: bot.id,
       currentBotQqUin: botQqUin,
       mentionedBotQqUins: readMentionedQqUins(event),
@@ -3351,7 +3378,7 @@ export class OneBotRuntime {
         await this.sendGroupMessage(botQqUin, groupId, pluginBlockedMessage);
         return;
       }
-      const reviewHelp = buildReviewHelp(reviewPluginFlags);
+      const reviewHelp = buildReviewHelp(reviewPluginFlags, { includePrivateReply: isPrivateReplyGroup });
       let stylishEnabled = false;
       if (pluginConfig) {
         stylishEnabled = applyBotStylishMessages(pluginConfig);
@@ -3616,10 +3643,21 @@ export class OneBotRuntime {
       }
 
       if (command.name === "回复") {
+        if (!isPrivateReplyGroup) {
+          await this.sendGroupMessage(
+            botQqUin,
+            groupId,
+            privateForwardGroupId
+              ? `私聊消息已转发到群 ${privateForwardGroupId}，请在该群引用消息使用 #回复。`
+              : "当前没有开启私聊转发，无法回复私聊消息。",
+          );
+          return;
+        }
         await this.handlePrivateReply({
           bot,
           botQqUin,
           groupId,
+          operatorQqUin,
           event,
           replyText: command.args,
           stylishEnabled,
@@ -3849,11 +3887,13 @@ export class OneBotRuntime {
       return;
     }
     const savedReply = bot.reviewGroupMessageReply?.trim();
+    const forwardTarget = resolvePrivateForwardGroupId(bot);
+    const includePrivateReply = forwardTarget !== null && normalizeId(forwardTarget) === normalizeId(bot.reviewGroupId ?? undefined);
     // 管理员自定义过就照旧用自定义文本；仍是数据库默认文本时改用按插件开关生成的帮助，
     // 避免默认提示里既缺已启用插件的指令、又宣传已关闭的指令。
     const reviewHelp = savedReply && savedReply !== defaultReviewGroupMessageReply
-      ? savedReply
-      : buildReviewHelp(await this.resolveReviewPluginFlags(bot.tenantId));
+      ? (includePrivateReply ? savedReply : stripPrivateReplyHelpLines(savedReply))
+      : buildReviewHelp(await this.resolveReviewPluginFlags(bot.tenantId), { includePrivateReply });
     await this.sendGroupMessage(botQqUin, groupId, reviewHelp).catch((error) => {
       this.logger.warn({ error, botQqUin, groupId }, "failed to send review group auto reply");
     });
@@ -4455,6 +4495,7 @@ export class OneBotRuntime {
     bot,
     botQqUin,
     groupId,
+    operatorQqUin,
     event,
     replyText,
     stylishEnabled,
@@ -4462,6 +4503,7 @@ export class OneBotRuntime {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null };
     botQqUin: string;
     groupId: string;
+    operatorQqUin: string;
     event: OneBotMessageEvent;
     replyText: string;
     stylishEnabled: boolean;
@@ -4478,8 +4520,15 @@ export class OneBotRuntime {
       return;
     }
 
-    const target = this.privateForwardMsgIdMap.get(replyToMsgId);
+    const target = this.privateForwardMsgIdMap.get(`${botQqUin}:${replyToMsgId}`);
     if (!target) {
+      // 多墙号共用转发群时，未命中也只让本墙首选通知墙号回一次，避免每个墙号各发一条错误。
+      const preferredBotId = await this.findTenantReviewNotificationBot(bot.tenantId)
+        .then((candidate) => candidate?.id ?? null)
+        .catch(() => null);
+      if (preferredBotId !== null && preferredBotId !== bot.id) {
+        return;
+      }
       await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplyNoTarget(stylishEnabled));
       return;
     }
@@ -4487,6 +4536,8 @@ export class OneBotRuntime {
       // 不是当前 bot 转发的消息，跳过；对应 bot 也会收到此命令并处理
       return;
     }
+    // 转发群可能包含非审核员：只对被引用消息所属墙号校验审核员身份。
+    await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
     await this.sendPrivateMessage(botQqUin, target.userQqUin, formatPrivateReplyReceived(text, stylishEnabled));
     await this.sendGroupMessage(botQqUin, groupId, formatPrivateReplySent(target.userNickname, target.userQqUin, stylishEnabled));
@@ -4508,7 +4559,8 @@ export class OneBotRuntime {
         this.privateForwardMsgIdMap.delete(firstKey);
       }
     }
-    this.privateForwardMsgIdMap.set(msgId, { tenantId, userQqUin, userNickname, botQqUin });
+    // 同一个群可能被多个墙号转发，消息 ID 只在单个墙号内唯一，必须带上墙号做键。
+    this.privateForwardMsgIdMap.set(`${botQqUin}:${msgId}`, { tenantId, userQqUin, userNickname, botQqUin });
   }
 
   private extractMessageId(data: unknown): string | null {
