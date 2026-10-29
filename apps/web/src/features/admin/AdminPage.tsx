@@ -2959,7 +2959,7 @@ function BotsPanel({
                       placeholder={form.reviewGroupId ? `默认 ${form.reviewGroupId}（审核群）` : "留空则不转发私聊消息"}
                       onChange={(event) => onFormChange({ ...form, privateForwardGroupId: event.target.value.replace(/\D/g, "") })}
                     />
-                    <span className="text-[11px] font-normal text-slate-400">默认跟随上方审核群号；改成其他群号则只转发到该群，清空后不再转发。</span>
+                    <span className="text-[11px] font-normal text-slate-400">默认跟随上方审核群号；改成其他群号则只转发到该群，#回复 也改在该群使用；清空后不再转发。</span>
                   </label>
                 </>
               ) : (
@@ -3371,7 +3371,7 @@ function BotConfigEditor({
                     placeholder={reviewGroupId ? `默认 ${reviewGroupId}（审核群）` : "留空则不转发私聊消息"}
                     onChange={(event) => setPrivateForwardGroupId(event.target.value.replace(/\D/g, ""))}
                   />
-                  <span className="text-[11px] font-normal text-slate-400">用户私聊消息 1 分钟合并转发到这个群；默认沿用审核群，填其他群号则只转发到该群，清空后不再转发。</span>
+                  <span className="text-[11px] font-normal text-slate-400">用户私聊消息 1 分钟合并转发到这个群；默认沿用审核群，填其他群号则只转发到该群，清空后不再转发。转发到其他群时 #回复 也在该群使用，审核群不再显示该指令。</span>
                 </label>
               </>
             )}
