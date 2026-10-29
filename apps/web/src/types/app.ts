@@ -633,6 +633,7 @@ export type AdminBotAccount = {
   displayName: string;
   enabled: boolean;
   reviewGroupId: string | null;
+  privateForwardGroupId: string | null;
   reviewNotificationEnabled: boolean;
   reviewQueueAutoReminderEnabled: boolean;
   reviewQueueReminderThresholdHours: number;
