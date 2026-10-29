@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parsePostTagMaintenanceJson, parsePostTagSuggestionJson } from "./post-tagging";
+import { parsePostTagMaintenanceJson, parsePostTagSuggestionJson, shouldRunTagClustering, shouldRunTagMaintenance, tagMaintenancePostStatuses } from "./post-tagging";
 
 describe("post tag LLM JSON parsing", () => {
   test("parses tag suggestions and normalizes names", () => {
@@ -70,5 +70,31 @@ describe("post tag LLM JSON parsing", () => {
     expect(parsed?.create).toEqual([]);
     expect(parsed?.merge).toEqual([]);
     expect(parsed?.assign).toEqual([]);
+  });
+});
+
+describe("post tag maintenance gate", () => {
+  const base = { enabled: true, mode: "llm", rules: { postTaggingEnabled: true, postTagMaintenanceEnabled: true } };
+
+  test("maintenance runs when AI and maintenance are on", () => {
+    expect(shouldRunTagMaintenance(base)).toBe(true);
+    expect(shouldRunTagMaintenance(null)).toBe(false);
+    expect(shouldRunTagMaintenance({ ...base, enabled: false })).toBe(false);
+    expect(shouldRunTagMaintenance({ ...base, mode: "local" })).toBe(false);
+    expect(shouldRunTagMaintenance({ ...base, rules: { postTaggingEnabled: true, postTagMaintenanceEnabled: false } })).toBe(false);
+  });
+
+  test("clustering stops burning tokens when auto tagging is off, archiving still runs", () => {
+    const taggingOff = { ...base, rules: { postTaggingEnabled: false, postTagMaintenanceEnabled: true } };
+    expect(shouldRunTagMaintenance(taggingOff)).toBe(true);
+    expect(shouldRunTagClustering(taggingOff)).toBe(false);
+  });
+
+  test("clusters only posts that are still visible on the wall", () => {
+    expect([...tagMaintenancePostStatuses]).toContain("published");
+    expect([...tagMaintenancePostStatuses]).toContain("pending_recall");
+    expect([...tagMaintenancePostStatuses]).not.toContain("approved");
+    expect([...tagMaintenancePostStatuses]).not.toContain("rejected");
+    expect([...tagMaintenancePostStatuses]).not.toContain("cancelled");
   });
 });

@@ -5,6 +5,7 @@ import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } fro
 import { prisma } from "../lib/prisma";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
+import { llmFinishReason, llmOutputTokenBudget } from "./post-review";
 
 type ExistingTag = {
   id: string;
@@ -71,6 +72,38 @@ const tagAgentRecentPosts = 80;
 const tagMaintenanceTimeoutMs = 180_000;
 /** Rock's rule ①: a new tag is only created once a theme recurs across at least this many posts. */
 const minClusterSize = 3;
+
+/**
+ * 只有真正上过墙的稿件才参与标签聚类。被拒绝、撤回、取消的稿件留在库里，
+ * 但它们不代表墙上的内容，拿它们聚类既没意义，还会让"墙上没稿件"的墙
+ * 周期性发出一笔大 prompt。
+ */
+export const tagMaintenancePostStatuses = ["published", "partially_failed", "pending_recall"] as const;
+
+type TagMaintenanceSettings = {
+  enabled: boolean;
+  mode: string;
+  rules: { postTaggingEnabled?: boolean | undefined; postTagMaintenanceEnabled?: boolean | undefined };
+};
+
+/**
+ * 标签维护的准入门槛：AI 开着、处于模型模式、维护开关开、且「自动打标」本身开着。
+ * 打标关掉还去维护标签库，属于纯烧 token。
+ */
+export function shouldRunTagMaintenance(settings: TagMaintenanceSettings | null | undefined): settings is TagMaintenanceSettings {
+  if (!settings) {
+    return false;
+  }
+  if (!settings.enabled || settings.mode !== "llm") {
+    return false;
+  }
+  return settings.rules.postTagMaintenanceEnabled === true;
+}
+
+/** 聚类要喂 LLM，只在「自动打标」开着时做；关掉时维护任务仍会归档旧标签。 */
+export function shouldRunTagClustering(settings: TagMaintenanceSettings): boolean {
+  return settings.rules.postTaggingEnabled !== false;
+}
 
 export async function autoTagPost(options: {
   tenantId: string;
@@ -172,6 +205,11 @@ export async function generatePostTagSuggestion(options: {
     return null;
   }
 
+  const maxTokens = llmOutputTokenBudget(options.text.length, { floor: 500, ceiling: 1500, multiplier: 0.6, padding: 300 });
+  options.logger.info(
+    { site: "post-tagging.single", tenantId: options.tenantId, model: settings.model, maxTokens, textChars: options.text.length },
+    "llm request",
+  );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
   try {
@@ -186,7 +224,7 @@ export async function generatePostTagSuggestion(options: {
         body: JSON.stringify({
           model: settings.model,
           temperature: 0,
-          max_tokens: 500,
+          max_tokens: maxTokens,
           response_format: { type: "json_object" },
           messages: [
             {
@@ -226,6 +264,9 @@ export async function generatePostTagSuggestion(options: {
     if (!response.ok) {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tags: LLM request failed");
       return null;
+    }
+    if (llmFinishReason(data) === "length") {
+      options.logger.warn({ tenantId: options.tenantId, textChars: options.text.length, maxTokens }, "post tag suggestion output truncated by max_tokens");
     }
     const parsed = parsePostTagSuggestionJson(data?.choices?.[0]?.message?.content ?? "");
     return parsed;
@@ -274,13 +315,30 @@ export async function maintainTenantPostTags(options: {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag maintenance: failed to read AI settings");
     return null;
   });
-  if (!settings || !settings.enabled || !settings.rules.postTagMaintenanceEnabled || settings.mode !== "llm") {
+  if (!shouldRunTagMaintenance(settings)) {
     return emptyResult();
   }
 
   const lookbackDays = clampInteger(options.lookbackDays, 7, maxTagMaintenanceLookbackDays, defaultTagMaintenanceLookbackDays);
   const clusterSince = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
   const archiveSince = new Date(Date.now() - tagMaintenanceArchiveInactiveDays * 24 * 60 * 60 * 1000);
+
+  /** 归档与聚类解耦：打标关掉时只做过期标签归档，不再发 LLM 请求。 */
+  const archiveInactive = async () => {
+    if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+      return [];
+    }
+    const result = await runWithActiveTenantLease(
+      prisma,
+      options.tenantId,
+      (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
+    );
+    return result.active ? result.value : [];
+  };
+
+  if (!shouldRunTagClustering(settings)) {
+    return { ...emptyResult(), archived: await archiveInactive() };
+  }
 
   const [tags, posts] = await Promise.all([
     prisma.postTag.findMany({
@@ -298,6 +356,9 @@ export async function maintainTenantPostTags(options: {
         tenantId: options.tenantId,
         text: { not: "" },
         createdAt: { gte: clusterSince },
+        // 只聚类当前还在墙上的稿件：被拒绝/取消的、审过但还没发出去的草稿都不算，
+        // 否则墙上一片空也会每 6 小时发一次大 prompt。
+        status: { in: [...tagMaintenancePostStatuses] },
       },
       select: {
         id: true,
@@ -314,24 +375,70 @@ export async function maintainTenantPostTags(options: {
   if (posts.length === 0 && tags.length === 0) {
     return emptyResult();
   }
-
-  let applied = emptyResult();
-  const apiKey = settings.apiKeyConfigured ? await resolveTenantAiApiKey(options.tenantId, {}) : null;
+  if (!settings.apiKeyConfigured) {
+    return { ...emptyResult(), archived: await archiveInactive() };
+  }
+  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
   if (!apiKey || posts.length < minClusterSize) {
-    if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
-      return emptyResult();
-    }
-    const archived = await runWithActiveTenantLease(
-      prisma,
-      options.tenantId,
-      (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
-    );
-    return archived.active ? { ...applied, archived: archived.value } : applied;
+    return { ...emptyResult(), archived: await archiveInactive() };
   }
   if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
     return emptyResult();
   }
 
+  // 读设置到真正发请求之间可能隔着查询，管理员此刻关掉打标就不该再烧 token。
+  const freshSettings = await readTenantAiSettings(options.tenantId).catch(() => null);
+  if (!shouldRunTagMaintenance(freshSettings) || !shouldRunTagClustering(freshSettings)) {
+    return { ...emptyResult(), archived: await archiveInactive() };
+  }
+
+  // 查询到发请求之间稿件可能被撤回，用当前状态过一遍，避免拿已经下墙的稿件聚类。
+  const stillVisible = new Set((await prisma.post.findMany({
+    where: { tenantId: options.tenantId, id: { in: posts.map((post) => post.id) }, status: { in: [...tagMaintenancePostStatuses] } },
+    select: { id: true },
+  })).map((post) => post.id));
+  const visiblePosts = posts.filter((post) => stillVisible.has(post.id));
+  if (visiblePosts.length < minClusterSize) {
+    return { ...emptyResult(), archived: await archiveInactive() };
+  }
+
+  let applied: PostTagMaintenanceResult = emptyResult();
+  const systemPrompt = [
+    "你是校园墙标签库的自治维护 agent。只返回 JSON，不要 Markdown。",
+    `你只维护最近 ${lookbackDays} 天的稿件标签（这是一个近期活动特性，不回填历史稿件）。可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给近期稿件补打标签）。`,
+    `create：只有当最近 ${lookbackDays} 天里同一主题反复出现、相似稿件达到 ${minClusterSize} 条及以上（postIds 至少 ${minClusterSize} 个）时，才新建一个标签。postIds 必须来自输入 posts 的 id。`,
+    "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。",
+    "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
+    "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。不确定时宁可少操作。",
+    "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
+    "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",
+  ].join("\n");
+  const userPayload = JSON.stringify({
+    tags: tags.map((tag) => ({
+      name: tag.name,
+      description: tag.description,
+      status: tag.status,
+      source: tag.source,
+      postCount: tag._count.assignments,
+      lastUsedAt: tag.lastUsedAt?.toISOString() ?? null,
+    })),
+    posts: visiblePosts.map((post) => ({
+      id: post.id,
+      displayId: post.displayId,
+      createdAt: post.createdAt.toISOString(),
+      text: post.text.slice(0, tagAgentPostTextChars),
+      tags: post.tagAssignments.map((assignment) => assignment.tag.name),
+    })),
+    lookbackDays,
+    minClusterSize,
+  });
+  // 每个动作占几十 token，稿件越多动作越多；给 2000 起步、4096 封顶。
+  const maxTokens = Math.min(4096, Math.max(2000, 800 + visiblePosts.length * 80));
+
+  options.logger.info(
+    { site: "post-tagging.maintenance", tenantId: options.tenantId, model: settings.model, maxTokens, promptChars: systemPrompt.length + userPayload.length, posts: visiblePosts.length, tags: tags.length },
+    "llm request",
+  );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
   try {
@@ -346,46 +453,13 @@ export async function maintainTenantPostTags(options: {
         body: JSON.stringify({
           model: settings.model,
           temperature: 0,
-          max_tokens: 2000,
+          max_tokens: maxTokens,
           response_format: { type: "json_object" },
           messages: [
-          {
-            role: "system",
-            content: [
-              "你是校园墙标签库的自治维护 agent。只返回 JSON，不要 Markdown。",
-              `你只维护最近 ${lookbackDays} 天的稿件标签（这是一个近期活动特性，不回填历史稿件）。可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给近期稿件补打标签）。`,
-              `create：只有当最近 ${lookbackDays} 天里同一主题反复出现、相似稿件达到 ${minClusterSize} 条及以上（postIds 至少 ${minClusterSize} 个）时，才新建一个标签。postIds 必须来自输入 posts 的 id。`,
-              "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。",
-              "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
-              "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。不确定时宁可少操作。",
-              "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
-              "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              tags: tags.map((tag) => ({
-                name: tag.name,
-                description: tag.description,
-                status: tag.status,
-                source: tag.source,
-                postCount: tag._count.assignments,
-                lastUsedAt: tag.lastUsedAt?.toISOString() ?? null,
-              })),
-              posts: posts.map((post) => ({
-                id: post.id,
-                displayId: post.displayId,
-                createdAt: post.createdAt.toISOString(),
-                text: post.text.slice(0, tagAgentPostTextChars),
-                tags: post.tagAssignments.map((assignment) => assignment.tag.name),
-              })),
-              lookbackDays,
-              minClusterSize,
-            }),
-          },
-        ],
-      }),
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPayload },
+          ],
+        }),
       });
       const data = (await response.json().catch(() => null)) as
         | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
@@ -398,19 +472,17 @@ export async function maintainTenantPostTags(options: {
     const { response, data } = leased.value;
     if (!response.ok) {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
-      const archived = await runWithActiveTenantLease(
-        prisma,
-        options.tenantId,
-        (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
-      );
-      return archived.active ? { ...applied, archived: archived.value } : applied;
+      return { ...applied, archived: uniqueStrings([...applied.archived, ...await archiveInactive()]) };
+    }
+    if (llmFinishReason(data) === "length") {
+      options.logger.warn({ tenantId: options.tenantId, posts: visiblePosts.length, maxTokens }, "post tag maintenance output truncated by max_tokens");
     }
     const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
     if (plan) {
       const planned = await runWithActiveTenantLease(
         prisma,
         options.tenantId,
-        (transaction) => applyTagAgentPlan(options.tenantId, plan, posts.map((post) => post.id), options.logger, transaction),
+        (transaction) => applyTagAgentPlan(options.tenantId, plan, visiblePosts.map((post) => post.id), options.logger, transaction),
       );
       if (planned.active) {
         applied = planned.value;
@@ -422,18 +494,9 @@ export async function maintainTenantPostTags(options: {
   } finally {
     clearTimeout(timeout);
   }
-  const archiveLease = await runWithActiveTenantLease(
-    prisma,
-    options.tenantId,
-    (transaction) => archiveInactivePostTags(options.tenantId, archiveSince, transaction),
-  );
-  if (!archiveLease.active) {
-    return applied;
-  }
-  const archived = archiveLease.value;
   return {
     ...applied,
-    archived: uniqueStrings([...applied.archived, ...archived]),
+    archived: uniqueStrings([...applied.archived, ...await archiveInactive()]),
   };
 }
 
@@ -516,6 +579,19 @@ export async function applyTagAgentPlan(
   const merged: Array<{ from: string[]; into: string }> = [];
   const assignedByTag = new Map<string, Set<string>>();
   const knownIds = new Set(knownPostIds);
+  // LLM 往返期间稿件可能被撤回或删除：应用前重新确认它们还在墙上。
+  if (knownIds.size > 0) {
+    const visibleRows = await client.post.findMany({
+      where: { tenantId, id: { in: [...knownIds] }, status: { in: [...tagMaintenancePostStatuses] } },
+      select: { id: true },
+    });
+    const visibleIds = new Set(visibleRows.map((row) => row.id));
+    for (const postId of [...knownIds]) {
+      if (!visibleIds.has(postId)) {
+        knownIds.delete(postId);
+      }
+    }
+  }
   const handledCreateNames = new Set<string>();
 
   const recordAssignment = (tagName: string, postId: string) => {
