@@ -216,7 +216,8 @@ export async function testTenantAiSettings(
         body: JSON.stringify({
           model,
           temperature: 0,
-          max_tokens: 32,
+          // 推理型模型会先消耗一部分 token 思考，32 容易在吐 JSON 之前就被截断。
+          max_tokens: 128,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: "只返回 JSON。" },

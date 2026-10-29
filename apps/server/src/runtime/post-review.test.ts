@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse } from "./post-review";
+import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
 
 describe("withTenantReviewSlot", () => {
@@ -82,5 +82,27 @@ describe("assertSafeLlmUrl", () => {
     for (const url of ["http://api.example.com/v1", "https://localhost/v1", "https://127.0.0.1/v1", "https://10.0.0.8/v1", "https://192.168.1.8/v1", "https://[::1]/v1", "file:///etc/passwd"]) {
       await expect(assertSafeLlmUrl(url)).rejects.toThrow();
     }
+  });
+});
+
+describe("llm output token budget", () => {
+  it("keeps short inputs at the floor instead of a tiny fixed cap", () => {
+    expect(llmOutputTokenBudget(0, { floor: 600 })).toBe(600);
+    expect(llmOutputTokenBudget(30, { floor: 600, multiplier: 1.8, padding: 300 })).toBe(600);
+  });
+
+  it("scales with input length so long posts are not truncated", () => {
+    const short = llmOutputTokenBudget(400, { floor: 1000, multiplier: 2.4, padding: 600 });
+    const long = llmOutputTokenBudget(2000, { floor: 1000, multiplier: 2.4, padding: 600 });
+    expect(short).toBe(1560);
+    expect(long).toBe(4096);
+    expect(long).toBeGreaterThan(short);
+  });
+
+  it("reads finish_reason and treats missing envelope as unknown", () => {
+    expect(llmFinishReason({ choices: [{ finish_reason: "length" }] })).toBe("length");
+    expect(llmFinishReason({ choices: [{ finish_reason: "stop" }] })).toBe("stop");
+    expect(llmFinishReason(null)).toBeNull();
+    expect(llmFinishReason({})).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
+import { llmFinishReason, llmOutputTokenBudget } from "./post-review";
 
 // 说说文字里追加的极短总结硬上限：不超过 16 个字。
 export const publishSummaryMaxChars = 16;
@@ -72,6 +73,12 @@ export async function generatePublishSummary(options: {
     return null;
   }
 
+  // 提要只有十几个字，但推理型模型会先花 token 思考，给 512 的余量并记录下来。
+  const maxTokens = llmOutputTokenBudget(text.length, { floor: 512, ceiling: 1024, multiplier: 0.2, padding: 256 });
+  options.logger.info(
+    { site: "publish-summary", tenantId: options.tenantId, model: settings.model, maxTokens, textChars: text.length },
+    "llm request",
+  );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
   try {
@@ -86,6 +93,7 @@ export async function generatePublishSummary(options: {
         model: settings.model,
         // 提要要求确定性输出（同一稿件多墙复用同一份），温度固定为 0。
         temperature: 0,
+        max_tokens: maxTokens,
         messages: [
           {
             role: "system",
@@ -107,6 +115,9 @@ export async function generatePublishSummary(options: {
     if (!response.ok) {
       options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "publish summary: LLM request failed");
       return null;
+    }
+    if (llmFinishReason(data) === "length") {
+      options.logger.warn({ tenantId: options.tenantId, textChars: text.length, maxTokens }, "publish summary output truncated by max_tokens");
     }
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {

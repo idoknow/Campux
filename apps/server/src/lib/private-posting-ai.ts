@@ -3,6 +3,7 @@ import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "../runtime/ai-settings";
 import { prisma } from "./prisma";
 import { runWithActiveTenantLease } from "./tenant-runtime-lease";
+import { llmFinishReason, llmOutputTokenBudget } from "../runtime/post-review";
 
 export type PrivatePostSemanticInput = {
   tenantId: string;
@@ -114,6 +115,11 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
   const systemPrompt = buildPrivatePostSystemPrompt(settings.rules.privatePostPrompt);
+  const maxTokens = llmOutputTokenBudget(messageText.length + (input.currentDraftText?.trim().length ?? 0), { floor: 600, multiplier: 1.8, padding: 300 });
+  input.logger.info(
+    { site: "private-post-intake", tenantId: input.tenantId, model: settings.model, maxTokens, textChars: messageText.length, promptChars: systemPrompt.length },
+    "llm request",
+  );
   try {
     const leased = await runWithActiveTenantLease(prisma, input.tenantId, async () => {
       const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
@@ -126,7 +132,7 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
         body: JSON.stringify({
           model: settings.model,
           temperature: 0,
-          max_tokens: 600,
+          max_tokens: maxTokens,
           response_format: { type: "json_object" },
           messages: [
             {
@@ -159,6 +165,9 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
       return fallback;
     }
 
+    if (llmFinishReason(data) === "length") {
+      input.logger.warn({ tenantId: input.tenantId, textChars: messageText.length, maxTokens }, "private post semantic output truncated by max_tokens");
+    }
     const content = data?.choices?.[0]?.message?.content;
     const parsed = parsePrivatePostSemanticJson(content ?? "");
     if (!parsed) {
