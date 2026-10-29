@@ -17,6 +17,7 @@ import {
   parseReviewGroupCommand,
   parseReviewGroupShortCommand,
   parseUnbanCommandArgs,
+  resolvePrivateForwardGroupId,
   resolvePrivatePostModeSelectionFromSemantic,
   resolvePrivatePostSemanticAction,
   resolveReviewPluginCommandBlock,
@@ -738,5 +739,19 @@ describe("插件未启用时拦截审核群指令", () => {
     const blocked = resolveReviewPluginCommandBlock("毕业通过", null);
     expect(blocked).toContain("暂时无法读取");
     expect(blocked).not.toContain("未开启");
+  });
+});
+
+describe("私聊消息转发群号解析", () => {
+  test("未设置或空串表示不转发", () => {
+    expect(resolvePrivateForwardGroupId({ privateForwardGroupId: null })).toBeNull();
+    expect(resolvePrivateForwardGroupId({ privateForwardGroupId: "" })).toBeNull();
+    expect(resolvePrivateForwardGroupId({ privateForwardGroupId: "   " })).toBeNull();
+    expect(resolvePrivateForwardGroupId({})).toBeNull();
+  });
+
+  test("配置了群号则转发到该群，与审核群无关", () => {
+    expect(resolvePrivateForwardGroupId({ privateForwardGroupId: "123456" })).toBe("123456");
+    expect(resolvePrivateForwardGroupId({ privateForwardGroupId: " 789012 " })).toBe("789012");
   });
 });

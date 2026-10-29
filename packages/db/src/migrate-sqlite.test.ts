@@ -113,9 +113,11 @@ describe("applySqliteBaseline", () => {
     const currentBaseline = readFileSync(join(import.meta.dir, "../prisma/sqlite-baseline.sql"), "utf8");
     const oldBaseline = currentBaseline
       .replace(NEW_PRIVATE_REPLY, OLD_PRIVATE_REPLY)
-      .replace('    "lastPublishStartedAt" DATETIME,\n', "");
+      .replace('    "lastPublishStartedAt" DATETIME,\n', "")
+      .replace('    "privateForwardGroupId" TEXT,\n', "");
     expect(oldBaseline).not.toBe(currentBaseline);
     expect(oldBaseline).not.toContain('"lastPublishStartedAt"');
+    expect(oldBaseline).not.toContain('"privateForwardGroupId"');
 
     try {
       const before = new Database(dbPath);
@@ -145,8 +147,8 @@ describe("applySqliteBaseline", () => {
         ["bot-default", "tenant-1", 10001, "Default", "token-default"],
       );
       before.run(
-        `INSERT INTO "BotAccount" ("id", "tenantId", "qqUin", "displayName", "connectionToken", "userMessageReply") VALUES (?, ?, ?, ?, ?, ?)`,
-        ["bot-custom", "tenant-1", 10002, "Custom", "token-custom", "tenant custom reply"],
+        `INSERT INTO "BotAccount" ("id", "tenantId", "qqUin", "displayName", "connectionToken", "userMessageReply", "reviewGroupId") VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["bot-custom", "tenant-1", 10002, "Custom", "token-custom", "tenant custom reply", "888888"],
       );
       before.close();
 
@@ -179,6 +181,17 @@ describe("applySqliteBaseline", () => {
         .query(`SELECT "migration_name" FROM "_prisma_migrations" WHERE "migration_name" = ?`)
         .get("20260724090000_add_bot_last_publish_started_at");
       expect(publishStartedMigration).not.toBeNull();
+      const forwardTargets = after
+        .query(`SELECT "id", "privateForwardGroupId" FROM "BotAccount" ORDER BY "id"`)
+        .all() as Array<{ id: string; privateForwardGroupId: string | null }>;
+      expect(forwardTargets).toEqual([
+        { id: "bot-custom", privateForwardGroupId: "888888" },
+        { id: "bot-default", privateForwardGroupId: null },
+      ]);
+      const forwardMigration = after
+        .query(`SELECT "migration_name" FROM "_prisma_migrations" WHERE "migration_name" = ?`)
+        .get("20261029120000_add_private_forward_group");
+      expect(forwardMigration).not.toBeNull();
       expect(after.query("PRAGMA foreign_key_check").all()).toEqual([]);
       after.close();
 

@@ -72,6 +72,7 @@ const botCreateSchema = z.discriminatedUnion("platform", [
     qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字"),
     displayName: z.string().min(1).max(80),
     reviewGroupId: z.string().trim().max(40).optional(),
+    privateForwardGroupId: z.string().trim().regex(/^\d*$/, "私聊转发群号必须是数字").max(40).optional(),
     reviewNotificationEnabled: z.boolean().default(false),
     reviewQueueAutoReminderEnabled: z.boolean().default(false),
     reviewQueueReminderThresholdHours: z.number().int().min(1).max(168).default(6),
@@ -106,6 +107,7 @@ const botPatchSchema = z.object({
   qqUin: z.string().regex(/^\d+$/, "Bot QQ 必须是数字").optional(),
     enabled: z.boolean().optional(),
     reviewGroupId: z.string().trim().max(40).nullable().optional(),
+    privateForwardGroupId: z.string().trim().regex(/^\d*$/, "私聊转发群号必须是数字").max(40).nullable().optional(),
     guildId: z.string().trim().max(40).optional(),
     channelId: z.string().trim().max(40).optional(),
     personalQqToken: z.string().trim().min(1).max(1000).optional(),
@@ -847,6 +849,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       return reply.code(409).send({ message: "这个机器人 QQ 已经绑定到其他校园墙" });
     }
 
+    const privateForwardGroupId = body.privateForwardGroupId === undefined
+      ? body.reviewGroupId?.trim() || null
+      : body.privateForwardGroupId.trim() || null;
     const bot = await prisma.$transaction(async (tx) => {
       if (body.platform === "onebot" && body.reviewNotificationEnabled) {
         await tx.botAccount.updateMany({
@@ -867,6 +872,9 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           qqUin: identityUin,
           displayName: body.displayName,
           reviewGroupId: body.reviewGroupId?.trim() || null,
+          // 未显式传值（旧客户端/默认表单）时沿用审核群，保持「私聊转发到审核群」的既有行为；
+          // 显式传空串表示关闭转发。
+          privateForwardGroupId,
           reviewNotificationEnabled: body.reviewNotificationEnabled,
           reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled,
           reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours,
@@ -905,6 +913,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
         qqUin: body.qqUin,
         displayName: body.displayName,
         reviewGroupId: body.reviewGroupId?.trim() || null,
+        privateForwardGroupId,
         reviewNotificationEnabled: body.reviewNotificationEnabled,
         reviewQueueAutoReminderEnabled: body.reviewQueueAutoReminderEnabled,
         reviewQueueReminderThresholdHours: body.reviewQueueReminderThresholdHours,
@@ -974,6 +983,7 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
           ...(body.displayName === undefined ? {} : { displayName: body.displayName }),
           ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
           ...(body.reviewGroupId === undefined ? {} : { reviewGroupId: body.reviewGroupId?.trim() || null }),
+          ...(body.privateForwardGroupId === undefined ? {} : { privateForwardGroupId: body.privateForwardGroupId?.trim() || null }),
           ...(bot.platform === "personal_qq" && body.guildId !== undefined ? { qqUin: BigInt(body.guildId) } : {}),
           ...(nextOnebotQq !== null ? { qqUin: nextOnebotQq } : {}),
           ...(bot.platform === "personal_qq" && body.channelId !== undefined ? { reviewGroupId: body.channelId.trim() } : {}),
@@ -1588,6 +1598,7 @@ function toBotAccount(
     displayName: string;
     enabled: boolean;
     reviewGroupId: string | null;
+    privateForwardGroupId: string | null;
     reviewNotificationEnabled: boolean;
     reviewQueueAutoReminderEnabled: boolean;
     reviewQueueReminderThresholdHours: number;
@@ -1628,6 +1639,7 @@ function toBotAccount(
     displayName: bot.displayName,
     enabled: bot.enabled,
     reviewGroupId: bot.reviewGroupId,
+    privateForwardGroupId: bot.privateForwardGroupId,
     reviewNotificationEnabled: bot.reviewNotificationEnabled,
     reviewQueueAutoReminderEnabled: bot.reviewQueueAutoReminderEnabled,
     reviewQueueReminderThresholdHours: bot.reviewQueueReminderThresholdHours,

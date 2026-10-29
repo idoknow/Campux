@@ -298,6 +298,7 @@ CREATE TABLE "BotAccount" (
     "displayName" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "reviewGroupId" TEXT,
+    "privateForwardGroupId" TEXT,
     "reviewNotificationEnabled" BOOLEAN NOT NULL DEFAULT false,
     "reviewQueueAutoReminderEnabled" BOOLEAN NOT NULL DEFAULT false,
     "reviewQueueReminderThresholdHours" INTEGER NOT NULL DEFAULT 6,
@@ -604,6 +605,13 @@ CREATE TABLE "PostAiAnalysis" (
     "rewrittenText" TEXT,
     "maskedText" TEXT,
     "rejectionReason" TEXT,
+    "autoDecision" TEXT,
+    "autoDecisionReason" TEXT,
+    "autoDecisionAt" DATETIME,
+    "autoDecisionExecuteAfter" DATETIME,
+    "autoDecisionCancelledAt" DATETIME,
+    "autoDecisionExecutingAt" DATETIME,
+    "autoDecisionLeaseAt" DATETIME,
     "error" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
@@ -623,6 +631,7 @@ CREATE TABLE "AiFeedback" (
     "humanAction" TEXT NOT NULL,
     "humanComment" TEXT,
     "matched" BOOLEAN NOT NULL,
+    "categories" JSONB NOT NULL DEFAULT '[]',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "AiFeedback_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "AiFeedback_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -933,6 +942,9 @@ CREATE UNIQUE INDEX "SchoolModelSnapshot_tenantId_id_key" ON "SchoolModelSnapsho
 
 -- CreateIndex
 CREATE INDEX "PostAiAnalysis_tenantId_status_createdAt_idx" ON "PostAiAnalysis"("tenantId", "status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "PostAiAnalysis_tenantId_autoDecision_autoDecisionExecuteAfter_idx" ON "PostAiAnalysis"("tenantId", "autoDecision", "autoDecisionExecuteAfter");
 
 -- CreateIndex
 CREATE INDEX "PostAiAnalysis_tenantId_postId_createdAt_idx" ON "PostAiAnalysis"("tenantId", "postId", "createdAt");

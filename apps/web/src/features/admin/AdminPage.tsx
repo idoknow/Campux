@@ -128,6 +128,8 @@ type BotForm = {
   appSecret: string;
   displayName: string;
   reviewGroupId: string;
+  /** 私聊消息转发群号；留空表示不转发（新建时服务端回落到审核群号）。 */
+  privateForwardGroupId: string;
   guildId: string;
   channelId: string;
   createPublishTarget: boolean;
@@ -867,6 +869,8 @@ export function AdminPage({
           qqUin: botForm.qqUin.trim(),
           displayName: botForm.displayName.trim(),
           reviewGroupId: botForm.reviewGroupId.trim() || undefined,
+          // 显式传值：空串表示不转发；服务端只在字段缺省时才回落到审核群。
+          privateForwardGroupId: botForm.privateForwardGroupId.trim(),
           createPublishTarget: botForm.createPublishTarget,
         } : {
           platform: "personal_qq",
@@ -903,7 +907,7 @@ export function AdminPage({
 
   async function updateBotConfig(
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "privateForwardGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) {
     setBusy(true);
     try {
@@ -2838,7 +2842,7 @@ function BotsPanel({
   onDelete: (id: string) => void;
   onUpdateConfig: (
     botId: string,
-    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
+    patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "privateForwardGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>,
   ) => void;
   onRefresh: () => void;
 }) {
@@ -2932,7 +2936,30 @@ function BotsPanel({
                   </label>
                   <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
                     审核群号 <span className="font-normal text-slate-400">可选</span>
-                    <Input className="bg-white" value={form.reviewGroupId} onChange={(event) => onFormChange({ ...form, reviewGroupId: event.target.value.replace(/\D/g, "") })} />
+                    <Input
+                      className="bg-white"
+                      value={form.reviewGroupId}
+                      onChange={(event) => {
+                        const nextReviewGroupId = event.target.value.replace(/\D/g, "");
+                        // 转发群默认跟随审核群；管理员手动改过转发群后不再覆盖。
+                        const followsReviewGroup = !form.privateForwardGroupId || form.privateForwardGroupId === form.reviewGroupId;
+                        onFormChange({
+                          ...form,
+                          reviewGroupId: nextReviewGroupId,
+                          ...(followsReviewGroup ? { privateForwardGroupId: nextReviewGroupId } : {}),
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                    私聊转发群号 <span className="font-normal text-slate-400">留空则不转发</span>
+                    <Input
+                      className="bg-white"
+                      value={form.privateForwardGroupId}
+                      placeholder={form.reviewGroupId ? `默认 ${form.reviewGroupId}（审核群）` : "留空则不转发私聊消息"}
+                      onChange={(event) => onFormChange({ ...form, privateForwardGroupId: event.target.value.replace(/\D/g, "") })}
+                    />
+                    <span className="text-[11px] font-normal text-slate-400">默认跟随上方审核群号；改成其他群号则只转发到该群，清空后不再转发。</span>
                   </label>
                 </>
               ) : (
@@ -3172,10 +3199,11 @@ function BotConfigEditor({
 }: {
   bot: AdminBotAccount;
   busy: boolean;
-  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderAtAll" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
+  onSave: (patch: Partial<Pick<AdminBotAccount, "displayName" | "enabled" | "reviewGroupId" | "privateForwardGroupId" | "personalQqToken" | "reviewNotificationEnabled" | "reviewQueueAutoReminderEnabled" | "reviewQueueReminderAtAll" | "reviewQueueReminderThresholdHours" | "autoFriendRequestApprovalEnabled" | "userMessageReply" | "userMessageReplyCooldownSeconds" | "reviewGroupMessageReply">>) => void;
 }) {
   const [displayName, setDisplayName] = useState(bot.displayName);
   const [reviewGroupId, setReviewGroupId] = useState(bot.reviewGroupId ?? "");
+  const [privateForwardGroupId, setPrivateForwardGroupId] = useState(bot.privateForwardGroupId ?? "");
   const [personalQqToken, setPersonalQqToken] = useState("");
   const [userMessageReply, setUserMessageReply] = useState(bot.userMessageReply);
   const [userMessageReplyCooldownSeconds, setUserMessageReplyCooldownSeconds] = useState(String(bot.userMessageReplyCooldownSeconds));
@@ -3194,6 +3222,7 @@ function BotConfigEditor({
   useEffect(() => {
     setDisplayName(bot.displayName);
     setReviewGroupId(bot.reviewGroupId ?? "");
+    setPrivateForwardGroupId(bot.privateForwardGroupId ?? "");
     setPersonalQqToken("");
     setUserMessageReply(bot.userMessageReply);
     setUserMessageReplyCooldownSeconds(String(bot.userMessageReplyCooldownSeconds));
@@ -3204,10 +3233,11 @@ function BotConfigEditor({
     setReviewQueueReminderAtAll(bot.reviewQueueReminderAtAll);
     setAutoFriendRequestApprovalEnabled(bot.autoFriendRequestApprovalEnabled);
     setEnabled(bot.enabled);
-  }, [bot.displayName, bot.reviewGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.reviewQueueReminderAtAll, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
+  }, [bot.displayName, bot.reviewGroupId, bot.privateForwardGroupId, bot.userMessageReply, bot.userMessageReplyCooldownSeconds, bot.reviewGroupMessageReply, bot.reviewNotificationEnabled, bot.reviewQueueAutoReminderEnabled, bot.reviewQueueReminderThresholdHours, bot.reviewQueueReminderAtAll, bot.autoFriendRequestApprovalEnabled, bot.enabled]);
 
   const trimmedDisplayName = displayName.trim();
   const trimmedReviewGroupId = reviewGroupId.trim();
+  const trimmedPrivateForwardGroupId = privateForwardGroupId.trim();
   const trimmedPersonalQqToken = personalQqToken.trim();
   const trimmedUserMessageReply = userMessageReply.trim();
   const trimmedReviewGroupMessageReply = reviewGroupMessageReply.trim();
@@ -3215,6 +3245,7 @@ function BotConfigEditor({
   const normalizedReviewQueueReminderThresholdHours = Math.min(168, Math.max(1, Number(reviewQueueReminderThresholdHours || 6)));
   const changed = trimmedDisplayName !== bot.displayName
     || trimmedReviewGroupId !== (bot.reviewGroupId ?? "")
+    || (bot.platform === "onebot" && trimmedPrivateForwardGroupId !== (bot.privateForwardGroupId ?? ""))
     || (bot.platform === "personal_qq" && Boolean(trimmedPersonalQqToken))
     || (bot.platform === "onebot" && trimmedUserMessageReply !== bot.userMessageReply)
     || (bot.platform === "onebot" && normalizedCooldownSeconds !== bot.userMessageReplyCooldownSeconds)
@@ -3240,6 +3271,9 @@ function BotConfigEditor({
     onSave({
       displayName: trimmedDisplayName,
       reviewGroupId: trimmedReviewGroupId || null,
+      ...(trimmedPrivateForwardGroupId === (bot.privateForwardGroupId ?? "")
+        ? {}
+        : { privateForwardGroupId: trimmedPrivateForwardGroupId || null }),
       userMessageReply: trimmedUserMessageReply,
       userMessageReplyCooldownSeconds: normalizedCooldownSeconds,
       reviewGroupMessageReply: trimmedReviewGroupMessageReply,
@@ -3328,6 +3362,16 @@ function BotConfigEditor({
                 <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
                   审核群号 <span className="font-normal text-slate-400">可留空</span>
                   <Input className="bg-white" value={reviewGroupId} onChange={(event) => setReviewGroupId(event.target.value.replace(/\D/g, ""))} />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-500">
+                  私聊转发群号 <span className="font-normal text-slate-400">留空则不转发</span>
+                  <Input
+                    className="bg-white"
+                    value={privateForwardGroupId}
+                    placeholder={reviewGroupId ? `默认 ${reviewGroupId}（审核群）` : "留空则不转发私聊消息"}
+                    onChange={(event) => setPrivateForwardGroupId(event.target.value.replace(/\D/g, ""))}
+                  />
+                  <span className="text-[11px] font-normal text-slate-400">用户私聊消息 1 分钟合并转发到这个群；默认沿用审核群，填其他群号则只转发到该群，清空后不再转发。</span>
                 </label>
               </>
             )}
@@ -4268,6 +4312,7 @@ function defaultBotForm(): BotForm {
     appSecret: "",
     displayName: "",
     reviewGroupId: "",
+    privateForwardGroupId: "",
     guildId: "",
     channelId: "",
     createPublishTarget: true,

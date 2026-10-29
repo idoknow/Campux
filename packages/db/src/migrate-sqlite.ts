@@ -29,6 +29,7 @@ const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedb
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
 const AUTO_MODERATION_SCHEDULE_MIGRATION_NAME = "20261024120000_ai_auto_moderation_schedule_quota";
+const PRIVATE_FORWARD_GROUP_MIGRATION_NAME = "20261029120000_add_private_forward_group";
 
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
@@ -830,6 +831,60 @@ function applyAutoModerationScheduleSqliteMigration(
   logger.info({ migration: AUTO_MODERATION_SCHEDULE_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
+function applyPrivateForwardGroupSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const botTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'BotAccount'`)
+    .get() as { present: number } | null;
+  if (!botTable) return;
+
+  if (doneNames.has(PRIVATE_FORWARD_GROUP_MIGRATION_NAME)) {
+    skipped.push(PRIVATE_FORWARD_GROUP_MIGRATION_NAME);
+    return;
+  }
+
+  logger.info({ migration: PRIVATE_FORWARD_GROUP_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    const columns = new Set(
+      (db.query(`PRAGMA table_info("BotAccount")`).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    if (!columns.has("privateForwardGroupId")) {
+      db.exec(`ALTER TABLE "BotAccount" ADD COLUMN "privateForwardGroupId" TEXT`);
+    }
+    // 升级前所有墙号的私聊消息都转发到审核群；迁移后沿用同一目标，避免静默丢失转发。
+    db.exec(
+      `UPDATE "BotAccount"
+          SET "privateForwardGroupId" = "reviewGroupId"
+        WHERE "privateForwardGroupId" IS NULL
+          AND "reviewGroupId" IS NOT NULL`,
+    );
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(`ALTER TABLE "BotAccount" ADD COLUMN "privateForwardGroupId" TEXT`),
+        PRIVATE_FORWARD_GROUP_MIGRATION_NAME,
+      ],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(PRIVATE_FORWARD_GROUP_MIGRATION_NAME);
+  applied.push(PRIVATE_FORWARD_GROUP_MIGRATION_NAME);
+  logger.info({ migration: PRIVATE_FORWARD_GROUP_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 export function applySqliteBaseline(
   baselineSql: string,
   databaseUrl: string,
@@ -914,6 +969,7 @@ export function applySqliteBaseline(
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyAutoModerationScheduleSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyPrivateForwardGroupSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

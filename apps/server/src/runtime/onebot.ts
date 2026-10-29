@@ -222,7 +222,7 @@ type PrivateForwardBuffer = {
 
 type PrivatePostAggregateBuffer = {
   tenantId: string;
-  bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null; userMessageReply: string | null; userMessageReplyCooldownSeconds: number };
+  bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null; privateForwardGroupId?: string | null; userMessageReply: string | null; userMessageReplyCooldownSeconds: number };
   botQqUin: string;
   userQqUin: string;
   userNickname: string;
@@ -258,6 +258,12 @@ type OneBotMessageEvent = {
 };
 
 const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
+
+/** 用户私聊消息的转发目标群；留空（NULL/空串）表示不转发。 */
+export function resolvePrivateForwardGroupId(bot: { privateForwardGroupId?: string | null }): string | null {
+  const target = bot.privateForwardGroupId?.trim();
+  return target ? target : null;
+}
 
 /** 审核群指令依赖的租户插件开关。 */
 export type ReviewPluginFlags = {
@@ -1803,8 +1809,8 @@ export class OneBotRuntime {
 
         const isStickerOnly = this.isStickerOnlyMessage(event);
 
-        // 非投稿、非命令消息：缓存到缓冲区，1 分钟无新消息后合并转发到审核群
-        if (bot.reviewGroupId) {
+        // 非投稿、非命令消息：缓存到缓冲区，1 分钟无新消息后合并转发到配置的转发群
+        if (resolvePrivateForwardGroupId(bot)) {
           this.bufferPrivateForwardMessage({
             bot,
             botQqUin,
@@ -3893,7 +3899,7 @@ export class OneBotRuntime {
     event,
     delaySeconds,
   }: {
-    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null; userMessageReply: string | null; userMessageReplyCooldownSeconds: number };
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null; reviewGroupId: string | null; privateForwardGroupId?: string | null; userMessageReply: string | null; userMessageReplyCooldownSeconds: number };
     botQqUin: string;
     userQqUin: string;
     userNickname: string;
@@ -4010,7 +4016,7 @@ export class OneBotRuntime {
       return;
     }
 
-    if (buffer.bot.reviewGroupId) {
+    if (resolvePrivateForwardGroupId(buffer.bot)) {
       if (!this.interactionFence.isCurrent(permit)) {
         return;
       }
@@ -4105,9 +4111,10 @@ export class OneBotRuntime {
     const permit = this.interactionFence.snapshot(buffer.tenantId);
 
     try {
-      // 重新获取 bot 信息以获取最新的 reviewGroupId
+      // 重新获取 bot 信息以获取最新的转发群号
       const bot = await findEnabledBot(buffer.botQqUin).catch(() => null);
-      if (!bot?.reviewGroupId) {
+      const forwardGroupId = bot ? resolvePrivateForwardGroupId(bot) : null;
+      if (!forwardGroupId) {
         return;
       }
 
@@ -4146,7 +4153,7 @@ export class OneBotRuntime {
       let msgId: string | null = null;
       try {
         const data = await this.callAction(buffer.botQqUin, "send_group_forward_msg", {
-          group_id: Number(bot.reviewGroupId),
+          group_id: Number(forwardGroupId),
           messages: nodes,
         });
         msgId = this.extractMessageId(data);
@@ -4158,7 +4165,7 @@ export class OneBotRuntime {
           ...buffer.messages.map((entry, i) => `${i + 1}. ${escapeCqCode(entry.text)}`),
         ];
         const fallbackData = await this.callAction(buffer.botQqUin, "send_group_msg", {
-          group_id: Number(bot.reviewGroupId),
+          group_id: Number(forwardGroupId),
           message: lines.join("\n"),
         });
         msgId = this.extractMessageId(fallbackData);

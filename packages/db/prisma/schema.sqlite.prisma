@@ -474,6 +474,8 @@ model BotAccount {
   displayName    String
   enabled        Boolean         @default(true)
   reviewGroupId  String?
+  // 用户私聊消息的转发目标群。留空 = 不转发；新建墙号时默认填入审核群号，管理员可改为其他群。
+  privateForwardGroupId String?
   reviewNotificationEnabled Boolean @default(false)
   reviewQueueAutoReminderEnabled Boolean @default(false)
   reviewQueueReminderThresholdHours Int @default(6)
