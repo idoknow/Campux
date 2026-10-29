@@ -7,6 +7,7 @@ import { decryptJson, encryptJson } from "./secret-json";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
 import { readTenantOperateMode, readTenantPublishMode } from "./tenant-metadata";
+import { readTenantPluginConfig } from "./tenant-plugin-config";
 import { tenantRuntimeRelationFilter } from "./tenant-runtime";
 import { runWithActiveTenantLease } from "./tenant-runtime-lease";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -784,6 +785,11 @@ export async function reviewCampaignViaBot({
   }
 
   const reviewed = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    // 指令入口的开关检查与这里之间存在窗口；写库前在事务内再确认一次插件仍启用。
+    const pluginConfig = await readTenantPluginConfig(transaction, bot.tenantId);
+    if (!pluginConfig.campaigns.enabled) {
+      throw new BotWorkflowError("投票竞选插件未开启", 409);
+    }
     const nextStatus = action === "approve" ? "running" : "rejected";
     const updated = await transaction.campaign.update({
       where: { id: campaign.id },
@@ -856,6 +862,11 @@ export async function reviewGraduationViaBot({
   }
 
   const reviewed = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+    // 指令入口的开关检查与这里之间存在窗口；写库前在事务内再确认一次插件仍启用。
+    const pluginConfig = await readTenantPluginConfig(transaction, bot.tenantId);
+    if (!pluginConfig.graduation.enabled) {
+      throw new BotWorkflowError("毕业去向插件未开启", 409);
+    }
     const nextStatus = action === "approve" ? "approved" : "rejected";
     const updated = await transaction.userGraduation.update({
       where: { id: record.id },
