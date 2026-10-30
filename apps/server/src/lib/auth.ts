@@ -131,7 +131,8 @@ export async function getSessionContext(request: FastifyRequest) {
 
   if (!session || session.expiresAt.getTime() <= Date.now()) {
     if (session) {
-      await prisma.accountSession.delete({ where: { id: session.id } });
+      // deleteMany 而非 delete：并发请求可能同时清理同一过期会话，删不到行不该报错。
+      await prisma.accountSession.deleteMany({ where: { id: session.id } });
     }
     return null;
   }

@@ -136,6 +136,69 @@ export async function uploadAttachmentBytes({
 }
 
 /**
+ * 站内上传链接 → storage key。
+ * 只识别本系统生成的 `/api/uploads/post-image?key=...`，外链与相对路径统一返回 null，
+ * 避免把任意字段当成可读取的 key。
+ */
+export function extractPostImageKey(url: string | null | undefined): string | null {
+  const trimmed = typeof url === "string" ? url.trim() : "";
+  if (!trimmed) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed, "http://campux.local");
+  } catch {
+    return null;
+  }
+  if (parsed.pathname !== "/api/uploads/post-image") {
+    return null;
+  }
+  const key = parsed.searchParams.get("key")?.trim();
+  if (!key || key.startsWith("base64://")) {
+    return null;
+  }
+  return key;
+}
+
+/** 上传 key → 租户 ID（形如 `tenants/<tenantId>/uploads/...`）。 */
+export function parseTenantIdFromUploadKey(key: string): string | null {
+  const match = /^tenants\/([^/]+)\/(?:uploads|legacy)\//.exec(key);
+  return match?.[1] ?? null;
+}
+
+export type UploadAccessDecision =
+  | { allow: true; cacheControl: "private, max-age=3600" | "public, max-age=300" }
+  | { allow: false; status: 401 | 403; message: string };
+
+/**
+ * `/api/uploads/post-image` 的访问判定：
+ * - 已登录：只能读自己选中墙的 uploads / legacy 目录，私有缓存；
+ * - 未登录：只放行该墙当前配置的 Logo（`logoKey` 与请求 key 完全一致），公开缓存。
+ */
+export function decideUploadAccess(input: {
+  key: string;
+  tenantId: string | null;
+  logoKey: string | null;
+}): UploadAccessDecision {
+  if (input.tenantId) {
+    const allowedPrefixes = [
+      `tenants/${input.tenantId}/uploads/`,
+      `tenants/${input.tenantId}/legacy/`,
+    ];
+    if (!allowedPrefixes.some((prefix) => input.key.startsWith(prefix))) {
+      return { allow: false, status: 403, message: "没有访问该图片的权限" };
+    }
+    return { allow: true, cacheControl: "private, max-age=3600" };
+  }
+  if (input.logoKey !== null && input.logoKey === input.key) {
+    // Logo 是公开资源，但缓存别太长：换 Logo 后旧 key 最多残留 5 分钟。
+    return { allow: true, cacheControl: "public, max-age=300" };
+  }
+  return { allow: false, status: 401, message: "请先登录" };
+}
+
+/**
  * Batch delete attachment objects from storage.
  * Logs warnings on per-key failures but does not throw.
  */

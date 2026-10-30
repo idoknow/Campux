@@ -8,13 +8,15 @@ import type { CampuxConfig } from "@campux/config";
 import { TransactionIsolationLevel, isTransactionSerializationFailure } from "@campux/db";
 import { getStorageDriver } from "@campux/integrations";
 import { renderPostCard } from "@campux/render";
-import { hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
+import { getSessionContext, hasTenantRole, requireReadyTenant, requireTenantContext } from "../lib/auth";
+import { assertTenantLogoUpload } from "../lib/tenant-logo-upload";
 import { toPostListItem } from "../lib/posts";
 import { buildPublishedFeed, filterPublishedFeedByTag, type BatchFeedInput, type RawFeedPost, type SingleFeedInput } from "../lib/published-feed";
 import { serializeAssignedPostTags } from "../lib/post-tags";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import { prisma } from "../lib/prisma";
 import { readTenantPendingPostLimit, readTenantImageCompression } from "../lib/tenant-metadata";
+import { isTenantRuntimeActiveStatus } from "../lib/tenant-runtime";
 import { lockActiveTenantRuntime } from "../lib/tenant-runtime-lease";
 import {
   buildImageSourceSizeErrorMessage,
@@ -36,7 +38,15 @@ import {
   validateProcessedImageSize,
 } from "../lib/image-upload-policy";
 import { writeAuditLog } from "../lib/audit";
-import { compressImageBuffer, uploadAttachmentBytes, deleteAttachmentObjects, type PostAttachment } from "../lib/attachments";
+import {
+  compressImageBuffer,
+  decideUploadAccess,
+  deleteAttachmentObjects,
+  extractPostImageKey,
+  parseTenantIdFromUploadKey,
+  uploadAttachmentBytes,
+  type PostAttachment,
+} from "../lib/attachments";
 import { detectPostInjection, validateRemoteGifUrls, createAutoBan } from "../lib/sanitize";
 import { formatBanNotify } from "../lib/bot-messages";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
@@ -69,6 +79,22 @@ const publicForumMediaQuerySchema = fileQuerySchema.extend({
   expires: z.coerce.number().int().positive(),
   signature: z.string().min(1),
 });
+
+/**
+ * 该 key 若是所属墙当前配置的 Logo，返回它（供匿名分支判定）。
+ * 只服务 post-image 的匿名分支，私有上传（稿件图等）仍然要求登录。
+ */
+async function resolveTenantLogoKey(key: string): Promise<string | null> {
+  const tenantId = parseTenantIdFromUploadKey(key);
+  if (!tenantId) {
+    return null;
+  }
+  const record = await prisma.tenantMetadata.findUnique({
+    where: { tenantId_key: { tenantId, key: "logo_url" } },
+    select: { value: true },
+  });
+  return extractPostImageKey(typeof record?.value === "string" ? record.value : "");
+}
 
 const postParamsSchema = z.object({
   id: z.string().min(1),
@@ -422,14 +448,33 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
   });
 
   app.get("/api/uploads/post-image", async (request, reply) => {
-    const context = await requireTenantContext(request, reply);
     const query = fileQuerySchema.parse(request.query);
-    const allowedPrefixes = [
-      `tenants/${context.selectedTenant.id}/uploads/`,
-      `tenants/${context.selectedTenant.id}/legacy/`,
-    ];
-    if (!allowedPrefixes.some((prefix) => query.key.startsWith(prefix))) {
-      return reply.code(403).send({ message: "没有访问该图片的权限" });
+    // 这个接口同时承载私有的稿件图与公开的墙品牌图，所以鉴权不能一刀切：
+    // 登录页、无痕窗口要在未登录状态下渲染墙 Logo。
+    // 会话解析失败（如过期会话已被并发请求删除）按匿名处理，别让 Logo 请求 500。
+    const context = await getSessionContext(request).catch(() => null);
+    const selectedTenant = context?.selectedTenant && context.selectedMembership ? context.selectedTenant : null;
+    if (selectedTenant) {
+      // 与 requireTenantContext 一致的访问门槛：封禁 / 待改密 / 暂停归档的墙不能读私有附件。
+      if (!isTenantRuntimeActiveStatus(selectedTenant.status)) {
+        return reply.code(403).send({ message: "校园墙已暂停或归档，请联系系统运维恢复后再操作" });
+      }
+      if (context?.activeBan) {
+        return reply.code(403).send({ message: `账号已被封禁：${context.activeBan.comment}` });
+      }
+      if (context?.user.passwordChangeRequired) {
+        return reply.code(403).send({ message: "请先修改初始密码" });
+      }
+    }
+    const tenantId = selectedTenant?.id ?? null;
+    const decision = decideUploadAccess({
+      key: query.key,
+      tenantId,
+      // 仅匿名请求需要查 Logo 归属，登录用户走租户前缀校验。
+      logoKey: tenantId ? null : await resolveTenantLogoKey(query.key),
+    });
+    if (!decision.allow) {
+      return reply.code(decision.status).send({ message: decision.message });
     }
 
     const storage = getStorageDriver(config);
@@ -438,10 +483,17 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       return reply.code(404).send({ message: "图片不存在" });
     }
 
+    if (!tenantId) {
+      // 匿名只能拿到图片类 Logo：即使 logo_url 被指到别的文件，也不给脚本类内容开匿名口子。
+      if (!assertTenantLogoUpload({ contentType: object.contentType ?? "application/octet-stream", size: 0 }).ok) {
+        return reply.code(404).send({ message: "图片不存在" });
+      }
+      reply.header("X-Content-Type-Options", "nosniff");
+    }
     if (object.contentType) {
       reply.header("Content-Type", object.contentType);
     }
-    reply.header("Cache-Control", "private, max-age=3600");
+    reply.header("Cache-Control", decision.cacheControl);
     return reply.send(Buffer.from(object.bytes));
   });
 
