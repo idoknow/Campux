@@ -40,6 +40,22 @@ export type AutoModerationSignals = {
   matchedCategoryRates: Record<string, { total: number; matched: number }>;
 };
 
+type HighRiskPostIntent = "solicitation" | "contextual" | "unclear";
+
+/** Fail closed on ambiguous high-risk content; distinguish promotion from warning/discussion using whole-text semantics. */
+export function classifyHighRiskPostIntent(assessment: PostReviewAssessment, postText: string): { postIntent: HighRiskPostIntent; reason: string } {
+  const text = postText.normalize("NFKC").toLocaleLowerCase();
+  const rebuttal = /(?:辟谣|反诈|提醒|警示|科普|不要参与|勿参与|禁止参与|别参与|不要相信|勿信|谨防|防范|曝光|揭穿|批评|反对|讨论|分析|质疑|报道|新闻|转述|引用|举例|是真是假|是否违规|被骗|受骗|套路解析|风险提示|揭露|抵制|劝阻|避坑|警惕|不是.{0,8}(?:招募|广告|诈骗)|并非.{0,8}(?:招募|广告|诈骗))/u;
+  const directRecruitment = /(?:招募|招人|找人|联系我|私聊|加我|报名|来做|兼职|学生工|每单|一单|返佣|佣金|辛苦费|赚钱|赚零花|下单.{0,8}(?:退款|返款)|(?:退款|返款).{0,8}下单|刷单|冲销量)/u;
+  const highRiskActivity = /(?:刷单|冲销量|下单.{0,8}(?:退款|返款)|(?:退款|返款).{0,8}下单|返佣|诈骗|骗|垫付|刷流水|套现|代付)/u;
+  const promotionFindings = assessment.sensitiveFindings.some((finding) => /招募|返佣|推广|引流|诈骗招揽|拉人/u.test(`${finding.type} ${finding.reason}`));
+  const directNegative = /(?:不要|勿|禁止|别|拒绝|反对|并非|不是|没有|无需).{0,12}(?:招募|兼职|下单|刷单|返佣|诈骗|联系|参与)/u;
+  const explicitWarning = rebuttal.test(text) && highRiskActivity.test(text);
+  if (explicitWarning) return { postIntent: "contextual", reason: "本文包含风险活动的警示、辟谣或讨论语境。" };
+  if (directRecruitment.test(text) && highRiskActivity.test(text) && !directNegative.test(text)) return { postIntent: "solicitation", reason: "本文正在招揽参与具有高风险特征的活动。" };
+  return { postIntent: "unclear", reason: "仅凭现有语境无法区分推广招揽与引用讨论。" };
+}
+
 export function evaluateAutoModerationDecision(input: {
   assessment: PostReviewAssessment;
   policy: AutoModerationPolicy;
@@ -62,10 +78,19 @@ export function evaluateAutoModerationDecision(input: {
   const validRisk = assessment.riskLevel === "low" || assessment.riskLevel === "medium" || assessment.riskLevel === "high" || assessment.riskLevel === "critical";
   add("assessment.risk", !validRisk ? "indeterminate" : assessment.riskLevel === "low" ? "pass" : "fail", !validRisk ? "Risk level is unknown." : assessment.riskLevel === "low" ? "Risk level is low." : "Risk level is not low.");
   if (!validRisk) return finish("manual_review", "未知风险必须人工审核");
-  if (assessment.riskLevel === "high" || assessment.riskLevel === "critical") {
-    add("assessment.sensitive_findings", "fail", assessment.sensitiveFindings.length ? "Sensitive findings are recorded, but high-risk content is always rejected when auto-reject is enabled." : "High-risk assessment is rejected according to policy.");
+  const highRisk = assessment.riskLevel === "high" || assessment.riskLevel === "critical";
+  const { postIntent } = classifyHighRiskPostIntent(assessment, postText);
+  if (highRisk && postIntent === "solicitation") {
+    add("assessment.post_intent", "pass", "Text context indicates direct promotion or recruitment of a high-risk activity.");
+    add("reject.enabled", policy.autoRejectEnabled ? "pass" : "fail", policy.autoRejectEnabled ? "Automatic rejection is enabled." : "Automatic rejection is disabled.");
     if (!policy.autoRejectEnabled) return finish("manual_review", "高风险自动拒绝未启用，已转人工审核");
-    return finish("reject", `高风险稿件自动拒绝：${assessment.riskLevel}`);
+    return finish("reject", `高风险招募/诈骗推广按语义自动拒绝：${assessment.riskLevel}`);
+  }
+  if (highRisk && postIntent === "contextual") {
+    add("assessment.post_intent", "pass", "Text context indicates warning, debunking, or discussion; normal recommendation and confidence/category gates apply.");
+  } else if (highRisk) {
+    add("assessment.post_intent", "indeterminate", "High-risk intent is unclear; manual review is required.");
+    return finish("manual_review", "高风险内容意图不明确，需人工复核");
   }
   add("assessment.sensitive_findings", assessment.sensitiveFindings.length === 0 ? "pass" : "fail", assessment.sensitiveFindings.length === 0 ? "No sensitive findings." : "Sensitive findings require human review.");
   if (assessment.sensitiveFindings.length > 0) return finish("manual_review", "敏感信息必须人工审核");

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PostReviewAssessment } from "./post-review";
-import { evaluateAutoModerationDecision, type AutoModerationPolicy } from "./auto-moderation";
+import { classifyHighRiskPostIntent, evaluateAutoModerationDecision, type AutoModerationPolicy } from "./auto-moderation";
 
 const policy: AutoModerationPolicy = { enabled: true, autoApproveEnabled: true, autoRejectEnabled: true, allowedAutoApproveCategories: ["campus_news"], allowedAutoRejectCategories: ["scam"], autoRejectRiskLevels: ["high", "critical"], blockedPatterns: ["直接转账"], minimumConfidence: 0.98, autoApproveMinimumConfidence: 0.98, autoRejectMinimumConfidence: 0.99, minimumValidatedSamples: 100, delaySeconds: 60, globalKillSwitch: false };
 const assessment = (overrides: Partial<PostReviewAssessment> = {}): PostReviewAssessment => ({ schemaVersion: 1, riskLevel: "low", categories: ["campus_news"], sensitiveFindings: [], suggestedAction: "approve", reasons: [], confidence: 0.99, maskedText: null, rewrittenText: null, rejectionReason: null, ...overrides });
@@ -31,15 +31,39 @@ describe("automatic moderation explicit policy trace", () => {
     expect(evaluate(assessment({ suggestedAction: "reject", confidence: 0.97 }), policy, signals, "直接转账").reason).toBe("拒绝类别或风险级别未获管理员明确授权");
     expect(evaluate(a, policy, signals, "通常情况下转账需要谨慎").action).toBe("manual_review");
   });
-  test("high/critical ratings are rejected whenever auto-reject is enabled, regardless of other thresholds or suggested action", () => {
+  test("high-risk posts classify by text semantics: solicitation rejects, rebuttals follow gates, unclear intent reviews", () => {
     const configured = { ...policy, autoRejectMinimumConfidence: 0.99, blockedPatterns: [], allowedAutoRejectCategories: [] };
-    const highRisk = assessment({ suggestedAction: "manual_review", riskLevel: "high", categories: ["other"], confidence: 0.5, sensitiveFindings: [{ type: "刷单返佣", excerpt: "每单给20块辛苦费", reason: "诱导刷单返佣" }] });
+    const solicitation = assessment({ suggestedAction: "manual_review", riskLevel: "high", categories: ["solicitation"], confidence: 0.5, sensitiveFindings: [{ type: "刷单返佣", excerpt: "每单给20块辛苦费", reason: "诱导刷单返佣" }] });
     const pitch = "家里有亲戚做电商，最近平台审核冲销量需要帮忙，很简单就是下单再退款，每单给20块辛苦费，不占用太多时间，想赚点零花的同学可以联系我。";
-    expect(evaluate(highRisk, configured, signals, pitch).action).toBe("reject");
-    expect(evaluate(assessment({ ...highRisk, riskLevel: "critical" }), configured, signals, pitch).action).toBe("reject");
-    expect(evaluate(highRisk, { ...configured, autoRejectEnabled: false }, signals, pitch).action).toBe("manual_review");
-    expect(evaluate(assessment({ ...highRisk, riskLevel: "medium" }), configured, signals, pitch).action).toBe("manual_review");
-    expect(evaluate(highRisk, configured, signals, "有人说‘下单再退款’能拿返佣，这是刷单诈骗，大家不要参与。").action).toBe("reject");
+    expect(classifyHighRiskPostIntent(solicitation, pitch).postIntent).toBe("solicitation");
+    expect(evaluate(solicitation, configured, signals, pitch).action).toBe("reject");
+    expect(evaluate(assessment({ ...solicitation, riskLevel: "critical" }), configured, signals, pitch).action).toBe("reject");
+    expect(evaluate(solicitation, { ...configured, autoRejectEnabled: false }, signals, pitch).action).toBe("manual_review");
+
+    const rebuttal = assessment({ suggestedAction: "manual_review", riskLevel: "high", categories: ["诈骗"], confidence: 0.97, sensitiveFindings: [] });
+    const rebuttalText = "提醒同学不要参与下单退款刷单，这类兼职是诈骗，请勿相信。";
+    expect(classifyHighRiskPostIntent(rebuttal, rebuttalText).postIntent).toBe("contextual");
+    expect(evaluate(rebuttal, policy, signals, rebuttalText).action).toBe("manual_review");
+    const quoted = "有人说下单再退款能赚钱，这是刷单诈骗，大家不要参与。";
+    expect(classifyHighRiskPostIntent(solicitation, quoted).postIntent).toBe("contextual");
+    expect(evaluate(assessment({ ...solicitation, categories: ["诈骗"], sensitiveFindings: [] }), policy, signals, quoted).action).toBe("manual_review");
+    const fullQuotedPitch = "有人发帖：家里有亲戚做电商，平台审核冲销量，需要同学下单再退款，每单给20元，联系我。请大家不要参与，这是刷单诈骗。";
+    expect(classifyHighRiskPostIntent(solicitation, fullQuotedPitch).postIntent).toBe("contextual");
+    expect(evaluate(assessment({ ...solicitation, categories: ["诈骗"], sensitiveFindings: [] }), policy, signals, fullQuotedPitch).action).toBe("manual_review");
+
+    const unclear = assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["misc"], confidence: 1, sensitiveFindings: [] });
+    expect(classifyHighRiskPostIntent(unclear, "高风险内容").postIntent).toBe("unclear");
+    expect(evaluate(unclear, configured, signals, "高风险内容").action).toBe("manual_review");
+  });
+
+  test("high-risk contextual content obeys suggestion, confidence and category gates", () => {
+    const contextualPolicy = { ...policy, autoRejectMinimumConfidence: 0.99, allowedAutoRejectCategories: ["scam"], blockedPatterns: ["直接转账"] };
+    const contextual = assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["scam"], confidence: 0.97, sensitiveFindings: [] });
+    const contextText = "辟谣：直接转账是诈骗话术，请大家不要相信。";
+    expect(classifyHighRiskPostIntent(contextual, contextText).postIntent).toBe("contextual");
+    expect(evaluate(contextual, contextualPolicy, signals, contextText).action).toBe("manual_review");
+    const categoryNotAllowed = assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["debunking"], confidence: 1, sensitiveFindings: [] });
+    expect(evaluate(categoryNotAllowed, contextualPolicy, signals, contextText).action).toBe("manual_review");
   });
 
   test("model reject without exact configured substring hit is not auto-rejected", () => {
