@@ -137,10 +137,12 @@ export const tenantPluginConfigSchema = z.object({
       enabled: z.boolean(),
     })
     .default({ enabled: false }),
-  // Bot 异常通知：登录态失效且自动刷新失败时，向配置的邮箱发送通知。
+  // Bot 异常通知：登录态失效且自动刷新失败、或 bot 连接断开时，向配置的邮箱发送通知。
   botAlert: z
     .object({
       enabled: z.boolean(),
+      // 连接断开通知：与登录态失效通知分开，避免长时间离线刷屏（默认开，按墙可关）。
+      notifyOnDisconnect: z.boolean().default(true),
       smtpHost: z.string().max(255).default(""),
       smtpPort: z.number().int().min(1).max(65535).default(465),
       smtpUser: z.string().max(255).default(""),
@@ -148,7 +150,16 @@ export const tenantPluginConfigSchema = z.object({
       fromEmail: z.string().max(255).default(""),
       toEmails: z.array(z.string().max(255)).max(20).default([]),
     })
-    .default({ enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] }),
+    .default({
+      enabled: false,
+      notifyOnDisconnect: true,
+      smtpHost: "",
+      smtpPort: 465,
+      smtpUser: "",
+      smtpPass: "",
+      fromEmail: "",
+      toEmails: [],
+    }),
   // 那年今日：开启后投稿页顶部出现「那年今日」胶囊，展示历史上同一月同一日的已发布稿件。
   todayInHistory: z
     .object({
@@ -208,7 +219,7 @@ export const defaultTenantPluginConfig: TenantPluginConfig = {
     autoCreateAccount: false,
   },
   feedback: { enabled: false },
-  botAlert: { enabled: false, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
+  botAlert: { enabled: false, notifyOnDisconnect: true, smtpHost: "", smtpPort: 465, smtpUser: "", smtpPass: "", fromEmail: "", toEmails: [] },
   todayInHistory: { enabled: false },
   heatBoard: { enabled: false, maxTagCount: 5 },
   commentManagement: { enabled: false, allowUserDeleteOwnPostComments: false },

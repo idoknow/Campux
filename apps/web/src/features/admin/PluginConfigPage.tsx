@@ -283,9 +283,16 @@ function BotAlertPanel({ config, onChange, busy }: { config: TenantPluginConfig;
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-        开启后，当 QZone 登录态失效且自动刷新失败时，向收件邮箱发送异常通知。请先配置 SMTP 服务器与收件邮箱；
+        开启后，当 QZone 登录态失效且自动刷新失败、或 Bot 连接断开时，向收件邮箱发送异常通知。请先配置 SMTP 服务器与收件邮箱；
         保存设置前会先发送测试邮件，测试通过后才会保存。
       </div>
+      <SwitchField
+        title="连接断开时也通知"
+        description="Bot 的 WebSocket 断开后超过 60 秒仍未重连才发信；同一 Bot 30 分钟内最多一封，避免网络抖动刷屏。暂停或归档的墙不会通知。"
+        checked={alert.notifyOnDisconnect}
+        disabled={busy}
+        onChange={(value) => set({ notifyOnDisconnect: value })}
+      />
       <div className="grid gap-3">
         <label className="grid gap-1 text-xs font-semibold text-slate-600">
           SMTP 服务器
@@ -1521,6 +1528,7 @@ function buildInitialConfig(metadata: TenantMetadata): TenantPluginConfig {
     },
     botAlert: {
       enabled: metadata.enableBotAlert ?? false,
+      notifyOnDisconnect: true,
       smtpHost: "",
       smtpPort: 465,
       smtpUser: "",
@@ -1653,6 +1661,22 @@ function defaultConfigForPlugin(pluginId: PluginId): TenantPluginConfig[PluginId
   }
 }
 
+/**
+ * 需要 SMTP 连通性验证的字段。
+ * notifyOnDisconnect 只是行为开关，改了它不该被「先发测试邮件」的门禁挡住——
+ * 否则 SMTP 不可用时，管理员连关掉断连通知都做不到。
+ */
+function botAlertSmtpSignature(alert: TenantPluginConfig["botAlert"]): string {
+  return JSON.stringify({
+    smtpHost: alert.smtpHost,
+    smtpPort: alert.smtpPort,
+    smtpUser: alert.smtpUser,
+    smtpPass: alert.smtpPass,
+    fromEmail: alert.fromEmail,
+    toEmails: alert.toEmails,
+  });
+}
+
 export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: string; metadata: TenantMetadata; onSaved?: () => void | Promise<void> }) {
   const [config, setConfig] = useState<TenantPluginConfig>(() => ensureFontSelectionDefaults(ensureBotMessageDefaults(buildInitialConfig(metadata))));
   const [activeId, setActiveId] = useState<PluginId>("markdownRender");
@@ -1695,7 +1719,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       const data = await api<{ config: TenantPluginConfig }>("/api/admin/plugins/settings");
       const next = ensureFontSelectionDefaults(ensureBotMessageDefaults(data.config));
       setConfig(next);
-      savedBotAlertRef.current = JSON.stringify(next.botAlert);
+      savedBotAlertRef.current = botAlertSmtpSignature(next.botAlert);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "读取插件配置失败");
     } finally {
@@ -1739,7 +1763,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       // 保存发不出去的 SMTP/收件配置（服务端只校验字段长度，不校验可达性）。
       let configToSave = config;
       const botAlertDirty =
-        savedBotAlertRef.current !== null && config.botAlert !== undefined && JSON.stringify(config.botAlert) !== savedBotAlertRef.current;
+        savedBotAlertRef.current !== null && config.botAlert !== undefined && botAlertSmtpSignature(config.botAlert) !== savedBotAlertRef.current;
       if (botAlertDirty) {
         // 先丢弃没填完的空行，再拿清理后的收件列表做测试与保存。
         configToSave = { ...config, botAlert: { ...config.botAlert, toEmails: config.botAlert.toEmails.map((s) => s.trim()).filter(Boolean) } };
@@ -1758,7 +1782,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
         setConfig(configToSave);
       }
       await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(configToSave) });
-      savedBotAlertRef.current = JSON.stringify(configToSave.botAlert);
+      savedBotAlertRef.current = botAlertSmtpSignature(configToSave.botAlert);
       toast.success("插件配置已保存");
       await onSaved?.();
       // 保存可能触发插件启停变化，重新拉一次列表保持侧栏同步。
@@ -1854,7 +1878,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
       await api("/api/admin/plugins/settings", { method: "PATCH", body: JSON.stringify(nextConfig) });
       setConfig(nextConfig);
       setEnabledPresetNames(nextEnabledPresetNames);
-      savedBotAlertRef.current = JSON.stringify(nextConfig.botAlert);
+      savedBotAlertRef.current = botAlertSmtpSignature(nextConfig.botAlert);
       setResetPending(null);
       toast.success(`${pluginName}已重置并保存`);
       await onSaved?.();

@@ -36,6 +36,13 @@ import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotPr
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { setBotCustomStylishMessages } from "../lib/bot-messages";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
+import {
+  BOT_OFFLINE_ALERT_GRACE_MS,
+  formatBotOfflineDuration,
+  shouldCancelBotOfflineAlert,
+  shouldSendBotOfflineAlert,
+  type BotAlertRule,
+} from "../lib/bot-alert-rules";
 import { lockActiveTenantRuntime, runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { extractDisplayIdFromReviewText, readQuotedReplyPayload, type QuotedReplyPayload } from "./review-reply-resolve";
 import {
@@ -542,6 +549,13 @@ export class OneBotRuntime {
   private static readonly MAX_FORWARD_MSG_ID_MAP_SIZE = 500;
   private readonly qzoneProtocolAutoRefreshFailures = new Map<string, QZoneProtocolAutoRefreshFailure>();
   private readonly qzoneProtocolAutoRefreshInFlight = new Map<string, Promise<{ cookieNames: string[]; session: { id: string } }>>();
+  /**
+   * Bot 掉线通知：宽限期内重连就不发信，宽限到期仍离线才发（按 botAccountId 记）。
+   * 前提是单实例部署——在线状态只在进程内，跨实例需要外部共享状态才有意义。
+   */
+  private readonly botOfflineAlertTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly botOfflineSince = new Map<string, number>();
+  private readonly botOfflineAlertSentAt = new Map<string, number>();
   private readonly reviewQueueReminderTimer: Timer | null;
   private reviewQueueReminderRunning = false;
 
@@ -602,6 +616,12 @@ export class OneBotRuntime {
       if (buffer.timer) clearTimeout(buffer.timer);
       this.privateForwardBuffers.delete(key);
     }
+    // 主动关停不是故障，清掉待发的掉线通知，避免重启时误发邮件。
+    for (const timer of this.botOfflineAlertTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.botOfflineAlertTimers.clear();
+    this.botOfflineSince.clear();
     if (this.reviewQueueReminderTimer) {
       clearInterval(this.reviewQueueReminderTimer);
     }
@@ -712,6 +732,8 @@ export class OneBotRuntime {
       permit,
     };
     this.connections.add(connection);
+    // 连接回来就撤销待发的掉线通知：宽限期内重连属于正常抖动。
+    this.clearBotOfflineAlert(connection.botAccountId);
     this.markBotSeen(connection).catch((error) => this.logger.warn({ error, selfId: connection.selfId }, "failed to mark onebot bot seen"));
 
     socket.on("message", (data) => {
@@ -721,6 +743,7 @@ export class OneBotRuntime {
     });
     socket.on("close", () => {
       this.connections.delete(connection);
+      this.scheduleBotOfflineAlert(connection);
       for (const [echo, pending] of this.pendingActions) {
         if (pending.connection !== connection) continue;
         clearTimeout(pending.timer);
@@ -733,6 +756,116 @@ export class OneBotRuntime {
     });
 
     this.logger.info({ botAccountId: connection.botAccountId, tenantId: connection.tenantId, selfId: connection.selfId }, "onebot websocket connected");
+  }
+
+  /** 连接恢复时撤销待发的掉线通知（宽限期内重连属于正常抖动）。 */
+  private clearBotOfflineAlert(botAccountId: string) {
+    const timer = this.botOfflineAlertTimers.get(botAccountId);
+    if (timer) {
+      clearTimeout(timer);
+      this.botOfflineAlertTimers.delete(botAccountId);
+    }
+    this.botOfflineSince.delete(botAccountId);
+  }
+
+  /**
+   * 连接断开后不立刻发信：NapCat 常规重连在秒级，直接发会变成抖动刷屏。
+   * 宽限期到期仍没有该 bot 的新连接，才真正走通知判定。
+   */
+  /** 此刻是否仍处于「本轮离线」状态：进程未关停、没有任何活跃连接、离线起点没被刷新。 */
+  private isBotOfflineAlertValid(botAccountId: string, offlineSince: number): boolean {
+    return !shouldCancelBotOfflineAlert({
+      closing: this.closing,
+      activeConnections: Array.from(this.connections).filter((item) => item.botAccountId === botAccountId).length,
+      currentOfflineSince: this.botOfflineSince.get(botAccountId),
+      expectedOfflineSince: offlineSince,
+    });
+  }
+
+  private scheduleBotOfflineAlert(connection: OneBotConnection) {
+    if (this.closing) {
+      return;
+    }
+    if (this.botOfflineAlertTimers.has(connection.botAccountId)) {
+      return;
+    }
+    // 旧连接的 close 可能晚于新连接建立：此时 bot 其实在线，不该起计时。
+    if (Array.from(this.connections).some((item) => item.botAccountId === connection.botAccountId)) {
+      return;
+    }
+    const offlineSince = Date.now();
+    this.botOfflineSince.set(connection.botAccountId, offlineSince);
+    const timer = setTimeout(() => {
+      this.botOfflineAlertTimers.delete(connection.botAccountId);
+      void this.dispatchBotOfflineAlert({
+        botAccountId: connection.botAccountId,
+        tenantId: connection.tenantId,
+        selfId: connection.selfId,
+        offlineSince,
+      }).catch((error) => {
+        this.logger.warn({ error, botAccountId: connection.botAccountId }, "failed to dispatch bot offline alert");
+      });
+    }, BOT_OFFLINE_ALERT_GRACE_MS);
+    // 常驻进程里这个定时器不该单独撑住事件循环。
+    timer.unref?.();
+    this.botOfflineAlertTimers.set(connection.botAccountId, timer);
+  }
+
+  private async dispatchBotOfflineAlert(input: {
+    botAccountId: string;
+    tenantId: string;
+    selfId: string | null;
+    offlineSince: number;
+  }) {
+    if (!this.isBotOfflineAlertValid(input.botAccountId, input.offlineSince)) {
+      return;
+    }
+    const bot = await prisma.botAccount.findUnique({
+      where: { id: input.botAccountId },
+      select: { id: true, tenantId: true, displayName: true, qqUin: true, enabled: true },
+    });
+    // 绑定被删除或已被管理员停用的 bot，断开是预期状态，不该告警。
+    if (!bot || !bot.enabled) {
+      return;
+    }
+    // 暂停 / 归档的墙本来就不允许建立连接，断开同样属预期。
+    if (!(await isTenantRuntimeActive(prisma, bot.tenantId))) {
+      return;
+    }
+    const pluginConfig = await readTenantPluginConfig(prisma, bot.tenantId);
+    const alertConfig = pluginConfig.botAlert;
+    // 读库/读配置期间可能已重连，或进程开始关停：发信前再确认一次，别给已恢复的 bot 报警。
+    if (!this.isBotOfflineAlertValid(input.botAccountId, input.offlineSince)) {
+      return;
+    }
+    const now = Date.now();
+    const shouldAlert = shouldSendBotOfflineAlert({
+      pluginEnabled: alertConfig.enabled,
+      notifyOnDisconnect: alertConfig.notifyOnDisconnect,
+      hasRecipients: alertConfig.toEmails.length > 0,
+      stillConnected: false,
+      now,
+      lastAlertAt: this.botOfflineAlertSentAt.get(bot.id) ?? null,
+    });
+    if (!shouldAlert) {
+      return;
+    }
+    // 先占冷却再发信：否则并发派发（两条连接先后断开）会同时通过检查，各发一封。
+    this.botOfflineAlertSentAt.set(bot.id, now);
+    const offlineFor = formatBotOfflineDuration(now - input.offlineSince);
+    const sent = await this.sendBotAlertEmail(
+      bot,
+      "Bot 连接断开",
+      `已断开 ${offlineFor} 且没有重连（QQ ${bot.qqUin.toString()}，会话 ${input.selfId ?? "未知"}）`,
+      "disconnect",
+      "请检查该墙号的 NapCat / QQ 进程是否存活、能否访问 Campux 服务（反向 WS 出站），恢复后无需重新扫码。",
+      // 最后一次复核放在真正发信前：sendBotAlertEmail 内部还有动态导入与配置读取。
+      () => this.isBotOfflineAlertValid(input.botAccountId, input.offlineSince),
+    );
+    if (!sent) {
+      // 发送失败不占冷却，下一次断开会重试。
+      this.botOfflineAlertSentAt.delete(bot.id);
+    }
   }
 
   async notifyNewPost(postId: string) {
@@ -1208,13 +1341,20 @@ export class OneBotRuntime {
     bot: { id: string; tenantId: string; displayName: string | null; qqUin: bigint },
     reason: string,
     error: string,
-  ) {
+    rule: BotAlertRule = "login",
+    hint?: string,
+    guard?: () => boolean,
+  ): Promise<boolean> {
     const { readTenantPluginConfig } = await import("../lib/tenant-plugin-config");
     const { sendBotAlertEmail: sendEmail, formatBotAlertEmail } = await import("../lib/bot-alert-email");
     const pluginConfig = await readTenantPluginConfig(prisma, bot.tenantId);
     const alertConfig = pluginConfig.botAlert;
     if (!alertConfig.enabled || alertConfig.toEmails.length === 0) {
-      return;
+      return false;
+    }
+    // 掉线通知单独受开关控制：有的墙只关心登录态失效，不想收重连抖动。
+    if (rule === "disconnect" && !alertConfig.notifyOnDisconnect) {
+      return false;
     }
     const tenant = await prisma.tenant.findUnique({ where: { id: bot.tenantId }, select: { name: true } });
     const email = formatBotAlertEmail({
@@ -1223,11 +1363,18 @@ export class OneBotRuntime {
       botQqUin: bot.qqUin.toString(),
       reason,
       error,
+      ...(hint ? { hint } : {}),
     });
+    // 到这里所有 await 都结束了：此刻再复核一次运行态，状态已变就放弃，不占冷却。
+    if (guard && !guard()) {
+      return false;
+    }
     const result = await sendEmail(alertConfig, email);
     if (!result.ok) {
       this.logger.warn({ error: result.error, botId: bot.id }, "failed to send bot alert email");
+      return false;
     }
+    return true;
   }
 
   private async notifyQZoneCookiesAutoRefreshed(botAccountId: string, reason: string, cookieCount: number, healthMessage: string | null) {

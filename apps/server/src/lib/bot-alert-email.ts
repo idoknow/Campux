@@ -78,15 +78,18 @@ export function formatBotAlertEmail(input: {
   botQqUin: string;
   reason: string;
   error: string;
+  /** 处理建议：登录态失效与连接断开需要的操作不同，默认给扫码/刷新 cookie。 */
+  hint?: string;
 }): { subject: string; text: string; html: string } {
   const subject = `Campux 校园墙 Bot 异常通知 - ${input.tenantName}`;
+  const hint = input.hint ?? "请尽快登录墙号重新扫码或手动刷新 QZone cookies。";
   const text = [
     `校园墙：${input.tenantName}`,
     `墙号：${input.botName}（QQ ${input.botQqUin}）`,
     `触发原因：${input.reason}`,
     `错误信息：${input.error}`,
     "",
-    "请尽快登录墙号重新扫码或手动刷新 QZone cookies。",
+    hint,
   ].join("\n");
   const html = `
     <h2>Campux Bot 异常通知</h2>
@@ -96,7 +99,7 @@ export function formatBotAlertEmail(input: {
       <tr><td style="padding:4px 12px;font-weight:bold">触发原因</td><td>${escapeHtml(input.reason)}</td></tr>
       <tr><td style="padding:4px 12px;font-weight:bold">错误信息</td><td><pre style="white-space:pre-wrap">${escapeHtml(input.error)}</pre></td></tr>
     </table>
-    <p>请尽快登录墙号重新扫码或手动刷新 QZone cookies。</p>
+    <p>${escapeHtml(hint)}</p>
   `;
   return { subject, text, html };
 }
