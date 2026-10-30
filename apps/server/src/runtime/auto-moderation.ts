@@ -61,8 +61,14 @@ export function evaluateAutoModerationDecision(input: {
 
   const validRisk = assessment.riskLevel === "low" || assessment.riskLevel === "medium" || assessment.riskLevel === "high" || assessment.riskLevel === "critical";
   add("assessment.risk", !validRisk ? "indeterminate" : assessment.riskLevel === "low" ? "pass" : "fail", !validRisk ? "Risk level is unknown." : assessment.riskLevel === "low" ? "Risk level is low." : "Risk level is not low.");
+  if (!validRisk) return finish("manual_review", "未知风险必须人工审核");
+  if (assessment.riskLevel === "high" || assessment.riskLevel === "critical") {
+    add("assessment.sensitive_findings", "fail", assessment.sensitiveFindings.length ? "Sensitive findings are recorded, but high-risk content is always rejected when auto-reject is enabled." : "High-risk assessment is rejected according to policy.");
+    if (!policy.autoRejectEnabled) return finish("manual_review", "高风险自动拒绝未启用，已转人工审核");
+    return finish("reject", `高风险稿件自动拒绝：${assessment.riskLevel}`);
+  }
   add("assessment.sensitive_findings", assessment.sensitiveFindings.length === 0 ? "pass" : "fail", assessment.sensitiveFindings.length === 0 ? "No sensitive findings." : "Sensitive findings require human review.");
-  if (!validRisk || assessment.sensitiveFindings.length > 0) return finish("manual_review", "未知风险或敏感信息必须人工审核");
+  if (assessment.sensitiveFindings.length > 0) return finish("manual_review", "敏感信息必须人工审核");
 
   if (assessment.suggestedAction === "reject") {
     add("reject.enabled", policy.autoRejectEnabled ? "pass" : "fail", policy.autoRejectEnabled ? "Automatic rejection is enabled." : "Automatic rejection is disabled.");
@@ -76,6 +82,7 @@ export function evaluateAutoModerationDecision(input: {
     const confidencePass = assessment.confidence >= policy.autoRejectMinimumConfidence;
     add("reject.confidence", confidencePass ? "pass" : "fail", confidencePass ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
     if (!patternHit || !riskPass || !category || !confidencePass) return finish("manual_review", !riskPass || !category ? "拒绝类别或风险级别未获管理员明确授权" : !confidencePass ? "拒绝建议置信度不足" : "没有命中管理员配置的明确拒绝规则");
+    if (assessment.sensitiveFindings.length > 0) return finish("manual_review", "敏感信息必须人工审核");
     const escapedPattern = patternHit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const quotedPattern = new RegExp(`[“‘\"'][^“”‘’\"']*${escapedPattern}[^“”‘’\"']*[”’\"']`).test(postText);
     const contextualDiscussion = /(?:引用|转述|讨论|举例|反对|辟谣|批评|不要|禁止|勿).{0,12}(?:规则|话术|内容|行为|说法)?/u.test(postText);

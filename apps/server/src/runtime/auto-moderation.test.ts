@@ -31,15 +31,17 @@ describe("automatic moderation explicit policy trace", () => {
     expect(evaluate(assessment({ suggestedAction: "reject", confidence: 0.97 }), policy, signals, "直接转账").reason).toBe("拒绝类别或风险级别未获管理员明确授权");
     expect(evaluate(a, policy, signals, "通常情况下转账需要谨慎").action).toBe("manual_review");
   });
-  test("high-risk configured rejection preserves confidence gates and holds quoted/discussion mentions for review", () => {
-    const assessmentReject = assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["scam"], confidence: 0.985 });
-    expect(evaluate(assessmentReject, policy, signals, "直接转账").action).toBe("manual_review");
-    expect(evaluate(assessmentReject, { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "直接转账").action).toBe("reject");
-    expect(evaluate(assessmentReject, { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "这里是直接转账的引用讨论").action).toBe("manual_review");
-    expect(evaluate(assessmentReject, { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "“直接转账”是诈骗话术").action).toBe("manual_review");
-    expect(evaluate(assessment({ ...assessmentReject, categories: ["other"] }), { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "直接转账").action).toBe("manual_review");
-    expect(evaluate(assessment({ ...assessmentReject, riskLevel: "medium" }), { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "直接转账").action).toBe("manual_review");
+  test("high/critical ratings are rejected whenever auto-reject is enabled, regardless of other thresholds or suggested action", () => {
+    const configured = { ...policy, autoRejectMinimumConfidence: 0.99, blockedPatterns: [], allowedAutoRejectCategories: [] };
+    const highRisk = assessment({ suggestedAction: "manual_review", riskLevel: "high", categories: ["other"], confidence: 0.5, sensitiveFindings: [{ type: "刷单返佣", excerpt: "每单给20块辛苦费", reason: "诱导刷单返佣" }] });
+    const pitch = "家里有亲戚做电商，最近平台审核冲销量需要帮忙，很简单就是下单再退款，每单给20块辛苦费，不占用太多时间，想赚点零花的同学可以联系我。";
+    expect(evaluate(highRisk, configured, signals, pitch).action).toBe("reject");
+    expect(evaluate(assessment({ ...highRisk, riskLevel: "critical" }), configured, signals, pitch).action).toBe("reject");
+    expect(evaluate(highRisk, { ...configured, autoRejectEnabled: false }, signals, pitch).action).toBe("manual_review");
+    expect(evaluate(assessment({ ...highRisk, riskLevel: "medium" }), configured, signals, pitch).action).toBe("manual_review");
+    expect(evaluate(highRisk, configured, signals, "有人说‘下单再退款’能拿返佣，这是刷单诈骗，大家不要参与。").action).toBe("reject");
   });
+
   test("model reject without exact configured substring hit is not auto-rejected", () => {
     const result = evaluate(assessment({ suggestedAction: "reject" }), policy, signals, "普通校园新闻");
     expect(result.action).toBe("manual_review");
