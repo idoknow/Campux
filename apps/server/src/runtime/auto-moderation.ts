@@ -5,8 +5,12 @@ export type AutoModerationPolicy = {
   autoApproveEnabled: boolean;
   autoRejectEnabled: boolean;
   allowedAutoApproveCategories: string[];
+  allowedAutoRejectCategories: string[];
+  autoRejectRiskLevels: Array<"high" | "critical">;
   blockedPatterns: string[];
   minimumConfidence: number;
+  autoApproveMinimumConfidence: number;
+  autoRejectMinimumConfidence: number;
   minimumValidatedSamples: number;
   delaySeconds: number;
   globalKillSwitch: boolean;
@@ -58,23 +62,29 @@ export function evaluateAutoModerationDecision(input: {
   const validRisk = assessment.riskLevel === "low" || assessment.riskLevel === "medium" || assessment.riskLevel === "high" || assessment.riskLevel === "critical";
   add("assessment.risk", !validRisk ? "indeterminate" : assessment.riskLevel === "low" ? "pass" : "fail", !validRisk ? "Risk level is unknown." : assessment.riskLevel === "low" ? "Risk level is low." : "Risk level is not low.");
   add("assessment.sensitive_findings", assessment.sensitiveFindings.length === 0 ? "pass" : "fail", assessment.sensitiveFindings.length === 0 ? "No sensitive findings." : "Sensitive findings require human review.");
-  if (!validRisk || assessment.riskLevel !== "low" || assessment.sensitiveFindings.length > 0) return finish("manual_review", "中高风险或敏感信息必须人工审核");
+  if (!validRisk || assessment.sensitiveFindings.length > 0) return finish("manual_review", "未知风险或敏感信息必须人工审核");
 
   if (assessment.suggestedAction === "reject") {
     add("reject.enabled", policy.autoRejectEnabled ? "pass" : "fail", policy.autoRejectEnabled ? "Automatic rejection is enabled." : "Automatic rejection is disabled.");
     if (!policy.autoRejectEnabled) return finish("manual_review", "未启用自动拒绝");
     const patternHit = policy.blockedPatterns.find((pattern) => pattern && postText.toLocaleLowerCase().includes(pattern.toLocaleLowerCase()));
     add("reject.pattern_substring", patternHit ? "pass" : "fail", patternHit ? `Matched configured literal substring: ${patternHit}` : "No configured literal substring matched.", "literal_substring");
-    const confidencePass = assessment.confidence >= policy.minimumConfidence;
+    const riskPass = policy.autoRejectRiskLevels.includes(assessment.riskLevel as "high" | "critical");
+    const category = assessment.categories.find((item) => policy.allowedAutoRejectCategories.includes(item));
+    add("reject.risk", riskPass ? "pass" : "fail", riskPass ? `Risk level is configured for rejection: ${assessment.riskLevel}.` : "Risk level is not configured for automatic rejection.");
+    add("reject.category_allowlist", category ? "pass" : "fail", category ? `Category is allowlisted: ${category}` : "No assessed category is allowlisted for rejection.");
+    const confidencePass = assessment.confidence >= policy.autoRejectMinimumConfidence;
     add("reject.confidence", confidencePass ? "pass" : "fail", confidencePass ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
-    if (patternHit && confidencePass) return finish("reject", `命中已配置规则且达到置信度门槛：${patternHit}`);
-    return finish("manual_review", patternHit ? "拒绝决策未达到置信度门槛" : "没有命中管理员配置的明确拒绝规则");
+    if (riskPass && category && patternHit && confidencePass) return finish("reject", `高风险、命中拒绝白名单和已配置规则且达到置信度门槛：${category}`);
+    return finish("manual_review", !riskPass || !category ? "拒绝类别或风险级别未获管理员明确授权" : patternHit ? "拒绝决策未达到置信度门槛" : "没有命中管理员配置的明确拒绝规则");
   }
 
+  if (assessment.riskLevel !== "low") return finish("manual_review", "中高风险必须人工审核");
+  const approveThreshold = policy.autoApproveMinimumConfidence ?? policy.minimumConfidence;
   add("approve.enabled", policy.autoApproveEnabled ? "pass" : "fail", policy.autoApproveEnabled ? "Automatic approval is enabled." : "Automatic approval is disabled.");
-  add("assessment.confidence", assessment.confidence >= policy.minimumConfidence ? "pass" : "fail", assessment.confidence >= policy.minimumConfidence ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
+  add("assessment.confidence", assessment.confidence >= approveThreshold ? "pass" : "fail", assessment.confidence >= approveThreshold ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
   add("assessment.suggested_action", assessment.suggestedAction === "approve" ? "pass" : "fail", assessment.suggestedAction === "approve" ? "Assessment suggests approval." : "Assessment does not suggest approval.");
-  if (!policy.autoApproveEnabled || assessment.confidence < policy.minimumConfidence || assessment.suggestedAction !== "approve") return finish("manual_review", "AI 拒绝建议缺少达到置信度门槛的明确规则命中");
+  if (!policy.autoApproveEnabled || assessment.confidence < approveThreshold || assessment.suggestedAction !== "approve") return finish("manual_review", "AI 通过建议未达到配置的置信度门槛");
 
   const samplePass = signals.validatedSamples >= policy.minimumValidatedSamples;
   add("calibration.samples", samplePass ? "pass" : "fail", samplePass ? "Validated sample minimum is met." : "Validated sample minimum is not met.");

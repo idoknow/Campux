@@ -1192,7 +1192,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       }).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to auto-tag post");
       });
-      void assessPostForReview({ tenantId: context.selectedTenant.id, postId: post.id, logger: request.log }).catch((error) => {
+      void assessPostForReview({ tenantId: context.selectedTenant.id, postId: post.id, logger: request.log, onAssessmentReady: (readyPostId) => oneBot?.notifyAiReviewAssistance(readyPostId) ?? Promise.resolve() }).catch((error) => {
         app.log.warn({ error, postId: post.id }, "failed to assess post for AI review");
       });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason } from "./post-review";
+import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason, postReviewSystemPrompt } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
 
 describe("withTenantReviewSlot", () => {
@@ -17,6 +17,15 @@ describe("withTenantReviewSlot", () => {
     await Promise.all([first, second]);
   });
 });
+describe("global post review prompt", () => {
+  it("covers euphemism and context-sensitive risks while avoiding guesses", () => {
+    expect(postReviewSystemPrompt).toContain("委婉表达");
+    expect(postReviewSystemPrompt).toContain("上下文指代");
+    expect(postReviewSystemPrompt).toContain("不要猜测");
+    expect(postReviewSystemPrompt).toContain("倾向 manual_review");
+  });
+});
+
 describe("parsePostReviewAssessment", () => {
   it("exposes persisted shadow results as comparison-only analysis", () => {
     const shadowRecord = { id: "analysis-1", mode: "shadow", status: "completed", riskLevel: "high", confidence: 0.9, categories: ["privacy"], sensitiveFindings: [], suggestedAction: "manual_review", reasons: ["reason"], maskedText: null, rewrittenText: null, rejectionReason: null };

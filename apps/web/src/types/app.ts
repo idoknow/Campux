@@ -447,7 +447,7 @@ export type ReviewPostItem = PostItem & {
     displayName: string | null;
   } | null;
   timeline?: PostTimelineEntry[];
-  aiReview?: { mode: "assist" | "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; analysisId?: string; autoDecisionReason?: string | null; assessment?: { riskLevel: "low" | "medium" | "high" | "critical"; categories: string[]; sensitiveFindings: Array<{ type: string; excerpt: string; reason: string }>; suggestedAction: "approve" | "revise" | "reject" | "manual_review"; reasons: string[]; confidence: number; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null } } | null;
+  aiReview?: { mode: "assist" | "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; analysisId?: string; autoDecisionReason?: string | null; assessment?: { riskLevel: "low" | "medium" | "high" | "critical"; categories: string[]; sensitiveFindings: Array<{ type: string; excerpt: string; reason: string }>; suggestedAction: "approve" | "reject" | "manual_review"; reasons: string[]; confidence: number; maskedText: string | null; rewrittenText: string | null; rejectionReason: string | null } } | null;
   aiAutoDecision?: { action: string; reason: string; analysisId: string; trace?: AutoModerationTrace } | null;
 };
 
@@ -677,7 +677,7 @@ export type AiRules = {
     strictPrivacy?: boolean | undefined;
   };
   aiReviewMode?: "off" | "shadow" | "assist" | "auto";
-  autoModeration: { enabled?: boolean | undefined; globalKillSwitch?: boolean | undefined; autoApproveEnabled?: boolean | undefined; autoRejectEnabled?: boolean | undefined; allowedAutoApproveCategories?: string[] | undefined; blockedPatterns?: string[] | undefined; minimumConfidence?: number | undefined; minimumValidatedSamples?: number | undefined; delaySeconds?: number | undefined; };
+  autoModeration: { enabled?: boolean | undefined; globalKillSwitch?: boolean | undefined; autoApproveEnabled?: boolean | undefined; autoRejectEnabled?: boolean | undefined; allowedAutoApproveCategories?: string[] | undefined; allowedAutoRejectCategories?: string[] | undefined; autoRejectRiskLevels?: Array<"high" | "critical"> | undefined; blockedPatterns?: string[] | undefined; minimumConfidence?: number | undefined; autoApproveMinimumConfidence?: number | undefined; autoRejectMinimumConfidence?: number | undefined; minimumValidatedSamples?: number | undefined; delaySeconds?: number | undefined; };
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;
   /** 是否启用投稿后的 LLM 自动打标 */

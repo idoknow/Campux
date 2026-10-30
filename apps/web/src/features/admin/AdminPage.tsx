@@ -175,7 +175,7 @@ type AiSettingsForm = {
   privatePostAiEnabled: boolean;
   aiReviewRules: { blockedPatterns: string[]; allowedCategories: string[]; tone: string; strictPrivacy: boolean };
   aiReviewMode: "off" | "shadow" | "assist" | "auto";
-  autoModeration: { enabled: boolean; globalKillSwitch: boolean; autoApproveEnabled: boolean; autoRejectEnabled: boolean; allowedAutoApproveCategories: string[]; blockedPatterns: string[]; minimumConfidence: number; minimumValidatedSamples: number; delaySeconds: number };
+  autoModeration: { enabled: boolean; globalKillSwitch: boolean; autoApproveEnabled: boolean; autoRejectEnabled: boolean; allowedAutoApproveCategories: string[]; allowedAutoRejectCategories: string[]; autoRejectRiskLevels: Array<"high" | "critical">; blockedPatterns: string[]; minimumConfidence: number; autoApproveMinimumConfidence: number; autoRejectMinimumConfidence: number; minimumValidatedSamples: number; delaySeconds: number };
   postTaggingEnabled: boolean;
   postTagMaintenanceEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
@@ -1219,28 +1219,6 @@ export function AdminPage({
                 <details className="product-surface overflow-hidden">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
                     <div>
-                      <p className="text-base font-semibold text-slate-950">学校实体词典与审核反馈</p>
-                      <p className="mt-1 text-sm text-slate-600">当前租户隔离管理；实体仅用于辅助分析，不会自动成为校园事实或触发审核决定。</p>
-                    </div>
-                    <Badge className="rounded-full bg-sky-50 text-sky-700 shadow-none">AI 数据</Badge>
-                  </summary>
-                  <div className="grid gap-3 border-t border-slate-200 p-4">
-                    <p className="text-sm text-slate-700">分析 {aiReviewMetrics?.total ?? 0} 条；人工判断一致 {aiReviewMetrics?.feedback.matched ?? 0} 条，覆盖 {aiReviewMetrics?.feedback.overridden ?? 0} 条。</p>
-                    <Button variant="outline" disabled={aiReviewLoading} onClick={() => void (async () => { try { await api("/api/admin/ai-review/snapshots/refresh", { method: "POST", body: JSON.stringify({}) }); toast.success("学校模型快照已更新"); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "快照更新失败"); } })()}>更新学校模型快照</Button>
-                    {aiReviewLoading ? <p className="text-sm text-slate-500">读取中…</p> : null}
-                    <div className="grid gap-2 md:grid-cols-4">
-                      <Select value={aiEntityForm.type} onValueChange={(type) => setAiEntityForm({ ...aiEntityForm, type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{[["location", "地点"], ["class", "班级"], ["person_alias", "人物别名"], ["organization", "组织"], ["topic", "话题"], ["risky_phrase", "风险短语"], ["service", "校园服务"]].map(([value, label]) => <SelectItem key={value ?? label} value={value ?? "location"}>{label}</SelectItem>)}</SelectContent></Select>
-                      <Input value={aiEntityForm.name} maxLength={120} placeholder="实体名称" onChange={(event) => setAiEntityForm({ ...aiEntityForm, name: event.target.value })} />
-                      <Input value={aiEntityForm.aliases} placeholder="别名，逗号分隔" onChange={(event) => setAiEntityForm({ ...aiEntityForm, aliases: event.target.value })} />
-                      <Select value={aiEntityForm.sensitivity} onValueChange={(sensitivity) => setAiEntityForm({ ...aiEntityForm, sensitivity })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="normal">普通</SelectItem><SelectItem value="sensitive">敏感</SelectItem><SelectItem value="blocked">高风险</SelectItem></SelectContent></Select>
-                    </div>
-                    <Button disabled={busy || !aiEntityForm.name.trim()} onClick={() => void (async () => { try { const result = await api<{ entity: (typeof aiReviewEntities)[number] }>("/api/admin/ai-review/entities", { method: "POST", body: JSON.stringify({ ...aiEntityForm, aliases: aiEntityForm.aliases.split(/[，,]/).map((value) => value.trim()).filter(Boolean).slice(0, 20), confidence: 1 }) }); setAiReviewEntities((items) => [...items.filter((item) => item.id !== result.entity.id), result.entity]); setAiEntityForm({ ...aiEntityForm, name: "", aliases: "" }); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "保存实体失败"); } })()}>添加或更新实体</Button>
-                    <div className="grid gap-2">{aiReviewEntities.map((entity) => <div key={entity.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm"><span>{entity.type} · {entity.name}{entity.aliases.length ? `（${entity.aliases.join("、")}）` : ""} · {entity.sensitivity}</span><Button variant="outline" size="sm" onClick={() => void (async () => { try { await api(`/api/admin/ai-review/entities/${entity.id}`, { method: "DELETE" }); setAiReviewEntities((items) => items.filter((item) => item.id !== entity.id)); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除实体失败"); } })()}>删除</Button></div>)}</div>
-                  </div>
-                </details>
-                <details className="product-surface overflow-hidden">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
-                    <div>
                       <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
                         <p className="text-sm leading-6 text-slate-600">当前审核模式：{aiForm?.aiReviewMode === "auto" ? "自动决策" : aiForm?.aiReviewMode === "assist" ? "仅人工参考" : aiForm?.aiReviewMode === "shadow" ? "仅审计记录" : "关闭"}。自动决策仅处理通过租户策略、校准及延迟检查的内容；其他稿件转人工。运维可随时全局停止。</p>
                     </div>
@@ -1271,9 +1249,12 @@ export function AdminPage({
                     <label className="flex items-center justify-between text-sm">自动通过低风险白名单类别<Switch checked={aiForm?.autoModeration.autoApproveEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoApproveEnabled: checked } })} /></label>
                     <label className="flex items-center justify-between text-sm">精确规则命中时自动拒绝<Switch checked={aiForm?.autoModeration.autoRejectEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectEnabled: checked } })} /></label>
                     <label className="grid gap-1 text-sm">自动通过类别（每行一条）<Textarea value={aiForm?.autoModeration.allowedAutoApproveCategories.join("\n") ?? ""} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, allowedAutoApproveCategories: lines(event.target.value).slice(0, 40) } })} /></label>
+                    <label className="grid gap-1 text-sm">自动拒绝类别（每行一条）<Textarea value={aiForm?.autoModeration.allowedAutoRejectCategories.join("\n") ?? ""} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, allowedAutoRejectCategories: lines(event.target.value).slice(0, 40) } })} /></label>
+                    <label className="grid gap-1 text-sm">自动拒绝风险等级<select className="rounded-md border px-2 py-1" multiple value={aiForm?.autoModeration.autoRejectRiskLevels ?? ["high", "critical"]} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectRiskLevels: Array.from(event.target.selectedOptions, (option) => option.value as "high" | "critical") } })}><option value="high">高</option><option value="critical">严重</option></select></label>
                     <label className="grid gap-1 text-sm">自动拒绝规则（每行一条）<Textarea value={aiForm?.autoModeration.blockedPatterns.join("\n") ?? ""} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, blockedPatterns: lines(event.target.value).slice(0, 100) } })} /></label>
                     <div className="grid gap-2 md:grid-cols-2">
-                    <label className="grid gap-1 text-sm">最低置信度<Input type="number" min={0.9} max={1} step={0.01} value={aiForm?.autoModeration.minimumConfidence ?? 0.98} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, minimumConfidence: Number(event.target.value) } })} /></label>
+                    <label className="grid gap-1 text-sm">自动通过最低置信度<Input type="number" min={0.9} max={1} step={0.01} value={aiForm?.autoModeration.autoApproveMinimumConfidence ?? 0.98} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoApproveMinimumConfidence: Number(event.target.value) } })} /></label>
+                    <label className="grid gap-1 text-sm">自动拒绝最低置信度<Input type="number" min={0.9} max={1} step={0.01} value={aiForm?.autoModeration.autoRejectMinimumConfidence ?? 0.99} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectMinimumConfidence: Number(event.target.value) } })} /></label>
                     <label className="grid gap-1 text-sm">校准样本门槛<Input type="number" min={5} max={10000} value={aiForm?.autoModeration.minimumValidatedSamples ?? 100} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, minimumValidatedSamples: Number(event.target.value) } })} /></label>
                     <label className="grid gap-1 text-sm">延迟执行秒数<Input type="number" min={30} max={120} value={aiForm?.autoModeration.delaySeconds ?? 60} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, delaySeconds: Number(event.target.value) } })} /></label>
                     </div>
@@ -1323,6 +1304,29 @@ export function AdminPage({
                     </button>
                     {aiSectionOpen ? (
                       <div className="border-t border-slate-200 p-3">
+                <details className="product-surface overflow-hidden">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
+                    <div>
+                      <p className="text-base font-semibold text-slate-950">学校实体词典与审核反馈</p>
+                      <p className="mt-1 text-sm text-slate-600">当前租户隔离管理；实体仅用于辅助分析，不会自动成为校园事实或触发审核决定。</p>
+                    </div>
+                    <Badge className="rounded-full bg-sky-50 text-sky-700 shadow-none">AI 数据</Badge>
+                  </summary>
+                  <div className="grid gap-3 border-t border-slate-200 p-4">
+                    <p className="text-sm text-slate-700">分析 {aiReviewMetrics?.total ?? 0} 条；人工判断一致 {aiReviewMetrics?.feedback.matched ?? 0} 条，覆盖 {aiReviewMetrics?.feedback.overridden ?? 0} 条。</p>
+                    <Button variant="outline" disabled={aiReviewLoading} onClick={() => void (async () => { try { await api("/api/admin/ai-review/snapshots/refresh", { method: "POST", body: JSON.stringify({}) }); toast.success("学校模型快照已更新"); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "快照更新失败"); } })()}>更新学校模型快照</Button>
+                    {aiReviewLoading ? <p className="text-sm text-slate-500">读取中…</p> : null}
+                    <div className="grid gap-2 md:grid-cols-4">
+                      <Select value={aiEntityForm.type} onValueChange={(type) => setAiEntityForm({ ...aiEntityForm, type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{[["location", "地点"], ["class", "班级"], ["person_alias", "人物别名"], ["organization", "组织"], ["topic", "话题"], ["risky_phrase", "风险短语"], ["service", "校园服务"]].map(([value, label]) => <SelectItem key={value ?? label} value={value ?? "location"}>{label}</SelectItem>)}</SelectContent></Select>
+                      <Input value={aiEntityForm.name} maxLength={120} placeholder="实体名称" onChange={(event) => setAiEntityForm({ ...aiEntityForm, name: event.target.value })} />
+                      <Input value={aiEntityForm.aliases} placeholder="别名，逗号分隔" onChange={(event) => setAiEntityForm({ ...aiEntityForm, aliases: event.target.value })} />
+                      <Select value={aiEntityForm.sensitivity} onValueChange={(sensitivity) => setAiEntityForm({ ...aiEntityForm, sensitivity })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="normal">普通</SelectItem><SelectItem value="sensitive">敏感</SelectItem><SelectItem value="blocked">高风险</SelectItem></SelectContent></Select>
+                    </div>
+                    <Button disabled={busy || !aiEntityForm.name.trim()} onClick={() => void (async () => { try { const result = await api<{ entity: (typeof aiReviewEntities)[number] }>("/api/admin/ai-review/entities", { method: "POST", body: JSON.stringify({ ...aiEntityForm, aliases: aiEntityForm.aliases.split(/[，,]/).map((value) => value.trim()).filter(Boolean).slice(0, 20), confidence: 1 }) }); setAiReviewEntities((items) => [...items.filter((item) => item.id !== result.entity.id), result.entity]); setAiEntityForm({ ...aiEntityForm, name: "", aliases: "" }); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "保存实体失败"); } })()}>添加或更新实体</Button>
+                    <div className="grid gap-2">{aiReviewEntities.map((entity) => <div key={entity.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm"><span>{entity.type} · {entity.name}{entity.aliases.length ? `（${entity.aliases.join("、")}）` : ""} · {entity.sensitivity}</span><Button variant="outline" size="sm" onClick={() => void (async () => { try { await api(`/api/admin/ai-review/entities/${entity.id}`, { method: "DELETE" }); setAiReviewEntities((items) => items.filter((item) => item.id !== entity.id)); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除实体失败"); } })()}>删除</Button></div>)}</div>
+                  </div>
+                </details>
+
                         <AdminAiSettingsPanel
                           settings={aiSettings}
                           form={aiForm}
@@ -4248,9 +4252,13 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
       globalKillSwitch: settings.rules.autoModeration?.globalKillSwitch ?? false,
       autoApproveEnabled: settings.rules.autoModeration?.autoApproveEnabled ?? false,
       autoRejectEnabled: settings.rules.autoModeration?.autoRejectEnabled ?? false,
-      allowedAutoApproveCategories: settings.rules.autoModeration?.allowedAutoApproveCategories ?? [],
+      allowedAutoApproveCategories: settings.rules.autoModeration?.allowedAutoApproveCategories ?? ["campus_news", "campus_event", "lost_and_found"],
+      allowedAutoRejectCategories: settings.rules.autoModeration?.allowedAutoRejectCategories ?? ["scam", "harassment", "personal_information", "dangerous_content"],
+      autoRejectRiskLevels: settings.rules.autoModeration?.autoRejectRiskLevels ?? ["high", "critical"],
       blockedPatterns: settings.rules.autoModeration?.blockedPatterns ?? [],
       minimumConfidence: settings.rules.autoModeration?.minimumConfidence ?? 0.98,
+      autoApproveMinimumConfidence: settings.rules.autoModeration?.autoApproveMinimumConfidence ?? 0.98,
+      autoRejectMinimumConfidence: settings.rules.autoModeration?.autoRejectMinimumConfidence ?? 0.99,
       minimumValidatedSamples: settings.rules.autoModeration?.minimumValidatedSamples ?? 100,
       delaySeconds: settings.rules.autoModeration?.delaySeconds ?? 60,
     },

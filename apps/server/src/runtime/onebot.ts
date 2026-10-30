@@ -31,7 +31,7 @@ import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, parsePostRecallOrCancelCommand, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
-import { assessPostForReview } from "./post-review";
+import { assessPostForReview, parsePostReviewAnalysisRecord, type PostReviewAssessment } from "./post-review";
 import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { setBotCustomStylishMessages } from "../lib/bot-messages";
@@ -265,6 +265,21 @@ const PERMANENT_BAN_ENDS_AT = new Date("9999-12-31T23:59:59.999Z");
 export function resolvePrivateForwardGroupId(bot: { privateForwardGroupId?: string | null }): string | null {
   const target = bot.privateForwardGroupId?.trim();
   return target ? target : null;
+}
+
+export function buildAiReviewForwardNodes(displayId: number, review: NonNullable<ReturnType<typeof parsePostReviewAnalysisRecord>>): Array<{ type: "node"; data: { name: string; nickname: string; uin: string; user_id: string; qq: string; content: OneBotMessageSegment[] } }> {
+  const lines = [`AI 辅助审核 #${displayId}（${review.mode === "assist" ? "仅供参考" : "自动审核"}；不替代人工判断）`, `分析状态：${review.status}`];
+  if (review.status === "completed" && review.assessment) {
+    const a = review.assessment;
+    lines.push(`风险：${a.riskLevel}`, `建议：${a.suggestedAction}`, `置信度：${a.confidence}`, `类别：${a.categories.join("、") || "无"}`, `理由：${a.reasons.join("；")}`);
+    for (const finding of a.sensitiveFindings) lines.push(`发现：${finding.type}「${finding.excerpt}」— ${finding.reason}`);
+    if (a.maskedText) lines.push(`脱敏建议：${a.maskedText}`);
+    if (a.rewrittenText) lines.push(`改写建议：${a.rewrittenText}`);
+    if (a.rejectionReason) lines.push(`拒绝理由建议：${a.rejectionReason}`);
+  } else lines.push("AI 未能完成分析，请人工审核，不要据此推断稿件安全或违规。");
+  if (review.mode === "auto") lines.push(`自动决定：${review.autoDecision ?? "人工审核"}`, `决定说明：${review.autoDecisionReason ?? "请以人工审核为准"}`);
+  const text = lines.join("\n");
+  return [{ type: "node", data: { name: "Campux AI 审核助手", nickname: "Campux AI 审核助手", uin: "0", user_id: "0", qq: "0", content: [{ type: "text", data: { text } }] } }];
 }
 
 /**
@@ -772,6 +787,27 @@ export class OneBotRuntime {
         : lines.join("\n");
 
     await this.sendBotReviewGroupMessage(bot, message, "failed to notify review group");
+  }
+
+  async notifyAiReviewAssistance(postId: string) {
+    const post = await prisma.post.findUnique({ where: { id: postId }, select: { id: true, tenantId: true, displayId: true } });
+    if (!post) return;
+    const bot = await this.findTenantReviewNotificationBot(post.tenantId);
+    if (!bot?.reviewGroupId) return;
+    void (async () => {
+      try {
+        const record = await prisma.postAiAnalysis.findFirst({
+          where: { tenantId: post.tenantId, postId: post.id, mode: { in: ["assist", "auto"] } }, orderBy: [{ version: "desc" }],
+          select: { id: true, mode: true, status: true, riskLevel: true, confidence: true, categories: true, sensitiveFindings: true, suggestedAction: true, reasons: true, maskedText: true, rewrittenText: true, rejectionReason: true, autoDecision: true, autoDecisionReason: true },
+        });
+        if (!record || (record.mode !== "assist" && record.mode !== "auto")) return;
+        const review = parsePostReviewAnalysisRecord(record);
+        if (!review) return;
+        await this.callAction(bot.qqUin.toString(), "send_group_forward_msg", { group_id: Number(bot.reviewGroupId), messages: buildAiReviewForwardNodes(post.displayId, review) });
+      } catch (error) {
+        this.logger.warn({ error, postId, botQqUin: bot.qqUin.toString(), groupId: bot.reviewGroupId }, "failed to send AI review assistance forward");
+      }
+    })();
   }
 
   async notifyPostCancelled(postId: string) {
@@ -3290,7 +3326,7 @@ export class OneBotRuntime {
         this.logger.warn({ error, postId: post.id }, "failed to notify review group from private post");
       });
     }
-    void assessPostForReview({ tenantId: bot.tenantId, postId: post.id, logger: this.logger }).catch((error) => {
+    void assessPostForReview({ tenantId: bot.tenantId, postId: post.id, logger: this.logger, onAssessmentReady: (readyPostId) => this.notifyAiReviewAssistance(readyPostId) }).catch((error) => {
       this.logger.warn({ error, postId: post.id }, "failed to assess private post for AI review");
     });
 

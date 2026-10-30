@@ -34,8 +34,12 @@ export type AiRules = {
     autoApproveEnabled?: boolean | undefined;
     autoRejectEnabled?: boolean | undefined;
     allowedAutoApproveCategories?: string[] | undefined;
+    allowedAutoRejectCategories?: string[] | undefined;
+    autoRejectRiskLevels?: Array<"high" | "critical"> | undefined;
     blockedPatterns?: string[] | undefined;
     minimumConfidence?: number | undefined;
+    autoApproveMinimumConfidence?: number | undefined;
+    autoRejectMinimumConfidence?: number | undefined;
     minimumValidatedSamples?: number | undefined;
     delaySeconds?: number | undefined;
   } | undefined;
@@ -87,7 +91,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
   timeoutSeconds: 30,
   rules: {
     aiReviewMode: "off",
-    autoModeration: { enabled: false, globalKillSwitch: false, autoApproveEnabled: false, autoRejectEnabled: false, allowedAutoApproveCategories: [], blockedPatterns: [], minimumConfidence: 0.98, minimumValidatedSamples: 100, delaySeconds: 60 },
+    autoModeration: { enabled: false, globalKillSwitch: false, autoApproveEnabled: false, autoRejectEnabled: false, allowedAutoApproveCategories: ["campus_news", "campus_event", "lost_and_found"], allowedAutoRejectCategories: ["scam", "harassment", "personal_information", "dangerous_content"], autoRejectRiskLevels: ["high", "critical"], blockedPatterns: [], minimumConfidence: 0.98, autoApproveMinimumConfidence: 0.98, autoRejectMinimumConfidence: 0.99, minimumValidatedSamples: 100, delaySeconds: 60 },
     privatePostAiEnabled: false,
     postTaggingEnabled: true,
     postTagMaintenanceEnabled: true,
@@ -315,8 +319,12 @@ function normalizeAutoModeration(value: unknown): NonNullable<AiRules["autoModer
     autoApproveEnabled: candidate.autoApproveEnabled === true,
     autoRejectEnabled: candidate.autoRejectEnabled === true,
     allowedAutoApproveCategories: normalizeStringArray(candidate.allowedAutoApproveCategories).slice(0, 40).map((item) => item.slice(0, 80)),
+    allowedAutoRejectCategories: normalizeStringArray(candidate.allowedAutoRejectCategories ?? defaultAiSettings.rules.autoModeration?.allowedAutoRejectCategories).slice(0, 40).map((item) => item.slice(0, 80)),
+    autoRejectRiskLevels: Array.isArray(candidate.autoRejectRiskLevels) ? candidate.autoRejectRiskLevels.filter((item): item is "high" | "critical" => item === "high" || item === "critical") : ["high", "critical"],
     blockedPatterns: normalizeStringArray(candidate.blockedPatterns).slice(0, 100).map((item) => item.slice(0, 160)),
     minimumConfidence: clampNumber(candidate.minimumConfidence, 0.9, 1, 0.98),
+    autoApproveMinimumConfidence: clampNumber(candidate.autoApproveMinimumConfidence, 0.9, 1, 0.98),
+    autoRejectMinimumConfidence: clampNumber(candidate.autoRejectMinimumConfidence, 0.9, 1, 0.99),
     minimumValidatedSamples: normalizeNumber(candidate.minimumValidatedSamples, 5, 10000, 100),
     delaySeconds: normalizeNumber(candidate.delaySeconds, 30, 120, 60),
   };

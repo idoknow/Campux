@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { PostReviewAssessment } from "./post-review";
 import { evaluateAutoModerationDecision, type AutoModerationPolicy } from "./auto-moderation";
 
-const policy: AutoModerationPolicy = { enabled: true, autoApproveEnabled: true, autoRejectEnabled: true, allowedAutoApproveCategories: ["campus_news"], blockedPatterns: ["直接转账"], minimumConfidence: 0.98, minimumValidatedSamples: 100, delaySeconds: 60, globalKillSwitch: false };
+const policy: AutoModerationPolicy = { enabled: true, autoApproveEnabled: true, autoRejectEnabled: true, allowedAutoApproveCategories: ["campus_news"], allowedAutoRejectCategories: ["scam"], autoRejectRiskLevels: ["high", "critical"], blockedPatterns: ["直接转账"], minimumConfidence: 0.98, autoApproveMinimumConfidence: 0.98, autoRejectMinimumConfidence: 0.99, minimumValidatedSamples: 100, delaySeconds: 60, globalKillSwitch: false };
 const assessment = (overrides: Partial<PostReviewAssessment> = {}): PostReviewAssessment => ({ schemaVersion: 1, riskLevel: "low", categories: ["campus_news"], sensitiveFindings: [], suggestedAction: "approve", reasons: [], confidence: 0.99, maskedText: null, rewrittenText: null, rejectionReason: null, ...overrides });
 const signals = { validatedSamples: 200, matchedCategoryRates: { campus_news: { total: 120, matched: 119 } } };
 const evaluate = (a = assessment(), p = policy, s = signals, text = "校园新闻") => evaluateAutoModerationDecision({ assessment: a, policy: p, signals: s, postText: text });
@@ -27,11 +27,18 @@ describe("automatic moderation explicit policy trace", () => {
   });
   test("reject requires enabled rule, literal case-insensitive substring hit and confidence", () => {
     const a = assessment({ suggestedAction: "reject" });
-    expect(evaluate(a, policy, signals, "要求直接转账")).toMatchObject({ action: "reject", reason: "命中已配置规则且达到置信度门槛：直接转账", trace: { finalAction: "reject" } });
+    expect(evaluate(assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["scam"] }), policy, signals, "要求直接转账")).toMatchObject({ action: "reject", reason: "高风险、命中拒绝白名单和已配置规则且达到置信度门槛：scam", trace: { finalAction: "reject" } });
     expect(evaluate(a, { ...policy, autoRejectEnabled: false }, signals, "直接转账").reason).toBe("未启用自动拒绝");
     expect(evaluate(assessment({ suggestedAction: "reject", confidence: 0.97 }), policy, signals, "直接转账").reason).toBe("拒绝决策未达到置信度门槛");
     expect(evaluate(a, policy, signals, "通常情况下转账需要谨慎").action).toBe("manual_review");
-    expect(evaluate(a, policy, signals, "这里是直接转账的引用讨论").action).toBe("reject");
+    expect(evaluate(assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["scam"] }), policy, signals, "这里是直接转账的引用讨论").action).toBe("reject");
+  });
+  test("reject requires explicit high-risk mapping, category, configured pattern, and its own threshold", () => {
+    const assessmentReject = assessment({ suggestedAction: "reject", riskLevel: "high", categories: ["scam"], confidence: 0.985 });
+    expect(evaluate(assessmentReject, policy, signals, "直接转账").action).toBe("manual_review");
+    expect(evaluate(assessmentReject, { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "直接转账").action).toBe("reject");
+    expect(evaluate(assessment({ ...assessmentReject, categories: ["other"] }), { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "直接转账").action).toBe("manual_review");
+    expect(evaluate(assessment({ ...assessmentReject, riskLevel: "medium" }), { ...policy, autoRejectMinimumConfidence: 0.98 }, signals, "直接转账").action).toBe("manual_review");
   });
   test("model reject without exact configured substring hit is not auto-rejected", () => {
     const result = evaluate(assessment({ suggestedAction: "reject" }), policy, signals, "普通校园新闻");
@@ -41,9 +48,9 @@ describe("automatic moderation explicit policy trace", () => {
   });
   test("approval gates each flag, confidence, action, samples, category, and agreement", () => {
     const cases = [
-      [assessment({ suggestedAction: "approve" }), { ...policy, autoApproveEnabled: false }, signals, "校园新闻", "AI 拒绝建议缺少达到置信度门槛的明确规则命中"],
-      [assessment({ confidence: 0.97 }), policy, signals, "校园新闻", "AI 拒绝建议缺少达到置信度门槛的明确规则命中"],
-      [assessment({ suggestedAction: "revise" }), policy, signals, "校园新闻", "AI 拒绝建议缺少达到置信度门槛的明确规则命中"],
+      [assessment({ suggestedAction: "approve" }), { ...policy, autoApproveEnabled: false }, signals, "校园新闻", "AI 通过建议未达到配置的置信度门槛"],
+      [assessment({ confidence: 0.97 }), policy, signals, "校园新闻", "AI 通过建议未达到配置的置信度门槛"],
+      [assessment({ suggestedAction: "revise" }), policy, signals, "校园新闻", "AI 通过建议未达到配置的置信度门槛"],
       [assessment(), policy, { ...signals, validatedSamples: 0 }, "校园新闻", "有效人工校准样本不足"],
       [assessment({ categories: ["unknown"] }), policy, signals, "校园新闻", "投稿类别不在自动通过白名单"],
       [assessment(), policy, { ...signals, matchedCategoryRates: { campus_news: { total: 100, matched: 97 } } }, "校园新闻", "该类别人工校准一致率不足"],

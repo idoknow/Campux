@@ -25,6 +25,7 @@ import {
   shouldHandleReviewGroupCommandForBot,
   stripPrivateReplyHelpLines,
   buildForwardNodes,
+  buildAiReviewForwardNodes,
   sanitizeForwardSegments,
   sanitizeSegmentsForGroupSend,
   isDefinitiveForwardRejection,
@@ -780,6 +781,26 @@ describe("自定义审核群提示过滤 #回复", () => {
 
   test("没有 #回复 行时原样返回（去掉首尾空白）", () => {
     expect(stripPrivateReplyHelpLines("  审核命令：\n#通过 <稿件id>  ")).toBe("审核命令：\n#通过 <稿件id>");
+  });
+});
+
+describe("AI 审核辅助合并转发", () => {
+  test("构建独立的伪合并转发节点，附带审核建议但不带原帖附件", () => {
+    const [node] = buildAiReviewForwardNodes(42, {
+      mode: "assist", status: "completed",
+      assessment: { riskLevel: "medium", categories: ["隐私"], sensitiveFindings: [{ type: "隐私", excerpt: "某同学", reason: "可能指向具体个人" }], suggestedAction: "manual_review", reasons: ["语境不明确"], confidence: 0.6, maskedText: null, rewrittenText: null, rejectionReason: null },
+    });
+    expect(node?.type).toBe("node");
+    expect(node?.data).toMatchObject({ name: "Campux AI 审核助手", nickname: "Campux AI 审核助手", uin: "0", user_id: "0", qq: "0" });
+    expect(node?.data.content).toEqual([{ type: "text", data: { text: expect.stringContaining("语境不明确") } }]);
+    expect(node?.data.content[0]?.data?.text).toContain("AI 辅助审核 #42");
+  });
+
+  test("auto模式与分析失败均明确提示人工复核", () => {
+    const [auto] = buildAiReviewForwardNodes(3, { mode: "auto", status: "completed", autoDecision: "manual_review", autoDecisionReason: "不确定" });
+    const [failed] = buildAiReviewForwardNodes(4, { mode: "assist", status: "failed" });
+    expect(auto?.data.content[0]?.data?.text).toContain("自动决定：manual_review");
+    expect(failed?.data.content[0]?.data?.text).toContain("请人工审核");
   });
 });
 
