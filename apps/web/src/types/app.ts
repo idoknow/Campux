@@ -249,6 +249,7 @@ export type TenantPluginConfig = {
   };
   botAlert: {
     enabled: boolean;
+    notifyOnDisconnect: boolean;
     smtpHost: string;
     smtpPort: number;
     smtpUser: string;
