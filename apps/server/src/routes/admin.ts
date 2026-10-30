@@ -12,7 +12,7 @@ import {
 import { decryptJson, encryptJson } from "../lib/secret-json";
 import { writeAuditLog } from "../lib/audit";
 import { buildUserContainsSearch, findUserIdsByContainsSearch } from "../lib/user-search";
-import { defaultPublishIntervalSeconds, enqueueAttempt, resumePublishAttemptsWaitingForCookies, schedulePublishAttempt } from "../runtime/publishing";
+import { defaultPublishIntervalSeconds, enqueueAttempt, resumePublishAttemptsWaitingForCookies, schedulePublishAttempt, schedulePublishAttemptInTransaction, lockPublishQuota, reserveTenantPublishQuota, quotaReservationPostIdsForAttempt } from "../runtime/publishing";
 import { pushFollowedPostCommentDigestForPost } from "../runtime/followed-post-comments";
 import { readTenantFollowedPostCommentNotifyEnabled } from "../lib/tenant-metadata";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -1428,14 +1428,21 @@ export function registerAdminRoutes(app: FastifyInstance, queue: RuntimeQueue, o
       return reply.code(404).send({ message: "发布记录不存在" });
     }
 
-    const { attempt: updated, nextRunAt } = await schedulePublishAttempt({
-      tenantId: context.selectedTenant.id,
-      postId: attempt.postId,
-      publishTargetId: attempt.publishTargetId,
-      botAccountId: attempt.publishTarget.botAccountId,
-      intervalSeconds: attempt.publishTarget.publishDelaySeconds,
-      excludeAttemptId: attempt.id,
-      resetAttempt: true,
+    const { attempt: updated, nextRunAt } = await prisma.$transaction(async (tx) => {
+      // SQLite obtains its write lock before any read within the transaction.
+      await lockPublishQuota(tx, context.selectedTenant.id);
+      const quotaPostIds = await quotaReservationPostIdsForAttempt(tx, attempt);
+      const quotaAt = (await reserveTenantPublishQuota(tx, context.selectedTenant.id, quotaPostIds)).reduce<Date | null>((latest, slot) => slot && (!latest || slot > latest) ? slot : latest, null);
+      return schedulePublishAttemptInTransaction(tx, {
+        tenantId: context.selectedTenant.id,
+        postId: attempt.postId,
+        publishTargetId: attempt.publishTargetId,
+        botAccountId: attempt.publishTarget.botAccountId,
+        intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+        excludeAttemptId: attempt.id,
+        resetAttempt: true,
+        quotaAt: quotaAt ?? null,
+      });
     });
     enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
 

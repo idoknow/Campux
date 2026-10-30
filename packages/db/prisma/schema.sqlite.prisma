@@ -112,6 +112,7 @@ model Tenant {
   botFriendSnapshots BotFriendSnapshot[]
   publishBatches PublishBatch[]
   feedbacks      TenantFeedback[]
+  quotaReservations TenantPublishQuotaReservation[]
 }
 
 model User {
@@ -395,6 +396,7 @@ model Post {
   @@unique([tenantId, id])
   @@unique([tenantId, legacyDisplayId])
   @@index([tenantId, status, createdAt])
+  quotaReservations TenantPublishQuotaReservation[]
   @@index([tenantId, status, reviewQueueReminderSentAt])
 }
 
@@ -575,6 +577,22 @@ model PublishTarget {
   attempts            PublishAttempt[]
 
   @@index([tenantId, enabled])
+}
+
+model TenantPublishQuotaReservation {
+  id         String   @id @default(uuid())
+  tenantId   String
+  postId     String
+  periodType String
+  periodStart DateTime
+  status     String   @default("reserved")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post       Post     @relation(fields: [tenantId, postId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, postId, periodType, periodStart])
+  @@index([tenantId, periodType, periodStart, status])
 }
 
 model PublishAttempt {

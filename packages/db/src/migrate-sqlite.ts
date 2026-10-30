@@ -30,6 +30,7 @@ const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
 const AUTO_MODERATION_SCHEDULE_MIGRATION_NAME = "20261024120000_ai_auto_moderation_schedule_quota";
 const PRIVATE_FORWARD_GROUP_MIGRATION_NAME = "20261029120000_add_private_forward_group";
+const TENANT_PUBLISH_QUOTA_MIGRATION_NAME = "20261027120000_durable_tenant_publish_quota_reservations";
 
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
@@ -769,6 +770,52 @@ function applyPostPendingTagsSqliteMigration(
   logger.info({ migration: POST_PENDING_TAGS_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
+function applyTenantPublishQuotaReservationSqliteMigration(db: Database, doneNames: Set<string>, applied: string[], skipped: string[], logger: SqliteMigrateLogger): void {
+  if (doneNames.has(TENANT_PUBLISH_QUOTA_MIGRATION_NAME)) { skipped.push(TENANT_PUBLISH_QUOTA_MIGRATION_NAME); return; }
+  const hasTable = db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='TenantPublishQuotaReservation'").get() !== null;
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Tenant'").get() || !db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Post'").get()) return;
+  logger.info({ migration: TENANT_PUBLISH_QUOTA_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasTable) db.exec(`CREATE TABLE "TenantPublishQuotaReservation" (
+      "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL,
+      "periodType" TEXT NOT NULL CHECK ("periodType" IN ('hourly', 'daily')), "periodStart" DATETIME NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'reserved' CHECK ("status" IN ('reserved', 'consumed', 'released')),
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" DATETIME NOT NULL,
+      CONSTRAINT "TenantPublishQuotaReservation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "TenantPublishQuotaReservation_tenantId_postId_fkey" FOREIGN KEY ("tenantId", "postId") REFERENCES "Post"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    else {
+      const columns = db.query(`PRAGMA table_info("TenantPublishQuotaReservation")`).all() as Array<{ name: string }>;
+      const indexes = db.query(`PRAGMA index_list("TenantPublishQuotaReservation")`).all() as Array<{ name: string; unique: number }>;
+      const fks = db.query(`PRAGMA foreign_key_list("TenantPublishQuotaReservation")`).all() as Array<{ table: string; from: string; to: string; seq: number }>;
+      const grouped = new Map<string, Array<{ from: string; to: string; seq: number }>>();
+      for (const fk of fks) grouped.set(fk.table, [...(grouped.get(fk.table) ?? []), fk]);
+      const postFk = (grouped.get("Post") ?? []).sort((a, b) => a.seq - b.seq);
+      const tenantFk = (grouped.get("Tenant") ?? []).sort((a, b) => a.seq - b.seq);
+      const indexColumns = (name: string) => (db.query(`PRAGMA index_info(${JSON.stringify(name)})`).all() as Array<{ seqno: number; name: string }>).sort((a, b) => a.seqno - b.seqno).map((column) => column.name);
+      const required = ["id", "tenantId", "postId", "periodType", "periodStart", "status", "createdAt", "updatedAt"];
+      if (required.some((name) => !columns.some((column) => column.name === name)) ||
+        !indexes.some((index) => index.unique && index.name === "TenantPublishQuotaReservation_tenantId_postId_periodType_periodStart_key" && indexColumns(index.name).join(",") === "tenantId,postId,periodType,periodStart") ||
+        !indexes.some((index) => !index.unique && index.name === "TenantPublishQuotaReservation_tenantId_periodType_periodStart_status_idx" && indexColumns(index.name).join(",") === "tenantId,periodType,periodStart,status") ||
+        tenantFk.length !== 1 || tenantFk[0]?.from !== "tenantId" || tenantFk[0]?.to !== "id" ||
+        postFk.length !== 2 || postFk[0]?.from !== "tenantId" || postFk[0]?.to !== "tenantId" || postFk[1]?.from !== "postId" || postFk[1]?.to !== "id") {
+        throw new Error("Existing TenantPublishQuotaReservation table has an incompatible schema; refusing to mark migration applied");
+      }
+      const tableSql = (db.query(`SELECT sql FROM sqlite_master WHERE type='table' AND name='TenantPublishQuotaReservation'`).get() as { sql: string }).sql;
+      if (!tableSql.includes("'hourly'") || !tableSql.includes("'daily'") || !tableSql.includes("'consumed'") || !tableSql.includes("'released'")) {
+        throw new Error("Existing TenantPublishQuotaReservation table lacks period/status CHECK constraints");
+      }
+    }
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "TenantPublishQuotaReservation_tenantId_postId_periodType_periodStart_key" ON "TenantPublishQuotaReservation"("tenantId", "postId", "periodType", "periodStart")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "TenantPublishQuotaReservation_tenantId_periodType_periodStart_status_idx" ON "TenantPublishQuotaReservation"("tenantId", "periodType", "periodStart", "status")`);
+    const violations = db.query("PRAGMA foreign_key_check").all();
+    if (violations.length) throw new Error(`sqlite migration introduced ${violations.length} foreign-key violation(s)`);
+    db.run(`INSERT INTO "_prisma_migrations" ("id","checksum","migration_name","started_at","finished_at","applied_steps_count") VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`, [randomUUID(), checksumOf("durable tenant publish quota reservations"), TENANT_PUBLISH_QUOTA_MIGRATION_NAME]);
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
+  doneNames.add(TENANT_PUBLISH_QUOTA_MIGRATION_NAME); applied.push(TENANT_PUBLISH_QUOTA_MIGRATION_NAME);
+}
+
 function applyAutoModerationScheduleSqliteMigration(
   db: Database,
   doneNames: Set<string>,
@@ -943,7 +990,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -970,6 +1017,7 @@ export function applySqliteBaseline(
     applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyAutoModerationScheduleSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPrivateForwardGroupSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyTenantPublishQuotaReservationSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

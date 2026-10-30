@@ -18,8 +18,9 @@ import { isQZoneProtocolAutoRefreshCooldownError, isQZoneProtocolAutoRefreshTran
 import { joinBatchCaptions } from "./publish-batching";
 import { generatePublishSummary } from "./publish-summary";
 import {
-  countTenantSuccessfulPublishes,
+  listTenantSuccessfulPublishPostIds,
   readTenantPublishRateLimits,
+  publishRateLimitWindowStart,
   nextPublishRateLimitWindowEnd,
   readTenantPublishLlmSummaryEnabled,
 } from "../lib/tenant-metadata";
@@ -94,6 +95,35 @@ const publishSkipReasons = {
 } as const;
 
 type PublishScheduleClient = typeof prisma | Prisma.TransactionClient;
+
+export function countDistinctQuotaManuscripts(logPostIds: string[], reservations: Array<{ postId: string; periodType: string; periodStart: Date; status: string }>, periodType: "hourly" | "daily", periodStart: Date, excludeIds: readonly string[] = []) {
+  const excluded = new Set(excludeIds);
+  const manuscripts = new Set(logPostIds.filter((id) => !excluded.has(id)));
+  for (const row of reservations) {
+    if ((row.status === "reserved" || row.status === "consumed")
+      && row.periodType === periodType
+      && row.periodStart.getTime() === periodStart.getTime()
+      && !excluded.has(row.postId)) manuscripts.add(row.postId);
+  }
+  return manuscripts.size;
+}
+
+export function assignedQuotaAt(reservations: Array<{ periodType: string; periodStart: Date; status: string }>, limits: { hourly: number; daily: number }, now?: Date) {
+  const required = (["hourly", "daily"] as const).filter((type) => limits[type] > 0);
+  if (!required.length) return null;
+  const active = reservations.filter((row) => row.status === "reserved");
+  const assignedStarts = required.map((type) => {
+    const windowStart = now
+      ? publishRateLimitWindowStart(now, type === "hourly" ? "hour" : "day").getTime()
+      : Number.NEGATIVE_INFINITY;
+    const starts = active
+      .filter((row) => row.periodType === type && row.periodStart.getTime() >= windowStart)
+      .map((row) => row.periodStart.getTime());
+    return starts.length ? Math.max(...starts) : null;
+  });
+  if (assignedStarts.some((start) => start === null)) return null;
+  return new Date(Math.max(...assignedStarts as number[]));
+}
 
 type PublishingNotifier = {
   notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
@@ -622,15 +652,22 @@ export async function requeueExpiredFailedPublishAttempts(queue: RuntimeQueue, l
   const attempts = candidates.filter((attempt) => shouldAutomaticallyRequeueFailedAttempt(attempt.lastError));
 
   for (const attempt of attempts) {
-    const { attempt: updated, nextRunAt } = await schedulePublishAttempt({
-      tenantId: attempt.tenantId,
-      postId: attempt.postId,
-      publishTargetId: attempt.publishTargetId,
-      botAccountId: attempt.publishTarget.botAccountId,
-      batchId: attempt.batchId,
-      intervalSeconds: attempt.publishTarget.publishDelaySeconds,
-      excludeAttemptId: attempt.id,
-      resetAttempt: true,
+    const { attempt: updated, nextRunAt } = await prisma.$transaction(async (tx) => {
+      await lockPublishQuota(tx, attempt.tenantId);
+      const quotaPostIds = await quotaReservationPostIdsForAttempt(tx, attempt);
+      const quotaAtValues = await reserveTenantPublishQuota(tx, attempt.tenantId, quotaPostIds);
+      const quotaAt = quotaAtValues.reduce<Date | null>((latest, value) => !latest || value > latest ? value : latest, null);
+      return schedulePublishAttemptInTransaction(tx, {
+        tenantId: attempt.tenantId,
+        postId: attempt.postId,
+        publishTargetId: attempt.publishTargetId,
+        botAccountId: attempt.publishTarget.botAccountId,
+        batchId: attempt.batchId,
+        intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+        excludeAttemptId: attempt.id,
+        resetAttempt: true,
+        quotaAt: quotaAt ?? null,
+      });
     });
     enqueueAttempt(queue, updated.tenantId, updated.id, nextRunAt);
     await prisma.postLog.create({
@@ -732,24 +769,13 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
     await lockPublishFanout(tx, tenantId, `post:${postId}`);
     const currentPost = await tx.post.findUnique({
       where: { id: postId },
-      select: {
-        status: true,
-        publishAttempts: {
-          select: { id: true, status: true },
-        },
-      },
+      select: { status: true, publishAttempts: { select: { id: true, status: true } } },
     });
-    if (
-      !currentPost
-      || shouldSkipPublishFanout({
-        ownerStatus: currentPost.status,
-        attempts: currentPost.publishAttempts,
-      })
-    ) {
-      return [];
-    }
-
+    if (!currentPost || shouldSkipPublishFanout({ ownerStatus: currentPost.status, attempts: currentPost.publishAttempts })) return [];
+    const quotaSlots = await reserveTenantPublishQuota(tx, tenantId, [postId]);
+    const quotaAt = quotaSlots[0] ?? null;
     if (targets.length === 0) {
+      await tx.tenantPublishQuotaReservation.updateMany({ where: { tenantId, postId, status: "reserved" }, data: { status: "consumed" } });
       await tx.post.update({
         where: { id: postId },
         data: {
@@ -792,6 +818,7 @@ export async function enqueuePublishFanout(queue: RuntimeQueue, tenantId: string
         publishTargetId: target.id,
         botAccountId: target.botAccountId,
         intervalSeconds: publishTargetIntervalSeconds(target),
+        quotaAt: quotaAt,
       });
       results.push(scheduled);
     }
@@ -853,6 +880,7 @@ export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string
   // 与 enqueuePublishFanout / enqueueBatchPublishFanout 一致，避免并发 requeue 双入队。
   const scheduledAttempts = await prisma.$transaction(async (tx) => {
     await lockPublishFanout(tx, tenantId, `requeue:${postId}`);
+    await lockPublishQuota(tx, tenantId);
     const currentPost = await tx.post.findUnique({
       where: { id: postId },
       select: { id: true, status: true },
@@ -860,6 +888,7 @@ export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string
     if (!currentPost) {
       return [];
     }
+    const [quotaAt] = await reserveTenantPublishQuota(tx, tenantId, [postId]);
 
     await tx.post.update({
       where: {
@@ -886,6 +915,7 @@ export async function requeuePublishFanout(queue: RuntimeQueue, tenantId: string
         publishTargetId: target.id,
         botAccountId: target.botAccountId,
         intervalSeconds: publishTargetIntervalSeconds(target),
+        quotaAt: quotaAt ?? null,
         resetAttempt: true,
       });
       results.push(scheduled);
@@ -989,6 +1019,10 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
       return [];
     }
 
+    // Each manuscript in the batch consumes one quota unit.
+    await lockPublishQuota(tx, tenantId);
+    const quotaSlots = await reserveTenantPublishQuota(tx, tenantId, postIds);
+
     await tx.publishBatch.update({
       where: { id: batch.id },
       data: { status: "publishing" },
@@ -996,6 +1030,7 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
 
     if (targets.length === 0) {
       for (const postId of postIds) {
+        await tx.tenantPublishQuotaReservation.updateMany({ where: { tenantId, postId, status: "reserved" }, data: { status: "consumed" } });
         await tx.post.update({
           where: { id: postId },
           data: {
@@ -1037,6 +1072,7 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
       });
     }
 
+    const batchQuotaAt = quotaSlots.length ? new Date(Math.max(...quotaSlots.map((slot) => slot.getTime()))) : null;
     const scheduledAttempts = [];
     for (const target of targets) {
       const scheduled = await schedulePublishAttemptInTransaction(tx, {
@@ -1046,6 +1082,7 @@ export async function enqueueBatchPublishFanout(queue: RuntimeQueue, tenantId: s
         botAccountId: target.botAccountId,
         batchId: batch.id,
         intervalSeconds: publishTargetIntervalSeconds(target),
+        quotaAt: batchQuotaAt,
       });
       scheduledAttempts.push(scheduled);
     }
@@ -1121,16 +1158,24 @@ export function resolveEarliestPublishDispatchAt(options: {
   return new Date(Math.max(options.now.getTime(), latestActivityAtMs + intervalMs));
 }
 
-export async function resolveTenantPublishQuotaDeferral(tenantId: string, now: Date, client: PublishScheduleClient = prisma): Promise<Date | null> {
+export async function resolveTenantPublishQuotaDeferral(tenantId: string, now: Date, client: PublishScheduleClient = prisma, excludePostId?: string, excludePostIds: string[] = []): Promise<Date | null> {
   const limits = await readTenantPublishRateLimits(client, tenantId);
-  const hourStart = new Date(now);
-  hourStart.setMinutes(0, 0, 0);
-  const dayStart = new Date(now);
-  dayStart.setHours(0, 0, 0, 0);
-  const [hourlyCount, dailyCount] = await Promise.all([
-    limits.hourly > 0 ? countTenantSuccessfulPublishes(client, tenantId, hourStart, nextPublishRateLimitWindowEnd(now, "hour")) : 0,
-    limits.daily > 0 ? countTenantSuccessfulPublishes(client, tenantId, dayStart, nextPublishRateLimitWindowEnd(now, "day")) : 0,
+  const hourStart = publishRateLimitWindowStart(now, "hour");
+  const dayStart = publishRateLimitWindowStart(now, "day");
+  const excludedPostIds = new Set([...(excludePostId ? [excludePostId] : []), ...excludePostIds]);
+  const reservationWhere = { tenantId, status: { in: ["reserved", "consumed"] }, periodStart: { gte: dayStart, lt: nextPublishRateLimitWindowEnd(now, "day") }, ...(excludedPostIds.size ? { postId: { notIn: [...excludedPostIds] } } : {}) };
+  const reservationRows = await Promise.all([
+    limits.hourly > 0 ? client.tenantPublishQuotaReservation.findMany({ where: { ...reservationWhere, periodType: "hourly", periodStart: hourStart }, select: { postId: true, periodType: true, periodStart: true, status: true } }) : [],
+    limits.daily > 0 ? client.tenantPublishQuotaReservation.findMany({ where: { ...reservationWhere, periodType: "daily", periodStart: dayStart }, select: { postId: true, periodType: true, periodStart: true, status: true } }) : [],
   ]);
+  const [hourLogs, dayLogs, hourReservations, dayReservations] = await Promise.all([
+    limits.hourly > 0 ? listTenantSuccessfulPublishPostIds(client, tenantId, hourStart, nextPublishRateLimitWindowEnd(now, "hour")) : [],
+    limits.daily > 0 ? listTenantSuccessfulPublishPostIds(client, tenantId, dayStart, nextPublishRateLimitWindowEnd(now, "day")) : [],
+    reservationRows[0], reservationRows[1],
+  ]);
+  const excluded = [...excludedPostIds];
+  const hourlyCount = countDistinctQuotaManuscripts(hourLogs, hourReservations, "hourly", hourStart, excluded);
+  const dailyCount = countDistinctQuotaManuscripts(dayLogs, dayReservations, "daily", dayStart, excluded);
   if (limits.hourly > 0 && hourlyCount >= limits.hourly) return nextPublishRateLimitWindowEnd(now, "hour");
   if (limits.daily > 0 && dailyCount >= limits.daily) return nextPublishRateLimitWindowEnd(now, "day");
   return null;
@@ -1191,14 +1236,15 @@ type SchedulePublishAttemptOptions = {
   intervalSeconds?: number | null;
   excludeAttemptId?: string;
   resetAttempt?: boolean;
+  quotaAt?: Date | null;
 };
 
-async function schedulePublishAttemptInTransaction(
+export async function schedulePublishAttemptInTransaction(
   tx: Prisma.TransactionClient,
   options: SchedulePublishAttemptOptions,
 ) {
   await lockPublishSchedule(tx, options.tenantId, options.botAccountId);
-  const nextRunAt = await resolveNextPublishRunAt(
+  const resolvedRunAt = await resolveNextPublishRunAt(
     {
       tenantId: options.tenantId,
       botAccountId: options.botAccountId,
@@ -1207,6 +1253,7 @@ async function schedulePublishAttemptInTransaction(
     },
     tx,
   );
+  const nextRunAt = options.quotaAt && options.quotaAt > resolvedRunAt ? options.quotaAt : resolvedRunAt;
   const whereUnique = options.batchId
     ? { batchId_publishTargetId: { batchId: options.batchId, publishTargetId: options.publishTargetId } }
     : { postId_publishTargetId: { postId: options.postId, publishTargetId: options.publishTargetId } };
@@ -1242,6 +1289,131 @@ export async function schedulePublishAttempt(options: SchedulePublishAttemptOpti
   });
 }
 
+export async function lockPublishQuota(tx: Prisma.TransactionClient, tenantId: string) {
+  if (supportsAdvisoryLock) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:publish-quota:${tenantId}`})::bigint)`;
+    return;
+  }
+  // SQLite has no advisory transaction locks. A no-op UPDATE takes the database
+  // write lock before reading quota state, serializing allocators across workers.
+  await tx.$executeRaw`UPDATE "Tenant" SET "updatedAt" = "updatedAt" WHERE "id" = ${tenantId}`;
+}
+
+export async function reserveTenantPublishQuota(tx: Prisma.TransactionClient, tenantId: string, postIds: string[], now = new Date()): Promise<Date[]> {
+  await lockPublishQuota(tx, tenantId);
+  const limits = await readTenantPublishRateLimits(tx, tenantId);
+  const hourStart = publishRateLimitWindowStart(now, "hour");
+  const dayStart = publishRateLimitWindowStart(now, "day");
+  const [hourLogIds, dayLogIds] = await Promise.all([
+    limits.hourly > 0 ? listTenantSuccessfulPublishPostIds(tx, tenantId, hourStart, nextPublishRateLimitWindowEnd(now, "hour")) : [],
+    limits.daily > 0 ? listTenantSuccessfulPublishPostIds(tx, tenantId, dayStart, nextPublishRateLimitWindowEnd(now, "day")) : [],
+  ]);
+  const reservations = await tx.tenantPublishQuotaReservation.findMany({ where: { tenantId, status: { in: ["reserved", "consumed"] }, periodStart: { gte: dayStart, lt: nextPublishRateLimitWindowEnd(now, "day") } }, select: { postId: true, periodType: true, periodStart: true, status: true } });
+  const allocationPostIds = [...new Set(postIds)];
+  const allocations: Date[] = [];
+  for (const postId of allocationPostIds) {
+    const excludedAllocationPostIds = new Set<string>();
+    const existing = reservations.filter((row) => row.postId === postId && row.status === "reserved");
+    const currentHourStart = publishRateLimitWindowStart(now, "hour");
+    const currentDayStart = publishRateLimitWindowStart(now, "day");
+    const dayRow = existing.find((row) => row.periodType === "daily" && row.periodStart.getTime() === currentDayStart.getTime());
+    const hourRow = existing.find((row) => row.periodType === "hourly" && row.periodStart.getTime() === currentHourStart.getTime());
+    if ((!limits.daily || dayRow) && (!limits.hourly || hourRow) && (limits.daily || limits.hourly)) {
+      allocations.push(new Date(Math.max(dayRow?.periodStart.getTime() ?? 0, hourRow?.periodStart.getTime() ?? 0)));
+      continue;
+    }
+    // Do not let yesterday's/different-hour reservation masquerade as a current slot.
+    // Retire stale active rows before allocating replacements for the current window.
+    const staleStarts = existing.filter((row) =>
+      (row.periodType === "daily" && row.periodStart.getTime() !== currentDayStart.getTime())
+      || (row.periodType === "hourly" && row.periodStart.getTime() !== currentHourStart.getTime()));
+    for (const stale of staleStarts) {
+      await tx.tenantPublishQuotaReservation.updateMany({
+        where: { tenantId, postId, periodType: stale.periodType, periodStart: stale.periodStart, status: "reserved" },
+        data: { status: "released" },
+      });
+      stale.status = "released";
+    }
+    let cursor = new Date(now);
+    // Bound allocator work even if metadata or window math is corrupt. At most
+    // one year's worth of hourly windows are considered before failing closed.
+    let windowsScanned = 0;
+    while (windowsScanned < 24 * 366) {
+      windowsScanned += 1;
+      const hs = publishRateLimitWindowStart(cursor, "hour");
+      const ds = publishRateLimitWindowStart(cursor, "day");
+      const he = nextPublishRateLimitWindowEnd(cursor, "hour");
+      const de = nextPublishRateLimitWindowEnd(cursor, "day");
+      const [hourLogIds, dayLogIds] = await Promise.all([
+        limits.hourly ? listTenantSuccessfulPublishPostIds(tx, tenantId, hs, he) : [],
+        limits.daily ? listTenantSuccessfulPublishPostIds(tx, tenantId, ds, de) : [],
+      ]);
+      const hc = countDistinctQuotaManuscripts(hourLogIds, reservations, "hourly", hs, [...excludedAllocationPostIds]);
+      const dc = countDistinctQuotaManuscripts(dayLogIds, reservations, "daily", ds, [...excludedAllocationPostIds]);
+      if ((!limits.hourly || hc < limits.hourly) && (!limits.daily || dc < limits.daily)) {
+        const quotaAt = new Date(Math.max(now.getTime(), cursor.getTime()));
+        for (const [type, periodStart] of [["hourly", publishRateLimitWindowStart(quotaAt, "hour")], ["daily", publishRateLimitWindowStart(quotaAt, "day")]] as const) {
+          if ((type === "hourly" && !limits.hourly) || (type === "daily" && !limits.daily)) continue;
+          await tx.tenantPublishQuotaReservation.updateMany({ where: { tenantId, postId, periodType: type, periodStart }, data: { status: "reserved" } });
+          await tx.tenantPublishQuotaReservation.createMany({ data: [{ tenantId, postId, periodType: type, periodStart, status: "reserved" }], skipDuplicates: true });
+          reservations.push({ postId, periodType: type, periodStart, status: "reserved" });
+        }
+        allocations.push(quotaAt);
+        break;
+      }
+      const nextCursorMs = Math.max(
+        limits.hourly && hc >= limits.hourly ? he.getTime() : cursor.getTime(),
+        limits.daily && dc >= limits.daily ? de.getTime() : cursor.getTime(),
+      );
+      if (!Number.isFinite(nextCursorMs) || nextCursorMs <= cursor.getTime()) {
+        throw new Error("Unable to allocate tenant publish quota slot safely");
+      }
+      cursor = new Date(nextCursorMs);
+    }
+    if (windowsScanned >= 24 * 366) {
+      throw new Error("Tenant publish quota slot search exceeded its bounded window");
+    }
+  }
+  return allocations;
+}
+
+export function quotaReservationPostIdsForPublication(input: { batchId: string | null; postId: string }, batchPostIds: string[] = []) {
+  return input.batchId ? [...new Set(batchPostIds.length ? batchPostIds : [input.postId])] : [input.postId];
+}
+
+export function queuedAttemptDeferral(status: string, nextRunAt: Date | null, now: Date) {
+  return status === "queued" && nextRunAt && nextRunAt > now ? nextRunAt : null;
+}
+
+export function shouldReleasePublishQuotaReservation(input: { terminal: boolean; ambiguous: boolean }) {
+  return input.terminal && !input.ambiguous;
+}
+
+export async function quotaReservationPostIdsForAttempt(tx: Prisma.TransactionClient, attempt: { batchId: string | null; postId: string }) {
+  if (!attempt.batchId) return [attempt.postId];
+  const items = await tx.publishBatchItem.findMany({ where: { batchId: attempt.batchId }, select: { postId: true } });
+  return quotaReservationPostIdsForPublication(attempt, items.map((item) => item.postId));
+}
+
+async function consumeTenantPublishQuota(tx: Prisma.TransactionClient, tenantId: string, postIds: string[]) {
+  await tx.tenantPublishQuotaReservation.updateMany({ where: { tenantId, postId: { in: postIds }, status: "reserved" }, data: { status: "consumed" } });
+}
+
+export async function releaseTenantPublishQuota(tx: Prisma.TransactionClient, tenantId: string, postIds: string[]) {
+  await tx.tenantPublishQuotaReservation.updateMany({ where: { tenantId, postId: { in: postIds }, status: "reserved" }, data: { status: "released" } });
+}
+
+async function tryLockPublishQuota(tx: Prisma.TransactionClient, tenantId: string) {
+  if (!supportsAdvisoryLock) {
+    await lockPublishQuota(tx, tenantId);
+    return true;
+  }
+  const rows = await tx.$queryRaw<Array<{ locked: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(hashtext(${`campux:publish-quota:${tenantId}`})::bigint) AS "locked"
+  `;
+  return rows[0]?.locked === true;
+}
+
 async function lockPublishFanout(tx: Prisma.TransactionClient, tenantId: string, ownerKey: string) {
   if (supportsAdvisoryLock) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`campux:fanout:${tenantId}:${ownerKey}`})::bigint)`;
@@ -1256,11 +1428,8 @@ async function lockPublishSchedule(tx: Prisma.TransactionClient, tenantId: strin
 }
 
 async function tryLockPublishSchedule(tx: Prisma.TransactionClient, tenantId: string, botAccountId: string) {
-  // 与 lockPublishSchedule 同一把锁，但被占用时立即返回 false 而不是阻塞等待：
-  // 认领事务跑在单并发派发的 runtime queue 里，阻塞会拖住所有租户的无关任务。
-  if (!supportsAdvisoryLock) {
-    return true;
-  }
+  // try a per-bot lock without blocking other tenant workers
+  if (!supportsAdvisoryLock) return true;
   const rows = await tx.$queryRaw<Array<{ locked: boolean }>>`
     SELECT pg_try_advisory_xact_lock(hashtext(${`campux:publish:${tenantId}:${botAccountId}`})::bigint) AS "locked"
   `;
@@ -1323,13 +1492,19 @@ export async function resumePublishAttemptsWaitingForCookies(queue: RuntimeQueue
   });
 
   for (const attempt of attempts) {
-    const { attempt: updated, nextRunAt } = await schedulePublishAttempt({
-      tenantId: attempt.tenantId,
-      postId: attempt.postId,
-      publishTargetId: attempt.publishTargetId,
-      botAccountId: attempt.publishTarget.botAccountId,
-      intervalSeconds: attempt.publishTarget.publishDelaySeconds,
-      excludeAttemptId: attempt.id,
+    const { attempt: updated, nextRunAt } = await prisma.$transaction(async (tx) => {
+      await lockPublishQuota(tx, attempt.tenantId);
+      const quotaPostIds = await quotaReservationPostIdsForAttempt(tx, attempt);
+      const quotaAt = (await reserveTenantPublishQuota(tx, attempt.tenantId, quotaPostIds)).reduce<Date | null>((latest, slot) => slot && (!latest || slot > latest) ? slot : latest, null);
+      return schedulePublishAttemptInTransaction(tx, {
+        tenantId: attempt.tenantId,
+        postId: attempt.postId,
+        publishTargetId: attempt.publishTargetId,
+        botAccountId: attempt.publishTarget.botAccountId,
+        intervalSeconds: attempt.publishTarget.publishDelaySeconds,
+        excludeAttemptId: attempt.id,
+        quotaAt: quotaAt ?? null,
+      });
     });
     await prisma.postLog.create({
       data: {
@@ -1379,6 +1554,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     where: { id: attemptId },
     select: {
       tenantId: true,
+      postId: true,
+      batchId: true,
       post: { select: { tenant: { select: { status: true } } } },
       publishTarget: {
         select: {
@@ -1403,30 +1580,49 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     | { lockBusy: false; claimed: boolean; deferredUntil: Date | null };
   try {
     claimResult = await prisma.$transaction(async (tx) => {
+      if (!await tryLockPublishQuota(tx, dispatchTarget.tenantId)) {
+        return { lockBusy: true } as const;
+      }
       if (!await tryLockPublishSchedule(tx, dispatchTarget.tenantId, dispatchTarget.publishTarget.botAccountId)) {
         return { lockBusy: true } as const;
       }
       const latestAttempt = await tx.publishAttempt.findUnique({
         where: { id: attemptId },
-        select: { status: true },
+        select: { status: true, nextRunAt: true },
       });
       if (!latestAttempt || (latestAttempt.status !== "queued" && latestAttempt.status !== "failed")) {
         return { lockBusy: false as const, claimed: false, deferredUntil: null };
       }
+      // The queue job may arrive before a persisted quota/interval slot; retain it at that durable time.
+      if (queuedAttemptDeferral(latestAttempt.status, latestAttempt.nextRunAt, now)) {
+        return { lockBusy: false as const, claimed: false, deferredUntil: queuedAttemptDeferral(latestAttempt.status, latestAttempt.nextRunAt, now) };
+      }
       const limits = await readTenantPublishRateLimits(tx, dispatchTarget.tenantId);
-      const hourStart = new Date(now);
-      hourStart.setMinutes(0, 0, 0);
-      const dayStart = new Date(now);
-      dayStart.setHours(0, 0, 0, 0);
-      const [hourlyCount, dailyCount] = await Promise.all([
-        limits.hourly > 0 ? countTenantSuccessfulPublishes(tx, dispatchTarget.tenantId, hourStart, nextPublishRateLimitWindowEnd(now, "hour")) : 0,
-        limits.daily > 0 ? countTenantSuccessfulPublishes(tx, dispatchTarget.tenantId, dayStart, nextPublishRateLimitWindowEnd(now, "day")) : 0,
-      ]);
-      const quotaDeferredUntil = limits.hourly > 0 && hourlyCount >= limits.hourly
-        ? nextPublishRateLimitWindowEnd(now, "hour")
-        : limits.daily > 0 && dailyCount >= limits.daily
-          ? nextPublishRateLimitWindowEnd(now, "day")
-          : null;
+      const assignedReservations = await tx.tenantPublishQuotaReservation.findMany({
+        where: { tenantId: dispatchTarget.tenantId, postId: { in: dispatchTarget.batchId
+          ? [...new Set([dispatchTarget.postId, ...(await tx.publishBatchItem.findMany({ where: { batchId: dispatchTarget.batchId }, select: { postId: true } })).map((item) => item.postId)])]
+          : [dispatchTarget.postId] }, status: "reserved" },
+        select: { periodType: true, periodStart: true, status: true },
+      });
+      const assignedAt = assignedQuotaAt(assignedReservations, limits, now);
+      if (assignedAt && assignedAt > now) {
+        const existing = await tx.publishAttempt.findUnique({ where: { id: attemptId }, select: { nextRunAt: true } });
+        const deferredUntil = existing?.nextRunAt && existing.nextRunAt > assignedAt ? existing.nextRunAt : assignedAt;
+        const deferred = await tx.publishAttempt.updateMany({
+          where: { id: attemptId, status: { in: ["queued", "failed"] } },
+          data: { status: "queued", nextRunAt: deferredUntil, lastError: null },
+        });
+        return { lockBusy: false as const, claimed: false, deferredUntil: deferred.count > 0 ? deferredUntil : null };
+      }
+      const quotaDeferredUntil = await resolveTenantPublishQuotaDeferral(
+        dispatchTarget.tenantId,
+        now,
+        tx,
+        undefined,
+        dispatchTarget.batchId
+          ? [...new Set([dispatchTarget.postId, ...(await tx.publishBatchItem.findMany({ where: { batchId: dispatchTarget.batchId }, select: { postId: true } })).map((item) => item.postId)])]
+          : [dispatchTarget.postId],
+      );
       if (quotaDeferredUntil) {
         const deferred = await tx.publishAttempt.updateMany({
           where: { id: attemptId, status: { in: ["queued", "failed"] } },
@@ -1757,6 +1953,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
               nextRunAt: null,
             },
           });
+          await consumeTenantPublishQuota(transaction, attempt.tenantId, await quotaReservationPostIdsForAttempt(transaction, attempt));
           for (const target of postsToPublish) {
             await transaction.postLog.create({
               data: {
@@ -1906,6 +2103,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
             nextRunAt: null,
           },
         });
+        await consumeTenantPublishQuota(transaction, attempt.tenantId, await quotaReservationPostIdsForAttempt(transaction, attempt));
         for (const target of postsToPublish) {
           await transaction.postLog.create({
             data: {
@@ -2050,6 +2248,12 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       },
     });
 
+    if (!nextRunAt && shouldReleasePublishQuotaReservation({ terminal: true, ambiguous: ambiguousPublishOutcome || needsLogin })) {
+      await prisma.$transaction(async (transaction) => {
+        await lockPublishQuota(transaction, attempt.tenantId);
+        await releaseTenantPublishQuota(transaction, attempt.tenantId, await quotaReservationPostIdsForAttempt(transaction, attempt));
+      });
+    }
     await prisma.postLog.create({
       data: {
         tenantId: attempt.tenantId,

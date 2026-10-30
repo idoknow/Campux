@@ -2001,7 +2001,7 @@ function MetadataPanel({
           </label>
           <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
             <p className="text-sm font-semibold text-slate-900">自动发布频率限制</p>
-            <p className="text-xs text-slate-500">按校园墙统计成功发布的独立稿件数，多发布目标同一稿件只计一次。触顶后自动等到下一自然小时或自然日继续；0 表示不设该项上限。</p>
+            <p className="text-xs text-slate-500">按校园墙统计成功发布的独立稿件数；批量发布时每篇稿件各计 1 次，多发布目标不会重复计数。触顶后自动等到下一自然小时或自然日继续；0 表示不设该项上限。</p>
             <div className="grid gap-3 md:grid-cols-2">
               <label className="grid gap-1 text-sm font-medium">
                 每小时上限

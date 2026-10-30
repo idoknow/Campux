@@ -1780,23 +1780,29 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       return reply.code(409).send({ message: "只有待审核稿件可以取消" });
     }
 
-    const updated = await prisma.post.update({
-      where: {
-        id: post.id,
-      },
-      data: {
-        status: "cancelled",
-        logs: {
-          create: {
-            tenantId: context.selectedTenant.id,
-            actorId: context.user.id,
-            oldStatus: post.status,
-            newStatus: "cancelled",
-            comment: "用户取消",
-          },
+    const updated = await prisma.$transaction(async (transaction) => {
+      const changed = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, authorId: context.user.id, status: "pending_approval" },
+        data: { status: "cancelled" },
+      });
+      if (changed.count === 0) return null;
+      await transaction.postLog.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          postId: post.id,
+          actorId: context.user.id,
+          oldStatus: post.status,
+          newStatus: "cancelled",
+          comment: "用户取消",
         },
-      },
+      });
+      await transaction.tenantPublishQuotaReservation.updateMany({
+        where: { tenantId: context.selectedTenant.id, postId: post.id, status: "reserved" },
+        data: { status: "released" },
+      });
+      return transaction.post.findUniqueOrThrow({ where: { id: post.id } });
     });
+    if (!updated) return reply.code(409).send({ message: "稿件状态已变化，取消未生效" });
     oneBot?.notifyPostCancelled(updated.id).catch((error) => {
       app.log.warn({ error, postId: updated.id }, "failed to notify post cancellation");
     });

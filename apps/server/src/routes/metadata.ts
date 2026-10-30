@@ -61,7 +61,6 @@ const publicMetadataKeys = [
   "post_rules",
   "services",
   pendingPostLimitMetadataKey,
-  publishRateLimitMetadataKey,
   imageCompressionEnabledKey,
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
@@ -215,7 +214,7 @@ async function readLogoPartCapped(sourceStream: NodeJS.ReadableStream): Promise<
   }
 }
 
-async function readPublicMetadata(tenantId: string) {
+async function readPublicMetadata(tenantId: string, includeAdminLimits = false) {
   const entries = await prisma.tenantMetadata.findMany({
     where: {
       tenantId,
@@ -226,7 +225,9 @@ async function readPublicMetadata(tenantId: string) {
   });
 
   const metadata = normalizeMetadata(entries);
-  metadata.publishRateLimits = await readTenantPublishRateLimits(prisma, tenantId);
+  if (includeAdminLimits) {
+    metadata.publishRateLimits = await readTenantPublishRateLimits(prisma, tenantId);
+  }
   // 插件开关从 tenant_metadata.plugin_config 读取，保留对前端公开 metadata 的
   // 字段兼容性（投稿页、稿件事件的开关均走这里）。
   try {
@@ -419,22 +420,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       return reply.code(400).send({ message: "访问标识创建后不可修改" });
     }
 
-    if (body.tenantName !== undefined || body.themeColor !== undefined) {
-      const tenantUpdate: {
-        name?: string;
-        themeColor?: string;
-      } = {};
-      if (body.tenantName !== undefined) tenantUpdate.name = body.tenantName;
-      if (body.themeColor !== undefined) tenantUpdate.themeColor = body.themeColor;
-
-      await prisma.tenant.update({
-        where: {
-          id: context.selectedTenant.id,
-        },
-        data: tenantUpdate,
-      });
-    }
-
+    const tenantUpdate: { name?: string; themeColor?: string } = {};
+    if (body.tenantName !== undefined) tenantUpdate.name = body.tenantName;
+    if (body.themeColor !== undefined) tenantUpdate.themeColor = body.themeColor;
     const updates: Array<{ key: string; value: string | number | string[] | boolean | { hourly: number; daily: number } | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
     if (body.brand !== undefined) {
       updates.push({ key: "brand", value: body.brand });
@@ -449,15 +437,7 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       updates.push({ key: "post_rules", value: body.postRules });
     }
     if (body.publishRateLimitHourly !== undefined || body.publishRateLimitDaily !== undefined) {
-      const current = await readTenantPublishRateLimits(prisma, context.selectedTenant.id);
-      const next = {
-        hourly: body.publishRateLimitHourly ?? current.hourly,
-        daily: body.publishRateLimitDaily ?? current.daily,
-      };
-      if (!isValidPublishRateLimits(next)) {
-        return reply.code(400).send({ message: "每小时上限 × 12 不能超过每日上限" });
-      }
-      updates.push({ key: publishRateLimitMetadataKey, value: next });
+      // Rate pair is resolved inside the transaction that writes every PATCH field.
     }
     if (body.pendingPostLimit !== undefined) {
       updates.push({ key: pendingPostLimitMetadataKey, value: body.pendingPostLimit });
@@ -517,9 +497,16 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       updates.push({ key: operateModeKey, value: body.operateMode });
     }
 
-    await prisma.$transaction(
-      updates.map((entry) =>
-        prisma.tenantMetadata.upsert({
+    const valid = await prisma.$transaction(async (transaction) => {
+      // A real row update serializes concurrent partial-pair PATCH requests on both SQLite and PostgreSQL.
+      await transaction.tenant.update({ where: { id: context.selectedTenant.id }, data: { ...tenantUpdate, updatedAt: new Date() } });
+      if (body.publishRateLimitHourly !== undefined || body.publishRateLimitDaily !== undefined) {
+        const current = await readTenantPublishRateLimits(transaction, context.selectedTenant.id);
+        const next = { hourly: body.publishRateLimitHourly ?? current.hourly, daily: body.publishRateLimitDaily ?? current.daily };
+        if (!isValidPublishRateLimits(next)) return false;
+        updates.push({ key: publishRateLimitMetadataKey, value: next });
+      }
+      await Promise.all(updates.map((entry) => transaction.tenantMetadata.upsert({
           where: {
             tenantId_key: {
               tenantId: context.selectedTenant.id,
@@ -534,9 +521,10 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
             key: entry.key,
             value: entry.value,
           },
-        }),
-      ),
-    );
+        })));
+      return true;
+    });
+    if (!valid) return reply.code(400).send({ message: "每小时上限 × 12 不能超过每日上限" });
 
     await writeAuditLog({
       tenantId: context.selectedTenant.id,
@@ -544,13 +532,9 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       action: "tenant.metadata.update",
       targetType: "tenant",
       targetId: context.selectedTenant.id,
-      detail: {
-        fields: Object.keys(body),
-      },
+      detail: { fields: Object.keys(body) },
     });
-
     // 无 Bot 模式不需要墙号上线：选定后立即把墙标记为已开通，
-    // 否则 readyAt 永远为空，管理员会被一直困在开墙向导、其他人只能看到等待墙号页面。
     if (body.operateMode === "manual" && context.selectedTenant.readyAt === null) {
       const now = new Date();
       await prisma.tenant.update({
@@ -567,6 +551,6 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       });
     }
 
-    return readPublicMetadata(context.selectedTenant.id);
+    return readPublicMetadata(context.selectedTenant.id, true);
   });
 }

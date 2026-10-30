@@ -28,16 +28,26 @@ export function isValidPublishRateLimits(limits: PublishRateLimits) {
   return (limits.hourly === 0 || limits.daily === 0 || limits.hourly * 12 <= limits.daily);
 }
 
+export function publishRateLimitWindowStart(now: Date, period: "hour" | "day") {
+  const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+  const localTimestamp = now.getTime() + SHANGHAI_OFFSET_MS;
+  const boundary = period === "hour"
+    ? Math.floor(localTimestamp / HOUR_MS) * HOUR_MS
+    : Math.floor(localTimestamp / DAY_MS) * DAY_MS;
+  return new Date(boundary - SHANGHAI_OFFSET_MS);
+}
+
 export function nextPublishRateLimitWindowEnd(now: Date, period: "hour" | "day") {
-  const next = new Date(now);
-  if (period === "hour") {
-    next.setMinutes(0, 0, 0);
-    next.setHours(next.getHours() + 1);
-  } else {
-    next.setHours(0, 0, 0, 0);
-    next.setDate(next.getDate() + 1);
-  }
-  return next;
+  const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+  const localTimestamp = now.getTime() + SHANGHAI_OFFSET_MS;
+  const localBoundary = period === "hour"
+    ? (Math.floor(localTimestamp / HOUR_MS) + 1) * HOUR_MS
+    : (Math.floor(localTimestamp / DAY_MS) + 1) * DAY_MS;
+  return new Date(localBoundary - SHANGHAI_OFFSET_MS);
 }
 
 export async function readTenantPublishRateLimits(client: MetadataClient, tenantId: string): Promise<PublishRateLimits> {
@@ -45,13 +55,17 @@ export async function readTenantPublishRateLimits(client: MetadataClient, tenant
   return normalizePublishRateLimits(entry?.value);
 }
 
-export async function countTenantSuccessfulPublishes(client: MetadataClient, tenantId: string, since: Date, before: Date) {
+export async function listTenantSuccessfulPublishPostIds(client: MetadataClient, tenantId: string, since: Date, before: Date) {
   const rows = await client.postLog.findMany({
     where: { tenantId, newStatus: "published", createdAt: { gte: since, lt: before } },
     select: { postId: true },
     distinct: ["postId"],
   });
-  return rows.length;
+  return [...new Set(rows.map((row) => row.postId))];
+}
+
+export async function countTenantSuccessfulPublishes(client: MetadataClient, tenantId: string, since: Date, before: Date) {
+  return (await listTenantSuccessfulPublishPostIds(client, tenantId, since, before)).length;
 }
 
 

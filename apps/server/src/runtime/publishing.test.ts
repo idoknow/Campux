@@ -17,17 +17,89 @@ import {
   shouldAutomaticallyRequeueFailedAttempt,
   shouldAppendQqForumQZoneLink,
   shouldWaitForQZoneAttempt,
+  countDistinctQuotaManuscripts,
+  assignedQuotaAt,
   resolveTenantPublishQuotaDeferral,
+  quotaReservationPostIdsForPublication,
+  quotaReservationPostIdsForAttempt,
+  shouldReleasePublishQuotaReservation,
+  releaseTenantPublishQuota,
+  queuedAttemptDeferral,
 } from "./publishing";
 
 describe("tenant publish rate limit deferral", () => {
-  it("defers quota-limited publishes until the next natural hour", async () => {
-    const now = new Date("2026-07-24T13:42:00.000Z");
+  it("counts the distinct union of successful logs and matching reservation rows", () => {
+    const start = new Date("2026-07-24T05:00:00.000Z");
+    const rows = [
+      { postId: "overlap", periodType: "hourly", periodStart: start, status: "reserved" },
+      { postId: "consumed-only", periodType: "hourly", periodStart: start, status: "consumed" },
+      { postId: "other-window", periodType: "hourly", periodStart: new Date(start.getTime() - 3_600_000), status: "reserved" },
+      { postId: "other-period", periodType: "daily", periodStart: start, status: "reserved" },
+    ];
+    expect(countDistinctQuotaManuscripts(["overlap", "log-only", "log-only"], rows, "hourly", start)).toBe(3);
+    expect(countDistinctQuotaManuscripts(["overlap", "log-only"], rows, "hourly", start, ["overlap"])).toBe(1);
+    expect(countDistinctQuotaManuscripts([], [rows[1]!], "hourly", start)).toBe(1);
+    expect(countDistinctQuotaManuscripts([], [rows[1]!], "hourly", start, ["consumed-only"])).toBe(0);
+    expect(countDistinctQuotaManuscripts([], [rows[1]!, { postId: "another", periodType: "hourly", periodStart: start, status: "reserved" }], "hourly", start)).toBe(2);
+  });
+
+  it("assigns the latest required reserved period as a future dispatch slot", () => {
+    const hour = new Date("2026-07-24T06:00:00.000Z");
+    const day = new Date("2026-07-24T08:00:00.000Z");
+    expect(assignedQuotaAt([
+      { periodType: "hourly", periodStart: hour, status: "reserved" },
+      { periodType: "daily", periodStart: day, status: "reserved" },
+    ], { hourly: 1, daily: 1 }, new Date("2026-07-24T08:30:00.000Z"))).toBeNull();
+    expect(assignedQuotaAt([
+      { periodType: "hourly", periodStart: hour, status: "reserved" },
+      { periodType: "daily", periodStart: day, status: "reserved" },
+    ], { hourly: 1, daily: 1 })).toEqual(day);
+    const batchAssignedAt = assignedQuotaAt([
+      { periodType: "hourly", periodStart: hour, status: "reserved" },
+      { periodType: "daily", periodStart: new Date("2026-07-25T00:00:00.000Z"), status: "reserved" },
+    ], { hourly: 1, daily: 1 }, new Date("2026-07-24T05:42:00.000Z"));
+    expect(batchAssignedAt).toEqual(new Date("2026-07-25T00:00:00.000Z"));
+    expect(assignedQuotaAt([{ periodType: "hourly", periodStart: hour, status: "consumed" }], { hourly: 1, daily: 0 })).toBeNull();
+    expect(assignedQuotaAt([{ periodType: "hourly", periodStart: hour, status: "reserved" }], { hourly: 0, daily: 0 })).toBeNull();
+  });
+
+  it("defers at the next Asia/Shanghai calendar hour, independent of host timezone", async () => {
+    const now = new Date("2026-07-24T05:42:00.000Z"); // Shanghai 13:42
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
     } as never;
-    await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T14:00:00.000Z"));
+    await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
+  });
+
+  it("defers at Shanghai midnight when only the daily limit is full", async () => {
+    const now = new Date("2026-07-24T15:42:00.000Z"); // Shanghai 23:42
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 0, daily: 1 } }) },
+      postLog: { findMany: async () => [{ postId: "p1" }] },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T16:00:00.000Z"));
+  });
+
+  it("counts consumed reservations without a log and deduplicates reservation/log overlap", async () => {
+    const calls: any[] = [];
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
+      postLog: { findMany: async () => [{ postId: "p1" }] },
+      tenantPublishQuotaReservation: { findMany: async (args: any) => { calls.push(args); return [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }]; } },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T05:42:00.000Z"), client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].where.status.in).toEqual(["reserved", "consumed"]);
+  });
+
+  it("counts a consumed reservation even when no successful-post log exists", async () => {
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
+      postLog: { findMany: async () => [] },
+      tenantPublishQuotaReservation: { findMany: async () => [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }] },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T05:42:00.000Z"), client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
   });
 
   it("leaves independently disabled rate limits unrestricted", async () => {
@@ -37,8 +109,92 @@ describe("tenant publish rate limit deferral", () => {
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T13:42:00.000Z"), client)).resolves.toBeNull();
   });
+
+  it("does not defer an attempt against its own quota reservation", async () => {
+    const now = new Date("2026-07-24T05:42:00.000Z");
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
+      postLog: { findMany: async () => [] },
+      tenantPublishQuotaReservation: { findMany: async () => [{ postId: "current", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }, { postId: "current", periodType: "daily", periodStart: new Date("2026-07-24T08:00:00.000Z") }] },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", now, client, "current")).resolves.toBeNull();
+  });
+
+  it("consumes exactly one anchor reservation for a multi-post batch", () => {
+    expect(quotaReservationPostIdsForPublication({ batchId: "batch", postId: "anchor" }, ["anchor", "member", "member"])).toEqual(["anchor", "member"]);
+    expect(quotaReservationPostIdsForPublication({ batchId: null, postId: "single" })).toEqual(["single"]);
+  });
+
+  it("reschedules queued attempts at their durable future nextRunAt, but does not defer expired or non-queued attempts", () => {
+    const now = new Date("2026-07-24T05:42:00.000Z");
+    const later = new Date("2026-07-24T06:00:00.000Z");
+    expect(queuedAttemptDeferral("queued", later, now)).toEqual(later);
+    expect(queuedAttemptDeferral("queued", now, now)).toBeNull();
+    expect(queuedAttemptDeferral("queued", null, now)).toBeNull();
+    expect(queuedAttemptDeferral("failed", later, now)).toBeNull();
+  });
+
+  it("releases reservations only for definite terminal failures", () => {
+    expect(shouldReleasePublishQuotaReservation({ terminal: true, ambiguous: false })).toBe(true);
+    expect(shouldReleasePublishQuotaReservation({ terminal: true, ambiguous: true })).toBe(false);
+    expect(shouldReleasePublishQuotaReservation({ terminal: false, ambiguous: false })).toBe(false);
+  });
+
+  it("releases a reservation when a pending post is cancelled", async () => {
+    const calls: any[] = [];
+    const tx = {
+      tenantPublishQuotaReservation: {
+        updateMany: async (args: any) => { calls.push(args); return { count: 1 }; },
+      },
+    } as never;
+    await releaseTenantPublishQuota(tx, "tenant-1", ["post-1"]);
+    expect(calls).toEqual([{
+      where: { tenantId: "tenant-1", postId: { in: ["post-1"] }, status: "reserved" },
+      data: { status: "released" },
+    }]);
+  });
+
+  it("uses every batch manuscript for QZone success quota consumption", () => {
+    expect(quotaReservationPostIdsForPublication({ batchId: "batch-1", postId: "first" }, ["first", "second", "first"])).toEqual(["first", "second"]);
+  });
+
+  it("excludes all batch members from dispatch reservation counts", async () => {
+    const queries: any[] = [];
+    const now = new Date("2026-07-24T05:42:00.000Z");
+    const client = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
+      postLog: { findMany: async () => [] },
+      tenantPublishQuotaReservation: { findMany: async (args: any) => { queries.push(args); return []; } },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", now, client, "anchor", ["member", "anchor"])).resolves.toBeNull();
+    expect(queries[0].where.postId.notIn).toEqual(["anchor", "member"]);
+
+    const unrelatedReservationQueries: any[] = [];
+    const cappedElsewhere = {
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
+      postLog: { findMany: async () => [] },
+      tenantPublishQuotaReservation: { findMany: async (args: any) => {
+        unrelatedReservationQueries.push(args);
+        return args.where.periodType === "hourly"
+          ? [{ postId: "cm1234567890abcdefghijkl", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z"), status: "reserved" }]
+          : [];
+      } },
+    } as never;
+    await expect(resolveTenantPublishQuotaDeferral("tenant", now, cappedElsewhere, undefined, ["anchor", "member"]))
+      .resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
+    expect(unrelatedReservationQueries[0].where.postId.notIn).toEqual(["anchor", "member"]);
+  });
 });
 describe("publishing recovery and error logging", () => {
+  it("resolves quota reservation IDs from every item in a batch attempt", async () => {
+    const queried: any[] = [];
+    const tx = { publishBatchItem: { findMany: async (args: any) => { queried.push(args); return [{ postId: "member-1" }, { postId: "anchor" }, { postId: "member-1" }]; } } } as never;
+    await expect(quotaReservationPostIdsForAttempt(tx, { batchId: "batch-1", postId: "anchor" }))
+      .resolves.toEqual(["member-1", "anchor"]);
+    expect(queried[0].where.batchId).toBe("batch-1");
+    await expect(quotaReservationPostIdsForAttempt(tx, { batchId: null, postId: "solo" })).resolves.toEqual(["solo"]);
+  });
+
   const now = new Date("2026-07-24T00:00:00.000Z").getTime();
 
   it("fails interrupted attempts without scheduling an ambiguous retry", () => {
