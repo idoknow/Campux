@@ -1,6 +1,31 @@
 import { describe, expect, it } from "bun:test";
-import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason, postReviewSystemPrompt } from "./post-review";
+import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason, postReviewSystemPrompt, writeAutoAssessmentDecision, retryLlmReviewRequest } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
+
+describe("AI review retry policy", () => {
+  it("retries transient failures up to five total attempts and waits with exponential backoff", async () => {
+    const waits: number[] = [];
+    let attempts = 0;
+    const result = await retryLlmReviewRequest(async (attempt) => {
+      attempts = attempt;
+      if (attempt < 5) throw Object.assign(new Error("temporary"), { retryAfterMs: 0 });
+      return "ok";
+    }, async (milliseconds) => { waits.push(milliseconds); });
+    expect(result).toBe("ok");
+    expect(attempts).toBe(5);
+    expect(waits).toEqual([500, 1000, 2000, 4000]);
+  });
+
+  it("does not retry permanent errors and caps transient failures at five calls", async () => {
+    let attempts = 0;
+    await expect(retryLlmReviewRequest(async () => { attempts += 1; throw new Error("bad credentials"); }, async () => {})).rejects.toThrow("bad credentials");
+    expect(attempts).toBe(1);
+    attempts = 0;
+    await expect(retryLlmReviewRequest(async () => { attempts += 1; throw Object.assign(new Error("busy"), { retryAfterMs: 0 }); }, async () => {})).rejects.toThrow("busy");
+    expect(attempts).toBe(5);
+  });
+});
+
 
 describe("withTenantReviewSlot", () => {
   it("limits concurrent work independently for each tenant", async () => {

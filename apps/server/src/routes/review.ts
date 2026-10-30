@@ -213,7 +213,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         aiReview: parsePostReviewAnalysisRecord(assessmentByPost.get(post.id)),
         aiAutoDecision: (() => {
           const record = assessmentByPost.get(post.id);
-          if (!record || (record.autoDecision !== "approve" && record.autoDecision !== "reject")) return null;
+          if (!record || (record.autoDecision !== "approve" && record.autoDecision !== "reject") || !record.autoDecisionExecuteAfter || record.autoDecisionCancelledAt) return null;
           const action = record.autoDecision;
           const review = parsePostReviewAnalysisRecord(record);
           return { action, reason: record.autoDecisionReason ?? "", analysisId: record.id, ...(review?.autoModerationTrace ? { trace: review.autoModerationTrace } : {}) };

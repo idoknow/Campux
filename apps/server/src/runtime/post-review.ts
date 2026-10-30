@@ -47,6 +47,20 @@ export const postReviewSystemPrompt = `你是校园墙审核员的 AI 助手，�
 
 const activeReviewRequests = new Map<string, number>();
 const MAX_ACTIVE_REVIEW_REQUESTS_PER_TENANT = 2;
+const MAX_LLM_REVIEW_ATTEMPTS = 5;
+class RetryableLlmReviewError extends Error { constructor(message: string, readonly retryAfterMs?: number) { super(message); } }
+export async function retryLlmReviewRequest<T>(operation: (attempt: number) => Promise<T>, wait: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))): Promise<T> {
+  const deadline = Date.now() + 60_000;
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await operation(attempt); }
+    catch (error) {
+      if (!(error instanceof RetryableLlmReviewError) || attempt >= MAX_LLM_REVIEW_ATTEMPTS || Date.now() >= deadline) throw error;
+      const backoff = Math.min(4_000, 500 * 2 ** (attempt - 1));
+      await wait(Math.min(10_000, Math.max(backoff, error.retryAfterMs ?? 0), deadline - Date.now()));
+    }
+  }
+}
+
 
 export function parsePostReviewAssessment(raw: string): PostReviewAssessment | null {
   try {
@@ -199,8 +213,9 @@ async function writeAssistAssessment(options: { tenantId: string; postId: string
   });
 }
 
-export function writeAutoAssessmentDecision(input: { mode: "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; assessment?: { suggestedAction: PostReviewAssessment["suggestedAction"] }; executeAfter?: Date }): { mode: "auto" | "shadow"; autoDecision: "approve" | "reject" | "manual_review" | null; autoDecisionExecuteAfter: Date | null } {
-  return { mode: input.mode, autoDecision: input.mode === "auto" ? input.status === "completed" && input.assessment?.suggestedAction === "approve" ? "approve" : input.status === "completed" && input.assessment?.suggestedAction === "reject" ? "reject" : "manual_review" : null, autoDecisionExecuteAfter: input.mode === "auto" ? input.executeAfter ?? null : null };
+export function writeAutoAssessmentDecision(input: { mode: "auto" | "shadow"; status: "completed" | "failed" | "unavailable"; assessment?: { suggestedAction: PostReviewAssessment["suggestedAction"] }; decision?: "approve" | "reject" | "manual_review"; executeAfter?: Date }): { mode: "auto" | "shadow"; autoDecision: "approve" | "reject" | "manual_review" | null; autoDecisionExecuteAfter: Date | null } {
+  const executable = input.status === "completed" && input.decision !== undefined && input.decision !== "manual_review" && input.executeAfter !== undefined;
+  return { mode: input.mode, autoDecision: input.mode !== "auto" ? null : executable ? input.decision! : "manual_review", autoDecisionExecuteAfter: input.mode === "auto" && executable ? input.executeAfter! : null };
 }
 
 export async function writeAutoAssessment(input: { tenantId: string; postId: string; postText: string; status: "completed" | "failed" | "unavailable"; provider: string; model: string; snapshotId: string | null; assessment?: PostReviewAssessment; settings: Awaited<ReturnType<typeof readTenantAiSettings>>; mode?: "auto" | "shadow" }) {
@@ -243,7 +258,7 @@ export async function writeAutoAssessment(input: { tenantId: string; postId: str
     }
     const analysisMode = input.mode ?? "auto";
     latest ??= await tx.postAiAnalysis.findFirst({ where: { tenantId: input.tenantId, postId: input.postId }, orderBy: { version: "desc" }, select: { version: true } });
-    const fields = writeAutoAssessmentDecision({ mode: analysisMode, status: input.status, ...(input.assessment ? { assessment: input.assessment } : {}), ...(executeAfter ? { executeAfter } : {}) });
+    const fields = writeAutoAssessmentDecision({ mode: analysisMode, status: input.status, decision: finalDecision.action, ...(executeAfter ? { executeAfter } : {}) });
     const persistedReasons = input.assessment ? analysisMode === "auto" && input.mode !== "shadow" ? { schemaVersion: 1, reasons: input.assessment.reasons, autoModerationTrace: finalDecision.trace } : input.assessment.reasons : undefined;
     const stored = await tx.postAiAnalysis.create({ data: { tenantId: input.tenantId, postId: input.postId, version: (latest?.version ?? 0) + 1, provider: input.provider, model: input.model, modelSnapshotId: input.snapshotId, mode: fields.mode, status: input.status, autoDecision: fields.autoDecision, autoDecisionReason: fields.autoDecision === null ? null : finalDecision.reason, autoDecisionExecuteAfter: fields.autoDecisionExecuteAfter, ...(input.assessment ? { riskLevel: input.assessment.riskLevel, confidence: input.assessment.confidence, categories: input.assessment.categories, sensitiveFindings: input.assessment.sensitiveFindings, suggestedAction: input.assessment.suggestedAction, reasons: persistedReasons!, maskedText: input.assessment.maskedText, rewrittenText: input.assessment.rewrittenText, rejectionReason: input.assessment.rejectionReason } : {}) } });
     if (analysisMode === "auto" && executeAfter) await writeAuditLog({ tenantId: input.tenantId, action: `post.auto_moderation.${finalDecision.action}.staged`, targetType: "post", targetId: input.postId, detail: { analysisId: stored.id, executeAfter, reason: finalDecision.reason } }, tx);
@@ -278,29 +293,43 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
             "llm request",
           );
           const baseUrl = (await assertSafeLlmUrl(normalizeBaseUrl(settings.baseUrl))).toString().replace(/\/$/, "");
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 30) * 1000);
-          try {
-            const response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", signal: controller.signal, redirect: "error", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({
-              model: settings.model, temperature: 0, max_tokens: maxTokens, response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: `${postReviewSystemPrompt}${JSON.stringify(rules ?? [])} 实体:${JSON.stringify(entities.map(({ type, name, aliases, sensitivity }) => ({ type, name, aliases, sensitivity })))} 学校上下文:${snapshot?.summary ?? "无"}` },
-                { role: "user", content: JSON.stringify({ text: post.text, truncated: post.text.length > 12000 }) },
-              ],
-            }) });
-            if (!response.ok) throw new Error(`LLM status ${response.status}`);
-            const envelope: unknown = JSON.parse(await readBoundedLlmResponse(response));
-            if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new Error("LLM response envelope invalid");
-            if (llmFinishReason(envelope) === "length") {
-              options.logger.warn({ tenantId: options.tenantId, postId: options.postId, textChars: post.text.length, maxTokens }, "AI review output truncated by max_tokens");
-            }
-            const content = (envelope as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
-            if (typeof content !== "string") throw new Error("LLM result missing");
-            const parsedAssessment = parsePostReviewAssessment(content);
-            assessment = parsedAssessment ? validatePostReviewEvidence(post.text, parsedAssessment) ?? undefined : undefined;
-            if (!assessment) throw new Error("LLM review schema or evidence invalid");
-            status = "completed";
-          } finally { clearTimeout(timeout); }
+          assessment = await retryLlmReviewRequest(async (attempt) => {
+            options.logger.info({ tenantId: options.tenantId, postId: post.id, attempt, maxAttempts: MAX_LLM_REVIEW_ATTEMPTS }, "AI review request attempt");
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 30) * 1000);
+            try {
+              const response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", signal: controller.signal, redirect: "error", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({
+                model: settings.model, temperature: 0, max_tokens: maxTokens, response_format: { type: "json_object" },
+                messages: [
+                  { role: "system", content: `${postReviewSystemPrompt}${JSON.stringify(rules ?? [])} 实体:${JSON.stringify(entities.map(({ type, name, aliases, sensitivity }) => ({ type, name, aliases, sensitivity })))} 学校上下文:${snapshot?.summary ?? "无"}` },
+                  { role: "user", content: JSON.stringify({ text: post.text, truncated: post.text.length > 12000 }) },
+                ],
+              }) });
+              if (!response.ok) {
+                if (response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500) {
+                  const header = response.headers.get("retry-after");
+                  const retryAfterMs = header ? (/^\d+(?:\.\d+)?$/.test(header) ? Number(header) * 1000 : Math.max(0, Date.parse(header) - Date.now())) : undefined;
+                  throw new RetryableLlmReviewError(`LLM status ${response.status}`, retryAfterMs);
+                }
+                throw new Error(`LLM status ${response.status}`);
+              }
+              let envelope: unknown;
+              try { envelope = JSON.parse(await readBoundedLlmResponse(response)); }
+              catch (error) { throw new RetryableLlmReviewError(error instanceof Error ? error.message : "LLM response invalid"); }
+              if (!envelope || typeof envelope !== "object" || Array.isArray(envelope) || llmFinishReason(envelope) === "length") throw new RetryableLlmReviewError("LLM response envelope invalid or truncated");
+              const content = (envelope as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
+              if (typeof content !== "string") throw new RetryableLlmReviewError("LLM result missing");
+              const parsed = parsePostReviewAssessment(content);
+              const verified = parsed ? validatePostReviewEvidence(post.text, parsed) : null;
+              if (!verified) throw new RetryableLlmReviewError("LLM assessment schema or evidence invalid");
+              return verified;
+            } catch (error) {
+              if (error instanceof RetryableLlmReviewError) throw error;
+              if (controller.signal.aborted || error instanceof TypeError) throw new RetryableLlmReviewError(error instanceof Error ? error.message : "LLM network error");
+              throw error;
+            } finally { clearTimeout(timeout); }
+          });
+          status = "completed";
         } catch (error) {
           options.logger.warn({ errorName: error instanceof Error ? error.name : "UnknownError", postId: options.postId, tenantId: options.tenantId }, "AI review assessment failed");
         }
