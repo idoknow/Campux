@@ -272,7 +272,7 @@ export function buildAiReviewForwardNodes(displayId: number, review: NonNullable
   if (review.status === "completed" && review.assessment) {
     const a = review.assessment;
     lines.push(`风险：${a.riskLevel}`, `建议：${a.suggestedAction}`, `置信度：${a.confidence}`, `类别：${a.categories.join("、") || "无"}`, `理由：${a.reasons.join("；")}`);
-    for (const finding of a.sensitiveFindings) lines.push(`发现：${finding.type}「${finding.excerpt}」— ${finding.reason}`);
+    for (const finding of a.sensitiveFindings) lines.push(`发现：${finding.type} — 相关细节已隐藏，请在受控审核界面查看`);
     if (a.maskedText) lines.push(`脱敏建议：${a.maskedText}`);
     if (a.rewrittenText) lines.push(`改写建议：${a.rewrittenText}`);
     if (a.rejectionReason) lines.push(`拒绝理由建议：${a.rejectionReason}`);

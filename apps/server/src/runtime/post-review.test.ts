@@ -38,6 +38,11 @@ describe("parsePostReviewAssessment", () => {
     expect(parsePostReviewAssessment('{"schemaVersion":2,"riskLevel":"low","categories":[],"sensitiveFindings":[],"suggestedAction":"manual_review","reasons":["review"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')).toBeNull();
   });
 
+  it("maps the legacy revise recommendation to human review", () => {
+    const parsed = parsePostReviewAssessment('{"riskLevel":"medium","categories":[],"sensitiveFindings":[],"suggestedAction":"revise","reasons":["needs context"],"confidence":0.7,"maskedText":null,"rewrittenText":null,"rejectionReason":null}');
+    expect(parsed?.suggestedAction).toBe("manual_review");
+  });
+
   it("requires exact source grounding for findings, including Unicode", () => {
     const parsed = parsePostReviewAssessment('{"riskLevel":"low","categories":[],"sensitiveFindings":[{"type":"privacy","excerpt":"李雷🌱","reason":"reason"}],"suggestedAction":"manual_review","reasons":["free-form reason"],"confidence":0.5,"maskedText":null,"rewrittenText":null,"rejectionReason":null}')!;
     expect(validatePostReviewEvidence("原文：李雷🌱。", parsed)).not.toBeNull();

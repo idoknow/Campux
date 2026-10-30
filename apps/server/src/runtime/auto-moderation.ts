@@ -75,8 +75,12 @@ export function evaluateAutoModerationDecision(input: {
     add("reject.category_allowlist", category ? "pass" : "fail", category ? `Category is allowlisted: ${category}` : "No assessed category is allowlisted for rejection.");
     const confidencePass = assessment.confidence >= policy.autoRejectMinimumConfidence;
     add("reject.confidence", confidencePass ? "pass" : "fail", confidencePass ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
-    if (riskPass && category && patternHit && confidencePass) return finish("reject", `高风险、命中拒绝白名单和已配置规则且达到置信度门槛：${category}`);
-    return finish("manual_review", !riskPass || !category ? "拒绝类别或风险级别未获管理员明确授权" : patternHit ? "拒绝决策未达到置信度门槛" : "没有命中管理员配置的明确拒绝规则");
+    if (!patternHit || !riskPass || !category || !confidencePass) return finish("manual_review", !riskPass || !category ? "拒绝类别或风险级别未获管理员明确授权" : !confidencePass ? "拒绝建议置信度不足" : "没有命中管理员配置的明确拒绝规则");
+    const escapedPattern = patternHit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const quotedPattern = new RegExp(`[“‘\"'][^“”‘’\"']*${escapedPattern}[^“”‘’\"']*[”’\"']`).test(postText);
+    const contextualDiscussion = /(?:引用|转述|讨论|举例|反对|辟谣|批评|不要|禁止|勿).{0,12}(?:规则|话术|内容|行为|说法)?/u.test(postText);
+    if (quotedPattern || contextualDiscussion) return finish("manual_review", "命中配置规则，但可能是引用或讨论语境，需人工确认");
+    return finish("reject", `高风险、命中拒绝白名单和配置规则且达到置信度门槛：${category}`);
   }
 
   if (assessment.riskLevel !== "low") return finish("manual_review", "中高风险必须人工审核");

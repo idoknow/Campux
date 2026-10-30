@@ -785,7 +785,7 @@ describe("自定义审核群提示过滤 #回复", () => {
 });
 
 describe("AI 审核辅助合并转发", () => {
-  test("构建独立的伪合并转发节点，附带审核建议但不带原帖附件", () => {
+  test("构建独立的伪合并转发节点，附带审核建议但会省略隐私片段", () => {
     const [node] = buildAiReviewForwardNodes(42, {
       mode: "assist", status: "completed",
       assessment: { riskLevel: "medium", categories: ["隐私"], sensitiveFindings: [{ type: "隐私", excerpt: "某同学", reason: "可能指向具体个人" }], suggestedAction: "manual_review", reasons: ["语境不明确"], confidence: 0.6, maskedText: null, rewrittenText: null, rejectionReason: null },
@@ -793,6 +793,9 @@ describe("AI 审核辅助合并转发", () => {
     expect(node?.type).toBe("node");
     expect(node?.data).toMatchObject({ name: "Campux AI 审核助手", nickname: "Campux AI 审核助手", uin: "0", user_id: "0", qq: "0" });
     expect(node?.data.content).toEqual([{ type: "text", data: { text: expect.stringContaining("语境不明确") } }]);
+    expect(node?.data.content[0]?.data?.text).toContain("相关细节已隐藏");
+    expect(node?.data.content[0]?.data?.text).not.toContain("可能指向具体个人");
+    expect(node?.data.content[0]?.data?.text).not.toContain("某同学");
     expect(node?.data.content[0]?.data?.text).toContain("AI 辅助审核 #42");
   });
 
