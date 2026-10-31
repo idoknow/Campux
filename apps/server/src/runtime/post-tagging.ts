@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
-import { isPrismaKnownRequestError, supportsAdvisoryLock } from "@campux/db";
+import { supportsAdvisoryLock, supportsSkipDuplicates } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
@@ -668,41 +668,43 @@ export async function applyTagAgentPlan(
       continue;
     }
     try {
-      // 先创建；并发撞名（P2002）时重读现有标签并按其来源保护更新——
-      // 来源保护与 upsert 原子生效，不存在"检查后、写入前被人工标签插队"的窗口。
-      let tag;
-      try {
-        tag = await client.postTag.create({
-          data: {
+      // 全程使用不抛 P2002 的容错写法（事务内 PG 的失败语句会中止整个事务，禁止 catch-recover）：
+      // 1) 已存在的 llm 标签：原子恢复并刷新配色/描述；
+      // 2) 已存在的人工标签：仅激活，不夺走来源与配色；
+      // 3) 都不存在：PG 用 skipDuplicates 容错插入（SQLite 事务内无并发写者，先查后插不会撞键）。
+      const existing = await client.postTag.findUnique({
+        where: { tenantId_name: { tenantId, name: item.name } },
+        select: { id: true, name: true },
+      });
+      await client.postTag.updateMany({
+        where: { tenantId, name: item.name, source: "llm" },
+        data: {
+          status: "active",
+          color: item.color,
+          ...(item.description ? { description: item.description } : {}),
+        },
+      });
+      await client.postTag.updateMany({
+        where: { tenantId, name: item.name, source: { not: "llm" } },
+        data: { status: "active" },
+      });
+      if (!existing && supportsSkipDuplicates) {
+        await client.postTag.createMany({
+          data: [{
             tenantId,
             name: item.name,
             description: item.description,
             color: item.color,
             source: "llm",
-          },
+          }],
+          skipDuplicates: true,
         });
+      }
+      const tag = await client.postTag.findUniqueOrThrow({
+        where: { tenantId_name: { tenantId, name: item.name } },
+      });
+      if (!existing) {
         created.push(tag.name);
-      } catch (error) {
-        if (!(isPrismaKnownRequestError(error) && error.code === "P2002")) {
-          throw error;
-        }
-        const existing = await client.postTag.findUnique({
-          where: { tenantId_name: { tenantId, name: item.name } },
-          select: { id: true, source: true },
-        });
-        if (!existing) {
-          throw error;
-        }
-        // 人工添加的标签（manual/user）不允许被 AI 改写来源：只激活，不夺走归属与配色。
-        const protectedSource = existing.source !== "llm";
-        tag = await client.postTag.update({
-          where: { id: existing.id },
-          data: {
-            status: "active",
-            ...(protectedSource ? {} : { source: "llm", color: item.color }),
-            ...(item.description ? { description: item.description } : {}),
-          },
-        });
       }
       for (const postId of postIds) {
         await assignPostTags(client, {
