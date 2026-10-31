@@ -25,6 +25,7 @@ import {
   Trash2Icon,
   UserIcon,
   XIcon,
+  PlusIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GraduationItem } from "@/features/graduation/GraduationReview";
@@ -200,6 +201,9 @@ const reviewStatusOptions = [
   { value: "all", label: "全部" },
 ] as const;
 
+// bot 模式专用：审核板块筛选里的「待发布」（approved 且从未进过发布队列的滞留稿件）。
+const pendingPublishReviewOption = { value: "pending_publish", label: "待发布" } as const;
+
 const publishedTagMaintenanceOptions = [
   { value: "14", label: "近 14 天" },
   { value: "30", label: "近 30 天" },
@@ -218,7 +222,7 @@ type PostTagMaintenanceResult = {
   }>;
 };
 
-type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"];
+type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"] | (typeof pendingPublishReviewOption)["value"];
 type ReviewListPreferences = {
   status: ReviewStatusFilter;
   keyword: string;
@@ -229,9 +233,13 @@ const defaultReviewListPreferences: ReviewListPreferences = {
   keyword: "",
 };
 
+function isReviewStatusFilterValue(value: unknown): value is ReviewStatusFilter {
+  return value === pendingPublishReviewOption.value || reviewStatusOptions.some((option) => option.value === value);
+}
+
 function readReviewStatusQuery(): ReviewStatusFilter {
   const status = readQueryParam("status");
-  return reviewStatusOptions.some((option) => option.value === status) ? (status as ReviewStatusFilter) : "pending_approval";
+  return isReviewStatusFilterValue(status) ? status : "pending_approval";
 }
 
 function reviewPreferencesKey(tenantId: string) {
@@ -241,7 +249,7 @@ function reviewPreferencesKey(tenantId: string) {
 function isReviewListPreferences(value: unknown): value is ReviewListPreferences {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ReviewListPreferences>;
-  return typeof candidate.keyword === "string" && reviewStatusOptions.some((option) => option.value === candidate.status);
+  return typeof candidate.keyword === "string" && isReviewStatusFilterValue(candidate.status);
 }
 
 function readReviewListPreferences(tenantId: string): ReviewListPreferences {
@@ -353,9 +361,19 @@ export function PostsPage({
   const [pendingRequeueBusy, setPendingRequeueBusy] = useState(false);
   const [pendingPublishLoading, setPendingPublishLoading] = useState(false);
   const [pendingPublishBusyId, setPendingPublishBusyId] = useState("");
-  const showPendingPublishTab = isAdmin;
+  // bot 模式下「待发布」不再是独立页签，并入审核板块的「待发布」筛选；
+  // manual 模式保留独立页签作为主工作队列。
+  const showPendingPublishTab = isAdmin && pendingResidual?.operateMode !== "bot";
+  const reviewPendingPublishActive = isAdmin && pendingResidual?.operateMode === "bot";
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
+  const [tagCreateOpen, setTagCreateOpen] = useState(false);
+  const [tagCreateName, setTagCreateName] = useState("");
+  const [tagCreateDesc, setTagCreateDesc] = useState("");
+  const [tagCreateDays, setTagCreateDays] = useState("30");
+  const [tagCreateBusy, setTagCreateBusy] = useState(false);
+  const [tagDeleteTarget, setTagDeleteTarget] = useState<PostTag | null>(null);
+  const [tagDeleteBusy, setTagDeleteBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
@@ -408,11 +426,11 @@ export function PostsPage({
     if (canReview) allowed.push("review");
     if (showFeedbackTab) allowed.push("feedback");
     if (showHistoryTab) allowed.push("history");
-    if (isAdmin) allowed.push("pendingPublish");
+    if (showPendingPublishTab) allowed.push("pendingPublish");
     if (!allowed.includes(activeTab)) {
       onTabChange(canReview ? "review" : "mine");
     }
-  }, [activeTab, canReview, isAdmin, showFeedbackTab, showHistoryTab, onTabChange]);
+  }, [activeTab, canReview, showPendingPublishTab, showFeedbackTab, showHistoryTab, onTabChange]);
 
   useEffect(() => {
     // Tenant switch invalidates any in-flight feedback list for the old wall.
@@ -421,11 +439,37 @@ export function PostsPage({
   }, [tenantId]);
 
   useEffect(() => {
-    if (!showPendingPublishTab) {
+    // bot 模式下面板挂在审核板块的「待发布」筛选下；manual 模式挂在独立页签下。
+    const mergedViewActive = reviewPendingPublishActive && activeTab === "review" && reviewStatus === "pending_publish";
+    if (!showPendingPublishTab && !mergedViewActive) {
       return;
     }
     void refreshPendingPublish();
-  }, [showPendingPublishTab, activeTab === "pendingPublish", pendingPublishPage, tenantId]);
+  }, [showPendingPublishTab, reviewPendingPublishActive, activeTab, reviewStatus, pendingPublishPage, tenantId]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+    // 独立读取运营模式：决定「待发布」是独立页签还是审核筛选，不能等面板刷新才拿到。
+    let cancelled = false;
+    api<{ operateMode: "bot" | "manual"; residual: number }>("/api/admin/pending-publish/residual")
+      .then((data) => {
+        if (!cancelled) setPendingResidual(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPendingResidual(null);
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, tenantId]);
+
+  useEffect(() => {
+    // 「待发布」筛选只在 bot 模式管理员下有效：模式切换或权限不足时把持久化的筛选值归位，
+    // 避免审核列表请求失效或在 manual 模式下渲染出不该有的面板。
+    if (reviewStatus === "pending_publish" && (!isAdmin || pendingResidual?.operateMode === "manual")) {
+      setReviewStatusWithQuery("pending_approval");
+    }
+  }, [reviewStatus, isAdmin, pendingResidual]);
 
   async function refreshPendingPublish() {
     setPendingPublishLoading(true);
@@ -525,6 +569,194 @@ export function PostsPage({
     } finally {
       setPendingPublishBusyId("");
     }
+  }
+
+  /**
+   * 待发布面板：manual 模式挂在独立页签下作为主工作队列；
+   * bot 模式并入审核板块的「待发布」筛选，用于滞留稿件查看与补投。
+   */
+  function renderPendingPublishPanel() {
+    const botMode = pendingResidual?.operateMode === "bot";
+    return (
+      <>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-500">
+            {botMode
+              ? "这里只显示审核通过但未进入发布队列的滞留稿件，不会自动发布；可一键补入队列。"
+              : "审核通过的稿件会在这里排队；渲染保存后手动发到 QQ 空间，再回来点「确认已发布」。"}
+            {pendingPublishPagination.total > 0 ? ` · 共 ${pendingPublishPagination.total} 条` : ""}
+          </p>
+          <Button variant="outline" size="sm" disabled={pendingPublishLoading} onClick={() => void refreshPendingPublish()}>
+            刷新
+          </Button>
+        </div>
+        {botMode && pendingResidual && pendingResidual.residual > 0 ? (
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <p>
+              切回机器人发布后，有 {pendingResidual.residual} 条审核通过的稿件仍滞留在这里，不会自动发布。
+            </p>
+            <Button
+              className="mt-2"
+              size="sm"
+              disabled={pendingRequeueBusy}
+              onClick={() => void requeueResidualPosts()}
+            >
+              {pendingRequeueBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+              一键补入自动发布队列
+            </Button>
+          </div>
+        ) : null}
+        {pendingPublishItems.length > 0 && !botMode ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                className="size-4 accent-sky-600"
+                checked={pendingPublishItems.every((item) => pendingPublishSelected.has(item.id))}
+                onChange={(event) => {
+                  setPendingPublishSelected(event.target.checked
+                    ? new Set(pendingPublishItems.map((item) => item.id))
+                    : new Set());
+                }}
+              />
+              全选本页
+            </label>
+            <span className="text-xs text-slate-500">已选 {pendingPublishSelected.size} 条</span>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pendingPublishBatchBusy || pendingPublishSelected.size === 0}
+                onClick={() => void confirmPendingPublishBulk([...pendingPublishSelected])}
+              >
+                确认选中
+              </Button>
+              <Button
+                size="sm"
+                disabled={pendingPublishBatchBusy || pendingPublishPagination.total === 0}
+                onClick={() => void confirmPendingPublishBulk([])}
+              >
+                {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+                一键确认全部已发布（{pendingPublishPagination.total}）
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {pendingPublishFailures.length > 0 ? (
+          <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-bold">有 {pendingPublishFailures.length} 条稿件未能确认发布</p>
+              <button type="button" className="shrink-0 font-semibold underline-offset-4 hover:underline" onClick={() => setPendingPublishFailures([])}>
+                关闭
+              </button>
+            </div>
+            <ul className="mt-2 space-y-1">
+              {pendingPublishFailures.map((failure) => (
+                <li key={failure.id}>
+                  <span className="font-semibold">{failure.displayId === null ? failure.id : `#${failure.displayId}`}</span>
+                  {" · "}
+                  {failure.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {pendingPublishLoading && pendingPublishItems.length === 0 ? (
+          <LoadingBlock title="正在加载待发布稿件..." />
+        ) : pendingPublishItems.length === 0 ? (
+          <EmptyCard title="没有待发布的稿件" />
+        ) : (
+          <div className="space-y-3">
+            {pendingPublishItems.map((item) => (
+              <Card key={item.id} className={`border-amber-200 bg-white shadow-none dark:border-amber-900 dark:bg-slate-900 ${pendingPublishSelected.has(item.id) ? "ring-2 ring-sky-400" : ""}`}>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {!botMode ? (
+                        <input
+                          type="checkbox"
+                          className="size-4 shrink-0 accent-sky-600"
+                          checked={pendingPublishSelected.has(item.id)}
+                          aria-label={`选择稿件 #${item.displayId}`}
+                          onChange={(event) => {
+                            setPendingPublishSelected((selected) => {
+                              const next = new Set(selected);
+                              if (event.target.checked) {
+                                next.add(item.id);
+                              } else {
+                                next.delete(item.id);
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                      ) : null}
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        #{item.displayId}
+                        {" · "}
+                        {item.anonymous
+                          ? "匿名投稿"
+                          : `${item.author.displayName || "未设置昵称"} · QQ ${item.author.qqUin}`}
+                      </span>
+                    </div>
+                    <span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span>
+                  </div>
+                  <p className="line-clamp-4 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
+                    {item.text}
+                  </p>
+                  <a
+                    href={`/api/posts/${item.id}/render-preview`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                    title="点击查看大图"
+                  >
+                    <img
+                      src={`/api/posts/${item.id}/render-preview`}
+                      alt={`稿件 #${item.displayId} 渲染图`}
+                      className="max-h-64 w-full object-contain"
+                      loading="lazy"
+                    />
+                  </a>
+                  <p className="text-xs text-slate-500">附件 {item.attachmentCount} 个</p>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`/api/posts/${item.id}/render-preview`} target="_blank" rel="noreferrer">
+                        <EyeIcon className="mr-1 size-4" />
+                        查看渲染图
+                      </a>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`/api/posts/${item.id}/render-preview`} download={`campux-post-${item.displayId}.jpg`}>
+                        <FileTextIcon className="mr-1 size-4" />
+                        保存图片
+                      </a>
+                    </Button>
+                    {!botMode ? (
+                      <Button
+                        size="sm"
+                        disabled={pendingPublishBusyId === item.id}
+                        onClick={() => void confirmManualPublish(item)}
+                      >
+                        {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+                        确认已发布
+                      </Button>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+        {pendingPublishPagination.total > 0 ? (
+          <PaginationControls
+            pagination={pendingPublishPagination}
+            busy={pendingPublishLoading || pendingPublishBatchBusy}
+            onPageChange={setPendingPublishPage}
+          />
+        ) : null}
+      </>
+    );
   }
 
   useEffect(() => {
@@ -702,6 +934,10 @@ export function PostsPage({
     if (activeTab === "pendingPublish" && showPendingPublishTab) {
       await refreshPendingPublish();
     }
+    // bot 模式下「待发布」面板挂在审核板块的筛选下，全局刷新时同样要更新它。
+    if (reviewPendingPublishActive && activeTab === "review" && reviewStatus === "pending_publish") {
+      await refreshPendingPublish();
+    }
   }
 
   async function refreshPendingRecallPosts() {
@@ -720,6 +956,10 @@ export function PostsPage({
   }
 
   async function refreshReviewPosts(page = reviewPage) {
+    // bot 模式的「待发布」筛选不走审核列表接口（服务端不认识这个值），所有调用方在此统一拦截。
+    if (reviewStatus === "pending_publish") {
+      return;
+    }
     const params = new URLSearchParams({
       status: reviewStatus,
       page: String(page),
@@ -797,6 +1037,87 @@ export function PostsPage({
       toast.error(caught instanceof Error ? caught.message : "标签整理失败");
     } finally {
       setTagMaintenanceBusy(false);
+    }
+  }
+
+  // 手动删除标签：级联移除所有稿件上的该标签；当前筛选若正停在被删标签上则回到「全部」。
+  async function submitDeleteTag() {
+    const tag = tagDeleteTarget;
+    if (!tag) {
+      return;
+    }
+    setTagDeleteBusy(true);
+    try {
+      await api(`/api/post-tags/${tag.id}`, { method: "DELETE" });
+      toast.success(`已删除标签「${tag.name}」`);
+      setTagDeleteTarget(null);
+      const nextFilter = publishedTagFilter === tag.id ? "all" : publishedTagFilter;
+      if (publishedTagFilter === tag.id) {
+        setPublishedTagFilter("all");
+      }
+      await refreshPublishedTags();
+      await refreshPublishedFeed(1, nextFilter);
+      void onRefresh();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "删除标签失败");
+    } finally {
+      setTagDeleteBusy(false);
+    }
+  }
+
+  // 手动新建标签 + AI 回溯打标。同名标签已存在时不挡路：定位现有标签继续回溯，
+  // 因此「再次输入同名标签」就是存量稿件未处理完时的续跑入口。
+  async function submitCreateTagWithBackfill() {
+    const tagName = tagCreateName.trim();
+    if (!tagName) {
+      return;
+    }
+    setTagCreateBusy(true);
+    try {
+      let tag = publishedTags.find((t) => t.name === tagName);
+      let existed = Boolean(tag);
+      if (!tag) {
+        try {
+          tag = (await api<{ tag: PostTag }>("/api/post-tags/create", {
+            method: "POST",
+            body: JSON.stringify({ tagName, description: tagCreateDesc.trim() || undefined }),
+          })).tag;
+        } catch (createError) {
+          // 并发竞态或列表过期导致 409：从标签列表定位现有标签后继续回溯。
+          const tags = await api<{ tags: PostTag[] }>("/api/post-tags").catch(() => null);
+          tag = tags?.tags.find((t) => t.name === tagName);
+          if (!tag) {
+            throw createError;
+          }
+          existed = true;
+        }
+      }
+      try {
+        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number; failedChunks: number; completed: boolean } }>(
+          `/api/post-tags/${tag.id}/backfill`,
+          { method: "POST", body: JSON.stringify({ lookbackDays: Number(tagCreateDays) }) },
+        );
+        toast.success(
+          (existed ? `标签「${tagName}」已存在，继续回溯打标：` : `标签「${tagName}」已创建：`)
+            + `AI 扫描近 ${tagCreateDays} 天 ${backfill.result.scannedCount} 条稿件，归类 ${backfill.result.assignedCount} 条`
+            + (backfill.result.skippedCount > 0 ? `，${backfill.result.skippedCount} 条因标签数已达上限跳过` : "")
+            + (backfill.result.failedChunks > 0 ? `；${backfill.result.failedChunks} 批次归类失败，可稍后重试` : "")
+            + (!backfill.result.completed ? "；本次触达处理预算，剩余稿件可再次回溯续跑" : ""),
+        );
+      } catch (backfillError) {
+        toast.warning(`标签「${tagName}」${existed ? "回溯打标未完成" : "已创建，但回溯打标未完成"}：${backfillError instanceof Error ? backfillError.message : "可稍后重试"}`);
+      }
+      setTagCreateOpen(false);
+      setTagCreateName("");
+      setTagCreateDesc("");
+      // 回溯打标会给存量稿件打上新标签：标签列表和已发布列表都要刷新才反映最新归类。
+      await refreshPublishedTags();
+      await refreshPublishedFeed(1, publishedTagFilter);
+      void onRefresh();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "创建标签失败");
+    } finally {
+      setTagCreateBusy(false);
     }
   }
 
@@ -1197,7 +1518,10 @@ export function PostsPage({
   }
 
   const activePreviewImage = imagePreview.images[imagePreview.index] ?? null;
-  const reviewStatusLabel = reviewStatusOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
+  const reviewStatusFilterOptions = reviewPendingPublishActive
+    ? [...reviewStatusOptions, pendingPublishReviewOption]
+    : reviewStatusOptions;
+  const reviewStatusLabel = reviewStatusFilterOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
   const filteredReviewPosts = reviewPosts.filter((post) => !pendingRecallPosts.some((recallPost) => recallPost.id === post.id));
   const detailPost = detailPostId ? pendingRecallPosts.find((post) => post.id === detailPostId) ?? reviewPosts.find((post) => post.id === detailPostId) ?? null : null;
 
@@ -1414,7 +1738,13 @@ export function PostsPage({
         </TabsContent>
         <TabsContent value="published" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <PublishedTagFilter tags={publishedTags} value={publishedTagFilter} onChange={changePublishedTagFilter} />
+            <PublishedTagFilter
+              tags={publishedTags}
+              value={publishedTagFilter}
+              onChange={changePublishedTagFilter}
+              canDelete={isAdmin}
+              onDeleteTag={(tag) => setTagDeleteTarget(tag)}
+            />
             <div className="flex items-center gap-2">
               <input
                 value={publishedKeyword}
@@ -1438,12 +1768,18 @@ export function PostsPage({
               ) : null}
             </div>
             {isAdmin ? (
-              <PublishedTagMaintenanceToolbar
-                value={tagMaintenanceDays}
-                busy={tagMaintenanceBusy}
-                onChange={setTagMaintenanceDays}
-                onRun={() => void runPublishedTagMaintenance()}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <PublishedTagMaintenanceToolbar
+                  value={tagMaintenanceDays}
+                  busy={tagMaintenanceBusy}
+                  onChange={setTagMaintenanceDays}
+                  onRun={() => void runPublishedTagMaintenance()}
+                />
+                <Button variant="outline" size="sm" className="h-8 shrink-0 font-bold" disabled={tagCreateBusy} onClick={() => setTagCreateOpen(true)}>
+                  <PlusIcon className="mr-1 size-4" />
+                  新建标签
+                </Button>
+              </div>
             ) : null}
           </div>
           {publishedLoading ? (
@@ -1505,176 +1841,7 @@ export function PostsPage({
         ) : null}
         {showPendingPublishTab ? (
           <TabsContent value="pendingPublish" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-slate-500">
-                审核通过的稿件会在这里排队；渲染保存后手动发到 QQ 空间，再回来点「确认已发布」。
-                {pendingPublishPagination.total > 0 ? ` · 共 ${pendingPublishPagination.total} 条` : ""}
-              </p>
-              <Button variant="outline" size="sm" disabled={pendingPublishLoading} onClick={() => void refreshPendingPublish()}>
-                刷新
-              </Button>
-            </div>
-            {pendingResidual?.operateMode === "bot" && pendingResidual.residual > 0 ? (
-              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                <p>
-                  切回机器人发布后，有 {pendingResidual.residual} 条审核通过的稿件仍滞留在这里，不会自动发布。
-                </p>
-                <Button
-                  className="mt-2"
-                  size="sm"
-                  disabled={pendingRequeueBusy}
-                  onClick={() => void requeueResidualPosts()}
-                >
-                  {pendingRequeueBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
-                  一键补入自动发布队列
-                </Button>
-              </div>
-            ) : null}
-            {pendingPublishItems.length > 0 ? (
-              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
-                <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-sky-600"
-                    checked={pendingPublishItems.every((item) => pendingPublishSelected.has(item.id))}
-                    onChange={(event) => {
-                      setPendingPublishSelected(event.target.checked
-                        ? new Set(pendingPublishItems.map((item) => item.id))
-                        : new Set());
-                    }}
-                  />
-                  全选本页
-                </label>
-                <span className="text-xs text-slate-500">已选 {pendingPublishSelected.size} 条</span>
-                <div className="ml-auto flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={pendingPublishBatchBusy || pendingPublishSelected.size === 0}
-                    onClick={() => void confirmPendingPublishBulk([...pendingPublishSelected])}
-                  >
-                    确认选中
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={pendingPublishBatchBusy || pendingPublishPagination.total === 0}
-                    onClick={() => void confirmPendingPublishBulk([])}
-                  >
-                    {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-                    一键确认全部已发布（{pendingPublishPagination.total}）
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            {pendingPublishFailures.length > 0 ? (
-              <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-bold">有 {pendingPublishFailures.length} 条稿件未能确认发布</p>
-                  <button type="button" className="shrink-0 font-semibold underline-offset-4 hover:underline" onClick={() => setPendingPublishFailures([])}>
-                    关闭
-                  </button>
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {pendingPublishFailures.map((failure) => (
-                    <li key={failure.id}>
-                      <span className="font-semibold">{failure.displayId === null ? failure.id : `#${failure.displayId}`}</span>
-                      {" · "}
-                      {failure.reason}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {pendingPublishLoading && pendingPublishItems.length === 0 ? (
-              <LoadingBlock title="正在加载待发布稿件..." />
-            ) : pendingPublishItems.length === 0 ? (
-              <EmptyCard title="没有待发布的稿件" />
-            ) : (
-              <div className="space-y-3">
-                {pendingPublishItems.map((item) => (
-                  <Card key={item.id} className={`border-amber-200 bg-white shadow-none dark:border-amber-900 dark:bg-slate-900 ${pendingPublishSelected.has(item.id) ? "ring-2 ring-sky-400" : ""}`}>
-                  <CardContent className="space-y-3 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <input
-                          type="checkbox"
-                          className="size-4 shrink-0 accent-sky-600"
-                          checked={pendingPublishSelected.has(item.id)}
-                          aria-label={`选择稿件 #${item.displayId}`}
-                          onChange={(event) => {
-                            setPendingPublishSelected((selected) => {
-                              const next = new Set(selected);
-                              if (event.target.checked) {
-                                next.add(item.id);
-                              } else {
-                                next.delete(item.id);
-                              }
-                              return next;
-                            });
-                          }}
-                        />
-                        <span className="font-semibold text-slate-700 dark:text-slate-200">
-                          #{item.displayId}
-                          {" · "}
-                          {item.anonymous
-                            ? "匿名投稿"
-                            : `${item.author.displayName || "未设置昵称"} · QQ ${item.author.qqUin}`}
-                        </span>
-                        </div>
-                        <span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span>
-                      </div>
-                      <p className="line-clamp-4 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
-                        {item.text}
-                      </p>
-                      <a
-                        href={`/api/posts/${item.id}/render-preview`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
-                        title="点击查看大图"
-                      >
-                        <img
-                          src={`/api/posts/${item.id}/render-preview`}
-                          alt={`稿件 #${item.displayId} 渲染图`}
-                          className="max-h-64 w-full object-contain"
-                          loading="lazy"
-                        />
-                      </a>
-                      <p className="text-xs text-slate-500">附件 {item.attachmentCount} 个</p>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={`/api/posts/${item.id}/render-preview`} target="_blank" rel="noreferrer">
-                          <EyeIcon className="mr-1 size-4" />
-                          查看渲染图
-                          </a>
-                        </Button>
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={`/api/posts/${item.id}/render-preview`} download={`campux-post-${item.displayId}.jpg`}>
-                          <FileTextIcon className="mr-1 size-4" />
-                          保存图片
-                          </a>
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={pendingPublishBusyId === item.id}
-                          onClick={() => void confirmManualPublish(item)}
-                        >
-                          {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-                          确认已发布
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-            {pendingPublishPagination.total > 0 ? (
-              <PaginationControls
-                pagination={pendingPublishPagination}
-                busy={pendingPublishLoading || pendingPublishBatchBusy}
-                onPageChange={setPendingPublishPage}
-              />
-            ) : null}
+            {renderPendingPublishPanel()}
           </TabsContent>
         ) : null}
         {showFeedbackTab ? (
@@ -1799,7 +1966,7 @@ export function PostsPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {reviewStatusOptions.map((option) => (
+                  {reviewStatusFilterOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -1904,38 +2071,44 @@ export function PostsPage({
                   )}
                 </section>
               ) : null}
-              <PendingRecallQueue
-                posts={pendingRecallPosts}
-                loading={pendingRecallLoading}
-                busyPostId={busyPostId}
-                onPreview={(post) => void openRenderPreview(post)}
-                onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
-                onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
-                onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
-                onRecallIgnore={(post) => void ignoreRecallPost(post)}
-                onDetail={(post) => openPostDetail(post.id)}
-              />
-              {reviewLoading ? (
-                <LoadingBlock title="正在加载审核稿件..." />
+              {reviewPendingPublishActive && reviewStatus === "pending_publish" ? (
+                renderPendingPublishPanel()
               ) : (
                 <>
-                  <ReviewList
-                    posts={filteredReviewPosts}
+                  <PendingRecallQueue
+                    posts={pendingRecallPosts}
+                    loading={pendingRecallLoading}
                     busyPostId={busyPostId}
-                    isAdmin={isAdmin}
                     onPreview={(post) => void openRenderPreview(post)}
                     onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
-                    onApprove={(id) => void reviewPost(id, "approve")}
-                    onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
                     onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
-                    onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
-                    onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
+                    onRecallIgnore={(post) => void ignoreRecallPost(post)}
                     onDetail={(post) => openPostDetail(post.id)}
-                    onCancelAutoDecision={(post) => void cancelAutoDecision(post)}
-                    emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
                   />
-                  <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
+                  {reviewLoading ? (
+                    <LoadingBlock title="正在加载审核稿件..." />
+                  ) : (
+                    <>
+                      <ReviewList
+                        posts={filteredReviewPosts}
+                        busyPostId={busyPostId}
+                        isAdmin={isAdmin}
+                        onPreview={(post) => void openRenderPreview(post)}
+                        onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+                        onApprove={(id) => void reviewPost(id, "approve")}
+                        onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
+                        onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
+                        onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
+                        onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
+                        onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
+                        onDetail={(post) => openPostDetail(post.id)}
+                        onCancelAutoDecision={(post) => void cancelAutoDecision(post)}
+                        emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
+                      />
+                      <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1974,7 +2147,7 @@ export function PostsPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {reviewStatusOptions.map((option) => (
+                  {reviewStatusFilterOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -2031,6 +2204,7 @@ export function PostsPage({
         recallBusy={detailPost ? busyPostId === detailPost.id : false}
         {...(detailPost ? { onCancelAutoDecision: (post: ReviewPostItem) => cancelAutoDecision(post) } : {})}
         onAiFeedback={submitAiFeedback}
+        onTagsChanged={() => void onRefresh()}
         isAdmin={isAdmin}
         onOpenChange={(open) => {
           if (!open) {
@@ -2048,6 +2222,85 @@ export function PostsPage({
           setRecallConfirm({ open: true, mode: "admin-silent", post });
         }}
       />
+      <Dialog open={tagCreateOpen} onOpenChange={(open) => { if (!tagCreateBusy) setTagCreateOpen(open); }}>
+        <DialogContent className="w-[min(440px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>新建标签并回溯打标</DialogTitle>
+            <DialogDescription>
+              创建标签后 AI 会把回溯范围内的存量稿件归类到这个标签，之后的新稿件由自动打标即时处理；标签已存在时会对其继续回溯打标。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 px-5 pb-5">
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              标签名
+              <input
+                value={tagCreateName}
+                maxLength={16}
+                autoFocus
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="如：高考志愿（2-8 个字最佳）"
+                onChange={(event) => setTagCreateName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !tagCreateBusy && tagCreateName.trim()) {
+                    void submitCreateTagWithBackfill();
+                  }
+                }}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              标签描述（可选，帮助 AI 判断归属）
+              <input
+                value={tagCreateDesc}
+                maxLength={100}
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="如：志愿填报、分数线、招生政策相关"
+                onChange={(event) => setTagCreateDesc(event.target.value)}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              回溯范围
+              <Select value={tagCreateDays} onValueChange={setTagCreateDays}>
+                <SelectTrigger className="h-9 w-full bg-white font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["7", "14", "30", "60", "90"].map((days) => (
+                    <SelectItem key={days} value={days}>最近 {days} 天</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <Button
+              className="font-bold"
+              disabled={tagCreateBusy || tagCreateName.trim().length === 0}
+              onClick={() => void submitCreateTagWithBackfill()}
+            >
+              {tagCreateBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <PlusIcon className="mr-1 size-4" />}
+              {tagCreateBusy ? "创建中，AI 回溯打标可能需要一些时间..." : "创建并开始回溯打标"}
+            </Button>
+            <p className="text-xs leading-5 text-slate-500">AI 从严判断，宁可少打；最多扫描 300 条，标签数已达上限（5 个/稿）的稿件会跳过。</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(tagDeleteTarget)} onOpenChange={(open) => { if (!open) setTagDeleteTarget(null); }}>
+        <DialogContent className="w-[min(400px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>删除标签「{tagDeleteTarget?.name}」</DialogTitle>
+            <DialogDescription>
+              将从 {tagDeleteTarget?.postCount ?? 0} 条稿件上移除该标签，操作不可恢复。后续标签整理任务如果发现同主题稿件仍可能重建同名标签。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 px-5 pb-5">
+            <Button variant="outline" size="sm" disabled={tagDeleteBusy} onClick={() => setTagDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button size="sm" className="bg-red-600 font-bold text-white hover:bg-red-700" disabled={tagDeleteBusy} onClick={() => void submitDeleteTag()}>
+              {tagDeleteBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <Trash2Icon className="mr-1 size-4" />}
+              删除
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(920px,calc(100vw-32px))]">
           <DialogHeader>
@@ -2279,6 +2532,7 @@ function PostDetailDialog({
   onRecallDirectSilent,
   onCancelAutoDecision,
   onAiFeedback,
+  onTagsChanged,
   isAdmin = false,
 }: {
   post: ReviewPostItem | null;
@@ -2293,10 +2547,85 @@ function PostDetailDialog({
   onRecallDirectSilent?: (post: ReviewPostItem) => void;
   onCancelAutoDecision?: (post: ReviewPostItem) => void;
   onAiFeedback: (post: ReviewPostItem, action: "approve" | "reject", matched: boolean) => void;
+  onTagsChanged?: () => void;
 }) {
   const images = post ? getPostImages(post.attachments) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
   const showDirectRecallSilent = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirectSilent);
+  // 手动打标后服务端返回最新标签；本地覆盖保证弹窗立即反映变更，列表刷新在后台进行。
+  const [manualTags, setManualTags] = useState<AssignedPostTag[] | null>(null);
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagOptions, setTagOptions] = useState<string[]>([]);
+  const tags = manualTags ?? post?.tags ?? [];
+
+  useEffect(() => {
+    setManualTags(null);
+    setTagEditorOpen(false);
+    setTagInput("");
+  }, [post?.id]);
+
+  useEffect(() => {
+    if (!open || !isAdmin) {
+      return;
+    }
+    let cancelled = false;
+    api<{ tags: Array<{ id: string; name: string; status: string }> }>("/api/post-tags")
+      .then((data) => {
+        if (!cancelled) {
+          setTagOptions(data.tags.filter((tag) => tag.status === "active").map((tag) => tag.name));
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [open, isAdmin]);
+
+  async function submitManualTag() {
+    if (!post) {
+      return;
+    }
+    const tagName = tagInput.trim();
+    if (!tagName) {
+      return;
+    }
+    setTagBusy(true);
+    try {
+      const result = await api<{ tags: AssignedPostTag[] }>("/api/post-tags/assign", {
+        method: "POST",
+        body: JSON.stringify({ postId: post.id, tagName }),
+      });
+      setManualTags(result.tags);
+      toast.success(`已添加标签「${tagName}」`);
+      setTagEditorOpen(false);
+      setTagInput("");
+      onTagsChanged?.();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "添加标签失败");
+    } finally {
+      setTagBusy(false);
+    }
+  }
+
+  async function removeManualTag(tag: AssignedPostTag) {
+    if (!post) {
+      return;
+    }
+    setTagBusy(true);
+    try {
+      const result = await api<{ tags: AssignedPostTag[] }>("/api/post-tags/unassign", {
+        method: "POST",
+        body: JSON.stringify({ postId: post.id, tagId: tag.id }),
+      });
+      setManualTags(result.tags);
+      toast.success(`已移除标签「${tag.name}」`);
+      onTagsChanged?.();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "移除标签失败");
+    } finally {
+      setTagBusy(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2322,6 +2651,65 @@ function PostDetailDialog({
               <span>更新时间：{formatFullDateTime(post.updatedAt)}</span>
               <span>作者 QQ：{post.author?.qqUin ?? "未知"}</span>
               <span>作者 ID：{post.author?.id ?? "未知"}</span>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">标签</span>
+                {tags.length === 0 && !tagEditorOpen ? <span className="text-xs text-slate-400">暂无标签</span> : null}
+                {tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 dark:border-slate-700 dark:text-slate-200"
+                    style={{ backgroundColor: tag.color || "#f8fafc" }}
+                    title={tag.assignmentSource === "llm" ? "AI 打标" : "手动打标"}
+                  >
+                    {tag.name}
+                    {tag.assignmentSource === "llm" ? <span className="text-[10px] font-medium opacity-60">AI</span> : null}
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        aria-label={`移除标签 ${tag.name}`}
+                        className="text-xs font-bold text-slate-500 hover:text-red-600 disabled:opacity-40"
+                        disabled={tagBusy}
+                        onClick={() => void removeManualTag(tag)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                ))}
+                {isAdmin && tagEditorOpen ? (
+                  <span className="flex items-center gap-1">
+                    <input
+                      value={tagInput}
+                      list="post-detail-tag-options"
+                      maxLength={16}
+                      autoFocus
+                      className="h-7 w-28 rounded border border-slate-300 bg-white px-2 text-xs outline-none focus:border-slate-400"
+                      placeholder="输入标签名"
+                      onChange={(event) => setTagInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          void submitManualTag();
+                        }
+                      }}
+                    />
+                    <datalist id="post-detail-tag-options">
+                      {tagOptions.map((option) => <option key={option} value={option} />)}
+                    </datalist>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={tagBusy || tagInput.trim().length === 0} onClick={() => void submitManualTag()}>
+                      添加
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={tagBusy} onClick={() => setTagEditorOpen(false)}>
+                      取消
+                    </Button>
+                  </span>
+                ) : isAdmin ? (
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setTagEditorOpen(true)}>
+                    添加标签
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <PostTimeline timeline={post.timeline} />
             {post.aiAutoDecision && onCancelAutoDecision ? (
@@ -2351,7 +2739,6 @@ function PostDetailDialog({
                   <p className="text-xs leading-5 text-violet-900 dark:text-violet-200">类别：{post.aiReview.assessment.categories.join("、") || "未分类"} <span className="text-violet-600 dark:text-violet-300">·</span> 置信度 {Math.round(post.aiReview.assessment.confidence * 100)}%</p>
                   <ul className="grid gap-1 pl-4 text-xs leading-5 text-violet-900 marker:text-violet-400 dark:text-violet-200 dark:marker:text-violet-300">{post.aiReview.assessment.reasons.map((reason, index) => <li key={index} className="list-disc">{reason}</li>)}</ul>
                   {post.aiReview.assessment.sensitiveFindings.length ? <div className="grid gap-1 rounded-md border border-amber-200 bg-amber-50/80 p-2 text-xs leading-5 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><p className="font-bold">敏感信息提示</p>{post.aiReview.assessment.sensitiveFindings.map((finding, index) => <p key={index} className="break-words">{finding.type}：{finding.excerpt} — {finding.reason}</p>)}</div> : null}
-                  {post.aiReview.assessment.maskedText ? <div className="grid gap-2 rounded-md border border-violet-100 bg-white/60 p-2 text-xs dark:border-violet-800 dark:bg-slate-900/80"><p className="font-semibold text-violet-950 dark:text-violet-100">打码建议</p><p className="whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.maskedText}</p><Button size="sm" variant="outline" className="w-fit" onClick={() => void navigator.clipboard.writeText(post.aiReview!.assessment!.maskedText!).then(() => toast.success("已复制打码建议")).catch(() => toast.error("复制失败"))}>复制打码建议</Button></div> : null}
                   {post.aiReview.assessment.rewrittenText ? <div className="grid gap-2 rounded-md border border-violet-100 bg-white/60 p-2 text-xs dark:border-violet-800 dark:bg-slate-900/80"><p className="font-semibold text-violet-950 dark:text-violet-100">改写建议</p><p className="whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.rewrittenText}</p><Button size="sm" variant="outline" className="w-fit" onClick={() => { void navigator.clipboard.writeText(post.aiReview!.assessment!.rewrittenText!).then(() => toast.success("已复制改写建议")).catch(() => toast.error("复制失败")); }}>复制改写建议</Button></div> : null}
                   {post.aiReview.assessment.rejectionReason ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs leading-5 text-violet-900 dark:text-violet-200">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p><Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(post.aiReview!.assessment!.rejectionReason!).then(() => toast.success("已复制拒绝理由")).catch(() => toast.error("复制失败"))}>复制理由</Button></div> : null}
 
@@ -3026,7 +3413,7 @@ function PublishedTagMaintenanceToolbar({
   );
 }
 
-function PublishedTagFilter({ tags, value, onChange }: { tags: PostTag[]; value: string; onChange: (value: string) => void }) {
+function PublishedTagFilter({ tags, value, onChange, canDelete = false, onDeleteTag }: { tags: PostTag[]; value: string; onChange: (value: string) => void; canDelete?: boolean; onDeleteTag?: (tag: PostTag) => void }) {
   return (
     <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
       <button
@@ -3040,19 +3427,33 @@ function PublishedTagFilter({ tags, value, onChange }: { tags: PostTag[]; value:
         全部
       </button>
       {tags.map((tag) => (
-        <button
+        <div
           key={tag.id}
-          type="button"
           className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-bold transition-colors ${
             value === tag.id ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           }`}
-          onClick={() => onChange(tag.id)}
-          title={tag.description ?? tag.name}
         >
-          <span className="size-2 rounded-full" style={{ backgroundColor: tag.color || "#cbd5e1" }} />
-          {tag.name}
-          {typeof tag.postCount === "number" ? <span className="text-[10px] opacity-70">{tag.postCount}</span> : null}
-        </button>
+          <button
+            type="button"
+            className="flex items-center gap-1"
+            onClick={() => onChange(tag.id)}
+            title={tag.description ?? tag.name}
+          >
+            <span className="size-2 rounded-full" style={{ backgroundColor: tag.color || "#cbd5e1" }} />
+            {tag.name}
+            {typeof tag.postCount === "number" ? <span className="text-[10px] opacity-70">{tag.postCount}</span> : null}
+          </button>
+          {canDelete && onDeleteTag ? (
+            <button
+              type="button"
+              aria-label={`删除标签 ${tag.name}`}
+              className="text-[11px] font-bold text-slate-400 hover:text-red-600"
+              onClick={() => onDeleteTag(tag)}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   );

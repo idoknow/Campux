@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
+import { supportsAdvisoryLock } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
@@ -72,6 +73,41 @@ const tagAgentRecentPosts = 80;
 const tagMaintenanceTimeoutMs = 180_000;
 /** Rock's rule ①: a new tag is only created once a theme recurs across at least this many posts. */
 const minClusterSize = 3;
+
+/** 维护 LLM 请求失败后的重试策略：先快速重试 5 次，仍失败则每 15 分钟自动重跑一轮，最多 3 轮，
+ * 之后停止并等待下一次周期维护。状态按租户隔离，成功即清除。 */
+const TAG_MAINTENANCE_RETRY_ATTEMPTS = 5;
+const TAG_MAINTENANCE_RETRY_PAUSE_MS = 10_000;
+const TAG_MAINTENANCE_RETRY_BUDGET_MS = 5 * 60_000;
+const TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS = 15 * 60 * 1000;
+const TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS = 3;
+const tagMaintenanceAutoRetryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; remaining: number }>();
+
+function clearTagMaintenanceAutoRetry(tenantId: string) {
+  const state = tagMaintenanceAutoRetryTimers.get(tenantId);
+  if (state) {
+    clearTimeout(state.timer);
+    tagMaintenanceAutoRetryTimers.delete(tenantId);
+  }
+}
+
+function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: number | undefined, logger: FastifyBaseLogger) {
+  const state = tagMaintenanceAutoRetryTimers.get(tenantId);
+  const remaining = state ? state.remaining - 1 : TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS;
+  if (remaining <= 0) {
+    tagMaintenanceAutoRetryTimers.delete(tenantId);
+    logger.warn({ tenantId }, "post tag maintenance: automatic retries exhausted; waiting for the next scheduled maintenance");
+    return;
+  }
+  if (state) clearTimeout(state.timer);
+  logger.warn({ tenantId, remaining, retryAfterMinutes: 15 }, "post tag maintenance: clustering failed, scheduling automatic retry");
+  const timer = setTimeout(() => {
+    void maintainTenantPostTags({ tenantId, lookbackDays, logger }).catch((error) => {
+      logger.warn({ error, tenantId }, "post tag maintenance: automatic retry crashed");
+    });
+  }, TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS);
+  tagMaintenanceAutoRetryTimers.set(tenantId, { timer, remaining });
+}
 
 /**
  * 只有真正上过墙的稿件才参与标签聚类。被拒绝、撤回、取消的稿件留在库里，
@@ -439,10 +475,26 @@ export async function maintainTenantPostTags(options: {
     { site: "post-tagging.maintenance", tenantId: options.tenantId, model: settings.model, maxTokens, promptChars: systemPrompt.length + userPayload.length, posts: visiblePosts.length, tags: tags.length },
     "llm request",
   );
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
-  try {
-    const leased = await runWithActiveTenantLease(prisma, options.tenantId, async () => {
+  // LLM 网络调用不进租户租约事务（避免 180 秒级调用长时间持有 Tenant 行锁、阻塞状态切换）：
+  // 每轮尝试前校验租户活跃，写库（applyTagAgentPlan）时才取 lease。
+  // 失败自动重试 5 次（间隔 10 秒，整体预算 5 分钟）；仍失败走 15 分钟间隔的自动重跑。
+  let clusteringSucceeded = false;
+  const retryStartedAt = Date.now();
+  for (let attempt = 1; attempt <= 1 + TAG_MAINTENANCE_RETRY_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      if (Date.now() - retryStartedAt > TAG_MAINTENANCE_RETRY_BUDGET_MS) {
+        options.logger.warn({ tenantId: options.tenantId, attempt }, "post tag maintenance: retry budget exceeded");
+        break;
+      }
+      options.logger.warn({ tenantId: options.tenantId, attempt }, "post tag maintenance: retrying LLM request");
+      await new Promise((resolve) => setTimeout(resolve, TAG_MAINTENANCE_RETRY_PAUSE_MS));
+    }
+    if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+      return applied;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
+    try {
       const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
         method: "POST",
         signal: controller.signal,
@@ -464,21 +516,19 @@ export async function maintainTenantPostTags(options: {
       const data = (await response.json().catch(() => null)) as
         | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
         | null;
-      return { response, data };
-    });
-    if (!leased.active) {
-      return applied;
-    }
-    const { response, data } = leased.value;
-    if (!response.ok) {
-      options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
-      return { ...applied, archived: uniqueStrings([...applied.archived, ...await archiveInactive()]) };
-    }
-    if (llmFinishReason(data) === "length") {
-      options.logger.warn({ tenantId: options.tenantId, posts: visiblePosts.length, maxTokens }, "post tag maintenance output truncated by max_tokens");
-    }
-    const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
-    if (plan) {
+      if (!response.ok) {
+        options.logger.warn({ tenantId: options.tenantId, attempt, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
+        continue;
+      }
+      if (llmFinishReason(data) === "length") {
+        options.logger.warn({ tenantId: options.tenantId, posts: visiblePosts.length, maxTokens }, "post tag maintenance output truncated by max_tokens");
+      }
+      const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
+      if (!plan) {
+        // 结构非法/截断：按失败处理，走既定重试策略，而不是当成功空跑。
+        options.logger.warn({ tenantId: options.tenantId, attempt }, "post tag maintenance: llm returned invalid plan JSON");
+        continue;
+      }
       const planned = await runWithActiveTenantLease(
         prisma,
         options.tenantId,
@@ -487,12 +537,19 @@ export async function maintainTenantPostTags(options: {
       if (planned.active) {
         applied = planned.value;
       }
+      clusteringSucceeded = true;
+      break;
+    } catch (error) {
+      const aborted = error instanceof Error && error.name === "AbortError";
+      options.logger.warn({ error, tenantId: options.tenantId, aborted, attempt }, "post tag maintenance: LLM call errored");
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch (error) {
-    const aborted = error instanceof Error && error.name === "AbortError";
-    options.logger.warn({ error, tenantId: options.tenantId, aborted }, "post tag maintenance: LLM call errored");
-  } finally {
-    clearTimeout(timeout);
+  }
+  if (clusteringSucceeded) {
+    clearTagMaintenanceAutoRetry(options.tenantId);
+  } else {
+    scheduleTagMaintenanceAutoRetry(options.tenantId, lookbackDays, options.logger);
   }
   return {
     ...applied,
@@ -910,4 +967,230 @@ function clampInteger(value: number | undefined, min: number, max: number, fallb
     return fallback;
   }
   return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+export type PostTagBackfillResult = {
+  scannedCount: number;
+  assignedCount: number;
+  skippedCount: number;
+  /** LLM 调用失败/响应无效而未能归类的分批数量：区别于「正常判断为零匹配」。 */
+  failedChunks: number;
+  /** 是否处理完本轮候选；false 表示触达预算/批数上限，剩余稿件可再次触发回溯续跑。 */
+  completed: boolean;
+};
+
+const tagBackfillMaxPosts = 300;
+const tagBackfillChunkSize = 25;
+/** HTTP 请求内单次回溯的批数与时间预算：剩余稿件未评估时 completed=false，可再次触发续跑。 */
+const tagBackfillMaxChunksPerRun = 8;
+const tagBackfillBudgetMs = 45_000;
+
+/**
+ * 手动新建标签后，把 lookbackDays 窗口内的存量稿件交给 AI 判断是否属于该标签并归类。
+ * 与维护 agent 不同，这里只针对一个标签做确定性回溯；新稿件仍由 autoTagPost 即时处理。
+ */
+export async function backfillPostsForTag(options: {
+  tenantId: string;
+  tagId: string;
+  lookbackDays?: number | undefined;
+  logger: FastifyBaseLogger;
+}): Promise<PostTagBackfillResult> {
+  const empty: PostTagBackfillResult = { scannedCount: 0, assignedCount: 0, skippedCount: 0, failedChunks: 0, completed: true };
+  const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
+    options.logger.warn({ error, tenantId: options.tenantId }, "post tag backfill: failed to read AI settings");
+    return null;
+  });
+  if (!settings || !settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured) {
+    return empty;
+  }
+  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
+  if (!apiKey || !await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return empty;
+  }
+
+  const lookbackDays = clampInteger(options.lookbackDays, 7, maxTagMaintenanceLookbackDays, defaultTagMaintenanceLookbackDays);
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const tag = await prisma.postTag.findFirst({
+    where: { id: options.tagId, tenantId: options.tenantId, status: "active" },
+  });
+  if (!tag) {
+    return empty;
+  }
+
+  // 常驻墙上的、有正文的窗口内稿件；排除已打上该标签的。
+  const candidates = await prisma.post.findMany({
+    where: {
+      tenantId: options.tenantId,
+      text: { not: "" },
+      createdAt: { gte: since },
+      status: { in: [...tagMaintenancePostStatuses] },
+      tagAssignments: { none: { tagId: tag.id } },
+    },
+    select: {
+      id: true,
+      displayId: true,
+      text: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: tagBackfillMaxPosts,
+  });
+  const result: PostTagBackfillResult = { scannedCount: candidates.length, assignedCount: 0, skippedCount: 0, failedChunks: 0, completed: true };
+  if (candidates.length === 0) {
+    return result;
+  }
+
+  const startedAt = Date.now();
+  let chunksProcessed = 0;
+  for (let offset = 0; offset < candidates.length; offset += tagBackfillChunkSize) {
+    if (chunksProcessed >= tagBackfillMaxChunksPerRun || Date.now() - startedAt > tagBackfillBudgetMs) {
+      // 触达批数/时间预算：本轮到此为止，剩余稿件未评估，再次触发回溯即可续跑。
+      result.completed = false;
+      break;
+    }
+    chunksProcessed += 1;
+    const chunk = candidates.slice(offset, offset + tagBackfillChunkSize);
+    const { matched, failed } = await classifyPostsIntoTag({
+      tenantId: options.tenantId,
+      settings,
+      apiKey,
+      tag,
+      chunk,
+      logger: options.logger,
+    });
+    if (failed) {
+      // LLM 调用失败/响应无效：这一批未被真正评估，不能当作零匹配。
+      result.failedChunks += 1;
+      continue;
+    }
+    if (matched.size === 0) {
+      continue;
+    }
+    for (const post of chunk) {
+      if (!matched.has(post.id)) {
+        continue;
+      }
+      const leased = await runWithActiveTenantLease(prisma, options.tenantId, async (tx) => {
+        // PG 下锁定稿件行，防止并发打标把单稿标签数顶破上限；SQLite 单写者天然串行。
+        if (supportsAdvisoryLock) {
+          await tx.$queryRaw`SELECT "id" FROM "Post" WHERE "id" = ${post.id} AND "tenantId" = ${options.tenantId} FOR UPDATE`;
+        }
+        const assignmentCount = await tx.postTagAssignment.count({ where: { postId: post.id } });
+        if (assignmentCount >= maxTagsPerPost) {
+          return false;
+        }
+        await assignPostTags(tx, {
+          tenantId: options.tenantId,
+          postId: post.id,
+          tags: [{ tagId: tag.id, source: "llm" }],
+        });
+        return true;
+      });
+      if (!leased.active) {
+        continue;
+      }
+      if (leased.value) {
+        result.assignedCount += 1;
+      } else {
+        result.skippedCount += 1;
+      }
+    }
+  }
+  if (result.assignedCount > 0) {
+    await prisma.postTag.update({ where: { id: tag.id }, data: { lastUsedAt: new Date() } }).catch(() => undefined);
+  }
+  return result;
+}
+
+/** 把一批稿件交给 LLM，判断哪些应归入指定标签；failed 表示这批因调用失败而未被真正评估。 */
+async function classifyPostsIntoTag(context: {
+  tenantId: string;
+  settings: NonNullable<Awaited<ReturnType<typeof readTenantAiSettings>>>;
+  apiKey: string;
+  tag: { id: string; name: string; description: string | null };
+  chunk: Array<{ id: string; displayId: number; text: string }>;
+  logger: FastifyBaseLogger;
+}): Promise<{ matched: Set<string>; failed: boolean }> {
+  const matched = new Set<string>();
+  const { settings, apiKey, tag, chunk } = context;
+  const knownIds = new Set(chunk.map((post) => post.id));
+  const totalChars = chunk.reduce((sum, post) => sum + post.text.length, 0);
+  const maxTokens = llmOutputTokenBudget(totalChars, { floor: 300, ceiling: 1500, multiplier: 0.3, padding: 200 });
+  context.logger.info(
+    { site: "post-tagging.backfill", tenantId: context.tenantId, model: settings.model, posts: chunk.length, maxTokens, tag: tag.name },
+    "llm request",
+  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
+  try {
+    // LLM 网络调用不进租户租约事务：避免 60 秒级调用长时间持锁；写库在回溯循环内单独取 lease。
+    const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: settings.model,
+        temperature: 0,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: [
+              "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
+              `目标：判断下列稿件中哪些适合归入标签「${tag.name}」。`,
+              tag.description ? `标签含义：${tag.description}` : "标签含义：按名称常见语义判断。",
+              "只判断是否属于这一个标签，不要发明新标签，不要考虑其他标签。",
+              "判断标准从严：内容主题确实与标签一致才选中；拿不准就不选。",
+              "postIds 必须来自输入 posts 的 id。",
+              "返回格式：{\"postIds\":[\"id1\",\"id2\"]}",
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              tag: { name: tag.name, description: tag.description },
+              posts: chunk.map((post) => ({
+                id: post.id,
+                displayId: post.displayId,
+                text: post.text.slice(0, tagAgentPostTextChars),
+              })),
+            }),
+          },
+        ],
+      }),
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+      | null;
+    if (!response.ok || !data) {
+      context.logger.warn(
+        { tag: tag.name, status: response.status, error: data?.error?.message ?? null },
+        "post tag backfill: llm request failed",
+      );
+      return { matched, failed: true };
+    }
+    const raw = data.choices?.[0]?.message?.content ?? "";
+    try {
+      const parsed = JSON.parse(raw) as { postIds?: unknown };
+      if (Array.isArray(parsed.postIds)) {
+        for (const id of parsed.postIds) {
+          if (typeof id === "string" && knownIds.has(id)) {
+            matched.add(id);
+          }
+        }
+      }
+    } catch {
+      context.logger.warn({ tag: tag.name, raw: raw.slice(0, 200) }, "post tag backfill: llm returned unparseable JSON");
+      return { matched, failed: true };
+    }
+    return { matched, failed: false };
+  } catch (caught) {
+    context.logger.warn({ error: caught, tag: tag.name }, "post tag backfill: llm request threw");
+    return { matched, failed: true };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
