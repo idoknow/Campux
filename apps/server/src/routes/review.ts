@@ -11,6 +11,7 @@ import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
 import { parsePostReviewAnalysisRecord, assessPostForReview } from "../runtime/post-review";
+import { readTenantAiSettings } from "../runtime/ai-settings";
 import { readTenantOperateMode, readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -20,6 +21,9 @@ import type { EventBus } from "@campux/plugin";
 const postParamsSchema = z.object({
   id: z.string().min(1),
 });
+
+/** 进行中的 AI 重评（按稿件去重）：防止并发重评产生相互竞争的分析与自动决策。 */
+const aiReassessInFlight = new Set<string>();
 
 const reviewBodySchema = z.object({
   comment: z.string().max(500).optional(),
@@ -282,9 +286,29 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!post) {
       return reply.code(404).send({ message: "稿件不存在或不在待审核状态" });
     }
-    void assessPostForReview({ tenantId: context.selectedTenant.id, postId: post.id, logger: request.log }).catch((error) => {
-      request.log.warn({ error, tenantId: context.selectedTenant.id, postId: post.id }, "ai review re-assessment failed");
+    if (aiReassessInFlight.has(post.id)) {
+      return reply.code(409).send({ message: "该稿件的 AI 分析已在进行中，请稍后刷新查看结果" });
+    }
+    // AI 审核未启用时 assessPostForReview 会静默跳过且不写结果，这里提前拒绝。
+    const settings = await readTenantAiSettings(context.selectedTenant.id);
+    if (!settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured || (settings.rules.aiReviewMode ?? "off") === "off") {
+      return reply.code(409).send({ message: "AI 审核未启用，无法重新发起分析" });
+    }
+    // 最新分析已完成（可能是并发重评刚完成）时不再重复评估，避免产生非预期的自动决策。
+    const latest = await prisma.postAiAnalysis.findFirst({
+      where: { postId: post.id, tenantId: context.selectedTenant.id },
+      orderBy: { version: "desc" },
+      select: { status: true },
     });
+    if (latest?.status === "completed") {
+      return reply.code(409).send({ message: "该稿件已有完成的 AI 分析，刷新页面即可查看" });
+    }
+    aiReassessInFlight.add(post.id);
+    void assessPostForReview({ tenantId: context.selectedTenant.id, postId: post.id, logger: request.log })
+      .catch((error) => {
+        request.log.warn({ error, tenantId: context.selectedTenant.id, postId: post.id }, "ai review re-assessment failed");
+      })
+      .finally(() => aiReassessInFlight.delete(post.id));
     return { ok: true, started: true };
   });
 

@@ -2747,7 +2747,7 @@ function PostDetailDialog({
                 </> : (
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-xs font-semibold">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>
-                    {onRetryAiReview ? (
+                    {onRetryAiReview && post.status === "pending_approval" ? (
                       <Button size="sm" variant="outline" disabled={aiRetryBusy} onClick={() => { setAiRetryBusy(true); void Promise.resolve(onRetryAiReview(post)).finally(() => setAiRetryBusy(false)); }}>
                         {aiRetryBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <RotateCcwIcon className="mr-1 size-4" />}
                         重新发起 AI 分析
@@ -2755,6 +2755,16 @@ function PostDetailDialog({
                     ) : null}
                   </div>
                 )}
+              </div>
+            ) : post.status === "pending_approval" && onRetryAiReview ? (
+              <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-xs dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+                <p className="font-semibold text-amber-900 dark:text-amber-100">该稿件还没有 AI 分析记录（投稿时 AI 审核未开启）。</p>
+                <div>
+                  <Button size="sm" variant="outline" disabled={aiRetryBusy} onClick={() => { setAiRetryBusy(true); void Promise.resolve(onRetryAiReview(post)).finally(() => setAiRetryBusy(false)); }}>
+                    {aiRetryBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <SparklesIcon className="mr-1 size-4" />}
+                    发起 AI 分析
+                  </Button>
+                </div>
               </div>
             ) : null}
             {images.length > 0 ? (

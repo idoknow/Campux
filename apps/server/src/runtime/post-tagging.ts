@@ -91,7 +91,7 @@ function clearTagMaintenanceAutoRetry(tenantId: string) {
   }
 }
 
-function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: number | undefined, logger: FastifyBaseLogger) {
+export function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: number | undefined, logger: FastifyBaseLogger) {
   const state = tagMaintenanceAutoRetryTimers.get(tenantId);
   const remaining = state ? state.remaining - 1 : TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS;
   if (remaining <= 0) {
