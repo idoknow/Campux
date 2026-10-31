@@ -10,7 +10,8 @@ import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedErro
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
-import { parsePostReviewAnalysisRecord } from "../runtime/post-review";
+import { parsePostReviewAnalysisRecord, assessPostForReview } from "../runtime/post-review";
+import { readTenantAiSettings } from "../runtime/ai-settings";
 import { readTenantOperateMode, readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -20,6 +21,9 @@ import type { EventBus } from "@campux/plugin";
 const postParamsSchema = z.object({
   id: z.string().min(1),
 });
+
+/** 进行中的 AI 重评（按稿件去重）：防止并发重评产生相互竞争的分析与自动决策。 */
+const aiReassessInFlight = new Set<string>();
 
 const reviewBodySchema = z.object({
   comment: z.string().max(500).optional(),
@@ -269,6 +273,75 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!lease.active) return reply.code(409).send({ error: "校园墙已暂停或归档" });
     if (!lease.value) return reply.code(409).send({ error: "自动审核决定已改变或无法撤销" });
     return { ok: true };
+  });
+
+  // AI 分析失败/不可用时的人工重试：重新发起评估（fire-and-forget，结果稍后写入）。
+  app.post("/api/review/posts/:id/ai-reassess", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: { id: params.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
+      select: { id: true, displayId: true },
+    });
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在或不在待审核状态" });
+    }
+    if (aiReassessInFlight.has(post.id)) {
+      return reply.code(409).send({ message: "该稿件的 AI 分析已在进行中，请稍后刷新查看结果" });
+    }
+    // 先占住进行中标记再做异步预检：两个并发请求都能通过预检的竞态窗口不存在了。
+    aiReassessInFlight.add(post.id);
+    try {
+      // AI 审核未启用时 assessPostForReview 会静默跳过且不写结果，这里提前拒绝。
+      const settings = await readTenantAiSettings(context.selectedTenant.id);
+      if (!settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured || (settings.rules.aiReviewMode ?? "off") === "off") {
+        aiReassessInFlight.delete(post.id);
+        // 按具体原因返回不同文案：按钮恰好出现在分析"不可用"的场景，多数是缺 Key。
+        let reason: string;
+        if (!settings.enabled || (settings.rules.aiReviewMode ?? "off") === "off") {
+          reason = "AI 审核未启用";
+        } else if (settings.mode !== "llm") {
+          reason = "当前为规则模式，无法发起 AI 分析";
+        } else {
+          reason = "请先在 AI 设置中配置 API Key";
+        }
+        return reply.code(409).send({ message: `无法重新发起 AI 分析：${reason}` });
+      }
+      // 最新分析已完成（可能是并发重评刚完成）时不再重复评估，避免产生非预期的自动决策。
+      const latest = await prisma.postAiAnalysis.findFirst({
+        where: { postId: post.id, tenantId: context.selectedTenant.id },
+        orderBy: { version: "desc" },
+        select: { id: true, status: true },
+      });
+      if (latest?.status === "completed") {
+        aiReassessInFlight.delete(post.id);
+        return reply.code(409).send({ message: "该稿件已有完成的 AI 分析，刷新页面即可查看" });
+      }
+      // reviewer 手动触发的重评写入审计（与 approve/feedback 一致）。
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.ai_review.reassess",
+        targetType: "post",
+        targetId: post.id,
+        detail: { displayId: post.displayId, analysisId: latest?.id ?? null },
+      });
+      void assessPostForReview({
+        tenantId: context.selectedTenant.id,
+        postId: post.id,
+        logger: request.log,
+        // 与创建路径一致：评估完成后通知审核群新的分析与自动决策。
+        onAssessmentReady: (readyPostId) => oneBot?.notifyAiReviewAssistance(readyPostId) ?? Promise.resolve(),
+      })
+        .catch((error) => {
+          request.log.warn({ error, tenantId: context.selectedTenant.id, postId: post.id }, "ai review re-assessment failed");
+        })
+        .finally(() => aiReassessInFlight.delete(post.id));
+      return { ok: true, started: true };
+    } catch (error) {
+      aiReassessInFlight.delete(post.id);
+      throw error;
+    }
   });
 
   app.post("/api/review/posts/:id/approve", async (request, reply) => {

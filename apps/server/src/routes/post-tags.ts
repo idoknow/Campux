@@ -13,7 +13,15 @@ import {
   tagColorForName,
   upsertTenantTagByName,
 } from "../lib/post-tags";
-import { backfillPostsForTag, maintainTenantPostTags } from "../runtime/post-tagging";
+import {
+  backfillPostsForTag,
+  hasPendingTagMaintenanceRetry,
+  maintainTenantPostTags,
+  scheduleTagMaintenanceAutoRetry,
+} from "../runtime/post-tagging";
+
+/** 进行中的标签整理（按租户去重）：防止并发运行消耗双份 token、应用相互冲突的计划。 */
+const maintenanceInFlight = new Set<string>();
 
 /** 单稿标签数达到上限时抛出，使整个打标事务回滚（避免残留新建的标签）。 */
 class TagLimitError extends Error {
@@ -67,15 +75,26 @@ export function registerPostTagRoutes(app: FastifyInstance) {
   app.post("/api/post-tags/maintain", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const body = maintainTagsBodySchema.parse(request.body ?? {});
-    const result = await maintainTenantPostTags({
+    // 整理含 LLM 请求与自动重试，耗时可达数分钟、会超过网关超时导致 "Failed to fetch"：
+    // 改为后台执行并立即返回；同一租户串行化（进行中时合并重复请求）；失败由自动重试兜底。
+    if (maintenanceInFlight.has(context.selectedTenant.id)) {
+      return { ok: true, started: true, deduplicated: true };
+    }
+    maintenanceInFlight.add(context.selectedTenant.id);
+    void maintainTenantPostTags({
       tenantId: context.selectedTenant.id,
       lookbackDays: body.lookbackDays,
-      logger: request.log,
-    });
-    return {
-      ok: true,
-      result,
-    };
+      logger: app.log,
+    })
+      .catch((error) => {
+        app.log.warn({ error, tenantId: context.selectedTenant.id }, "post tag maintenance: background run failed");
+        // 聚类失败路径可能已自行排程：已有待执行重试时只记日志，避免 3 轮预算被重复扣减。
+        if (!hasPendingTagMaintenanceRetry(context.selectedTenant.id)) {
+          scheduleTagMaintenanceAutoRetry(context.selectedTenant.id, body.lookbackDays, app.log);
+        }
+      })
+      .finally(() => maintenanceInFlight.delete(context.selectedTenant.id));
+    return { ok: true, started: true };
   });
 
   // 手动打标：标签不存在则创建（source=manual），已归档则重新启用。

@@ -81,17 +81,26 @@ const TAG_MAINTENANCE_RETRY_PAUSE_MS = 10_000;
 const TAG_MAINTENANCE_RETRY_BUDGET_MS = 5 * 60_000;
 const TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS = 15 * 60 * 1000;
 const TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS = 3;
-const tagMaintenanceAutoRetryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; remaining: number }>();
+/** 维护自动重试状态：timer 为已排程的 15 分钟重试；定时器触发后置 null（rerun 进行中，remaining 保留）。 */
+const tagMaintenanceAutoRetryTimers = new Map<string, { timer: ReturnType<typeof setTimeout> | null; remaining: number }>();
+
+/** 维护任务进行中标记（按租户互斥，路由/调度器/自动重试共用）。 */
+const tagMaintenanceInFlight = new Map<string, true>();
+
+/** 该租户是否已有待执行的维护自动重试（定时器已排程且未触发）。 */
+export function hasPendingTagMaintenanceRetry(tenantId: string): boolean {
+  return tagMaintenanceAutoRetryTimers.get(tenantId)?.timer != null;
+}
 
 function clearTagMaintenanceAutoRetry(tenantId: string) {
   const state = tagMaintenanceAutoRetryTimers.get(tenantId);
   if (state) {
-    clearTimeout(state.timer);
+    if (state.timer) clearTimeout(state.timer);
     tagMaintenanceAutoRetryTimers.delete(tenantId);
   }
 }
 
-function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: number | undefined, logger: FastifyBaseLogger) {
+export function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: number | undefined, logger: FastifyBaseLogger) {
   const state = tagMaintenanceAutoRetryTimers.get(tenantId);
   const remaining = state ? state.remaining - 1 : TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS;
   if (remaining <= 0) {
@@ -99,12 +108,20 @@ function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: number 
     logger.warn({ tenantId }, "post tag maintenance: automatic retries exhausted; waiting for the next scheduled maintenance");
     return;
   }
-  if (state) clearTimeout(state.timer);
+  if (state?.timer) clearTimeout(state.timer);
   logger.warn({ tenantId, remaining, retryAfterMinutes: 15 }, "post tag maintenance: clustering failed, scheduling automatic retry");
   const timer = setTimeout(() => {
-    void maintainTenantPostTags({ tenantId, lookbackDays, logger }).catch((error) => {
-      logger.warn({ error, tenantId }, "post tag maintenance: automatic retry crashed");
-    });
+    // 触发后先把 timer 置 null（rerun 进行中、remaining 保留）：
+    // hasPendingTagMaintenanceRetry 只认未触发的定时器，rerun 内部的失败才能按剩余预算继续排程。
+    const entry = tagMaintenanceAutoRetryTimers.get(tenantId);
+    if (entry) entry.timer = null;
+    void maintainTenantPostTags({ tenantId, lookbackDays, logger })
+      .catch((error) => {
+        logger.warn({ error, tenantId }, "post tag maintenance: automatic retry crashed");
+        if (!hasPendingTagMaintenanceRetry(tenantId)) {
+          scheduleTagMaintenanceAutoRetry(tenantId, lookbackDays, logger);
+        }
+      });
   }, TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS);
   tagMaintenanceAutoRetryTimers.set(tenantId, { timer, remaining });
 }
@@ -343,13 +360,24 @@ export async function maintainTenantPostTags(options: {
   lookbackDays?: number | undefined;
   logger: FastifyBaseLogger;
 }): Promise<PostTagMaintenanceResult> {
+  // 租户级互斥：路由、周期调度器、自动重试定时器共用同一把锁，
+  // 防止并发运行消耗双份 token、应用相互冲突的标签计划。
+  // 进程内互斥覆盖单实例部署；多副本需另引入分布式锁（当前部署为单实例）。
+  if (tagMaintenanceInFlight.has(options.tenantId)) {
+    options.logger.info({ tenantId: options.tenantId }, "post tag maintenance: already running, skipping");
+    return { created: [], merged: [], archived: [], deleted: [], assigned: [] };
+  }
+  tagMaintenanceInFlight.set(options.tenantId, true);
+  try {
+    return await (async (): Promise<PostTagMaintenanceResult> => {
   const emptyResult = (): PostTagMaintenanceResult => ({ created: [], merged: [], archived: [], deleted: [], assigned: [] });
   if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
     return emptyResult();
   }
   const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag maintenance: failed to read AI settings");
-    return null;
+    // 读设置的暂时性失败向上抛出：路由 catch 会安排 15 分钟自动重试，而不是静默空跑。
+    throw error;
   });
   if (!shouldRunTagMaintenance(settings)) {
     return emptyResult();
@@ -555,6 +583,10 @@ export async function maintainTenantPostTags(options: {
     ...applied,
     archived: uniqueStrings([...applied.archived, ...await archiveInactive()]),
   };
+    })();
+  } finally {
+    tagMaintenanceInFlight.delete(options.tenantId);
+  }
 }
 
 export function parsePostTagMaintenanceJson(raw: string): PostTagAgentPlan | null {

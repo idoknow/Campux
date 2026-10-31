@@ -211,17 +211,6 @@ const publishedTagMaintenanceOptions = [
   { value: "90", label: "近 90 天" },
 ] as const;
 
-type PostTagMaintenanceResult = {
-  created: string[];
-  merged: Array<{ from: string[]; into: string }>;
-  archived: string[];
-  deleted: string[];
-  assigned: Array<{
-    tag: string;
-    postIds: string[];
-  }>;
-};
-
 type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"] | (typeof pendingPublishReviewOption)["value"];
 type ReviewListPreferences = {
   status: ReviewStatusFilter;
@@ -377,6 +366,7 @@ export function PostsPage({
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
+  const [aiRetryBusyId, setAiRetryBusyId] = useState("");
   const [busyCancelPostId, setBusyCancelPostId] = useState("");
   const [busyRecallPostId, setBusyRecallPostId] = useState("");
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
@@ -1018,23 +1008,14 @@ export function PostsPage({
     const lookbackDays = Number(tagMaintenanceDays);
     setTagMaintenanceBusy(true);
     try {
-      const data = await api<{ ok: true; result: PostTagMaintenanceResult }>("/api/post-tags/maintain", {
+      // 整理含 LLM 重试、耗时可达数分钟（超过网关超时）：后端改为后台执行，这里只负责发起。
+      await api<{ ok: true; started: true }>("/api/post-tags/maintain", {
         method: "POST",
         body: JSON.stringify({ lookbackDays }),
       });
-      const assignedPostIds = new Set(data.result.assigned.flatMap((item) => item.postIds));
-      const summaryParts = [
-        data.result.created.length > 0 ? `新增 ${data.result.created.length} 个标签` : "",
-        data.result.merged.length > 0 ? `合并 ${data.result.merged.reduce((sum, item) => sum + item.from.length, 0)} 个标签` : "",
-        assignedPostIds.size > 0 ? `回填 ${assignedPostIds.size} 条稿件` : "",
-        data.result.archived.length > 0 ? `归档 ${data.result.archived.length} 个标签` : "",
-      ].filter(Boolean);
-      toast.success(summaryParts.length > 0 ? `整理完成：${summaryParts.join("，")}。` : `已整理近 ${lookbackDays} 天稿件，暂无标签变化。`);
-      const nextFilter = await refreshPublishedTags();
-      setPublishedPage(1);
-      await refreshPublishedFeed(1, nextFilter);
+      toast.success(`标签整理已在后台开始（近 ${lookbackDays} 天）：完成后刷新页面即可看到新标签与归类，失败会自动重试。`);
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "标签整理失败");
+      toast.error(caught instanceof Error ? caught.message : "标签整理发起失败");
     } finally {
       setTagMaintenanceBusy(false);
     }
@@ -1144,6 +1125,19 @@ export function PostsPage({
       await api(`/api/review/ai-feedback/${analysisId}`, { method: "POST", body: JSON.stringify({ matched, humanAction, analysisMode: post.aiReview.mode }) });
       toast.success(matched ? "已记录 AI 判断正确" : "已记录人工纠正，作为后续改进样本");
     } catch (error) { toast.error(error instanceof Error ? error.message : "AI 反馈保存失败"); }
+  }
+
+  async function retryAiReview(post: ReviewPostItem) {
+    if (aiRetryBusyId) return;
+    setAiRetryBusyId(post.id);
+    try {
+      await api(`/api/review/posts/${post.id}/ai-reassess`, { method: "POST" });
+      toast.success("已重新发起 AI 分析，完成后刷新页面即可看到结果");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "重新发起 AI 分析失败");
+    } finally {
+      setAiRetryBusyId("");
+    }
   }
 
   async function reviewPost(id: string, action: "approve" | "reject", comment?: string) {
@@ -2205,6 +2199,7 @@ export function PostsPage({
         {...(detailPost ? { onCancelAutoDecision: (post: ReviewPostItem) => cancelAutoDecision(post) } : {})}
         onAiFeedback={submitAiFeedback}
         onTagsChanged={() => void onRefresh()}
+        onRetryAiReview={retryAiReview}
         isAdmin={isAdmin}
         onOpenChange={(open) => {
           if (!open) {
@@ -2533,6 +2528,7 @@ function PostDetailDialog({
   onCancelAutoDecision,
   onAiFeedback,
   onTagsChanged,
+  onRetryAiReview,
   isAdmin = false,
 }: {
   post: ReviewPostItem | null;
@@ -2548,12 +2544,14 @@ function PostDetailDialog({
   onCancelAutoDecision?: (post: ReviewPostItem) => void;
   onAiFeedback: (post: ReviewPostItem, action: "approve" | "reject", matched: boolean) => void;
   onTagsChanged?: () => void;
+  onRetryAiReview?: (post: ReviewPostItem) => Promise<void> | void;
 }) {
   const images = post ? getPostImages(post.attachments) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
   const showDirectRecallSilent = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirectSilent);
   // 手动打标后服务端返回最新标签；本地覆盖保证弹窗立即反映变更，列表刷新在后台进行。
   const [manualTags, setManualTags] = useState<AssignedPostTag[] | null>(null);
+  const [aiRetryBusy, setAiRetryBusy] = useState(false);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [tagBusy, setTagBusy] = useState(false);
@@ -2746,7 +2744,27 @@ function PostDetailDialog({
                   {post.status === "pending_approval" ? <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">请先完成人工审核，再评价 AI 判断。</p> : null}
                   {isAdmin ? <AddAiEntityButton findings={post.aiReview.assessment.sensitiveFindings} analysisId={post.aiReview.analysisId ?? ""} /> : null}
                   <p className="border-t border-violet-200/70 pt-2 text-xs leading-5 text-violet-700 dark:border-violet-800 dark:text-violet-300">AI 不执行审核决定；请核对原文并由审核员作最终判断。</p>
-                </> : <p className="text-xs font-semibold">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>}
+                </> : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold">AI 辅助审核{post.aiReview.status === "unavailable" ? "不可用" : "失败"}；请按人工流程审核。</p>
+                    {onRetryAiReview && post.status === "pending_approval" ? (
+                      <Button size="sm" variant="outline" disabled={aiRetryBusy} onClick={() => { setAiRetryBusy(true); void Promise.resolve(onRetryAiReview(post)).finally(() => setAiRetryBusy(false)); }}>
+                        {aiRetryBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <RotateCcwIcon className="mr-1 size-4" />}
+                        重新发起 AI 分析
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : post.status === "pending_approval" && onRetryAiReview ? (
+              <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-xs dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+                <p className="font-semibold text-amber-900 dark:text-amber-100">该稿件还没有 AI 分析记录（投稿时 AI 审核未开启）。</p>
+                <div>
+                  <Button size="sm" variant="outline" disabled={aiRetryBusy} onClick={() => { setAiRetryBusy(true); void Promise.resolve(onRetryAiReview(post)).finally(() => setAiRetryBusy(false)); }}>
+                    {aiRetryBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <SparklesIcon className="mr-1 size-4" />}
+                    发起 AI 分析
+                  </Button>
+                </div>
               </div>
             ) : null}
             {images.length > 0 ? (
