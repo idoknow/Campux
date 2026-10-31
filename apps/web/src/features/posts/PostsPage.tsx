@@ -2087,6 +2087,7 @@ export function PostsPage({
         recallBusy={detailPost ? busyPostId === detailPost.id : false}
         {...(detailPost ? { onCancelAutoDecision: (post: ReviewPostItem) => cancelAutoDecision(post) } : {})}
         onAiFeedback={submitAiFeedback}
+        onTagsChanged={() => void onRefresh()}
         isAdmin={isAdmin}
         onOpenChange={(open) => {
           if (!open) {
@@ -2335,6 +2336,7 @@ function PostDetailDialog({
   onRecallDirectSilent,
   onCancelAutoDecision,
   onAiFeedback,
+  onTagsChanged,
   isAdmin = false,
 }: {
   post: ReviewPostItem | null;
@@ -2349,10 +2351,85 @@ function PostDetailDialog({
   onRecallDirectSilent?: (post: ReviewPostItem) => void;
   onCancelAutoDecision?: (post: ReviewPostItem) => void;
   onAiFeedback: (post: ReviewPostItem, action: "approve" | "reject", matched: boolean) => void;
+  onTagsChanged?: () => void;
 }) {
   const images = post ? getPostImages(post.attachments) : [];
   const showDirectRecall = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirect);
   const showDirectRecallSilent = Boolean(post && canDirectRecall && post.status === "published" && onRecallDirectSilent);
+  // 手动打标后服务端返回最新标签；本地覆盖保证弹窗立即反映变更，列表刷新在后台进行。
+  const [manualTags, setManualTags] = useState<AssignedPostTag[] | null>(null);
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagOptions, setTagOptions] = useState<string[]>([]);
+  const tags = manualTags ?? post?.tags ?? [];
+
+  useEffect(() => {
+    setManualTags(null);
+    setTagEditorOpen(false);
+    setTagInput("");
+  }, [post?.id]);
+
+  useEffect(() => {
+    if (!open || !isAdmin) {
+      return;
+    }
+    let cancelled = false;
+    api<{ tags: Array<{ id: string; name: string; status: string }> }>("/api/post-tags")
+      .then((data) => {
+        if (!cancelled) {
+          setTagOptions(data.tags.filter((tag) => tag.status === "active").map((tag) => tag.name));
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [open, isAdmin]);
+
+  async function submitManualTag() {
+    if (!post) {
+      return;
+    }
+    const tagName = tagInput.trim();
+    if (!tagName) {
+      return;
+    }
+    setTagBusy(true);
+    try {
+      const result = await api<{ tags: AssignedPostTag[] }>("/api/post-tags/assign", {
+        method: "POST",
+        body: JSON.stringify({ postId: post.id, tagName }),
+      });
+      setManualTags(result.tags);
+      toast.success(`已添加标签「${tagName}」`);
+      setTagEditorOpen(false);
+      setTagInput("");
+      onTagsChanged?.();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "添加标签失败");
+    } finally {
+      setTagBusy(false);
+    }
+  }
+
+  async function removeManualTag(tag: AssignedPostTag) {
+    if (!post) {
+      return;
+    }
+    setTagBusy(true);
+    try {
+      const result = await api<{ tags: AssignedPostTag[] }>("/api/post-tags/unassign", {
+        method: "POST",
+        body: JSON.stringify({ postId: post.id, tagId: tag.id }),
+      });
+      setManualTags(result.tags);
+      toast.success(`已移除标签「${tag.name}」`);
+      onTagsChanged?.();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "移除标签失败");
+    } finally {
+      setTagBusy(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2378,6 +2455,65 @@ function PostDetailDialog({
               <span>更新时间：{formatFullDateTime(post.updatedAt)}</span>
               <span>作者 QQ：{post.author?.qqUin ?? "未知"}</span>
               <span>作者 ID：{post.author?.id ?? "未知"}</span>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">标签</span>
+                {tags.length === 0 && !tagEditorOpen ? <span className="text-xs text-slate-400">暂无标签</span> : null}
+                {tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 dark:border-slate-700 dark:text-slate-200"
+                    style={{ backgroundColor: tag.color || "#f8fafc" }}
+                    title={tag.assignmentSource === "llm" ? "AI 打标" : "手动打标"}
+                  >
+                    {tag.name}
+                    {tag.assignmentSource === "llm" ? <span className="text-[10px] font-medium opacity-60">AI</span> : null}
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        aria-label={`移除标签 ${tag.name}`}
+                        className="text-xs font-bold text-slate-500 hover:text-red-600 disabled:opacity-40"
+                        disabled={tagBusy}
+                        onClick={() => void removeManualTag(tag)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                ))}
+                {isAdmin && tagEditorOpen ? (
+                  <span className="flex items-center gap-1">
+                    <input
+                      value={tagInput}
+                      list="post-detail-tag-options"
+                      maxLength={16}
+                      autoFocus
+                      className="h-7 w-28 rounded border border-slate-300 bg-white px-2 text-xs outline-none focus:border-slate-400"
+                      placeholder="输入标签名"
+                      onChange={(event) => setTagInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          void submitManualTag();
+                        }
+                      }}
+                    />
+                    <datalist id="post-detail-tag-options">
+                      {tagOptions.map((option) => <option key={option} value={option} />)}
+                    </datalist>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={tagBusy || tagInput.trim().length === 0} onClick={() => void submitManualTag()}>
+                      添加
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={tagBusy} onClick={() => setTagEditorOpen(false)}>
+                      取消
+                    </Button>
+                  </span>
+                ) : isAdmin ? (
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setTagEditorOpen(true)}>
+                    添加标签
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <PostTimeline timeline={post.timeline} />
             {post.aiAutoDecision && onCancelAutoDecision ? (

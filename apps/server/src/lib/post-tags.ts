@@ -171,3 +171,44 @@ export async function listTenantPostTags(tenantId: string, options: { includeArc
   });
   return tags.map(serializePostTag);
 }
+
+/** 手动打标用：按名取标签；不存在则创建（source=manual），已归档则重新启用。 */
+export async function upsertTenantTagByName(
+  client: TagClient,
+  input: { tenantId: string; name: string },
+) {
+  const existing = await client.postTag.findUnique({
+    where: { tenantId_name: { tenantId: input.tenantId, name: input.name } },
+  });
+  if (existing) {
+    if (existing.status === "active") {
+      return existing;
+    }
+    return client.postTag.update({
+      where: { id: existing.id },
+      data: { status: "active" },
+    });
+  }
+  return client.postTag.create({
+    data: {
+      tenantId: input.tenantId,
+      name: input.name,
+      color: tagColorForName(input.name),
+      source: "manual",
+    },
+  });
+}
+
+/** 读取稿件当前标签（序列化后的 assigned 形态），稿件不存在时返回 null。 */
+export async function readPostAssignedTags(tenantId: string, postId: string) {
+  const post = await prisma.post.findFirst({
+    where: { id: postId, tenantId },
+    select: {
+      tagAssignments: {
+        include: { tag: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  return post ? serializeAssignedPostTags(post.tagAssignments) : null;
+}
