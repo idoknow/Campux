@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parsePostTagMaintenanceJson, parsePostTagSuggestionJson, shouldRunTagClustering, shouldRunTagMaintenance, tagMaintenancePostStatuses } from "./post-tagging";
+import { chunkTagMaintenancePosts, mergeTagMaintenanceResults, parsePostTagMaintenanceJson, parsePostTagSuggestionJson, shouldRunTagClustering, shouldRunTagMaintenance, tagMaintenancePostStatuses } from "./post-tagging";
+import type { PostTagMaintenanceResult } from "./post-tagging";
 
 describe("post tag LLM JSON parsing", () => {
   test("parses tag suggestions and normalizes names", () => {
@@ -96,5 +97,36 @@ describe("post tag maintenance gate", () => {
     expect([...tagMaintenancePostStatuses]).not.toContain("approved");
     expect([...tagMaintenancePostStatuses]).not.toContain("rejected");
     expect([...tagMaintenancePostStatuses]).not.toContain("cancelled");
+  });
+});
+
+describe("tag maintenance batching", () => {
+  test("splits the wall into fixed-size batches so the plan JSON stays under max_tokens", () => {
+    const posts = Array.from({ length: 78 }, (_, index) => `p${index}`);
+    const batches = chunkTagMaintenancePosts(posts);
+    expect(batches.map((batch) => batch.length)).toEqual([30, 30, 18]);
+    expect(batches.flat()).toEqual(posts);
+  });
+
+  test("keeps an exact multiple as full batches and an empty wall as no batches", () => {
+    expect(chunkTagMaintenancePosts(Array.from({ length: 60 }, (_, i) => i)).map((b) => b.length)).toEqual([30, 30]);
+    expect(chunkTagMaintenancePosts([])).toEqual([]);
+    expect(chunkTagMaintenancePosts([1, 2, 3], 2).map((b) => b.length)).toEqual([2, 1]);
+  });
+
+  test("falls back to the default size for invalid input", () => {
+    expect(chunkTagMaintenancePosts(Array.from({ length: 31 }, (_, i) => i), 0).map((b) => b.length)).toEqual([30, 1]);
+    expect(chunkTagMaintenancePosts(Array.from({ length: 31 }, (_, i) => i), Number.NaN).map((b) => b.length)).toEqual([30, 1]);
+  });
+
+  test("dedupes merged entries when combining batch results", () => {
+    const first: PostTagMaintenanceResult = { created: ["A"], merged: [{ from: ["旧名", "别名"], into: "规范" }], archived: [], deleted: [], assigned: [{ tag: "A", postIds: ["p1"] }] };
+    const second: PostTagMaintenanceResult = { created: ["B"], merged: [{ from: ["别名", "旧名"], into: "规范" }], archived: ["x"], deleted: [], assigned: [{ tag: "B", postIds: ["p2"] }] };
+
+    const merged = mergeTagMaintenanceResults(first, second);
+    expect(merged.created).toEqual(["A", "B"]);
+    expect(merged.merged).toHaveLength(1);
+    expect(merged.archived).toEqual(["x"]);
+    expect(merged.assigned).toHaveLength(2);
   });
 });
