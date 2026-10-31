@@ -72,6 +72,9 @@ export type {
 
 export { resolveDbProvider, dbProvider, type DbProvider } from "./provider";
 export { applySqliteBaseline, type SqliteMigrateResult, type SqliteMigrateLogger } from "./migrate-sqlite";
+export { normalizeSchoolEntityAlias, syncSchoolEntityAliases, schoolEntityAliasRows } from "./school-entity-aliases";
+export type { SchoolEntityAliasTransaction } from "./school-entity-aliases";
+
 export {
   insensitiveContains,
   supportsSkipDuplicates,

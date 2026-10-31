@@ -31,6 +31,9 @@ const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
 const AUTO_MODERATION_SCHEDULE_MIGRATION_NAME = "20261024120000_ai_auto_moderation_schedule_quota";
 const PRIVATE_FORWARD_GROUP_MIGRATION_NAME = "20261029120000_add_private_forward_group";
 const TENANT_PUBLISH_QUOTA_MIGRATION_NAME = "20261027120000_durable_tenant_publish_quota_reservations";
+const SCHOOL_RELATIONS_MIGRATION_NAME = "20261031120000_add_school_relations";
+const SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME = "20261031130000_add_school_relation_extractions";
+const SCHOOL_ENTITY_ALIASES_MIGRATION_NAME = "20261031140000_school_entity_aliases";
 
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
 发送 #重置密码 可以重置你的登录密码。`;
@@ -932,6 +935,89 @@ function applyPrivateForwardGroupSqliteMigration(
   logger.info({ migration: PRIVATE_FORWARD_GROUP_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
+function applySchoolRelationsSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  if (doneNames.has(SCHOOL_RELATIONS_MIGRATION_NAME)) {
+    skipped.push(SCHOOL_RELATIONS_MIGRATION_NAME);
+    return;
+  }
+  const hasTenant = db.query(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='Tenant'`).get() !== null;
+  const hasPost = db.query(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='Post'`).get() !== null;
+  if (!hasTenant || !hasPost) return;
+
+  logger.info({ migration: SCHOOL_RELATIONS_MIGRATION_NAME }, "applying sqlite school relations migration");
+  db.exec("BEGIN");
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS "SchoolRelation" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "tenantId" TEXT NOT NULL,
+      "subject" TEXT NOT NULL,
+      "predicate" TEXT NOT NULL,
+      "object" TEXT NOT NULL,
+      "evidence" TEXT NOT NULL,
+      "sourcePostId" TEXT NOT NULL,
+      "approved" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "SchoolRelation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "SchoolRelation_sourcePostId_tenantId_fkey" FOREIGN KEY ("sourcePostId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolRelation_tenantId_subject_predicate_object_sourcePostId_key" ON "SchoolRelation"("tenantId", "subject", "predicate", "object", "sourcePostId")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "SchoolRelation_tenantId_approved_createdAt_idx" ON "SchoolRelation"("tenantId", "approved", "createdAt")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "SchoolRelation_tenantId_sourcePostId_idx" ON "SchoolRelation"("tenantId", "sourcePostId")`);
+    const violations = db.query("PRAGMA foreign_key_check").all();
+    if (violations.length) throw new Error(`school relations sqlite migration introduced ${violations.length} foreign-key violation(s)`);
+    db.run(`INSERT INTO "_prisma_migrations" ("id","checksum","migration_name","started_at","finished_at","applied_steps_count") VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`, [randomUUID(), checksumOf("create school relations table and indexes"), SCHOOL_RELATIONS_MIGRATION_NAME]);
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
+  doneNames.add(SCHOOL_RELATIONS_MIGRATION_NAME);
+  applied.push(SCHOOL_RELATIONS_MIGRATION_NAME);
+}
+
+function applySchoolEntityAliasesSqliteMigration(db: Database, doneNames: Set<string>, applied: string[], skipped: string[], logger: SqliteMigrateLogger): void {
+  if (doneNames.has(SCHOOL_ENTITY_ALIASES_MIGRATION_NAME)) { skipped.push(SCHOOL_ENTITY_ALIASES_MIGRATION_NAME); return; }
+  if (!db.query(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchoolEntity'`).get()) return;
+  logger.info({ migration: SCHOOL_ENTITY_ALIASES_MIGRATION_NAME }, "applying sqlite school entity aliases migration");
+  db.exec("BEGIN");
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolEntity_tenantId_id_key" ON "SchoolEntity"("tenantId", "id")`);
+    db.exec(`CREATE TABLE IF NOT EXISTS "SchoolEntityAlias" (
+      "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "entityId" TEXT NOT NULL,
+      "value" TEXT NOT NULL, "normalized" TEXT NOT NULL,
+      CONSTRAINT "SchoolEntityAlias_tenantId_entityId_fkey" FOREIGN KEY ("tenantId", "entityId") REFERENCES "SchoolEntity" ("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolEntityAlias_tenantId_entityId_normalized_key" ON "SchoolEntityAlias"("tenantId", "entityId", "normalized")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "SchoolEntityAlias_tenantId_normalized_idx" ON "SchoolEntityAlias"("tenantId", "normalized")`);
+    // json_each is part of SQLite JSON1; aliases has always been JSON in supported SQLite builds.
+    db.exec(`INSERT OR IGNORE INTO "SchoolEntityAlias" ("id","tenantId","entityId","value","normalized")
+      SELECT lower(hex(randomblob(16))), e."tenantId", e."id", trim(j.value), lower(trim(j.value))
+      FROM "SchoolEntity" e, json_each(e."aliases") j
+      WHERE j.type='text' AND trim(j.value) <> ''`);
+    db.run(`INSERT INTO "_prisma_migrations" ("id","checksum","migration_name","started_at","finished_at","applied_steps_count") VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`, [randomUUID(), checksumOf("create and backfill school entity aliases"), SCHOOL_ENTITY_ALIASES_MIGRATION_NAME]);
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
+  doneNames.add(SCHOOL_ENTITY_ALIASES_MIGRATION_NAME); applied.push(SCHOOL_ENTITY_ALIASES_MIGRATION_NAME);
+}
+
+function applySchoolRelationExtractionsSqliteMigration(db: Database, doneNames: Set<string>, applied: string[], skipped: string[], logger: SqliteMigrateLogger): void {
+  if (doneNames.has(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME)) { skipped.push(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME); return; }
+  if (!db.query(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchoolRelation'`).get()) return;
+  logger.info({ migration: SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME }, "applying sqlite relation extraction migration");
+  db.exec("BEGIN");
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS "SchoolRelationExtraction" ("id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL, "contentHash" TEXT NOT NULL, "status" TEXT NOT NULL, "attempts" INTEGER NOT NULL DEFAULT 0, "attemptedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "SchoolRelationExtraction_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "SchoolRelationExtraction_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post"("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolRelationExtraction_tenantId_postId_contentHash_key" ON "SchoolRelationExtraction"("tenantId", "postId", "contentHash")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "SchoolRelationExtraction_tenantId_status_attemptedAt_idx" ON "SchoolRelationExtraction"("tenantId", "status", "attemptedAt")`);
+    db.run(`INSERT INTO "_prisma_migrations" ("id","checksum","migration_name","started_at","finished_at","applied_steps_count") VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`, [randomUUID(), checksumOf("create school relation extraction checkpoints"), SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME]);
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
+  doneNames.add(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME); applied.push(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME);
+}
+
 export function applySqliteBaseline(
   baselineSql: string,
   databaseUrl: string,
@@ -990,7 +1076,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -1018,6 +1104,9 @@ export function applySqliteBaseline(
     applyAutoModerationScheduleSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPrivateForwardGroupSqliteMigration(db, doneNames, applied, skipped, logger);
     applyTenantPublishQuotaReservationSqliteMigration(db, doneNames, applied, skipped, logger);
+    applySchoolRelationsSqliteMigration(db, doneNames, applied, skipped, logger);
+    applySchoolRelationExtractionsSqliteMigration(db, doneNames, applied, skipped, logger);
+    applySchoolEntityAliasesSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

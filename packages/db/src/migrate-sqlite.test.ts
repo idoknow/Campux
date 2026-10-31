@@ -47,6 +47,9 @@ describe("applySqliteBaseline", () => {
         "20260913160000_add_tenant_feedback_messages",
         "20260925120000_add_user_graduation",
         "20261004000000_add_pending_tags",
+        "20261027120000_durable_tenant_publish_quota_reservations",
+        "20261031120000_add_school_relations",
+        "20261031130000_add_school_relation_extractions",
       ];
       for (const name of embeddedMigrations) {
         expect(r1.skipped).toContain(name);
@@ -68,8 +71,8 @@ describe("applySqliteBaseline", () => {
       const baselineRow = mig.find((row) => row.migration_name === "0_sqlite_baseline");
       expect(baselineRow).toBeTruthy();
       expect(baselineRow!.checksum).toMatch(/^[0-9a-f]{64}$/);
-      // 0_sqlite_baseline + 10 embedded migration names
-      expect(mig).toHaveLength(11);
+      // baseline + embedded incremental migration names
+      expect(mig).toHaveLength(14);
       expect(new Set(mig.map((row) => row.migration_name)).size).toBe(mig.length);
       db.close();
 

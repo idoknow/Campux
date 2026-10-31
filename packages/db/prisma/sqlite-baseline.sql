@@ -571,6 +571,36 @@ CREATE TABLE "SchoolEntity" (
 );
 
 -- CreateTable
+CREATE UNIQUE INDEX "SchoolEntity_tenantId_id_key" ON "SchoolEntity"("tenantId", "id");
+CREATE TABLE "SchoolEntityAlias" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "entityId" TEXT NOT NULL,
+    "value" TEXT NOT NULL,
+    "normalized" TEXT NOT NULL,
+    CONSTRAINT "SchoolEntityAlias_tenantId_entityId_fkey" FOREIGN KEY ("tenantId", "entityId") REFERENCES "SchoolEntity" ("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "SchoolRelation" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "subject" TEXT NOT NULL,
+    "predicate" TEXT NOT NULL,
+    "object" TEXT NOT NULL,
+    "evidence" TEXT NOT NULL,
+    "sourcePostId" TEXT NOT NULL,
+    "approved" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SchoolRelation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "SchoolRelation_sourcePostId_tenantId_fkey" FOREIGN KEY ("sourcePostId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "SchoolRelationExtraction" ("id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL, "contentHash" TEXT NOT NULL, "status" TEXT NOT NULL, "attempts" INTEGER NOT NULL DEFAULT 0, "attemptedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "SchoolRelationExtraction_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "SchoolRelationExtraction_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post"("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE);
+CREATE UNIQUE INDEX "SchoolRelationExtraction_tenantId_postId_contentHash_key" ON "SchoolRelationExtraction"("tenantId", "postId", "contentHash");
+CREATE INDEX "SchoolRelationExtraction_tenantId_status_attemptedAt_idx" ON "SchoolRelationExtraction"("tenantId", "status", "attemptedAt");
+
 CREATE TABLE "SchoolModelSnapshot" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
@@ -944,6 +974,17 @@ CREATE UNIQUE INDEX "TenantAiSettings_tenantId_key" ON "TenantAiSettings"("tenan
 
 -- CreateIndex
 CREATE INDEX "SchoolEntity_tenantId_type_sensitivity_idx" ON "SchoolEntity"("tenantId", "type", "sensitivity");
+CREATE UNIQUE INDEX "SchoolEntityAlias_tenantId_entityId_normalized_key" ON "SchoolEntityAlias"("tenantId", "entityId", "normalized");
+CREATE INDEX "SchoolEntityAlias_tenantId_normalized_idx" ON "SchoolEntityAlias"("tenantId", "normalized");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SchoolRelation_tenantId_subject_predicate_object_sourcePostId_key" ON "SchoolRelation"("tenantId", "subject", "predicate", "object", "sourcePostId");
+
+-- CreateIndex
+CREATE INDEX "SchoolRelation_tenantId_approved_createdAt_idx" ON "SchoolRelation"("tenantId", "approved", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "SchoolRelation_tenantId_sourcePostId_idx" ON "SchoolRelation"("tenantId", "sourcePostId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "SchoolEntity_tenantId_type_name_key" ON "SchoolEntity"("tenantId", "type", "name");
