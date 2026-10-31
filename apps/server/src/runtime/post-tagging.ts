@@ -911,3 +911,201 @@ function clampInteger(value: number | undefined, min: number, max: number, fallb
   }
   return Math.max(min, Math.min(max, Math.trunc(value)));
 }
+
+export type PostTagBackfillResult = {
+  scannedCount: number;
+  assignedCount: number;
+  skippedCount: number;
+};
+
+const tagBackfillMaxPosts = 300;
+const tagBackfillChunkSize = 25;
+
+/**
+ * 手动新建标签后，把 lookbackDays 窗口内的存量稿件交给 AI 判断是否属于该标签并归类。
+ * 与维护 agent 不同，这里只针对一个标签做确定性回溯；新稿件仍由 autoTagPost 即时处理。
+ */
+export async function backfillPostsForTag(options: {
+  tenantId: string;
+  tagId: string;
+  lookbackDays?: number | undefined;
+  logger: FastifyBaseLogger;
+}): Promise<PostTagBackfillResult> {
+  const empty: PostTagBackfillResult = { scannedCount: 0, assignedCount: 0, skippedCount: 0 };
+  const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
+    options.logger.warn({ error, tenantId: options.tenantId }, "post tag backfill: failed to read AI settings");
+    return null;
+  });
+  if (!settings || !settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured) {
+    return empty;
+  }
+  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
+  if (!apiKey || !await isTenantRuntimeActive(prisma, options.tenantId)) {
+    return empty;
+  }
+
+  const lookbackDays = clampInteger(options.lookbackDays, 7, maxTagMaintenanceLookbackDays, defaultTagMaintenanceLookbackDays);
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const tag = await prisma.postTag.findFirst({
+    where: { id: options.tagId, tenantId: options.tenantId, status: "active" },
+  });
+  if (!tag) {
+    return empty;
+  }
+
+  // 常驻墙上的、有正文的窗口内稿件；排除已打上该标签的。
+  const candidates = await prisma.post.findMany({
+    where: {
+      tenantId: options.tenantId,
+      text: { not: "" },
+      createdAt: { gte: since },
+      status: { in: [...tagMaintenancePostStatuses] },
+      tagAssignments: { none: { tagId: tag.id } },
+    },
+    select: {
+      id: true,
+      displayId: true,
+      text: true,
+      tagAssignments: { select: { tagId: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: tagBackfillMaxPosts,
+  });
+  const result: PostTagBackfillResult = { scannedCount: candidates.length, assignedCount: 0, skippedCount: 0 };
+  if (candidates.length === 0) {
+    return result;
+  }
+
+  for (let offset = 0; offset < candidates.length; offset += tagBackfillChunkSize) {
+    const chunk = candidates.slice(offset, offset + tagBackfillChunkSize);
+    const matchedIds = await classifyPostsIntoTag({
+      tenantId: options.tenantId,
+      settings,
+      apiKey,
+      tag,
+      chunk,
+      logger: options.logger,
+    });
+    if (matchedIds.size === 0) {
+      continue;
+    }
+    for (const post of chunk) {
+      if (!matchedIds.has(post.id)) {
+        continue;
+      }
+      if (post.tagAssignments.length >= maxTagsPerPost) {
+        result.skippedCount += 1;
+        continue;
+      }
+      const leased = await runWithActiveTenantLease(prisma, options.tenantId, (tx) =>
+        assignPostTags(tx, {
+          tenantId: options.tenantId,
+          postId: post.id,
+          tags: [{ tagId: tag.id, source: "llm" }],
+        }),
+      );
+      if (leased.active) {
+        result.assignedCount += 1;
+      }
+    }
+  }
+  if (result.assignedCount > 0) {
+    await prisma.postTag.update({ where: { id: tag.id }, data: { lastUsedAt: new Date() } }).catch(() => undefined);
+  }
+  return result;
+}
+
+/** 把一批稿件交给 LLM，判断哪些应归入指定标签；返回命中的稿件 id 集合。 */
+async function classifyPostsIntoTag(context: {
+  tenantId: string;
+  settings: NonNullable<Awaited<ReturnType<typeof readTenantAiSettings>>>;
+  apiKey: string;
+  tag: { id: string; name: string; description: string | null };
+  chunk: Array<{ id: string; displayId: number; text: string }>;
+  logger: FastifyBaseLogger;
+}): Promise<Set<string>> {
+  const matched = new Set<string>();
+  const { settings, apiKey, tag, chunk } = context;
+  const knownIds = new Set(chunk.map((post) => post.id));
+  const totalChars = chunk.reduce((sum, post) => sum + post.text.length, 0);
+  const maxTokens = llmOutputTokenBudget(totalChars, { floor: 300, ceiling: 1500, multiplier: 0.3, padding: 200 });
+  context.logger.info(
+    { site: "post-tagging.backfill", tenantId: context.tenantId, model: settings.model, posts: chunk.length, maxTokens, tag: tag.name },
+    "llm request",
+  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
+  try {
+    const leased = await runWithActiveTenantLease(prisma, context.tenantId, async () => {
+      const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          temperature: 0,
+          max_tokens: maxTokens,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: [
+                "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
+                `目标：判断下列稿件中哪些适合归入标签「${tag.name}」。`,
+                tag.description ? `标签含义：${tag.description}` : "标签含义：按名称常见语义判断。",
+                "只判断是否属于这一个标签，不要发明新标签，不要考虑其他标签。",
+                "判断标准从严：内容主题确实与标签一致才选中；拿不准就不选。",
+                "postIds 必须来自输入 posts 的 id。",
+                "返回格式：{\"postIds\":[\"id1\",\"id2\"]}",
+              ].join("\n"),
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                tag: { name: tag.name, description: tag.description },
+                posts: chunk.map((post) => ({
+                  id: post.id,
+                  displayId: post.displayId,
+                  text: post.text.slice(0, tagAgentPostTextChars),
+                })),
+              }),
+            },
+          ],
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+        | null;
+      if (!response.ok || !data) {
+        context.logger.warn(
+          { tag: tag.name, status: response.status, error: data?.error?.message ?? null },
+          "post tag backfill: llm request failed",
+        );
+        return matched;
+      }
+      const raw = data.choices?.[0]?.message?.content ?? "";
+      try {
+        const parsed = JSON.parse(raw) as { postIds?: unknown };
+        if (Array.isArray(parsed.postIds)) {
+          for (const id of parsed.postIds) {
+            if (typeof id === "string" && knownIds.has(id)) {
+              matched.add(id);
+            }
+          }
+        }
+      } catch {
+        context.logger.warn({ tag: tag.name, raw: raw.slice(0, 200) }, "post tag backfill: llm returned unparseable JSON");
+      }
+      return matched;
+    });
+    return leased.active ? leased.value : matched;
+  } catch (caught) {
+    context.logger.warn({ error: caught, tag: tag.name }, "post tag backfill: llm request threw");
+    return matched;
+  } finally {
+    clearTimeout(timeout);
+  }
+}

@@ -25,6 +25,7 @@ import {
   Trash2Icon,
   UserIcon,
   XIcon,
+  PlusIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GraduationItem } from "@/features/graduation/GraduationReview";
@@ -366,6 +367,11 @@ export function PostsPage({
   const reviewPendingPublishActive = isAdmin && pendingResidual?.operateMode === "bot";
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
+  const [tagCreateOpen, setTagCreateOpen] = useState(false);
+  const [tagCreateName, setTagCreateName] = useState("");
+  const [tagCreateDesc, setTagCreateDesc] = useState("");
+  const [tagCreateDays, setTagCreateDays] = useState("30");
+  const [tagCreateBusy, setTagCreateBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
@@ -1016,6 +1022,43 @@ export function PostsPage({
     }
   }
 
+  // 手动新建标签 + AI 回溯打标：创建后立即让 LLM 把回溯范围内的存量稿件归入该标签；
+  // 之后的新稿件由 autoTagPost 即时纳入该标签的候选。
+  async function submitCreateTagWithBackfill() {
+    const tagName = tagCreateName.trim();
+    if (!tagName) {
+      return;
+    }
+    setTagCreateBusy(true);
+    try {
+      const created = await api<{ tag: PostTag }>("/api/post-tags/create", {
+        method: "POST",
+        body: JSON.stringify({ tagName, description: tagCreateDesc.trim() || undefined }),
+      });
+      try {
+        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number } }>(
+          `/api/post-tags/${created.tag.id}/backfill`,
+          { method: "POST", body: JSON.stringify({ lookbackDays: Number(tagCreateDays) }) },
+        );
+        toast.success(
+          `标签「${tagName}」已创建：AI 扫描近 ${tagCreateDays} 天 ${backfill.result.scannedCount} 条稿件，归类 ${backfill.result.assignedCount} 条`
+            + (backfill.result.skippedCount > 0 ? `，${backfill.result.skippedCount} 条因标签数已达上限跳过` : ""),
+        );
+      } catch (backfillError) {
+        toast.warning(`标签「${tagName}」已创建，但回溯打标未完成：${backfillError instanceof Error ? backfillError.message : "可稍后重试"}`);
+      }
+      setTagCreateOpen(false);
+      setTagCreateName("");
+      setTagCreateDesc("");
+      await refreshPublishedTags();
+      void onRefresh();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "创建标签失败");
+    } finally {
+      setTagCreateBusy(false);
+    }
+  }
+
   async function cancelAutoDecision(post: ReviewPostItem) {
     const analysisId = post.aiAutoDecision?.analysisId;
     if (!analysisId || busyPostId) return;
@@ -1657,12 +1700,18 @@ export function PostsPage({
               ) : null}
             </div>
             {isAdmin ? (
-              <PublishedTagMaintenanceToolbar
-                value={tagMaintenanceDays}
-                busy={tagMaintenanceBusy}
-                onChange={setTagMaintenanceDays}
-                onRun={() => void runPublishedTagMaintenance()}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <PublishedTagMaintenanceToolbar
+                  value={tagMaintenanceDays}
+                  busy={tagMaintenanceBusy}
+                  onChange={setTagMaintenanceDays}
+                  onRun={() => void runPublishedTagMaintenance()}
+                />
+                <Button variant="outline" size="sm" className="h-8 shrink-0 font-bold" disabled={tagCreateBusy} onClick={() => setTagCreateOpen(true)}>
+                  <PlusIcon className="mr-1 size-4" />
+                  新建标签
+                </Button>
+              </div>
             ) : null}
           </div>
           {publishedLoading ? (
@@ -2105,6 +2154,66 @@ export function PostsPage({
           setRecallConfirm({ open: true, mode: "admin-silent", post });
         }}
       />
+      <Dialog open={tagCreateOpen} onOpenChange={(open) => { if (!tagCreateBusy) setTagCreateOpen(open); }}>
+        <DialogContent className="w-[min(440px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>新建标签并回溯打标</DialogTitle>
+            <DialogDescription>
+              创建后 AI 会把回溯范围内的存量稿件归类到这个标签；之后的新稿件由自动打标即时处理。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 px-5 pb-5">
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              标签名
+              <input
+                value={tagCreateName}
+                maxLength={16}
+                autoFocus
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="如：高考志愿（2-8 个字最佳）"
+                onChange={(event) => setTagCreateName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !tagCreateBusy && tagCreateName.trim()) {
+                    void submitCreateTagWithBackfill();
+                  }
+                }}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              标签描述（可选，帮助 AI 判断归属）
+              <input
+                value={tagCreateDesc}
+                maxLength={100}
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="如：志愿填报、分数线、招生政策相关"
+                onChange={(event) => setTagCreateDesc(event.target.value)}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              回溯范围
+              <Select value={tagCreateDays} onValueChange={setTagCreateDays}>
+                <SelectTrigger className="h-9 w-full bg-white font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["7", "14", "30", "60", "90"].map((days) => (
+                    <SelectItem key={days} value={days}>最近 {days} 天</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <Button
+              className="font-bold"
+              disabled={tagCreateBusy || tagCreateName.trim().length === 0}
+              onClick={() => void submitCreateTagWithBackfill()}
+            >
+              {tagCreateBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <PlusIcon className="mr-1 size-4" />}
+              {tagCreateBusy ? "创建中，AI 回溯打标可能需要一些时间..." : "创建并开始回溯打标"}
+            </Button>
+            <p className="text-xs leading-5 text-slate-500">AI 从严判断，宁可少打；最多扫描 300 条，标签数已达上限（5 个/稿）的稿件会跳过。</p>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(920px,calc(100vw-32px))]">
           <DialogHeader>
