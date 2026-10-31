@@ -167,18 +167,27 @@ export function registerPostTagRoutes(app: FastifyInstance) {
     });
     if (existing) {
       // 归档状态的标签直接恢复使用：让「新建同名标签」成为重新启用的入口。
+      // 管理员手动重建视为人工标签（source=manual），不再被 AI 归档；恢复与审计同事务。
       if (existing.status !== "active") {
-        const revived = await prisma.postTag.update({
-          where: { id: existing.id },
-          data: { status: "active", lastUsedAt: new Date() },
-        });
-        await writeAuditLog({
-          tenantId: context.selectedTenant.id,
-          actorId: context.user.id,
-          action: "post.tag.create",
-          targetType: "post_tag",
-          targetId: revived.id,
-          detail: { tagName, reactivated: true },
+        const revived = await prisma.$transaction(async (tx) => {
+          const updated = await tx.postTag.update({
+            where: { id: existing.id },
+            data: {
+              status: "active",
+              lastUsedAt: new Date(),
+              source: "manual",
+              ...(body.description?.trim() ? { description: body.description.trim() } : {}),
+            },
+          });
+          await writeAuditLog({
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            action: "post.tag.create",
+            targetType: "post_tag",
+            targetId: updated.id,
+            detail: { tagName, reactivated: true },
+          }, tx);
+          return updated;
         });
         return { tag: serializePostTag(revived) };
       }

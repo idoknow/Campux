@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
-import { supportsAdvisoryLock } from "@campux/db";
+import { isPrismaKnownRequestError, supportsAdvisoryLock } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
@@ -668,30 +668,41 @@ export async function applyTagAgentPlan(
       continue;
     }
     try {
-      const existing = await client.postTag.findUnique({
-        where: { tenantId_name: { tenantId, name: item.name } },
-        select: { id: true, source: true },
-      });
-      // 人工添加的标签（manual/user）不允许被 AI 改写来源：重发现同名主题时只激活，不夺走归属。
-      const protectedSource = existing && existing.source !== "llm";
-      const tag = await client.postTag.upsert({
-        where: { tenantId_name: { tenantId, name: item.name } },
-        update: {
-          status: "active",
-          ...(protectedSource ? {} : { source: "llm" }),
-          ...(protectedSource ? {} : { color: item.color }),
-          ...(item.description ? { description: item.description } : {}),
-        },
-        create: {
-          tenantId,
-          name: item.name,
-          description: item.description,
-          color: item.color,
-          source: "llm",
-        },
-      });
-      if (!existing) {
+      // 先创建；并发撞名（P2002）时重读现有标签并按其来源保护更新——
+      // 来源保护与 upsert 原子生效，不存在"检查后、写入前被人工标签插队"的窗口。
+      let tag;
+      try {
+        tag = await client.postTag.create({
+          data: {
+            tenantId,
+            name: item.name,
+            description: item.description,
+            color: item.color,
+            source: "llm",
+          },
+        });
         created.push(tag.name);
+      } catch (error) {
+        if (!(isPrismaKnownRequestError(error) && error.code === "P2002")) {
+          throw error;
+        }
+        const existing = await client.postTag.findUnique({
+          where: { tenantId_name: { tenantId, name: item.name } },
+          select: { id: true, source: true },
+        });
+        if (!existing) {
+          throw error;
+        }
+        // 人工添加的标签（manual/user）不允许被 AI 改写来源：只激活，不夺走归属与配色。
+        const protectedSource = existing.source !== "llm";
+        tag = await client.postTag.update({
+          where: { id: existing.id },
+          data: {
+            status: "active",
+            ...(protectedSource ? {} : { source: "llm", color: item.color }),
+            ...(item.description ? { description: item.description } : {}),
+          },
+        });
       }
       for (const postId of postIds) {
         await assignPostTags(client, {
@@ -709,8 +720,27 @@ export async function applyTagAgentPlan(
   // 2) MERGE — fold near-duplicate tags into one canonical tag. Assignments are
   // migrated to the canonical tag (upsert de-dupes), then the source tag's own
   // assignments are removed and the tag is archived (reversible, no post loses a tag).
+  // 人工添加的标签（manual/user）不允许被 AI 合并/下架：先校验存在可合并的 llm 来源，
+  // 再创建规范标签，避免所有来源都被保护时留下一个没有任何迁移打标的空 AI 标签。
   for (const item of plan.merge) {
     try {
+      const mergeable: Array<{ id: string; name: string }> = [];
+      for (const fromName of item.from) {
+        if (fromName === item.into) {
+          continue;
+        }
+        const fromTag = await client.postTag.findUnique({
+          where: { tenantId_name: { tenantId, name: fromName } },
+          select: { id: true, name: true, source: true },
+        });
+        if (!fromTag || fromTag.name === item.into || fromTag.source !== "llm") {
+          continue;
+        }
+        mergeable.push(fromTag);
+      }
+      if (mergeable.length === 0) {
+        continue;
+      }
       const canonical = await client.postTag.upsert({
         where: { tenantId_name: { tenantId, name: item.into } },
         update: { status: "active" },
@@ -723,19 +753,8 @@ export async function applyTagAgentPlan(
         },
       });
       const mergedFrom: string[] = [];
-      for (const fromName of item.from) {
-        if (fromName === canonical.name) {
-          continue;
-        }
-        const fromTag = await client.postTag.findUnique({
-          where: { tenantId_name: { tenantId, name: fromName } },
-          select: { id: true, name: true, source: true },
-        });
-        if (!fromTag || fromTag.id === canonical.id) {
-          continue;
-        }
-        // 人工添加的标签不允许被 AI 合并/下架：整个 merge 项涉及它时跳过该来源标签。
-        if (fromTag.source !== "llm") {
+      for (const fromTag of mergeable) {
+        if (fromTag.id === canonical.id) {
           continue;
         }
         const assignments = await client.postTagAssignment.findMany({
@@ -866,11 +885,15 @@ async function archiveInactivePostTags(
     return [];
   }
   const inactiveIds = inactiveTags.map((tag) => tag.id);
+  // 更新时原子重验不活跃条件：查询与写入之间若有稿件被打上标签（lastUsedAt 更新），
+  // 该标签不再满足归档条件，避免刚被使用的标签被归档。
   const result = await client.postTag.updateMany({
     where: {
       tenantId,
       id: { in: inactiveIds },
       status: "active",
+      createdAt: { lt: recentSince },
+      OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: recentSince } }],
     },
     data: {
       status: "archived",
