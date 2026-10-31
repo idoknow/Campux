@@ -49,19 +49,33 @@ describe("claimSchoolRelationExtraction", () => {
     expect(state).toEqual({ status: "processing", attemptedAt: new Date(1000), attempts: 2 });
   });
 
-  it("reclaims expired processing claims with conditional update", async () => {
-    const wheres: unknown[] = [];
-    let attempt = 0;
+  it("reclaims only expired processing claims with a conditional status-and-age filter", async () => {
+    const state = { status: "processing", attemptedAt: new Date(400), attempts: 1 };
+    const wheres: Array<{ tenantId: string; postId: string; contentHash: string; status: string; attemptedAt?: { lt: Date } }> = [];
     const db = { schoolRelationExtraction: {
       createMany: async () => ({ count: 0 }),
-      updateMany: async ({ where }: { where: unknown }) => { wheres.push(where); return { count: ++attempt === 2 ? 1 : 0 }; },
+      updateMany: async ({ where, data }: { where: (typeof wheres)[number]; data: { status: string; attempts: { increment: number }; attemptedAt: Date } }) => {
+        wheres.push(where);
+        const matches = state.status === where.status && (!where.attemptedAt || state.attemptedAt < where.attemptedAt.lt);
+        if (!matches) return { count: 0 };
+        state.status = data.status;
+        state.attempts += data.attempts.increment;
+        state.attemptedAt = data.attemptedAt;
+        return { count: 1 };
+      },
     } };
     const staleBefore = new Date(500);
     const result = await claimSchoolRelationExtraction(db, { tenantId: "t", postId: "p", contentHash: "h", staleBefore, now: new Date(1000) });
-    expect(result.claimed).toBe(true);
+    expect(result).toEqual({ claimed: true, attemptAt: new Date(1000) });
+    expect(state).toEqual({ status: "processing", attemptedAt: new Date(1000), attempts: 2 });
     expect(wheres).toEqual([
       { tenantId: "t", postId: "p", contentHash: "h", status: "failed" },
       { tenantId: "t", postId: "p", contentHash: "h", status: "processing", attemptedAt: { lt: staleBefore } },
     ]);
+
+    state.attemptedAt = new Date(900);
+    const liveResult = await claimSchoolRelationExtraction(db, { tenantId: "t", postId: "p", contentHash: "h", staleBefore, now: new Date(2000) });
+    expect(liveResult.claimed).toBe(false);
+    expect(state).toEqual({ status: "processing", attemptedAt: new Date(900), attempts: 2 });
   });
 });

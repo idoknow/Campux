@@ -116,7 +116,7 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     if (!apiKey) return reply.code(409).send({ message: "租户 LLM API Key 不可用" });
     const batchSize = 100;
     const maxPages = 20;
-    const batchLimit = 20;
+    const batchLimit = 3;
     const posts: Array<{ id: string; text: string; contentHash: string }> = [];
     const cursorRow = await prisma.schoolRelationExtractionCursor.findUnique({ where: { tenantId }, select: { postId: true } });
     let cursor: string | null = cursorRow?.postId ?? null;
@@ -164,7 +164,7 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     let failedCount = 0;
     for (const post of posts) {
       const now = new Date();
-      const claimLease = await runWithActiveTenantLease(prisma, tenantId, async () => claimSchoolRelationExtraction(prisma, { tenantId, postId: post.id, contentHash: post.contentHash, now, staleBefore: new Date(now.getTime() - 5 * 60_000) }));
+      const claimLease = await runWithActiveTenantLease(prisma, tenantId, async (tx) => claimSchoolRelationExtraction(tx, { tenantId, postId: post.id, contentHash: post.contentHash, now, staleBefore: new Date(now.getTime() - 5 * 60_000) }));
       if (!claimLease.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
       const claim = claimLease.value;
       if (!claim.claimed || !claim.attemptAt) continue;

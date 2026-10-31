@@ -14,4 +14,6 @@ test("uses deterministic grid coordinates and limits displayed label length", ()
   expect(graphNodePosition(10)).toEqual({ x: 50, y: 99 });
   expect(graphLabel("A very long campus location name")).toBe("A very long camp…");
   expect(graphLabel("短名")).toBe("短名");
+  expect(graphLabel("abcdefghij", 8)).toBe("abcdefg…");
+  expect(graphLabel("😀😀😀😀😀😀😀😀😀", 8)).toBe("😀😀😀😀😀😀😀…");
 });
