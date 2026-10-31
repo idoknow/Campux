@@ -63,6 +63,67 @@ const tagAgentPostTextChars = 240;
 const tagMaintenanceBatchSize = 30;
 /** 截断后继续折半的最小批；再小还截断就记失败，交给 15 分钟全量重跑。 */
 const tagMaintenanceMinSplitSize = 4;
+/**
+ * 记录「该 baseUrl+model 拒绝 reasoning_effort」的组合（如 GLM-5.3 这类 thinking-only 模型）。
+ * 进程内缓存，不落库：重启后重新探测一次即可。
+ */
+const reasoningEffortRejected = new Set<string>();
+
+export function reasoningEffortKey(baseUrl: string, model: string): string {
+  return `${normalizeBaseUrl(baseUrl)}|${model}`;
+}
+
+/**
+ * 是否应该去掉 reasoning_effort 重试一次。
+ * 4xx 表示请求本身被拒，除鉴权/限流/超时这几类与参数无关的状态外，都可能是
+ * 「不认识这个参数」（FastAPI 的 {detail:[...]}、网关的纯文本错误也一样）。
+ * 5xx 是上游故障，保持原有重试语义；已经降级过就不再降级。
+ */
+export function shouldFallbackReasoning(options: { status: number; alreadyFellBack: boolean }): boolean {
+  if (options.alreadyFellBack) return false;
+  if (options.status < 400 || options.status >= 500) return false;
+  return ![401, 403, 408, 413, 429].includes(options.status);
+}
+
+/** 从各种错误响应形态里取出可读信息：{error:{message}} / {error:"..."} / {detail:[{msg}]} / 纯文本。 */
+export function extractLlmErrorMessage(bodyText: string, parsed?: unknown): string {
+  const body = parsed as Record<string, unknown> | null | undefined;
+  const error = body?.error as unknown;
+  const detail = body?.detail as unknown;
+  const candidates: unknown[] = [
+    typeof error === "object" && error !== null ? (error as Record<string, unknown>).message : error,
+    body?.message,
+    detail,
+    Array.isArray(detail) ? detail.map((item) => (item as Record<string, unknown>)?.msg ?? JSON.stringify(item)).join("; ") : undefined,
+    bodyText,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.slice(0, 300);
+  }
+  return "";
+}
+
+/** 统一的 OpenAI 兼容 JSON 请求体；reasoningOff 为 false 时不带 reasoning_effort。 */
+export function buildLlmJsonRequestBody(options: {
+  model: string;
+  maxTokens: number;
+  systemPrompt: string;
+  userPayload: string;
+  reasoningOff: boolean;
+  temperature?: number;
+}): Record<string, unknown> {
+  return {
+    model: options.model,
+    temperature: options.temperature ?? 0,
+    max_tokens: options.maxTokens,
+    response_format: { type: "json_object" },
+    ...(options.reasoningOff ? { reasoning_effort: "none" } : {}),
+    messages: [
+      { role: "system", content: options.systemPrompt },
+      { role: "user", content: options.userPayload },
+    ],
+  };
+}
 
 /**
  * 把待维护稿件切成固定大小的批次。
@@ -300,8 +361,34 @@ export async function generatePostTagSuggestion(options: {
     { site: "post-tagging.single", tenantId: options.tenantId, model: settings.model, maxTokens, textChars: options.text.length },
     "llm request",
   );
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
+  const systemPrompt = [
+    "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
+    `目标：为一条校园墙稿件选择最多 ${maxTagsPerPost} 个主题标签。`,
+    "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
+    "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
+    "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
+    "打标标准放宽：主题相关、接近或属于同一大类就应打上；只有与标签完全无关时才不打。",
+    "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
+  ].join("\n");
+  const userPayload = JSON.stringify({
+    existingTags: options.existingTags.map((tag) => ({
+      name: tag.name,
+      description: tag.description,
+    })),
+    text: options.text.trim().slice(0, tagPromptMaxTextChars),
+  });
+  const reasoningKey = reasoningEffortKey(settings.baseUrl, settings.model);
+  let reasoningOff = !reasoningEffortRejected.has(reasoningKey);
+  const requestBody = (off: boolean) => JSON.stringify(buildLlmJsonRequestBody({
+    model: settings.model,
+    // 关不掉思考时用满 4096，给 reasoning 留空间；否则按文本长度估算即可。
+    maxTokens: off ? maxTokens : 4096,
+    systemPrompt,
+    userPayload,
+    reasoningOff: off,
+  }));
+  let controller = new AbortController();
+  let timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
   try {
     const leased = await runWithActiveTenantLease(prisma, options.tenantId, async () => {
       const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
@@ -311,50 +398,54 @@ export async function generatePostTagSuggestion(options: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: settings.model,
-          temperature: 0,
-          max_tokens: maxTokens,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content: [
-                "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
-                `目标：为一条校园墙稿件选择最多 ${maxTagsPerPost} 个主题标签。`,
-                "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
-                "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
-                "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
-                "打标标准放宽：主题相关、接近或属于同一大类就应打上；只有与标签完全无关时才不打。",
-                "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
-              ].join("\n"),
-            },
-            {
-              role: "user",
-              content: JSON.stringify({
-                existingTags: options.existingTags.map((tag) => ({
-                  name: tag.name,
-                  description: tag.description,
-                })),
-                text: options.text.trim().slice(0, tagPromptMaxTextChars),
-              }),
-            },
-          ],
-        }),
+        body: requestBody(reasoningOff),
       });
-      const data = (await response.json().catch(() => null)) as
-        | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-        | null;
-      return { response, data };
+      const bodyText = await response.text().catch(() => "");
+      let data: { choices?: Array<{ message?: { content?: string } }> } | null = null;
+      try {
+        data = JSON.parse(bodyText);
+      } catch {
+        data = null;
+      }
+      return { response, data, bodyText };
     });
     if (!leased.active) {
       return null;
     }
-    const { response, data } = leased.value;
+    let { response, data, bodyText } = leased.value;
+    let probed = false;
+    if (!response.ok && shouldFallbackReasoning({ status: response.status, alreadyFellBack: !reasoningOff })) {
+      // 可能是后端不认 reasoning_effort：去掉字段重试一次。租户已停用就不再外发正文。
+      if (!await isTenantRuntimeActive(prisma, options.tenantId)) return null;
+      probed = true;
+      reasoningOff = false;
+      // 降级请求单独计时：首次请求可能已经用掉大半 20 秒预算，而这次要输出到 4096。
+      clearTimeout(timeout);
+      controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
+      options.logger.info({ tenantId: options.tenantId, status: response.status, error: extractLlmErrorMessage(bodyText, data) }, "post tags: retrying without reasoning_effort");
+      const retry = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: requestBody(false),
+      });
+      bodyText = await retry.text().catch(() => "");
+      try {
+        data = JSON.parse(bodyText);
+      } catch {
+        data = null;
+      }
+      response = retry;
+    }
     if (!response.ok) {
-      options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "post tags: LLM request failed");
+      options.logger.warn({ tenantId: options.tenantId, status: response.status, error: extractLlmErrorMessage(bodyText, data) }, "post tags: LLM request failed");
       return null;
     }
+    if (probed) reasoningEffortRejected.add(reasoningKey);
     if (llmFinishReason(data) === "length") {
       options.logger.warn({ tenantId: options.tenantId, textChars: options.text.length, maxTokens }, "post tag suggestion output truncated by max_tokens");
     }
@@ -524,6 +615,9 @@ export async function maintainTenantPostTags(options: {
   // 每批落库后标签库就变了：next 批必须重读，否则会重复建近义标签、
   // 甚至把上一批刚合并归档的标签 create 回来。
   let tagsSnapshot: typeof tags | null = tags;
+  // 探测结果整轮共享：截断折半出的子批不会再重复撞同一个 4xx。
+  const reasoningKey = reasoningEffortKey(settings.baseUrl, settings.model);
+  let sendReasoningOff = !reasoningEffortRejected.has(reasoningKey);
 
   type BatchRun =
     | { status: "ok"; value: PostTagMaintenanceResult }
@@ -570,6 +664,9 @@ export async function maintainTenantPostTags(options: {
     // 每轮尝试前校验租户活跃，写库（applyTagAgentPlan）时才取 lease。
     // 失败自动重试 5 次（间隔 10 秒，整体预算 5 分钟）；仍失败走 15 分钟间隔的自动重跑。
     const retryStartedAt = Date.now();
+    // 推理模型（deepseek-v4 系列等）会把 max_tokens 大半花在 reasoning 上，真正要的 JSON
+    // 反而被截断。维护只需要结构化结果，显式关掉思考；thinking-only 模型（GLM-5.3 等）
+    // 会拒绝这个字段，降级后 sendReasoningOff 关闭并整轮复用。
     for (let attempt = 1; attempt <= 1 + TAG_MAINTENANCE_RETRY_ATTEMPTS; attempt += 1) {
       if (attempt > 1) {
         if (Date.now() - retryStartedAt > TAG_MAINTENANCE_RETRY_BUDGET_MS) {
@@ -582,8 +679,16 @@ export async function maintainTenantPostTags(options: {
       if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
         return { status: "stopped" };
       }
+      // 同一次 attempt 内最多两次请求；第二次是去掉 reasoning_effort 的降级探测，
+      // 不消耗重试名额、也不等 10 秒退避。
+      let probePending = false;
+      for (let variant = 0; variant < 2; variant += 1) {
+      if (variant === 1 && !probePending) break;
+      const requestReasoningOff = variant === 0 ? sendReasoningOff : false;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
+      // thinking-only 模型（关不掉思考）只能用满 4096，给推理留空间。
+      const requestMaxTokens = requestReasoningOff ? maxTokens : 4096;
       try {
         const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
           method: "POST",
@@ -592,27 +697,43 @@ export async function maintainTenantPostTags(options: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${apiKey}`,
           },
-          body: JSON.stringify({
+          body: JSON.stringify(buildLlmJsonRequestBody({
             model: settings.model,
-            temperature: 0,
-            max_tokens: maxTokens,
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPayload },
-            ],
-          }),
+            maxTokens: requestMaxTokens,
+            systemPrompt,
+            userPayload,
+            reasoningOff: requestReasoningOff,
+          })),
         });
-        const data = (await response.json().catch(() => null)) as
-          | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-          | null;
+        const responseBody = await response.text().catch(() => "");
+        let data: { choices?: Array<{ message?: { content?: string } }> } | null = null;
+        try {
+          data = JSON.parse(responseBody);
+        } catch {
+          data = null;
+        }
         if (!response.ok) {
-          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
+          const errorMessage = extractLlmErrorMessage(responseBody, data);
+          // 4xx 一律按「可能不认识 reasoning_effort」降级一次：FastAPI 的 {detail:[...]}、
+          // 网关返回纯文本或 {error:"..."} 时同样能救回来；5xx 保持原有重试语义。
+          if (variant === 0 && shouldFallbackReasoning({ status: response.status, alreadyFellBack: !sendReasoningOff })) {
+            probePending = true;
+            // 先不动共享的 sendReasoningOff：等去掉参数的这次真的成功，才认定是参数问题。
+            options.logger.info({ tenantId: options.tenantId, batch: label, status: response.status, error: errorMessage }, "post tag maintenance: retrying without reasoning_effort");
+            continue;
+          }
+          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label, status: response.status, error: errorMessage }, "post tag maintenance: LLM request failed");
           continue;
+        }
+        // 去掉参数后这次成功了，才认定该 baseUrl+model 不支持关闭思考，
+        // 并对后续批次关闭探测；无关的 4xx（上下文超长、模型不存在）不会污染状态。
+        if (variant === 1) {
+          sendReasoningOff = false;
+          reasoningEffortRejected.add(reasoningKey);
         }
         if (llmFinishReason(data) === "length") {
           // 原样重试只会再撞同一个上限：直接交给调用方折半。
-          options.logger.warn({ tenantId: options.tenantId, posts: batch.length, maxTokens, batch: label }, "post tag maintenance output truncated by max_tokens");
+          options.logger.warn({ tenantId: options.tenantId, posts: batch.length, maxTokens: requestMaxTokens, batch: label }, "post tag maintenance output truncated by max_tokens");
           return { status: "truncated" };
         }
         const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
@@ -634,8 +755,10 @@ export async function maintainTenantPostTags(options: {
       } catch (error) {
         const aborted = error instanceof Error && error.name === "AbortError";
         options.logger.warn({ error, tenantId: options.tenantId, aborted, attempt, batch: label }, "post tag maintenance: LLM call errored");
+        break;
       } finally {
         clearTimeout(timeout);
+      }
       }
     }
     return { status: "failed" };
@@ -1296,8 +1419,35 @@ async function classifyPostsIntoTag(context: {
     { site: "post-tagging.backfill", tenantId: context.tenantId, model: settings.model, posts: chunk.length, maxTokens, tag: tag.name },
     "llm request",
   );
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
+  const systemPrompt = [
+    "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
+    `目标：判断下列稿件中哪些适合归入标签「${tag.name}」。`,
+    tag.description ? `标签含义：${tag.description}` : "标签含义：按名称常见语义判断。",
+    "只判断是否属于这一个标签，不要发明新标签，不要考虑其他标签。",
+    "判断标准放宽：稿件主题与标签相关、接近或属于同一大类就应选中；只有明确无关时才不选。",
+    "postIds 必须来自输入 posts 的 id。",
+    "返回格式：{\"postIds\":[\"id1\",\"id2\"]}",
+  ].join("\n");
+  const userPayload = JSON.stringify({
+    tag: { name: tag.name, description: tag.description },
+    posts: chunk.map((post) => ({
+      id: post.id,
+      displayId: post.displayId,
+      text: post.text.slice(0, tagAgentPostTextChars),
+    })),
+  });
+  const reasoningKey = reasoningEffortKey(settings.baseUrl, settings.model);
+  let reasoningOff = !reasoningEffortRejected.has(reasoningKey);
+  const requestBody = (off: boolean) => JSON.stringify(buildLlmJsonRequestBody({
+    model: settings.model,
+    // 关不掉思考时用满 4096，给 reasoning 留空间；否则按文本长度估算即可。
+    maxTokens: off ? maxTokens : 4096,
+    systemPrompt,
+    userPayload,
+    reasoningOff: off,
+  }));
+  let controller = new AbortController();
+  let timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
   try {
     // LLM 网络调用不进租户租约事务：避免 60 秒级调用长时间持锁；写库在回溯循环内单独取 lease。
     const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
@@ -1307,48 +1457,49 @@ async function classifyPostsIntoTag(context: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: settings.model,
-        temperature: 0,
-        max_tokens: maxTokens,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: [
-              "你是校园墙稿件标签助手。只返回 JSON，不要 Markdown。",
-              `目标：判断下列稿件中哪些适合归入标签「${tag.name}」。`,
-              tag.description ? `标签含义：${tag.description}` : "标签含义：按名称常见语义判断。",
-              "只判断是否属于这一个标签，不要发明新标签，不要考虑其他标签。",
-              "判断标准放宽：稿件主题与标签相关、接近或属于同一大类就应选中；只有明确无关时才不选。",
-              "postIds 必须来自输入 posts 的 id。",
-              "返回格式：{\"postIds\":[\"id1\",\"id2\"]}",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              tag: { name: tag.name, description: tag.description },
-              posts: chunk.map((post) => ({
-                id: post.id,
-                displayId: post.displayId,
-                text: post.text.slice(0, tagAgentPostTextChars),
-              })),
-            }),
-          },
-        ],
-      }),
+      body: requestBody(reasoningOff),
     });
-    const data = (await response.json().catch(() => null)) as
-      | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-      | null;
-    if (!response.ok || !data) {
+    let bodyText = await response.text().catch(() => "");
+    let data: { choices?: Array<{ message?: { content?: string } }> } | null = null;
+    try {
+      data = JSON.parse(bodyText);
+    } catch {
+      data = null;
+    }
+    let finalResponse = response;
+    let probed = false;
+    if (!response.ok && shouldFallbackReasoning({ status: response.status, alreadyFellBack: !reasoningOff })) {
+      probed = true;
+      reasoningOff = false;
+      // 降级请求单独计时：首次请求可能已经耗掉大半 60 秒预算。
+      clearTimeout(timeout);
+      controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
+      context.logger.info({ tag: tag.name, status: response.status, error: extractLlmErrorMessage(bodyText, data) }, "post tag backfill: retrying without reasoning_effort");
+      finalResponse = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: requestBody(false),
+      });
+      bodyText = await finalResponse.text().catch(() => "");
+      try {
+        data = JSON.parse(bodyText);
+      } catch {
+        data = null;
+      }
+    }
+    if (!finalResponse.ok || !data) {
       context.logger.warn(
-        { tag: tag.name, status: response.status, error: data?.error?.message ?? null },
+        { tag: tag.name, status: finalResponse.status, error: extractLlmErrorMessage(bodyText, data) || null },
         "post tag backfill: llm request failed",
       );
       return { matched, failed: true };
     }
+    if (probed) reasoningEffortRejected.add(reasoningKey);
     const raw = data.choices?.[0]?.message?.content ?? "";
     try {
       const parsed = JSON.parse(raw) as { postIds?: unknown };

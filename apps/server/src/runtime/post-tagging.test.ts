@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chunkTagMaintenancePosts, mergeTagMaintenanceResults, parsePostTagMaintenanceJson, parsePostTagSuggestionJson, shouldRunTagClustering, shouldRunTagMaintenance, tagMaintenancePostStatuses } from "./post-tagging";
+import { buildLlmJsonRequestBody, chunkTagMaintenancePosts, extractLlmErrorMessage, mergeTagMaintenanceResults, parsePostTagMaintenanceJson, parsePostTagSuggestionJson, shouldFallbackReasoning, shouldRunTagClustering, shouldRunTagMaintenance, tagMaintenancePostStatuses } from "./post-tagging";
 import type { PostTagMaintenanceResult } from "./post-tagging";
 
 describe("post tag LLM JSON parsing", () => {
@@ -128,5 +128,47 @@ describe("tag maintenance batching", () => {
     expect(merged.merged).toHaveLength(1);
     expect(merged.archived).toEqual(["x"]);
     expect(merged.assigned).toHaveLength(2);
+  });
+});
+
+describe("reasoning_effort fallback", () => {
+  test("falls back on any 4xx except auth/throttle, and only once", () => {
+    expect(shouldFallbackReasoning({ status: 400, alreadyFellBack: false })).toBe(true);
+    expect(shouldFallbackReasoning({ status: 422, alreadyFellBack: false })).toBe(true);
+    expect(shouldFallbackReasoning({ status: 404, alreadyFellBack: false })).toBe(true);
+    expect(shouldFallbackReasoning({ status: 400, alreadyFellBack: true })).toBe(false);
+    expect(shouldFallbackReasoning({ status: 500, alreadyFellBack: false })).toBe(false);
+    expect(shouldFallbackReasoning({ status: 502, alreadyFellBack: false })).toBe(false);
+    expect(shouldFallbackReasoning({ status: 401, alreadyFellBack: false })).toBe(false);
+    expect(shouldFallbackReasoning({ status: 429, alreadyFellBack: false })).toBe(false);
+  });
+
+  test("reads error text from FastAPI detail, string errors and plain text", () => {
+    const fastapi = '{"detail":[{"loc":["body","reasoning_effort"],"msg":"extra fields not permitted"}]}';
+    expect(extractLlmErrorMessage(fastapi, JSON.parse(fastapi))).toContain("extra fields not permitted");
+
+    const stringError = '{"error":"Unrecognized request argument: reasoning_effort"}';
+    expect(extractLlmErrorMessage(stringError, JSON.parse(stringError))).toContain("Unrecognized request argument");
+
+    const objectError = '{"error":{"message":"GLM-5.3 is a thinking-only model"}}';
+    expect(extractLlmErrorMessage(objectError, JSON.parse(objectError))).toContain("thinking-only");
+
+    expect(extractLlmErrorMessage("Bad Gateway")).toBe("Bad Gateway");
+  });
+
+  test("only adds reasoning_effort when thinking can be disabled", () => {
+    const base = { model: "deepseek-v4.1-flash", maxTokens: 1000, systemPrompt: "sys", userPayload: "{}" };
+    expect(buildLlmJsonRequestBody({ ...base, reasoningOff: true })).toMatchObject({
+      reasoning_effort: "none",
+      max_tokens: 1000,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "{}" },
+      ],
+    });
+    expect(buildLlmJsonRequestBody({ ...base, reasoningOff: false })).not.toHaveProperty("reasoning_effort");
+    expect(buildLlmJsonRequestBody({ ...base, reasoningOff: false, temperature: 0.5 })).toMatchObject({ temperature: 0.5 });
   });
 });
