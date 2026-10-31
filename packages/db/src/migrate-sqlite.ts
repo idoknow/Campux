@@ -33,6 +33,7 @@ const PRIVATE_FORWARD_GROUP_MIGRATION_NAME = "20261029120000_add_private_forward
 const TENANT_PUBLISH_QUOTA_MIGRATION_NAME = "20261027120000_durable_tenant_publish_quota_reservations";
 const SCHOOL_RELATIONS_MIGRATION_NAME = "20261031120000_add_school_relations";
 const SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME = "20261031130000_add_school_relation_extractions";
+const SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME = "20261031150000_school_relation_extraction_cursor";
 const SCHOOL_ENTITY_ALIASES_MIGRATION_NAME = "20261031140000_school_entity_aliases";
 
 const OLD_PRIVATE_MESSAGE_REPLY = `发送 #注册账号 可以用当前 QQ 注册本校园墙账号。
@@ -1003,6 +1004,19 @@ function applySchoolEntityAliasesSqliteMigration(db: Database, doneNames: Set<st
   doneNames.add(SCHOOL_ENTITY_ALIASES_MIGRATION_NAME); applied.push(SCHOOL_ENTITY_ALIASES_MIGRATION_NAME);
 }
 
+function applySchoolRelationExtractionCursorSqliteMigration(db: Database, doneNames: Set<string>, applied: string[], skipped: string[], logger: SqliteMigrateLogger): void {
+  if (doneNames.has(SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME)) { skipped.push(SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME); return; }
+  if (!db.query(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchoolRelationExtraction'`).get()) return;
+  logger.info({ migration: SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME }, "applying sqlite relation extraction cursor migration");
+  db.exec("BEGIN");
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS "SchoolRelationExtractionCursor" ("tenantId" TEXT NOT NULL PRIMARY KEY, "postId" TEXT, "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "SchoolRelationExtractionCursor_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    db.run(`INSERT INTO "_prisma_migrations" ("id","checksum","migration_name","started_at","finished_at","applied_steps_count") VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`, [randomUUID(), checksumOf("create school relation extraction cursor"), SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME]);
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
+  doneNames.add(SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME); applied.push(SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME);
+}
+
 function applySchoolRelationExtractionsSqliteMigration(db: Database, doneNames: Set<string>, applied: string[], skipped: string[], logger: SqliteMigrateLogger): void {
   if (doneNames.has(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME)) { skipped.push(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME); return; }
   if (!db.query(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchoolRelation'`).get()) return;
@@ -1076,7 +1090,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -1107,6 +1121,7 @@ export function applySqliteBaseline(
     applySchoolRelationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applySchoolRelationExtractionsSqliteMigration(db, doneNames, applied, skipped, logger);
     applySchoolEntityAliasesSqliteMigration(db, doneNames, applied, skipped, logger);
+    applySchoolRelationExtractionCursorSqliteMigration(db, doneNames, applied, skipped, logger);
     return { applied, skipped };
   } finally {
     db.close();

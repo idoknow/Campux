@@ -11,7 +11,7 @@ import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from ".
 import { parseSchoolRelationExtraction, buildSchoolRelationContext, validateSchoolRelationEvidence, schoolRelationSourceExcerpt } from "../runtime/post-review";
 import { readBoundedLlmResponse } from "../runtime/post-review";
 import { claimSchoolRelationExtraction } from "../runtime/school-relation-extraction-claim";
-import { normalizeSchoolEntityAlias, syncSchoolEntityAliases } from "@campux/db";
+import { dbProvider, normalizeSchoolEntityAlias, syncSchoolEntityAliases, type PostStatus } from "@campux/db";
 import { selectRelationExtractionCandidates } from "../runtime/school-relation-extraction-candidates";
 
 export const entityTypes = ["location", "class", "person_alias", "organization", "topic", "risky_phrase", "service"] as const;
@@ -43,20 +43,38 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     const post = await prisma.post.findFirst({ where: { id: query.postId, tenantId }, select: { id: true, text: true } });
     if (!post) return reply.code(404).send({ message: "稿件不存在" });
     const terms = [...new Set(post.text.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])].slice(0, 12);
-    const relations = terms.length ? await prisma.schoolRelation.findMany({ where: { tenantId, approved: true, AND: [{ OR: terms.flatMap((term) => [{ subject: { contains: term } }, { object: { contains: term } }]) }, { OR: terms.map((term) => ({ evidence: { contains: term } })) }] }, select: { subject: true, predicate: true, object: true, evidence: true }, take: 50 }) : [];
+    const endpointClauses = dbProvider === "postgresql"
+      ? terms.flatMap((term) => [{ subject: { contains: term, mode: "insensitive" as const } }, { object: { contains: term, mode: "insensitive" as const } }])
+      : terms.flatMap((term) => [{ subject: { contains: term } }, { object: { contains: term } }]);
+    const evidenceClauses = dbProvider === "postgresql"
+      ? terms.map((term) => ({ evidence: { contains: term, mode: "insensitive" as const } }))
+      : terms.map((term) => ({ evidence: { contains: term } }));
+    const relations = terms.length ? await prisma.schoolRelation.findMany({ where: { tenantId, approved: true, sourcePost: { is: { status: { in: ["approved", "published"] as PostStatus[] } } }, AND: [{ OR: endpointClauses }, { OR: evidenceClauses }] }, select: { subject: true, predicate: true, object: true, evidence: true }, take: 50 }) : [];
     return { context: buildSchoolRelationContext(relations, post.text), relations: relations.length };
   });
 
   app.get("/api/admin/ai-review/graph", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const relationSelect = { id: true, subject: true, predicate: true, object: true, evidence: true, approved: true, sourcePostId: true } as const;
-    const pendingRelations = await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: false }, orderBy: { createdAt: "desc" }, take: 150, select: relationSelect });
-    const approvedRelations = pendingRelations.length < 150 ? await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: true }, orderBy: { createdAt: "desc" }, take: 150 - pendingRelations.length, select: relationSelect }) : [];
+    const sourcePost = { is: { status: { in: ["approved", "published"] as PostStatus[] } } };
+    const pendingRelations = await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: false, sourcePost }, orderBy: { createdAt: "desc" }, take: 150, select: relationSelect });
+    const approvedRelations = pendingRelations.length < 150 ? await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: true, sourcePost }, orderBy: { createdAt: "desc" }, take: 150 - pendingRelations.length, select: relationSelect }) : [];
     const relations = [...pendingRelations, ...approvedRelations];
     const nodes = [...new Set(relations.flatMap((r) => [r.subject, r.object]))].slice(0, 100);
     const included = new Set(nodes);
     const edges = [...pendingRelations.filter((r) => included.has(r.subject) && included.has(r.object)), ...approvedRelations.filter((r) => included.has(r.subject) && included.has(r.object))].slice(0, 150);
     return { nodes: nodes.map((id, i) => ({ id, x: 40 + (i % 10) * 100, y: 40 + Math.floor(i / 10) * 70 })), edges };
+  });
+
+  app.get("/api/admin/ai-review/graph/pending", async (request, reply) => {
+    const context = await requireTenantRole(request, reply, "admin");
+    const query = z.object({ page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(12) }).parse(request.query);
+    const where = { tenantId: context.selectedTenant.id, approved: false, sourcePost: { is: { status: { in: ["approved", "published"] as PostStatus[] } } } };
+    const [relations, total] = await Promise.all([
+      prisma.schoolRelation.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (query.page - 1) * query.pageSize, take: query.pageSize, select: { id: true, subject: true, predicate: true, object: true, evidence: true, approved: true, sourcePostId: true } }),
+      prisma.schoolRelation.count({ where }),
+    ]);
+    return { relations, page: query.page, pageSize: query.pageSize, total };
   });
 
   app.get("/api/admin/ai-review/graph/:id/source", async (request, reply) => {
@@ -79,12 +97,13 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       const sourcePost = await tx.post.findFirst({ where: { id: relation.sourcePostId, tenantId, status: { in: ["approved", "published"] } }, select: { id: true, text: true } });
       if (!sourcePost || !validateSchoolRelationEvidence(relation, sourcePost.text)) return { outcome: "invalid_evidence" as const };
       const updated = await tx.schoolRelation.updateMany({ where: { id, tenantId, approved: false, sourcePostId: sourcePost.id }, data: { approved: true } });
-      return { outcome: updated.count ? "approved" as const : "missing" as const };
+      if (!updated.count) return { outcome: "missing" as const };
+      await tx.auditLog.create({ data: { tenantId, actorId: context.user.id, action: "tenant.ai_review.graph.approve", targetType: "school_relation", targetId: id } });
+      return { outcome: "approved" as const };
     });
     if (!result.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     if (result.value.outcome === "missing") return reply.code(404).send({ message: "待审核关系不存在" });
     if (result.value.outcome === "invalid_evidence") return reply.code(409).send({ message: "来源稿件证据无法验证，不能批准" });
-    await writeAuditLog({ tenantId: context.selectedTenant.id, actorId: context.user.id, action: "tenant.ai_review.graph.approve", targetType: "school_relation", targetId: id });
     return { ok: true };
   });
 
@@ -99,8 +118,8 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     const maxPages = 20;
     const batchLimit = 20;
     const posts: Array<{ id: string; text: string; contentHash: string }> = [];
-    const cursorCheckpoint = await prisma.schoolRelationExtraction.findFirst({ where: { tenantId }, orderBy: [{ attemptedAt: "desc" }, { postId: "desc" }], select: { postId: true } });
-    let cursor: string | null = cursorCheckpoint?.postId ?? null;
+    const cursorRow = await prisma.schoolRelationExtractionCursor.findUnique({ where: { tenantId }, select: { postId: true } });
+    let cursor: string | null = cursorRow?.postId ?? null;
     let wrapped = false;
     for (let page = 0; page < maxPages && posts.length < batchLimit; page++) {
       const candidates = await prisma.post.findMany({ where: { tenantId, status: { in: ["approved", "published"] } }, orderBy: { id: "asc" }, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), take: batchSize, select: { id: true, text: true } }) as Array<{ id: string; text: string }>;
@@ -130,6 +149,11 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       const selected = new Map(selection.candidates.map((candidate) => [candidate.id, candidate.contentHash]));
       posts.push(...candidates.filter((post) => selected.has(post.id)).map((post) => ({ ...post, contentHash: selected.get(post.id)! })));
       if (candidates.length < batchSize) break;
+    }
+    if (cursor) {
+      const scanCursor = cursor;
+      const cursorWrite = await runWithActiveTenantLease(prisma, tenantId, async (tx) => tx.schoolRelationExtractionCursor.upsert({ where: { tenantId }, create: { tenantId, postId: scanCursor }, update: { postId: scanCursor } }));
+      if (!cursorWrite.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
     if (!posts.length) return { postsRead: 0, relationsStored: 0 };
     const baseUrl = (await assertSafeLlmUrl(normalizeBaseUrl(settings.baseUrl))).toString().replace(/\/$/, "");
@@ -193,7 +217,7 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       return { entities, page: query.page, pageSize: query.pageSize, total, scanTruncated: false };
     }
     const [nameMatches, aliasMatches] = await Promise.all([
-      prisma.schoolEntity.findMany({ where: { tenantId, name: { contains: query.q } }, select: { id: true } }),
+      prisma.schoolEntity.findMany({ where: { tenantId, name: { contains: query.q, ...(dbProvider === "postgresql" ? { mode: "insensitive" as const } : {}) } }, select: { id: true } }),
       prisma.schoolEntityAlias.findMany({ where: { tenantId, normalized: { contains: normalizedQuery } }, distinct: ["entityId"], select: { entityId: true } }),
     ]);
     const entityIds = [...new Set([...nameMatches.map((entity) => entity.id), ...aliasMatches.map(({ entityId }) => entityId)])];

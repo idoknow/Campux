@@ -59,6 +59,9 @@ describe("claimSchoolRelationExtraction", () => {
     const staleBefore = new Date(500);
     const result = await claimSchoolRelationExtraction(db, { tenantId: "t", postId: "p", contentHash: "h", staleBefore, now: new Date(1000) });
     expect(result.claimed).toBe(true);
-    expect(wheres[1]).toEqual({ tenantId: "t", postId: "p", contentHash: "h", status: "processing", attemptedAt: { lt: staleBefore } });
+    expect(wheres).toEqual([
+      { tenantId: "t", postId: "p", contentHash: "h", status: "failed" },
+      { tenantId: "t", postId: "p", contentHash: "h", status: "processing", attemptedAt: { lt: staleBefore } },
+    ]);
   });
 });
