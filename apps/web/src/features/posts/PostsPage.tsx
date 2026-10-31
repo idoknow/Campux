@@ -25,6 +25,7 @@ import {
   Trash2Icon,
   UserIcon,
   XIcon,
+  PlusIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GraduationItem } from "@/features/graduation/GraduationReview";
@@ -366,6 +367,13 @@ export function PostsPage({
   const reviewPendingPublishActive = isAdmin && pendingResidual?.operateMode === "bot";
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
+  const [tagCreateOpen, setTagCreateOpen] = useState(false);
+  const [tagCreateName, setTagCreateName] = useState("");
+  const [tagCreateDesc, setTagCreateDesc] = useState("");
+  const [tagCreateDays, setTagCreateDays] = useState("30");
+  const [tagCreateBusy, setTagCreateBusy] = useState(false);
+  const [tagDeleteTarget, setTagDeleteTarget] = useState<PostTag | null>(null);
+  const [tagDeleteBusy, setTagDeleteBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [busyPostId, setBusyPostId] = useState("");
@@ -1016,6 +1024,68 @@ export function PostsPage({
     }
   }
 
+  // 手动删除标签：级联移除所有稿件上的该标签；当前筛选若正停在被删标签上则回到「全部」。
+  async function submitDeleteTag() {
+    const tag = tagDeleteTarget;
+    if (!tag) {
+      return;
+    }
+    setTagDeleteBusy(true);
+    try {
+      await api(`/api/post-tags/${tag.id}`, { method: "DELETE" });
+      toast.success(`已删除标签「${tag.name}」`);
+      setTagDeleteTarget(null);
+      const nextFilter = publishedTagFilter === tag.id ? "all" : publishedTagFilter;
+      if (publishedTagFilter === tag.id) {
+        setPublishedTagFilter("all");
+      }
+      await refreshPublishedTags();
+      await refreshPublishedFeed(1, nextFilter);
+      void onRefresh();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "删除标签失败");
+    } finally {
+      setTagDeleteBusy(false);
+    }
+  }
+
+  // 手动新建标签 + AI 回溯打标：创建后立即让 LLM 把回溯范围内的存量稿件归入该标签；
+  // 之后的新稿件由 autoTagPost 即时纳入该标签的候选。
+  async function submitCreateTagWithBackfill() {
+    const tagName = tagCreateName.trim();
+    if (!tagName) {
+      return;
+    }
+    setTagCreateBusy(true);
+    try {
+      const created = await api<{ tag: PostTag }>("/api/post-tags/create", {
+        method: "POST",
+        body: JSON.stringify({ tagName, description: tagCreateDesc.trim() || undefined }),
+      });
+      try {
+        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number } }>(
+          `/api/post-tags/${created.tag.id}/backfill`,
+          { method: "POST", body: JSON.stringify({ lookbackDays: Number(tagCreateDays) }) },
+        );
+        toast.success(
+          `标签「${tagName}」已创建：AI 扫描近 ${tagCreateDays} 天 ${backfill.result.scannedCount} 条稿件，归类 ${backfill.result.assignedCount} 条`
+            + (backfill.result.skippedCount > 0 ? `，${backfill.result.skippedCount} 条因标签数已达上限跳过` : ""),
+        );
+      } catch (backfillError) {
+        toast.warning(`标签「${tagName}」已创建，但回溯打标未完成：${backfillError instanceof Error ? backfillError.message : "可稍后重试"}`);
+      }
+      setTagCreateOpen(false);
+      setTagCreateName("");
+      setTagCreateDesc("");
+      await refreshPublishedTags();
+      void onRefresh();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "创建标签失败");
+    } finally {
+      setTagCreateBusy(false);
+    }
+  }
+
   async function cancelAutoDecision(post: ReviewPostItem) {
     const analysisId = post.aiAutoDecision?.analysisId;
     if (!analysisId || busyPostId) return;
@@ -1633,7 +1703,13 @@ export function PostsPage({
         </TabsContent>
         <TabsContent value="published" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
           <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <PublishedTagFilter tags={publishedTags} value={publishedTagFilter} onChange={changePublishedTagFilter} />
+            <PublishedTagFilter
+              tags={publishedTags}
+              value={publishedTagFilter}
+              onChange={changePublishedTagFilter}
+              canDelete={isAdmin}
+              onDeleteTag={(tag) => setTagDeleteTarget(tag)}
+            />
             <div className="flex items-center gap-2">
               <input
                 value={publishedKeyword}
@@ -1657,12 +1733,18 @@ export function PostsPage({
               ) : null}
             </div>
             {isAdmin ? (
-              <PublishedTagMaintenanceToolbar
-                value={tagMaintenanceDays}
-                busy={tagMaintenanceBusy}
-                onChange={setTagMaintenanceDays}
-                onRun={() => void runPublishedTagMaintenance()}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <PublishedTagMaintenanceToolbar
+                  value={tagMaintenanceDays}
+                  busy={tagMaintenanceBusy}
+                  onChange={setTagMaintenanceDays}
+                  onRun={() => void runPublishedTagMaintenance()}
+                />
+                <Button variant="outline" size="sm" className="h-8 shrink-0 font-bold" disabled={tagCreateBusy} onClick={() => setTagCreateOpen(true)}>
+                  <PlusIcon className="mr-1 size-4" />
+                  新建标签
+                </Button>
+              </div>
             ) : null}
           </div>
           {publishedLoading ? (
@@ -2105,6 +2187,85 @@ export function PostsPage({
           setRecallConfirm({ open: true, mode: "admin-silent", post });
         }}
       />
+      <Dialog open={tagCreateOpen} onOpenChange={(open) => { if (!tagCreateBusy) setTagCreateOpen(open); }}>
+        <DialogContent className="w-[min(440px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>新建标签并回溯打标</DialogTitle>
+            <DialogDescription>
+              创建后 AI 会把回溯范围内的存量稿件归类到这个标签；之后的新稿件由自动打标即时处理。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 px-5 pb-5">
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              标签名
+              <input
+                value={tagCreateName}
+                maxLength={16}
+                autoFocus
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="如：高考志愿（2-8 个字最佳）"
+                onChange={(event) => setTagCreateName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !tagCreateBusy && tagCreateName.trim()) {
+                    void submitCreateTagWithBackfill();
+                  }
+                }}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              标签描述（可选，帮助 AI 判断归属）
+              <input
+                value={tagCreateDesc}
+                maxLength={100}
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+                placeholder="如：志愿填报、分数线、招生政策相关"
+                onChange={(event) => setTagCreateDesc(event.target.value)}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-800">
+              回溯范围
+              <Select value={tagCreateDays} onValueChange={setTagCreateDays}>
+                <SelectTrigger className="h-9 w-full bg-white font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["7", "14", "30", "60", "90"].map((days) => (
+                    <SelectItem key={days} value={days}>最近 {days} 天</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <Button
+              className="font-bold"
+              disabled={tagCreateBusy || tagCreateName.trim().length === 0}
+              onClick={() => void submitCreateTagWithBackfill()}
+            >
+              {tagCreateBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <PlusIcon className="mr-1 size-4" />}
+              {tagCreateBusy ? "创建中，AI 回溯打标可能需要一些时间..." : "创建并开始回溯打标"}
+            </Button>
+            <p className="text-xs leading-5 text-slate-500">AI 从严判断，宁可少打；最多扫描 300 条，标签数已达上限（5 个/稿）的稿件会跳过。</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(tagDeleteTarget)} onOpenChange={(open) => { if (!open) setTagDeleteTarget(null); }}>
+        <DialogContent className="w-[min(400px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>删除标签「{tagDeleteTarget?.name}」</DialogTitle>
+            <DialogDescription>
+              将从 {tagDeleteTarget?.postCount ?? 0} 条稿件上移除该标签，操作不可恢复。后续标签整理任务如果发现同主题稿件仍可能重建同名标签。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 px-5 pb-5">
+            <Button variant="outline" size="sm" disabled={tagDeleteBusy} onClick={() => setTagDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button size="sm" className="bg-red-600 font-bold text-white hover:bg-red-700" disabled={tagDeleteBusy} onClick={() => void submitDeleteTag()}>
+              {tagDeleteBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <Trash2Icon className="mr-1 size-4" />}
+              删除
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={imagePreview.open} onOpenChange={(open) => setImagePreview((current) => ({ ...current, open }))}>
         <DialogContent className="w-[min(920px,calc(100vw-32px))]">
           <DialogHeader>
@@ -2543,7 +2704,6 @@ function PostDetailDialog({
                   <p className="text-xs leading-5 text-violet-900 dark:text-violet-200">类别：{post.aiReview.assessment.categories.join("、") || "未分类"} <span className="text-violet-600 dark:text-violet-300">·</span> 置信度 {Math.round(post.aiReview.assessment.confidence * 100)}%</p>
                   <ul className="grid gap-1 pl-4 text-xs leading-5 text-violet-900 marker:text-violet-400 dark:text-violet-200 dark:marker:text-violet-300">{post.aiReview.assessment.reasons.map((reason, index) => <li key={index} className="list-disc">{reason}</li>)}</ul>
                   {post.aiReview.assessment.sensitiveFindings.length ? <div className="grid gap-1 rounded-md border border-amber-200 bg-amber-50/80 p-2 text-xs leading-5 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><p className="font-bold">敏感信息提示</p>{post.aiReview.assessment.sensitiveFindings.map((finding, index) => <p key={index} className="break-words">{finding.type}：{finding.excerpt} — {finding.reason}</p>)}</div> : null}
-                  {post.aiReview.assessment.maskedText ? <div className="grid gap-2 rounded-md border border-violet-100 bg-white/60 p-2 text-xs dark:border-violet-800 dark:bg-slate-900/80"><p className="font-semibold text-violet-950 dark:text-violet-100">打码建议</p><p className="whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.maskedText}</p><Button size="sm" variant="outline" className="w-fit" onClick={() => void navigator.clipboard.writeText(post.aiReview!.assessment!.maskedText!).then(() => toast.success("已复制打码建议")).catch(() => toast.error("复制失败"))}>复制打码建议</Button></div> : null}
                   {post.aiReview.assessment.rewrittenText ? <div className="grid gap-2 rounded-md border border-violet-100 bg-white/60 p-2 text-xs dark:border-violet-800 dark:bg-slate-900/80"><p className="font-semibold text-violet-950 dark:text-violet-100">改写建议</p><p className="whitespace-pre-wrap break-words leading-5">{post.aiReview.assessment.rewrittenText}</p><Button size="sm" variant="outline" className="w-fit" onClick={() => { void navigator.clipboard.writeText(post.aiReview!.assessment!.rewrittenText!).then(() => toast.success("已复制改写建议")).catch(() => toast.error("复制失败")); }}>复制改写建议</Button></div> : null}
                   {post.aiReview.assessment.rejectionReason ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs leading-5 text-violet-900 dark:text-violet-200">参考拒绝理由：{post.aiReview.assessment.rejectionReason}</p><Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(post.aiReview!.assessment!.rejectionReason!).then(() => toast.success("已复制拒绝理由")).catch(() => toast.error("复制失败"))}>复制理由</Button></div> : null}
 
@@ -3218,7 +3378,7 @@ function PublishedTagMaintenanceToolbar({
   );
 }
 
-function PublishedTagFilter({ tags, value, onChange }: { tags: PostTag[]; value: string; onChange: (value: string) => void }) {
+function PublishedTagFilter({ tags, value, onChange, canDelete = false, onDeleteTag }: { tags: PostTag[]; value: string; onChange: (value: string) => void; canDelete?: boolean; onDeleteTag?: (tag: PostTag) => void }) {
   return (
     <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
       <button
@@ -3244,6 +3404,26 @@ function PublishedTagFilter({ tags, value, onChange }: { tags: PostTag[]; value:
           <span className="size-2 rounded-full" style={{ backgroundColor: tag.color || "#cbd5e1" }} />
           {tag.name}
           {typeof tag.postCount === "number" ? <span className="text-[10px] opacity-70">{tag.postCount}</span> : null}
+          {canDelete && onDeleteTag ? (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`删除标签 ${tag.name}`}
+              className="ml-0.5 text-[11px] font-bold text-slate-400 hover:text-red-600"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteTag(tag);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.stopPropagation();
+                  onDeleteTag(tag);
+                }
+              }}
+            >
+              ×
+            </span>
+          ) : null}
         </button>
       ))}
     </div>
