@@ -13,6 +13,10 @@ describe("school relation extraction", () => {
     expect(validateSchoolRelationEvidence({ ...relation, evidence: `图书馆${"旁边".repeat(20)}位于东区` }, `图书馆${"旁边".repeat(20)}位于东区` )).toBe(false);
     expect(validateSchoolRelationEvidence({ ...relation, evidence: "图书馆 东区" }, "图书馆 东区" )).toBe(false);
   });
+  test("rejects phone-number patterns with formatting", () => {
+    expect(parseSchoolRelationExtraction(JSON.stringify({ relations: [{ subject: "活动", predicate: "held_at", object: "东区", evidence: "活动在东区" }] }))).toHaveLength(1);
+    expect(parseSchoolRelationExtraction(JSON.stringify({ relations: [{ subject: "活动", predicate: "held_at", object: "东区", evidence: "联系 138-1234-5678" }] }))).toBeNull();
+  });
   test("returns a bounded source excerpt containing the evidence", () => {
     const text = `${"前文".repeat(100)}图书馆位于东区${"后文".repeat(100)}`;
     const excerpt = schoolRelationSourceExcerpt(text, "图书馆位于东区", 80);
@@ -70,6 +74,18 @@ describe("buildSchoolRelationContext", () => {
     expect(buildSchoolRelationContext([{ ...relation, evidence: "图书馆在东区" }], "图书馆位于东区开放")).toBe("");
   });
 
+  test("matches contiguous Chinese phrases and case-insensitive Latin endpoints, while revalidating evidence", () => {
+    const chinese = { subject: "图书馆", predicate: "located_at", object: "东区", evidence: "图书馆位于东区" };
+    const latin = { subject: "North Campus", predicate: "located_at", object: "Building B", evidence: "North Campus is located at Building B" };
+    expect(buildSchoolRelationContext([chinese], "新消息：图书馆位于东区。" )).toContain("图书馆");
+    expect(buildSchoolRelationContext([latin], "NORTH CAMPUS is located at building b" )).toContain("North Campus");
+    expect(buildSchoolRelationContext([chinese], "图书馆现在搬离东区" )).toBe("");
+    expect(buildSchoolRelationContext([{ ...chinese, evidence: "图书馆与东区有关" }], "图书馆位于东区" )).toBe("");
+  });
+  test("filters out relations whose evidence no longer appears as a valid relation", () => {
+    const stale = { subject: "图书馆", predicate: "located_at", object: "东区", evidence: "图书馆位于东区" };
+    expect(buildSchoolRelationContext([stale], "图书馆不位于东区")).toBe("");
+  });
   test("caps relation count and context characters", () => {
     const relations = Array.from({ length: 8 }, (_, index) => ({ subject: "图书馆", predicate: "located_at", object: `东区${index}`, evidence: "图书馆位于东区" }));
     const context = buildSchoolRelationContext(relations, "图书馆 东区", 100, 10000);
