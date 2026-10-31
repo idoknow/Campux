@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { withTenantReviewSlot, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason, postReviewSystemPrompt, writeAutoAssessmentDecision, retryLlmReviewRequest } from "./post-review";
+import type { FastifyBaseLogger } from "fastify";
+import { withTenantReviewSlot, clampAiReviewConcurrency, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason, postReviewSystemPrompt, writeAutoAssessmentDecision, retryLlmReviewRequest } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
 
 describe("AI review retry policy", () => {
@@ -28,18 +29,110 @@ describe("AI review retry policy", () => {
 
 
 describe("withTenantReviewSlot", () => {
-  it("limits concurrent work independently for each tenant", async () => {
-    const started: Array<() => void> = [];
-    const deferred = () => new Promise<void>((resolve) => started.push(resolve));
-    const first = withTenantReviewSlot("tenant-a", deferred);
-    const second = withTenantReviewSlot("tenant-a", deferred);
+  it("queues work above the per-tenant concurrency instead of dropping it", async () => {
+    const releases: Array<() => void> = [];
+    const deferred = () => new Promise<void>((resolve) => { releases.push(resolve); });
+    const first = withTenantReviewSlot("tenant-queue-a", deferred);
+    const second = withTenantReviewSlot("tenant-queue-a", deferred);
     await Promise.resolve();
-    const rejected = await withTenantReviewSlot("tenant-a", async () => "unexpected");
-    const otherTenant = withTenantReviewSlot("tenant-b", async () => "allowed");
-    expect(rejected).toBeNull();
+
+    let queuedSettled = false;
+    const queued = withTenantReviewSlot("tenant-queue-a", async () => "queued-result").then((value) => {
+      queuedSettled = true;
+      return value;
+    });
+    const otherTenant = withTenantReviewSlot("tenant-queue-b", async () => "allowed");
     await expect(otherTenant).resolves.toBe("allowed");
-    started.splice(0).forEach((release) => release());
+    await Promise.resolve();
+    // 并发已满时不再直接返回 null，而是排队等待。
+    expect(queuedSettled).toBe(false);
+
+    releases.shift()?.();
+    await expect(queued).resolves.toBe("queued-result");
+
+    releases.splice(0).forEach((release) => { release(); });
     await Promise.all([first, second]);
+  });
+
+  it("honours a custom concurrency limit", async () => {
+    const releases: Array<() => void> = [];
+    const deferred = () => new Promise<void>((resolve) => { releases.push(resolve); });
+    const first = withTenantReviewSlot("tenant-limit-1", deferred, 1);
+    await Promise.resolve();
+
+    let secondSettled = false;
+    const second = withTenantReviewSlot("tenant-limit-1", async () => "second", 1).then((value) => {
+      secondSettled = true;
+      return value;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondSettled).toBe(false);
+
+    releases.shift()?.();
+    await expect(second).resolves.toBe("second");
+    await first;
+  });
+
+  it("degrades with a log when the tenant queue is full", async () => {
+    const messages: string[] = [];
+    const logger = { warn: (_context: unknown, message: string) => { messages.push(message); } } as unknown as FastifyBaseLogger;
+    const never = () => new Promise<void>(() => {});
+    const running = withTenantReviewSlot("tenant-queue-full", never, 1, { maxQueued: 0, logger });
+    await Promise.resolve();
+
+    await expect(withTenantReviewSlot("tenant-queue-full", async () => "dropped", 1, { maxQueued: 0, logger })).resolves.toBeNull();
+    expect(messages).toEqual(["AI review queue overflow"]);
+    void running;
+  });
+
+  it("drains earlier waiters before admitting a new arrival when the limit rises", async () => {
+    const releases: Array<() => void> = [];
+    const deferred = () => new Promise<void>((resolve) => { releases.push(resolve); });
+    const running = withTenantReviewSlot("tenant-queue-drain", deferred, 1);
+    await Promise.resolve();
+    const older = withTenantReviewSlot("tenant-queue-drain", deferred, 1, { queueWaitMs: 5_000 });
+    await Promise.resolve();
+
+    let newerSettled = false;
+    const newer = withTenantReviewSlot("tenant-queue-drain", async () => "newer", 2, { queueWaitMs: 5_000 }).then((value) => {
+      newerSettled = true;
+      return value;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // 并发从 1 调到 2：更早排队的请求先拿到空位，后来的仍在等。
+    expect(releases.length).toBe(2);
+    expect(newerSettled).toBe(false);
+
+    releases.splice(0).forEach((release) => { release(); });
+    await expect(newer).resolves.toBe("newer");
+    await Promise.all([running, older]);
+  });
+
+  it("logs a timeout and lets the next waiter take the slot", async () => {
+    const messages: string[] = [];
+    const logger = { warn: (_context: unknown, message: string) => { messages.push(message); } } as unknown as FastifyBaseLogger;
+    const releases: Array<() => void> = [];
+    const deferred = () => new Promise<void>((resolve) => { releases.push(resolve); });
+    const running = withTenantReviewSlot("tenant-queue-timeout", deferred, 1);
+    await Promise.resolve();
+
+    const timedOut = withTenantReviewSlot("tenant-queue-timeout", async () => "late", 1, { queueWaitMs: 10, logger });
+    const next = withTenantReviewSlot("tenant-queue-timeout", async () => "granted", 1, { queueWaitMs: 1_000 });
+    await expect(timedOut).resolves.toBeNull();
+    expect(messages).toEqual(["AI review queue wait timeout"]);
+
+    releases.shift()?.();
+    await expect(next).resolves.toBe("granted");
+    await running;
+  });
+});
+
+describe("clampAiReviewConcurrency", () => {
+  it("keeps the configured limit inside the supported range", () => {
+    expect(clampAiReviewConcurrency(undefined)).toBe(2);
+    expect(clampAiReviewConcurrency(0)).toBe(1);
+    expect(clampAiReviewConcurrency(3.7)).toBe(3);
+    expect(clampAiReviewConcurrency(99)).toBe(5);
   });
 });
 describe("global post review prompt", () => {

@@ -17,6 +17,7 @@ export const aiSettingsSchema = z.object({
   timeoutSeconds: z.number().int().min(5).max(120).optional(),
   rules: z.object({
     aiReviewMode: z.enum(["off", "shadow", "assist", "auto"]).optional(),
+    aiReviewConcurrency: z.number().int().min(1).max(5).optional(),
     autoModeration: z.object({ enabled: z.boolean().optional(), globalKillSwitch: z.boolean().optional(), autoApproveEnabled: z.boolean().optional(), autoRejectEnabled: z.boolean().optional(), minimumConfidence: z.number().min(0.9).max(1).optional(), autoApproveMinimumConfidence: z.number().min(0.9).max(1).optional(), autoRejectMinimumConfidence: z.number().min(0.9).max(1).optional(),  delaySeconds: z.number().int().min(30).max(120).optional() }).optional(),
     aiReviewRules: z.object({ blockedPatterns: z.array(z.string().trim().min(1).max(160)).max(100).optional(), allowedCategories: z.array(z.string().trim().min(1).max(80)).max(40).optional(), tone: z.string().max(500).optional(), strictPrivacy: z.boolean().optional() }).optional(),
     privatePostAiEnabled: z.boolean().optional(),
