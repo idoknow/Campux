@@ -1090,7 +1090,9 @@ export function PostsPage({
       setTagCreateOpen(false);
       setTagCreateName("");
       setTagCreateDesc("");
+      // 回溯打标会给存量稿件打上新标签：标签列表和已发布列表都要刷新才反映最新归类。
       await refreshPublishedTags();
+      await refreshPublishedFeed(1, publishedTagFilter);
       void onRefresh();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "创建标签失败");

@@ -165,14 +165,26 @@ export function registerPostTagRoutes(app: FastifyInstance) {
     }
     let tag;
     try {
-      tag = await prisma.postTag.create({
-        data: {
+      // 标签插入与审计日志同事务：避免审计写入失败时出现无审计记录的标签。
+      tag = await prisma.$transaction(async (tx) => {
+        const created = await tx.postTag.create({
+          data: {
+            tenantId: context.selectedTenant.id,
+            name: tagName,
+            description: body.description?.trim() || null,
+            color: tagColorForName(tagName),
+            source: "manual",
+          },
+        });
+        await writeAuditLog({
           tenantId: context.selectedTenant.id,
-          name: tagName,
-          description: body.description?.trim() || null,
-          color: tagColorForName(tagName),
-          source: "manual",
-        },
+          actorId: context.user.id,
+          action: "post.tag.create",
+          targetType: "post_tag",
+          targetId: created.id,
+          detail: { tagName, description: created.description },
+        }, tx);
+        return created;
       });
     } catch (error) {
       // 并发创建同名标签的竞态：唯一约束冲突按 409 返回而不是 500。
@@ -181,14 +193,6 @@ export function registerPostTagRoutes(app: FastifyInstance) {
       }
       throw error;
     }
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.tag.create",
-      targetType: "post_tag",
-      targetId: tag.id,
-      detail: { tagName, description: tag.description },
-    });
     return { tag: serializePostTag(tag) };
   });
 
@@ -249,16 +253,18 @@ export function registerPostTagRoutes(app: FastifyInstance) {
     if (!post) {
       return reply.code(404).send({ message: "稿件不存在" });
     }
-    await prisma.postTagAssignment.deleteMany({
-      where: { postId: post.id, tagId: body.tagId, tenantId: context.selectedTenant.id },
-    });
-    await writeAuditLog({
-      tenantId: context.selectedTenant.id,
-      actorId: context.user.id,
-      action: "post.tag.unassign",
-      targetType: "post",
-      targetId: post.id,
-      detail: { tagId: body.tagId },
+    await prisma.$transaction(async (tx) => {
+      await tx.postTagAssignment.deleteMany({
+        where: { postId: post.id, tagId: body.tagId, tenantId: context.selectedTenant.id },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.tag.unassign",
+        targetType: "post",
+        targetId: post.id,
+        detail: { tagId: body.tagId },
+      }, tx);
     });
     return { tags: await readPostAssignedTags(context.selectedTenant.id, post.id) };
   });
