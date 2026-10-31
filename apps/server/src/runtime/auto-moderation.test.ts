@@ -72,16 +72,13 @@ describe("automatic moderation explicit policy trace", () => {
     expect(result.reason).toBe("没有命中管理员配置的明确拒绝规则");
     expect(result.trace.rules.find((r) => r.ruleId === "reject.pattern_substring")).toMatchObject({ outcome: "fail", matchSemantics: "literal_substring" });
   });
-  test("approval gates each flag, confidence, action, samples, category, and agreement", () => {
-    const cases = [
-      [assessment({ suggestedAction: "approve" }), { ...policy, autoApproveEnabled: false }, signals, "校园新闻", "AI 通过建议未达到配置的置信度门槛"],
-      [assessment({ confidence: 0.97 }), policy, signals, "校园新闻", "AI 通过建议未达到配置的置信度门槛"],
-      [assessment({ suggestedAction: "manual_review" }), policy, signals, "校园新闻", "AI 通过建议未达到配置的置信度门槛"],
-      [assessment(), policy, { ...signals, validatedSamples: 0 }, "校园新闻", "有效人工校准样本不足"],
-      [assessment({ categories: ["unknown"] }), policy, signals, "校园新闻", "投稿类别不在自动通过白名单"],
-      [assessment(), policy, { ...signals, matchedCategoryRates: { campus_news: { total: 100, matched: 97 } } }, "校园新闻", "该类别人工校准一致率不足"],
-    ] as const;
-    for (const [a, p, s, text, reason] of cases) expect(evaluate(a, p, s, text)).toMatchObject({ action: "manual_review", reason });
+  test("low-risk approval needs enabled toggle, approve suggestion, and configured confidence only", () => {
+    const relaxedPolicy = { ...policy, autoApproveMinimumConfidence: 0.95, allowedAutoApproveCategories: [], minimumValidatedSamples: 10000 };
+    expect(evaluate(assessment({ confidence: 0.99 }), relaxedPolicy, { validatedSamples: 0, matchedCategoryRates: {} }).action).toBe("approve");
+    expect(evaluate(assessment({ confidence: 0.95 }), relaxedPolicy, { validatedSamples: 0, matchedCategoryRates: {} }).action).toBe("approve");
+    expect(evaluate(assessment({ confidence: 0.949 }), relaxedPolicy, { validatedSamples: 0, matchedCategoryRates: {} })).toMatchObject({ action: "manual_review", reason: "AI 通过建议置信度不足" });
+    expect(evaluate(assessment({ suggestedAction: "manual_review" }), relaxedPolicy, signals).reason).toBe("AI 未建议通过");
+    expect(evaluate(assessment(), { ...relaxedPolicy, autoApproveEnabled: false }, signals).reason).toBe("未启用自动通过");
   });
   test("conflicting or unknown assessment values are manual review", () => {
     expect(evaluate(assessment({ riskLevel: "critical", suggestedAction: "approve" })).action).toBe("manual_review");
