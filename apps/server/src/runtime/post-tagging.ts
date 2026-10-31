@@ -349,7 +349,8 @@ export async function maintainTenantPostTags(options: {
   }
   const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag maintenance: failed to read AI settings");
-    return null;
+    // 读设置的暂时性失败向上抛出：路由 catch 会安排 15 分钟自动重试，而不是静默空跑。
+    throw error;
   });
   if (!shouldRunTagMaintenance(settings)) {
     return emptyResult();
