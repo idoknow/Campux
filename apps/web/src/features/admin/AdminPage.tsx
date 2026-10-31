@@ -52,6 +52,7 @@ import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { PluginConfigPage } from "./PluginConfigPage";
+import { capAiReviewGraph, graphLabel, graphNodePosition, type AiReviewGraph } from "./ai-review-graph";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -379,9 +380,25 @@ export function AdminPage({
   const [busy, setBusy] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [aiReviewEntities, setAiReviewEntities] = useState<Array<{ id: string; type: string; name: string; aliases: string[]; sensitivity: string }>>([]);
+  const [aiEntityQuery, setAiEntityQuery] = useState("");
+  const [aiEntitySearch, setAiEntitySearch] = useState("");
+  const [aiEntityPage, setAiEntityPage] = useState(1);
+  const [aiEntityTotal, setAiEntityTotal] = useState(0);
+  const [aiEntityScanTruncated, setAiEntityScanTruncated] = useState(false);
+  const [aiEntityReload, setAiEntityReload] = useState(0);
+  const aiEntityPageSize = 100;
   const [aiReviewMetrics, setAiReviewMetrics] = useState<{ total: number; byStatus: Record<string, number>; feedback: Record<string, number> } | null>(null);
   const [aiEntityForm, setAiEntityForm] = useState({ type: "location", name: "", aliases: "", sensitivity: "normal" });
   const [aiReviewLoading, setAiReviewLoading] = useState(false);
+  const [aiGraph, setAiGraph] = useState<AiReviewGraph>({ nodes: [], edges: [] });
+  const [aiPendingRelations, setAiPendingRelations] = useState<AiReviewGraph["edges"]>([]);
+  const [aiPendingPage, setAiPendingPage] = useState(1);
+  const [aiPendingTotal, setAiPendingTotal] = useState(0);
+  const [aiPendingLoading, setAiPendingLoading] = useState(false);
+  const aiPendingPageSize = 20;
+  const [aiGraphLoading, setAiGraphLoading] = useState(false);
+  const [aiGraphBusy, setAiGraphBusy] = useState(false);
+  const [aiGraphSources, setAiGraphSources] = useState<Record<string, string>>({});
   const [memberDetail, setMemberDetail] = useState<AdminMemberDetail | null>(null);
   const [memberDetailOpen, setMemberDetailOpen] = useState(false);
   const [memberDetailLoading, setMemberDetailLoading] = useState(false);
@@ -393,13 +410,41 @@ export function AdminPage({
   }, [selectedTenant.id, selectedTenant.slug, selectedTenant.name, selectedTenant.themeColor, metadata.brand, metadata.banner, metadata.logoUrl, metadata.pendingPostLimit, metadata.publishRateLimits.hourly, metadata.publishRateLimits.daily, metadata.postRules, metadata.services, metadata.imageCompression.enabled, metadata.imageCompression.quality, metadata.imageCompression.maxDimension, metadata.imageMaxSizeMb, metadata.publishMode, metadata.publishAccumulate.minImages, metadata.publishAccumulate.maxImages, metadata.publishAccumulate.staleMinutes, metadata.publishLlmSummaryEnabled, metadata.followedPostCommentNotifyEnabled, metadata.operateMode]);
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setAiEntitySearch(aiEntityQuery);
+      setAiEntityPage(1);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [aiEntityQuery]);
+
+  useEffect(() => {
     if (activeTab !== "metadata") return;
     let cancelled = false;
     setAiReviewLoading(true);
-    Promise.all([api<{ entities: typeof aiReviewEntities }>("/api/admin/ai-review/entities"), api<NonNullable<typeof aiReviewMetrics>>("/api/admin/ai-review/metrics")])
-      .then(([entities, metrics]) => { if (!cancelled) { setAiReviewEntities(entities.entities); setAiReviewMetrics(metrics); } })
+    api<{ entities: typeof aiReviewEntities; page: number; pageSize: number; total: number; scanTruncated: boolean }>(`/api/admin/ai-review/entities?page=${aiEntityPage}&pageSize=${aiEntityPageSize}&q=${encodeURIComponent(aiEntitySearch)}`)
+      .then((entities) => { if (!cancelled) { setAiReviewEntities(entities.entities); setAiEntityTotal(entities.total); setAiEntityScanTruncated(entities.scanTruncated); } })
       .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "无法读取 AI 审核数据"); })
       .finally(() => { if (!cancelled) setAiReviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedTenant.id, aiEntityPage, aiEntitySearch, aiEntityReload]);
+
+  useEffect(() => {
+    if (activeTab !== "metadata") return;
+    let cancelled = false;
+    setAiPendingLoading(true);
+    api<{ relations: AiReviewGraph["edges"]; page: number; pageSize: number; total: number }>(`/api/admin/ai-review/graph/pending?page=${aiPendingPage}&pageSize=${aiPendingPageSize}`)
+      .then((data) => { if (!cancelled) { setAiPendingRelations(data.relations); setAiPendingTotal(data.total); } })
+      .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "待审核关系读取失败"); })
+      .finally(() => { if (!cancelled) setAiPendingLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedTenant.id, aiPendingPage, aiPendingPageSize]);
+
+  useEffect(() => {
+    if (activeTab !== "metadata") return;
+    let cancelled = false;
+    Promise.all([api<NonNullable<typeof aiReviewMetrics>>("/api/admin/ai-review/metrics"), api<AiReviewGraph>("/api/admin/ai-review/graph")])
+      .then(([metrics, graph]) => { if (!cancelled) { setAiReviewMetrics(metrics); setAiGraph(capAiReviewGraph(graph)); } })
+      .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "无法读取 AI 审核数据"); });
     return () => { cancelled = true; };
   }, [activeTab, selectedTenant.id]);
 
@@ -1326,14 +1371,34 @@ export function AdminPage({
                     <p className="text-sm text-slate-700">分析 {aiReviewMetrics?.total ?? 0} 条；人工判断一致 {aiReviewMetrics?.feedback.matched ?? 0} 条，覆盖 {aiReviewMetrics?.feedback.overridden ?? 0} 条。</p>
                     <Button variant="outline" disabled={aiReviewLoading} onClick={() => void (async () => { try { await api("/api/admin/ai-review/snapshots/refresh", { method: "POST", body: JSON.stringify({}) }); toast.success("学校模型快照已更新"); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "快照更新失败"); } })()}>更新学校模型快照</Button>
                     {aiReviewLoading ? <p className="text-sm text-slate-500">读取中…</p> : null}
+                    <section className="grid gap-2 border-t border-slate-200 pt-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div><p className="text-sm font-semibold text-slate-900">校园关系图</p><p className="text-xs text-slate-500">固定网格布局 · 最多 100 个节点 / 150 条关系</p></div>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" disabled={aiGraphBusy || aiGraphLoading} onClick={() => void (async () => { setAiGraphLoading(true); try { setAiGraph(capAiReviewGraph(await api<AiReviewGraph>("/api/admin/ai-review/graph"))); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "关系图读取失败"); } finally { setAiGraphLoading(false); } })()}>刷新</Button>
+                          <Button size="sm" disabled={aiGraphBusy} onClick={() => void (async () => { setAiGraphBusy(true); try { const result = await api<{ postsRead: number; relationsStored: number; failed?: number }>("/api/admin/ai-review/graph/extract", { method: "POST", body: JSON.stringify({}) }); if ((result.failed ?? 0) > 0) { toast.error(`扫描 ${result.postsRead} 条，新增/更新 ${result.relationsStored} 条关系，${result.failed} 条抽取失败`); } else { toast.success(`扫描 ${result.postsRead} 条，新增/更新 ${result.relationsStored} 条关系`); } setAiGraph(capAiReviewGraph(await api<AiReviewGraph>("/api/admin/ai-review/graph"))); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "关系抽取失败"); } finally { setAiGraphBusy(false); } })()}>{aiGraphBusy ? "抽取中…" : "从已发布稿件抽取"}</Button>
+                        </div>
+                      </div>
+                      {aiGraphLoading ? <p className="text-sm text-slate-500">读取关系图…</p> : aiGraph.nodes.length === 0 ? <p className="text-sm text-slate-500">暂无关系，运行抽取后可在此审核。</p> : (
+                        <div className="overflow-x-auto rounded border border-slate-200 bg-white">
+                          <svg role="img" aria-label="校园关系图" viewBox={`0 0 ${Math.max(1, Math.min(10, aiGraph.nodes.length)) * 110 + 20} ${Math.ceil(aiGraph.nodes.length / 10) * 64 + 20}`} className="h-auto min-w-[680px] w-full" style={{ maxHeight: 480 }}>
+                            {aiGraph.edges.map((edge) => { const from = aiGraph.nodes.findIndex((node) => node.id === edge.subject); const to = aiGraph.nodes.findIndex((node) => node.id === edge.object); if (from < 0 || to < 0) return null; const a = graphNodePosition(from); const b = graphNodePosition(to); return <g key={edge.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={edge.approved ? "#64748b" : "#f59e0b"} strokeWidth="1.5" /><text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} textAnchor="middle" fontSize="9" fill="#475569">{graphLabel(edge.predicate, 12)}</text></g>; })}
+                            {aiGraph.nodes.map((node, index) => { const point = graphNodePosition(index); return <g key={node.id}><circle cx={point.x} cy={point.y} r="18" fill="#eff6ff" stroke="#93c5fd" /><text x={point.x} y={point.y + 3} textAnchor="middle" fontSize="9" fill="#1e3a8a">{graphLabel(node.id)}</text></g>; })}
+                          </svg>
+                        </div>
+                      )}
+                      <div className="grid gap-2">{aiPendingLoading ? <p className="text-sm text-slate-500">读取待审核关系…</p> : null}<div className="flex items-center justify-between gap-2 text-xs text-slate-600"><span>待审核 {aiPendingTotal} 条 · 第 {aiPendingPage} / {Math.max(1, Math.ceil(aiPendingTotal / aiPendingPageSize))} 页</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={aiPendingLoading || aiPendingPage <= 1} onClick={() => setAiPendingPage((page) => page - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={aiPendingLoading || aiPendingPage * aiPendingPageSize >= aiPendingTotal} onClick={() => setAiPendingPage((page) => page + 1)}>下一页</Button></div></div>{aiPendingRelations.map((edge) => <div key={edge.id} className="grid gap-2 rounded border border-amber-200 bg-amber-50/50 p-2 text-xs"><span>{edge.subject} —{edge.predicate}→ {edge.object} · 证据：{edge.evidence || "无"}</span><Button size="sm" variant="outline" disabled={aiGraphBusy} onClick={() => void (async () => { setAiGraphBusy(true); try { const source = await api<{ text: string }>(`/api/admin/ai-review/graph/${edge.id}/source`); setAiGraphSources((current) => ({ ...current, [edge.id]: source.text })); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "来源读取失败"); } finally { setAiGraphBusy(false); } })()}>查看来源稿件</Button>{aiGraphSources[edge.id] ? <pre className="whitespace-pre-wrap rounded bg-white p-2 text-xs">{aiGraphSources[edge.id]}</pre> : null}<Button size="sm" variant="outline" disabled={aiGraphBusy || !aiGraphSources[edge.id]} onClick={() => void (async () => { setAiGraphBusy(true); try { await api(`/api/admin/ai-review/graph/${edge.id}/approve`, { method: "POST", body: JSON.stringify({}) }); setAiPendingRelations((current) => current.filter((item) => item.id !== edge.id)); setAiPendingTotal((total) => Math.max(0, total - 1)); setAiGraph((current) => capAiReviewGraph({ ...current, edges: current.edges.map((item) => item.id === edge.id ? { ...item, approved: true } : item) })); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "审核关系失败"); } finally { setAiGraphBusy(false); } })()}>批准</Button></div>)}</div>
+                    </section>
                     <div className="grid gap-2 md:grid-cols-4">
                       <Select value={aiEntityForm.type} onValueChange={(type) => setAiEntityForm({ ...aiEntityForm, type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{[["location", "地点"], ["class", "班级"], ["person_alias", "人物别名"], ["organization", "组织"], ["topic", "话题"], ["risky_phrase", "风险短语"], ["service", "校园服务"]].map(([value, label]) => <SelectItem key={value ?? label} value={value ?? "location"}>{label}</SelectItem>)}</SelectContent></Select>
                       <Input value={aiEntityForm.name} maxLength={120} placeholder="实体名称" onChange={(event) => setAiEntityForm({ ...aiEntityForm, name: event.target.value })} />
                       <Input value={aiEntityForm.aliases} placeholder="别名，逗号分隔" onChange={(event) => setAiEntityForm({ ...aiEntityForm, aliases: event.target.value })} />
                       <Select value={aiEntityForm.sensitivity} onValueChange={(sensitivity) => setAiEntityForm({ ...aiEntityForm, sensitivity })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="normal">普通</SelectItem><SelectItem value="sensitive">敏感</SelectItem><SelectItem value="blocked">高风险</SelectItem></SelectContent></Select>
                     </div>
-                    <Button disabled={busy || !aiEntityForm.name.trim()} onClick={() => void (async () => { try { const result = await api<{ entity: (typeof aiReviewEntities)[number] }>("/api/admin/ai-review/entities", { method: "POST", body: JSON.stringify({ ...aiEntityForm, aliases: aiEntityForm.aliases.split(/[，,]/).map((value) => value.trim()).filter(Boolean).slice(0, 20), confidence: 1 }) }); setAiReviewEntities((items) => [...items.filter((item) => item.id !== result.entity.id), result.entity]); setAiEntityForm({ ...aiEntityForm, name: "", aliases: "" }); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "保存实体失败"); } })()}>添加或更新实体</Button>
-                    <div className="grid gap-2">{aiReviewEntities.map((entity) => <div key={entity.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm"><span>{entity.type} · {entity.name}{entity.aliases.length ? `（${entity.aliases.join("、")}）` : ""} · {entity.sensitivity}</span><Button variant="outline" size="sm" onClick={() => void (async () => { try { await api(`/api/admin/ai-review/entities/${entity.id}`, { method: "DELETE" }); setAiReviewEntities((items) => items.filter((item) => item.id !== entity.id)); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除实体失败"); } })()}>删除</Button></div>)}</div>
+                    <Button disabled={busy || !aiEntityForm.name.trim()} onClick={() => void (async () => { try { const result = await api<{ entity: (typeof aiReviewEntities)[number] }>("/api/admin/ai-review/entities", { method: "POST", body: JSON.stringify({ ...aiEntityForm, aliases: aiEntityForm.aliases.split(/[，,]/).map((value) => value.trim()).filter(Boolean).slice(0, 20), confidence: 1 }) }); setAiEntityPage(1); setAiEntityReload((revision) => revision + 1); setAiEntityForm({ ...aiEntityForm, name: "", aliases: "" }); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "保存实体失败"); } })()}>添加或更新实体</Button>
+                    <Input aria-label="搜索实体" placeholder="搜索实体名称或别名" value={aiEntityQuery} onChange={(event) => setAiEntityQuery(event.target.value)} />
+                    <div className="flex items-center justify-between gap-2 text-sm"><span>共 {aiEntityTotal} 条{aiEntityScanTruncated ? "（仅扫描前 5000 条，结果可能不完整）" : ""} · 第 {aiEntityPage} / {Math.max(1, Math.ceil(aiEntityTotal / aiEntityPageSize))} 页</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={aiEntityPage <= 1 || aiReviewLoading} onClick={() => setAiEntityPage((page) => page - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={aiEntityPage * aiEntityPageSize >= aiEntityTotal || aiReviewLoading} onClick={() => setAiEntityPage((page) => page + 1)}>下一页</Button></div></div>
+                    <div className="grid gap-2">{aiReviewEntities.map((entity) => <div key={entity.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm"><span>{entity.type} · {entity.name}{entity.aliases.length ? `（${entity.aliases.join("、")}）` : ""} · {entity.sensitivity}</span><Button variant="outline" size="sm" onClick={() => void (async () => { try { await api(`/api/admin/ai-review/entities/${entity.id}`, { method: "DELETE" }); if (aiReviewEntities.length === 1 && aiEntityPage > 1) { setAiEntityPage((page) => page - 1); } else { setAiEntityReload((revision) => revision + 1); } } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除实体失败"); } })()}>删除</Button></div>)}</div>
                   </div>
                 </details>
 

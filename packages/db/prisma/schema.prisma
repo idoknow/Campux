@@ -103,6 +103,9 @@ model Tenant {
   auditLogs      AuditLog[]
   aiSettings     TenantAiSettings?
   schoolEntities   SchoolEntity[]
+  schoolRelations  SchoolRelation[]
+  relationExtractions SchoolRelationExtraction[]
+  extractionCursor SchoolRelationExtractionCursor?
   schoolSnapshots  SchoolModelSnapshot[]
   postAiAnalyses   PostAiAnalysis[]
   aiFeedback       AiFeedback[]
@@ -390,6 +393,8 @@ model Post {
   aiAnalyses      PostAiAnalysis[]
   aiFeedback      AiFeedback[]
   batchItem       PublishBatchItem?
+  schoolRelations SchoolRelation[]
+  relationExtractions SchoolRelationExtraction[]
 
   @@unique([tenantId, displayId])
   @@unique([tenantId, id])
@@ -804,7 +809,61 @@ model SchoolEntity {
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, type, name])
+  @@unique([tenantId, id])
   @@index([tenantId, type, sensitivity])
+  normalizedAliases SchoolEntityAlias[]
+}
+
+model SchoolEntityAlias {
+  id         String @id @default(uuid())
+  tenantId   String
+  entityId   String
+  value      String
+  normalized String
+  entity     SchoolEntity @relation(fields: [tenantId, entityId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, entityId, normalized])
+  @@index([tenantId, normalized])
+}
+
+model SchoolRelation {
+  id           String   @id @default(uuid())
+  tenantId     String
+  subject      String
+  predicate    String
+  object       String
+  evidence     String
+  sourcePostId String
+  approved     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourcePost   Post     @relation(fields: [sourcePostId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([tenantId, subject, predicate, object, sourcePostId])
+  @@index([tenantId, approved, createdAt])
+  @@index([tenantId, sourcePostId])
+}
+
+model SchoolRelationExtractionCursor {
+  tenantId  String   @id
+  postId    String?
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model SchoolRelationExtraction {
+  id          String   @id @default(uuid())
+  tenantId    String
+  postId      String
+  contentHash String
+  status      String
+  attempts    Int      @default(0)
+  attemptedAt DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post        Post     @relation(fields: [postId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([tenantId, postId, contentHash])
+  @@index([tenantId, status, attemptedAt])
 }
 
 model SchoolModelSnapshot {

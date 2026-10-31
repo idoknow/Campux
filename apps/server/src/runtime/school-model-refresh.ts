@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { writeAuditLog } from "../lib/audit";
+import { syncSchoolEntityAliases } from "@campux/db";
 
 export type EntityEvidence = { analysisId: string; postId: string; type: string; name: string; sensitivity: "normal" | "sensitive" | "blocked"; confidence: number };
 const ENTITY_TYPES = ["location", "class", "person_alias", "organization", "topic", "risky_phrase", "service"];
@@ -35,13 +36,15 @@ export async function refreshTenantSchoolModel(tenantId: string): Promise<void> 
         const candidateKey = { tenantId, type, name: `candidate:${name}` };
         const current = await tx.schoolEntity.findUnique({ where: { tenantId_type_name: candidateKey }, select: { evidence: true, confidence: true, sensitivity: true, source: true } });
         const merged = mergeEntityEvidence(current?.evidence, { analysisId: analysis.id, postId: analysis.postId, type, name, sensitivity, confidence });
-        await tx.schoolEntity.upsert({ where: { tenantId_type_name: candidateKey }, create: { ...candidateKey, aliases: [], confidence: merged.confidence, sensitivity, source: "ai_candidate", evidence: merged.evidence }, update: { evidence: merged.evidence, confidence: Math.max(current?.confidence ?? 0, merged.confidence), sensitivity } });
+        const savedCandidate = await tx.schoolEntity.upsert({ where: { tenantId_type_name: candidateKey }, create: { ...candidateKey, aliases: [], confidence: merged.confidence, sensitivity, source: "ai_candidate", evidence: merged.evidence }, update: { evidence: merged.evidence, confidence: Math.max(current?.confidence ?? 0, merged.confidence), sensitivity } });
+        await syncSchoolEntityAliases(tx, tenantId, savedCandidate.id, [savedCandidate.name]);
         if (!merged.promoted || sensitivity !== "normal") continue;
-        const approved = await tx.schoolEntity.findUnique({ where: { tenantId_type_name: key }, select: { id: true, evidence: true, confidence: true, source: true, sensitivity: true } });
+        const approved = await tx.schoolEntity.findUnique({ where: { tenantId_type_name: key }, select: { id: true, aliases: true, evidence: true, confidence: true, source: true, sensitivity: true } });
         const approvedEvidence = Array.isArray(approved?.evidence) ? approved.evidence.filter((entry): entry is EntityEvidence => Boolean(entry) && typeof entry === "object" && typeof (entry as EntityEvidence).postId === "string") : [];
         const combined = mergeEntityEvidence(approvedEvidence, { analysisId: analysis.id, postId: analysis.postId, type, name, sensitivity, confidence });
         if (!combined.promoted) continue;
-        await tx.schoolEntity.upsert({ where: { tenantId_type_name: key }, create: { ...key, aliases: [], confidence: combined.confidence, sensitivity: "normal", source: "ai_extract", evidence: combined.evidence }, update: { evidence: combined.evidence, confidence: Math.max(approved?.confidence ?? 0, combined.confidence), ...(approved?.source === "admin" ? {} : { source: "ai_extract" }) } });
+        const savedEntity = await tx.schoolEntity.upsert({ where: { tenantId_type_name: key }, create: { ...key, aliases: [], confidence: combined.confidence, sensitivity: "normal", source: "ai_extract", evidence: combined.evidence }, update: { evidence: combined.evidence, confidence: Math.max(approved?.confidence ?? 0, combined.confidence), ...(approved?.source === "admin" ? {} : { source: "ai_extract" }) } });
+        await syncSchoolEntityAliases(tx, tenantId, savedEntity.id, [savedEntity.name, ...(Array.isArray(approved?.aliases) ? approved.aliases.filter((alias): alias is string => typeof alias === "string") : [])]);
         if (!approved) await writeAuditLog({ tenantId, action: "tenant.ai_review.entity.promote", targetType: "school_entity", targetId: candidateKey.name, detail: { type, name, evidenceCount: combined.evidence.length } }, tx);
       }
     }
