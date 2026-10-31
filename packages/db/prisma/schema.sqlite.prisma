@@ -106,6 +106,7 @@ model Tenant {
   schoolEntities   SchoolEntity[]
   schoolRelations  SchoolRelation[]
   relationExtractions SchoolRelationExtraction[]
+  extractionCursor SchoolRelationExtractionCursor?
   schoolSnapshots  SchoolModelSnapshot[]
   postAiAnalyses   PostAiAnalysis[]
   aiFeedback       AiFeedback[]
@@ -842,6 +843,13 @@ model SchoolRelation {
   @@unique([tenantId, subject, predicate, object, sourcePostId])
   @@index([tenantId, approved, createdAt])
   @@index([tenantId, sourcePostId])
+}
+
+model SchoolRelationExtractionCursor {
+  tenantId  String   @id
+  postId    String?
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model SchoolRelationExtraction {

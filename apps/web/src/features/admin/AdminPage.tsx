@@ -391,6 +391,11 @@ export function AdminPage({
   const [aiEntityForm, setAiEntityForm] = useState({ type: "location", name: "", aliases: "", sensitivity: "normal" });
   const [aiReviewLoading, setAiReviewLoading] = useState(false);
   const [aiGraph, setAiGraph] = useState<AiReviewGraph>({ nodes: [], edges: [] });
+  const [aiPendingRelations, setAiPendingRelations] = useState<AiReviewGraph["edges"]>([]);
+  const [aiPendingPage, setAiPendingPage] = useState(1);
+  const [aiPendingTotal, setAiPendingTotal] = useState(0);
+  const [aiPendingLoading, setAiPendingLoading] = useState(false);
+  const aiPendingPageSize = 20;
   const [aiGraphLoading, setAiGraphLoading] = useState(false);
   const [aiGraphBusy, setAiGraphBusy] = useState(false);
   const [aiGraphSources, setAiGraphSources] = useState<Record<string, string>>({});
@@ -422,6 +427,17 @@ export function AdminPage({
       .finally(() => { if (!cancelled) setAiReviewLoading(false); });
     return () => { cancelled = true; };
   }, [activeTab, selectedTenant.id, aiEntityPage, aiEntitySearch, aiEntityReload]);
+
+  useEffect(() => {
+    if (activeTab !== "metadata") return;
+    let cancelled = false;
+    setAiPendingLoading(true);
+    api<{ relations: AiReviewGraph["edges"]; page: number; pageSize: number; total: number }>(`/api/admin/ai-review/graph/pending?page=${aiPendingPage}&pageSize=${aiPendingPageSize}`)
+      .then((data) => { if (!cancelled) { setAiPendingRelations(data.relations); setAiPendingTotal(data.total); } })
+      .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "待审核关系读取失败"); })
+      .finally(() => { if (!cancelled) setAiPendingLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedTenant.id, aiPendingPage, aiPendingPageSize]);
 
   useEffect(() => {
     if (activeTab !== "metadata") return;
@@ -1371,7 +1387,7 @@ export function AdminPage({
                           </svg>
                         </div>
                       )}
-                      <div className="grid gap-2">{aiGraph.edges.filter((edge) => !edge.approved).slice(0, 12).map((edge) => <div key={edge.id} className="grid gap-2 rounded border border-amber-200 bg-amber-50/50 p-2 text-xs"><span>{edge.subject} —{edge.predicate}→ {edge.object} · 证据：{edge.evidence || "无"}</span><Button size="sm" variant="outline" disabled={aiGraphBusy} onClick={() => void (async () => { setAiGraphBusy(true); try { const source = await api<{ text: string }>(`/api/admin/ai-review/graph/${edge.id}/source`); setAiGraphSources((current) => ({ ...current, [edge.id]: source.text })); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "来源读取失败"); } finally { setAiGraphBusy(false); } })()}>查看来源稿件</Button>{aiGraphSources[edge.id] ? <pre className="whitespace-pre-wrap rounded bg-white p-2 text-xs">{aiGraphSources[edge.id]}</pre> : null}<Button size="sm" variant="outline" disabled={aiGraphBusy || !aiGraphSources[edge.id]} onClick={() => void (async () => { setAiGraphBusy(true); try { await api(`/api/admin/ai-review/graph/${edge.id}/approve`, { method: "POST", body: JSON.stringify({}) }); setAiGraph((current) => capAiReviewGraph({ ...current, edges: current.edges.map((item) => item.id === edge.id ? { ...item, approved: true } : item) })); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "审核关系失败"); } finally { setAiGraphBusy(false); } })()}>批准</Button></div>)}</div>
+                      <div className="grid gap-2">{aiPendingLoading ? <p className="text-sm text-slate-500">读取待审核关系…</p> : null}<div className="flex items-center justify-between gap-2 text-xs text-slate-600"><span>待审核 {aiPendingTotal} 条 · 第 {aiPendingPage} / {Math.max(1, Math.ceil(aiPendingTotal / aiPendingPageSize))} 页</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={aiPendingLoading || aiPendingPage <= 1} onClick={() => setAiPendingPage((page) => page - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={aiPendingLoading || aiPendingPage * aiPendingPageSize >= aiPendingTotal} onClick={() => setAiPendingPage((page) => page + 1)}>下一页</Button></div></div>{aiPendingRelations.map((edge) => <div key={edge.id} className="grid gap-2 rounded border border-amber-200 bg-amber-50/50 p-2 text-xs"><span>{edge.subject} —{edge.predicate}→ {edge.object} · 证据：{edge.evidence || "无"}</span><Button size="sm" variant="outline" disabled={aiGraphBusy} onClick={() => void (async () => { setAiGraphBusy(true); try { const source = await api<{ text: string }>(`/api/admin/ai-review/graph/${edge.id}/source`); setAiGraphSources((current) => ({ ...current, [edge.id]: source.text })); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "来源读取失败"); } finally { setAiGraphBusy(false); } })()}>查看来源稿件</Button>{aiGraphSources[edge.id] ? <pre className="whitespace-pre-wrap rounded bg-white p-2 text-xs">{aiGraphSources[edge.id]}</pre> : null}<Button size="sm" variant="outline" disabled={aiGraphBusy || !aiGraphSources[edge.id]} onClick={() => void (async () => { setAiGraphBusy(true); try { await api(`/api/admin/ai-review/graph/${edge.id}/approve`, { method: "POST", body: JSON.stringify({}) }); setAiPendingRelations((current) => current.filter((item) => item.id !== edge.id)); setAiPendingTotal((total) => Math.max(0, total - 1)); setAiGraph((current) => capAiReviewGraph({ ...current, edges: current.edges.map((item) => item.id === edge.id ? { ...item, approved: true } : item) })); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "审核关系失败"); } finally { setAiGraphBusy(false); } })()}>批准</Button></div>)}</div>
                     </section>
                     <div className="grid gap-2 md:grid-cols-4">
                       <Select value={aiEntityForm.type} onValueChange={(type) => setAiEntityForm({ ...aiEntityForm, type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{[["location", "地点"], ["class", "班级"], ["person_alias", "人物别名"], ["organization", "组织"], ["topic", "话题"], ["risky_phrase", "风险短语"], ["service", "校园服务"]].map(([value, label]) => <SelectItem key={value ?? label} value={value ?? "location"}>{label}</SelectItem>)}</SelectContent></Select>

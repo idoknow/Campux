@@ -51,6 +51,7 @@ describe("applySqliteBaseline", () => {
         "20261031120000_add_school_relations",
         "20261031130000_add_school_relation_extractions",
         "20261031140000_school_entity_aliases",
+        "20261031150000_school_relation_extraction_cursor",
       ];
       for (const name of embeddedMigrations) {
         expect(r1.skipped).toContain(name);
@@ -73,8 +74,16 @@ describe("applySqliteBaseline", () => {
       expect(baselineRow).toBeTruthy();
       expect(baselineRow!.checksum).toMatch(/^[0-9a-f]{64}$/);
       // baseline + embedded incremental migration names
-      expect(mig).toHaveLength(15);
+      expect(embeddedMigrations).toHaveLength(15);
+      expect(mig).toHaveLength(embeddedMigrations.length + 1);
       expect(new Set(mig.map((row) => row.migration_name)).size).toBe(mig.length);
+      expect(mig.map((row) => row.migration_name)).toEqual(
+        expect.arrayContaining(["20261031140000_school_entity_aliases"]),
+      );
+      const aliasMigrationRow = mig.find(
+        (row) => row.migration_name === "20261031140000_school_entity_aliases",
+      );
+      expect(aliasMigrationRow?.checksum).toMatch(/^[0-9a-f]{64}$/);
       db.close();
 
       // second run skips (idempotent)
