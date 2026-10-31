@@ -28,6 +28,7 @@ const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedb
 
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
+const AI_REVIEW_STAGE1_MIGRATION_NAME = "20261023120000_restore_ai_review_stage1";
 const AUTO_MODERATION_SCHEDULE_MIGRATION_NAME = "20261024120000_ai_auto_moderation_schedule_quota";
 const PRIVATE_FORWARD_GROUP_MIGRATION_NAME = "20261029120000_add_private_forward_group";
 const TENANT_PUBLISH_QUOTA_MIGRATION_NAME = "20261027120000_durable_tenant_publish_quota_reservations";
@@ -777,6 +778,11 @@ function applyTenantPublishQuotaReservationSqliteMigration(db: Database, doneNam
   logger.info({ migration: TENANT_PUBLISH_QUOTA_MIGRATION_NAME }, "applying sqlite incremental migration");
   db.exec("BEGIN");
   try {
+    // 复合外键引用 Post(tenantId, id)，SQLite 要求被引用列必须是完整的唯一索引。
+    // PG 侧由 20261023120000 迁移补的该约束，sqlite 全新基线也自带；但老库的
+    // 增量升级路径此前从未创建它，缺了会让 PRAGMA foreign_key_check 报
+    // "foreign key mismatch" 并回滚整个迁移。uuid 主键下 (tenantId, id) 不会重复。
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "Post_tenantId_id_key" ON "Post"("tenantId", "id")`);
     if (!hasTable) db.exec(`CREATE TABLE "TenantPublishQuotaReservation" (
       "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL,
       "periodType" TEXT NOT NULL CHECK ("periodType" IN ('hourly', 'daily')), "periodStart" DATETIME NOT NULL,
@@ -814,6 +820,121 @@ function applyTenantPublishQuotaReservationSqliteMigration(db: Database, doneNam
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); throw error; }
   doneNames.add(TENANT_PUBLISH_QUOTA_MIGRATION_NAME); applied.push(TENANT_PUBLISH_QUOTA_MIGRATION_NAME);
+}
+
+/**
+ * AI 审核一期的基础表（SchoolEntity / SchoolModelSnapshot / PostAiAnalysis / AiFeedback）。
+ * 全新基线自带这些表；PG 由 20261023120000 迁移创建；但 sqlite 增量升级路径此前没有
+ * 对应迁移，老库升级后会缺表并让 AI 审核/自动决策相关功能 P2021 报错。这里补上。
+ */
+function applyAiReviewStage1SqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  if (doneNames.has(AI_REVIEW_STAGE1_MIGRATION_NAME)) {
+    skipped.push(AI_REVIEW_STAGE1_MIGRATION_NAME);
+    return;
+  }
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Tenant'").get()
+    || !db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Post'").get()) return;
+
+  const hasTable = (name: string): boolean =>
+    db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== null;
+  if (hasTable("PostAiAnalysis") && hasTable("AiFeedback") && hasTable("SchoolEntity") && hasTable("SchoolModelSnapshot")) {
+    // 表已存在（全新基线安装，或中间版本建过表但缺复合外键依赖的唯一索引）：
+    // 补齐缺失索引并记迁移账，避免重复建表。
+    db.exec("BEGIN");
+    try {
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "Post_tenantId_id_key" ON "Post"("tenantId", "id")`);
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolModelSnapshot_tenantId_id_key" ON "SchoolModelSnapshot"("tenantId", "id")`);
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "PostAiAnalysis_tenantId_id_key" ON "PostAiAnalysis"("tenantId", "id")`);
+      db.run(
+        `INSERT INTO "_prisma_migrations"
+           ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+        [randomUUID(), checksumOf("baseline-includes-ai-review-stage1"), AI_REVIEW_STAGE1_MIGRATION_NAME],
+      );
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    doneNames.add(AI_REVIEW_STAGE1_MIGRATION_NAME);
+    skipped.push(AI_REVIEW_STAGE1_MIGRATION_NAME);
+    return;
+  }
+
+  logger.info({ migration: AI_REVIEW_STAGE1_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    // PostAiAnalysis/AiFeedback 的复合外键引用 Post(id, tenantId)，SQLite 要求被引用列
+    // 必须有完整唯一索引；老库和 PG 的 20261023120000 一样需要先补上它。
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "Post_tenantId_id_key" ON "Post"("tenantId", "id")`);
+    db.exec(`CREATE TABLE IF NOT EXISTS "SchoolEntity" (
+      "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "type" TEXT NOT NULL, "name" TEXT NOT NULL,
+      "aliases" JSONB NOT NULL DEFAULT '[]', "confidence" REAL NOT NULL DEFAULT 1,
+      "sensitivity" TEXT NOT NULL DEFAULT 'normal', "source" TEXT NOT NULL DEFAULT 'admin',
+      "evidence" JSONB NOT NULL DEFAULT '[]', "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL,
+      CONSTRAINT "SchoolEntity_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS "SchoolModelSnapshot" (
+      "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "version" INTEGER NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'active', "summary" TEXT NOT NULL, "entities" JSONB NOT NULL,
+      "riskMemory" JSONB NOT NULL DEFAULT '{}', "rules" JSONB NOT NULL, "metrics" JSONB NOT NULL DEFAULT '{}',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "SchoolModelSnapshot_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS "PostAiAnalysis" (
+      "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL,
+      "modelSnapshotId" TEXT, "mode" TEXT NOT NULL DEFAULT 'assist', "version" INTEGER NOT NULL DEFAULT 1, "provider" TEXT NOT NULL, "model" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'pending', "riskLevel" TEXT, "confidence" REAL,
+      "categories" JSONB NOT NULL DEFAULT '[]', "sensitiveFindings" JSONB NOT NULL DEFAULT '[]',
+      "suggestedAction" TEXT, "reasons" JSONB NOT NULL DEFAULT '[]', "rewrittenText" TEXT, "maskedText" TEXT,
+      "rejectionReason" TEXT, "error" TEXT, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL,
+      CONSTRAINT "PostAiAnalysis_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "PostAiAnalysis_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "PostAiAnalysis_modelSnapshotId_tenantId_fkey" FOREIGN KEY ("modelSnapshotId", "tenantId") REFERENCES "SchoolModelSnapshot" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS "AiFeedback" (
+      "id" TEXT NOT NULL PRIMARY KEY, "tenantId" TEXT NOT NULL, "postId" TEXT NOT NULL,
+      "analysisId" TEXT NOT NULL, "reviewerId" TEXT, "aiAction" TEXT, "humanAction" TEXT NOT NULL,
+      "humanComment" TEXT, "matched" BOOLEAN NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AiFeedback_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "AiFeedback_postId_tenantId_fkey" FOREIGN KEY ("postId", "tenantId") REFERENCES "Post" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "AiFeedback_analysisId_tenantId_fkey" FOREIGN KEY ("analysisId", "tenantId") REFERENCES "PostAiAnalysis" ("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "AiFeedback_reviewerId_fkey" FOREIGN KEY ("reviewerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolEntity_tenantId_type_name_key" ON "SchoolEntity"("tenantId", "type", "name")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "SchoolEntity_tenantId_type_sensitivity_idx" ON "SchoolEntity"("tenantId", "type", "sensitivity")`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolModelSnapshot_tenantId_version_key" ON "SchoolModelSnapshot"("tenantId", "version")`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "SchoolModelSnapshot_tenantId_id_key" ON "SchoolModelSnapshot"("tenantId", "id")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "SchoolModelSnapshot_tenantId_createdAt_idx" ON "SchoolModelSnapshot"("tenantId", "createdAt")`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "PostAiAnalysis_postId_tenantId_version_key" ON "PostAiAnalysis"("postId", "tenantId", "version")`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "PostAiAnalysis_tenantId_id_key" ON "PostAiAnalysis"("tenantId", "id")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "PostAiAnalysis_tenantId_status_createdAt_idx" ON "PostAiAnalysis"("tenantId", "status", "createdAt")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "PostAiAnalysis_tenantId_postId_createdAt_idx" ON "PostAiAnalysis"("tenantId", "postId", "createdAt")`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "AiFeedback_analysisId_key" ON "AiFeedback"("analysisId")`);
+    db.exec(`CREATE INDEX IF NOT EXISTS "AiFeedback_tenantId_createdAt_idx" ON "AiFeedback"("tenantId", "createdAt")`);
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [randomUUID(), checksumOf("restore ai review stage1"), AI_REVIEW_STAGE1_MIGRATION_NAME],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  doneNames.add(AI_REVIEW_STAGE1_MIGRATION_NAME);
+  applied.push(AI_REVIEW_STAGE1_MIGRATION_NAME);
+  logger.info({ migration: AI_REVIEW_STAGE1_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
 function applyAutoModerationScheduleSqliteMigration(
@@ -1015,6 +1136,7 @@ export function applySqliteBaseline(
     applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyAiReviewStage1SqliteMigration(db, doneNames, applied, skipped, logger);
     applyAutoModerationScheduleSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPrivateForwardGroupSqliteMigration(db, doneNames, applied, skipped, logger);
     applyTenantPublishQuotaReservationSqliteMigration(db, doneNames, applied, skipped, logger);
