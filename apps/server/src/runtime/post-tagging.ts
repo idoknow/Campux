@@ -271,7 +271,7 @@ export async function generatePostTagSuggestion(options: {
                 "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
                 "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
                 "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
-                "不确定时少打标。",
+                "打标标准放宽：主题相关、接近或属于同一大类就应打上；只有与标签完全无关时才不打。",
                 "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
               ].join("\n"),
             },
@@ -443,9 +443,9 @@ export async function maintainTenantPostTags(options: {
     "你是校园墙标签库的自治维护 agent。只返回 JSON，不要 Markdown。",
     `你只维护最近 ${lookbackDays} 天的稿件标签（这是一个近期活动特性，不回填历史稿件）。可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给近期稿件补打标签）。`,
     `create：只有当最近 ${lookbackDays} 天里同一主题反复出现、相似稿件达到 ${minClusterSize} 条及以上（postIds 至少 ${minClusterSize} 个）时，才新建一个标签。postIds 必须来自输入 posts 的 id。`,
-    "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。",
-    "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
-    "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。不确定时宁可少操作。",
+    "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。source 为 manual/user 的是人工维护的标签，禁止作为 merge 的 from（系统会拒绝）。",
+    "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；主题相关、接近或属于同一大类就应打上，只有完全无关才不打。",
+    "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。create 与 merge 保持谨慎；assign 放宽：相关即打标，不必强求精确匹配。",
     "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
     "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",
   ].join("\n");
@@ -670,14 +670,16 @@ export async function applyTagAgentPlan(
     try {
       const existing = await client.postTag.findUnique({
         where: { tenantId_name: { tenantId, name: item.name } },
-        select: { id: true },
+        select: { id: true, source: true },
       });
+      // 人工添加的标签（manual/user）不允许被 AI 改写来源：重发现同名主题时只激活，不夺走归属。
+      const protectedSource = existing && existing.source !== "llm";
       const tag = await client.postTag.upsert({
         where: { tenantId_name: { tenantId, name: item.name } },
         update: {
           status: "active",
-          source: "llm",
-          color: item.color,
+          ...(protectedSource ? {} : { source: "llm" }),
+          ...(protectedSource ? {} : { color: item.color }),
           ...(item.description ? { description: item.description } : {}),
         },
         create: {
@@ -727,9 +729,13 @@ export async function applyTagAgentPlan(
         }
         const fromTag = await client.postTag.findUnique({
           where: { tenantId_name: { tenantId, name: fromName } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, source: true },
         });
         if (!fromTag || fromTag.id === canonical.id) {
+          continue;
+        }
+        // 人工添加的标签不允许被 AI 合并/下架：整个 merge 项涉及它时跳过该来源标签。
+        if (fromTag.source !== "llm") {
           continue;
         }
         const assignments = await client.postTagAssignment.findMany({
@@ -824,6 +830,9 @@ async function archiveInactivePostTags(
       select: {
         id: true,
         name: true,
+        source: true,
+        createdAt: true,
+        lastUsedAt: true,
       },
     }),
     client.postTagAssignment.findMany({
@@ -840,7 +849,19 @@ async function archiveInactivePostTags(
     }),
   ]);
   const recentTagIds = new Set(recentAssignments.map((assignment) => assignment.tagId));
-  const inactiveTags = activeTags.filter((tag) => !recentTagIds.has(tag.id));
+  // 新建标签打标数为零是常态：归档只针对"创建已久且近期既无打标也无使用"的标签，
+  // 否则手动刚建的标签会在第一次整理时就被归档消失。
+  // 人工添加的标签（manual/user）不允许 AI 归档，只能由管理员手动删除。
+  const inactiveTags = activeTags.filter((tag) => {
+    if (tag.source !== "llm") {
+      return false;
+    }
+    if (recentTagIds.has(tag.id)) {
+      return false;
+    }
+    const lastActivity = tag.lastUsedAt ?? tag.createdAt;
+    return lastActivity < recentSince;
+  });
   if (inactiveTags.length === 0) {
     return [];
   }
@@ -1143,7 +1164,7 @@ async function classifyPostsIntoTag(context: {
               `目标：判断下列稿件中哪些适合归入标签「${tag.name}」。`,
               tag.description ? `标签含义：${tag.description}` : "标签含义：按名称常见语义判断。",
               "只判断是否属于这一个标签，不要发明新标签，不要考虑其他标签。",
-              "判断标准从严：内容主题确实与标签一致才选中；拿不准就不选。",
+              "判断标准放宽：稿件主题与标签相关、接近或属于同一大类就应选中；只有明确无关时才不选。",
               "postIds 必须来自输入 posts 的 id。",
               "返回格式：{\"postIds\":[\"id1\",\"id2\"]}",
             ].join("\n"),
