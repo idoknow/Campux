@@ -150,19 +150,20 @@ async function executeDueDecision(item: DueDecision & { action: string | null },
         rate.total += 1;
         if (entry.matched && entry.humanAction === entry.aiAction) rate.matched += 1;
       }
-      const fresh = await tx.postAiAnalysis.findUnique({ where: { id: item.id }, select: { riskLevel: true, confidence: true, categories: true, sensitiveFindings: true, suggestedAction: true } });
+      const fresh = await tx.postAiAnalysis.findUnique({ where: { id: item.id }, select: { riskLevel: true, confidence: true, categories: true, sensitiveFindings: true, suggestedAction: true, rejectionReason: true, reasons: true } });
       if (!fresh || !fresh.riskLevel || !fresh.suggestedAction || typeof fresh.confidence !== "number") {
         return cancelDecision("原始 AI 评估不完整，待执行决定已取消");
       }
-      const currentAssessment = { riskLevel: fresh.riskLevel, confidence: fresh.confidence, categories: fresh.categories, sensitiveFindings: fresh.sensitiveFindings, suggestedAction: fresh.suggestedAction, reasons: [], maskedText: null, rewrittenText: null, rejectionReason: null } as const;
-      const currentPolicy = { enabled: policy?.enabled === true, globalKillSwitch: Boolean(policy?.globalKillSwitch) || global?.value === "true", autoApproveEnabled: policy?.autoApproveEnabled === true, autoRejectEnabled: policy?.autoRejectEnabled === true, allowedAutoApproveCategories: policy?.allowedAutoApproveCategories ?? [], allowedAutoRejectCategories: policy?.allowedAutoRejectCategories ?? [], autoRejectRiskLevels: policy?.autoRejectRiskLevels ?? ["high", "critical"], blockedPatterns: policy?.blockedPatterns ?? [], minimumConfidence: policy?.minimumConfidence ?? 0.98, autoApproveMinimumConfidence: policy?.autoApproveMinimumConfidence ?? policy?.minimumConfidence ?? 0.98, autoRejectMinimumConfidence: policy?.autoRejectMinimumConfidence ?? 0.99, minimumValidatedSamples: policy?.minimumValidatedSamples ?? 100, delaySeconds: policy?.delaySeconds ?? 60 };
+      const reasons = Array.isArray(fresh.reasons) ? fresh.reasons.filter((reason): reason is string => typeof reason === "string") : [];
+      const currentAssessment = { riskLevel: fresh.riskLevel, confidence: fresh.confidence, categories: fresh.categories, sensitiveFindings: fresh.sensitiveFindings, suggestedAction: fresh.suggestedAction, reasons, maskedText: null, rewrittenText: null, rejectionReason: fresh.rejectionReason } as const;
+      const currentPolicy = { enabled: policy?.enabled === true, globalKillSwitch: Boolean(policy?.globalKillSwitch) || global?.value === "true", autoApproveEnabled: policy?.autoApproveEnabled === true, autoRejectEnabled: policy?.autoRejectEnabled === true, minimumConfidence: policy?.minimumConfidence ?? 0.98, autoApproveMinimumConfidence: policy?.autoApproveMinimumConfidence ?? policy?.minimumConfidence ?? 0.98, autoRejectMinimumConfidence: policy?.autoRejectMinimumConfidence ?? 0.99, delaySeconds: policy?.delaySeconds ?? 60 };
       const reevaluated = getAutoModerationGate(currentPolicy, currentAssessment as never, { validatedSamples: feedback.length, matchedCategoryRates: rates }, post.text);
       if (reevaluated.action !== item.action) {
         return cancelDecision("执行前当前策略或人工校准已变化，原待执行决定已取消");
       }
       const postUpdate = await tx.post.updateMany({ where: { id: item.postId, tenantId: item.tenantId, status: "pending_approval" }, data: item.action === "approve" ? { status: "approved" } : { status: "rejected" } });
       if (postUpdate.count !== 1) return cancelDecision("稿件已不再待审核，自动决定已取消");
-      const finalized = await tx.postAiAnalysis.updateMany({ where: { id: item.id, tenantId: item.tenantId, postId: item.postId, autoDecision: item.action, autoDecisionLeaseAt: now, autoDecisionExecutingAt: now, autoDecisionCancelledAt: null, autoDecisionAt: null }, data: { autoDecisionAt: now, autoDecisionLeaseAt: null, autoDecisionExecutingAt: null } });
+      const finalized = await tx.postAiAnalysis.updateMany({ where: { id: item.id, tenantId: item.tenantId, postId: item.postId, autoDecision: item.action, autoDecisionLeaseAt: now, autoDecisionExecutingAt: now, autoDecisionCancelledAt: null, autoDecisionAt: null }, data: { autoDecisionAt: now, autoDecisionLeaseAt: null, autoDecisionExecutingAt: null, ...(item.action === "reject" ? { rejectionReason: reevaluated.reason } : {}) } });
       if (finalized.count !== 1) throw new Error("Auto-moderation lease ownership lost before finalization");
       await tx.postLog.create({ data: { tenantId: item.tenantId, postId: item.postId, actorId: null, oldStatus: "pending_approval", newStatus: item.action === "approve" ? "approved" : "rejected", comment: "延迟自动审核决策已执行" } });
       if (item.action === "approve" && post?.pendingTags) {

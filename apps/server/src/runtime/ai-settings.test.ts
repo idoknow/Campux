@@ -25,19 +25,22 @@ describe("AI settings normalization", () => {
     expect(normalizeAiRules({ privatePostPrompt: " 自定义提示词 " }).privatePostPrompt).toBe("自定义提示词");
   });
 
-  test("prefills conservative auto-moderation allowlists without enabling automation", () => {
+  test("automatic moderation settings no longer include category allowlists or reject patterns", () => {
     const rules = normalizeAiRules(undefined);
     expect(rules.aiReviewMode).toBe("off");
-    expect(rules.autoModeration).toMatchObject({ enabled: false, autoApproveEnabled: false, autoRejectEnabled: false, allowedAutoApproveCategories: ["campus_news", "campus_event", "lost_and_found"], allowedAutoRejectCategories: ["scam", "harassment", "personal_information", "dangerous_content"], autoRejectRiskLevels: ["high", "critical"], autoApproveMinimumConfidence: 0.98, autoRejectMinimumConfidence: 0.99 });
+    expect(rules.autoModeration).toMatchObject({ enabled: false, autoApproveEnabled: false, autoRejectEnabled: false, autoApproveMinimumConfidence: 0.98, autoRejectMinimumConfidence: 0.99 });
+    expect(rules.autoModeration).not.toHaveProperty("allowedAutoApproveCategories");
+    expect(rules.autoModeration).not.toHaveProperty("allowedAutoRejectCategories");
+    expect(rules.autoModeration).not.toHaveProperty("blockedPatterns");
+    expect(rules.autoModeration).not.toHaveProperty("minimumValidatedSamples");
   });
 
-  test("normalizes per-operation thresholds and risk mappings", () => {
-    expect(normalizeAiRules({ autoModeration: { autoApproveMinimumConfidence: 0.95, autoRejectMinimumConfidence: 0.995, autoRejectRiskLevels: ["low", "critical", "high"] } }).autoModeration).toMatchObject({ autoApproveMinimumConfidence: 0.95, autoRejectMinimumConfidence: 0.995, autoRejectRiskLevels: ["critical", "high"] });
+  test("normalizes approval and rejection confidence thresholds", () => {
+    expect(normalizeAiRules({ autoModeration: { autoApproveMinimumConfidence: 0.95, autoRejectMinimumConfidence: 0.995 } }).autoModeration).toMatchObject({ autoApproveMinimumConfidence: 0.95, autoRejectMinimumConfidence: 0.995 });
     expect(normalizeAiRules({ autoModeration: { autoApproveMinimumConfidence: 4, autoRejectMinimumConfidence: "bad" } }).autoModeration).toMatchObject({ autoApproveMinimumConfidence: 1, autoRejectMinimumConfidence: 0.99 });
   });
 
-  test("settings API accepts operation thresholds and constrained risk mapping", () => {
-    expect(aiSettingsSchema.safeParse({ rules: { autoModeration: { autoApproveMinimumConfidence: 0.96, autoRejectMinimumConfidence: 0.995, autoRejectRiskLevels: ["high", "critical"], allowedAutoRejectCategories: ["scam"] } } }).success).toBe(true);
-    expect(aiSettingsSchema.safeParse({ rules: { autoModeration: { autoRejectRiskLevels: ["low"] } } }).success).toBe(false);
+  test("settings API accepts operation confidence thresholds", () => {
+    expect(aiSettingsSchema.safeParse({ rules: { autoModeration: { autoApproveMinimumConfidence: 0.96, autoRejectMinimumConfidence: 0.995 } } }).success).toBe(true);
   });
 });

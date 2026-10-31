@@ -175,7 +175,7 @@ type AiSettingsForm = {
   privatePostAiEnabled: boolean;
   aiReviewRules: { blockedPatterns: string[]; allowedCategories: string[]; tone: string; strictPrivacy: boolean };
   aiReviewMode: "off" | "shadow" | "assist" | "auto";
-  autoModeration: { enabled: boolean; globalKillSwitch: boolean; autoApproveEnabled: boolean; autoRejectEnabled: boolean; allowedAutoApproveCategories: string[]; allowedAutoRejectCategories: string[]; autoRejectRiskLevels: Array<"high" | "critical">; blockedPatterns: string[]; minimumConfidence: number; autoApproveMinimumConfidence: number; autoRejectMinimumConfidence: number; minimumValidatedSamples: number; delaySeconds: number };
+  autoModeration: { enabled: boolean; globalKillSwitch: boolean; autoApproveEnabled: boolean; autoRejectEnabled: boolean; minimumConfidence: number; autoApproveMinimumConfidence: number; autoRejectMinimumConfidence: number; delaySeconds: number };
   postTaggingEnabled: boolean;
   postTagMaintenanceEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
@@ -1220,7 +1220,7 @@ export function AdminPage({
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
                     <div>
                       <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
-                        <p className="text-sm leading-6 text-slate-600">当前审核模式：{aiForm?.aiReviewMode === "auto" ? "自动决策" : aiForm?.aiReviewMode === "assist" ? "仅人工参考" : aiForm?.aiReviewMode === "shadow" ? "仅审计记录" : "关闭"}。自动决策仅处理通过租户策略、校准及延迟检查的内容；其他稿件转人工。运维可随时全局停止。</p>
+                        <p className="text-sm leading-6 text-slate-600">当前审核模式：{aiForm?.aiReviewMode === "auto" ? "自动决策" : aiForm?.aiReviewMode === "assist" ? "仅人工参考" : aiForm?.aiReviewMode === "shadow" ? "仅审计记录" : "关闭"}。自动决策按风险等级、AI 建议动作与置信度门槛处理；中高风险非拒绝建议转人工。运维可随时全局停止。</p>
                     </div>
                     <Badge className="rounded-full bg-violet-50 text-violet-700 shadow-none">AI 辅助</Badge>
                   </summary>
@@ -1238,24 +1238,19 @@ export function AdminPage({
                           <SelectItem value="auto">自动决策（有风险）</SelectItem>
                         </SelectContent>
                       </Select>
-                      <span className="text-xs font-normal text-slate-500">模型只生成建议，不是最终决定。服务端按自动审核开关、紧急暂停、策略与类别、置信度/校准门槛及延迟进行门控；不符合条件或无法自动处理时转人工。接口未提供单条稿件的逐项门控命中明细。</span>
+                      <span className="text-xs font-normal text-slate-500">模型只生成建议，不是最终决定。服务端按自动审核开关、紧急暂停、风险等级、AI 建议动作与置信度门槛处理；不符合条件或无法判断时转人工。</span>
                     </label>
-                    <p className="text-xs leading-5 text-slate-600">建议与执行分开：AI 生成审核建议；是否自动执行由服务端安全门控决定。未通过门控、模式非自动或分析不可用时，仍由审核员按常规流程处理。这里展示现有配置，不代表单条稿件的实际命中记录。</p>
+                    <p className="text-xs leading-5 text-slate-600">建议与执行分开：AI 生成审核建议；是否自动执行由服务端安全门控决定。无法自动判断或未通过置信度门槛时，仍由审核员处理。</p>
                     <div className="mt-3 grid gap-3 rounded-lg border p-3">
                     <p className="text-sm font-semibold">自动决策参数 · {aiForm?.aiReviewMode === "auto" ? "当前模式生效" : "仅在自动决策模式生效"}</p>
                     {aiForm?.aiReviewMode === "auto" ? <p className="text-xs text-amber-800">自动决策可能自动通过或拒绝投稿；保存前请确认下方策略、校准门槛和延迟设置。</p> : null}
                     <label className="flex items-center justify-between text-sm">启用自动审核<Switch checked={aiForm?.autoModeration.enabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, enabled: checked } })} /></label>
                     <label className="flex items-center justify-between text-sm">墙内紧急暂停<Switch checked={aiForm?.autoModeration.globalKillSwitch ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, globalKillSwitch: checked } })} /></label>
-                    <label className="flex items-center justify-between text-sm">自动通过低风险白名单类别<Switch checked={aiForm?.autoModeration.autoApproveEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoApproveEnabled: checked } })} /></label>
-                    <label className="flex items-center justify-between text-sm">精确规则命中时自动拒绝<Switch checked={aiForm?.autoModeration.autoRejectEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectEnabled: checked } })} /></label>
-                    <label className="grid gap-1 text-sm">自动通过类别（每行一条）<Textarea value={aiForm?.autoModeration.allowedAutoApproveCategories.join("\n") ?? ""} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, allowedAutoApproveCategories: lines(event.target.value).slice(0, 40) } })} /></label>
-                    <label className="grid gap-1 text-sm">自动拒绝类别（每行一条）<Textarea value={aiForm?.autoModeration.allowedAutoRejectCategories.join("\n") ?? ""} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, allowedAutoRejectCategories: lines(event.target.value).slice(0, 40) } })} /></label>
-                    <label className="grid gap-1 text-sm">自动拒绝风险等级<select className="rounded-md border px-2 py-1" multiple value={aiForm?.autoModeration.autoRejectRiskLevels ?? ["high", "critical"]} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectRiskLevels: Array.from(event.target.selectedOptions, (option) => option.value as "high" | "critical") } })}><option value="high">高</option><option value="critical">严重</option></select></label>
-                    <label className="grid gap-1 text-sm">自动拒绝规则（每行一条）<Textarea value={aiForm?.autoModeration.blockedPatterns.join("\n") ?? ""} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, blockedPatterns: lines(event.target.value).slice(0, 100) } })} /></label>
+                    <label className="flex items-center justify-between text-sm">启用低风险自动通过<Switch checked={aiForm?.autoModeration.autoApproveEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoApproveEnabled: checked } })} /></label>
+                    <label className="flex items-center justify-between text-sm">启用 AI 建议自动拒绝<Switch checked={aiForm?.autoModeration.autoRejectEnabled ?? false} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onCheckedChange={(checked) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectEnabled: checked } })} /></label>
                     <div className="grid gap-2 md:grid-cols-2">
                     <label className="grid gap-1 text-sm">自动通过最低置信度<Input type="number" min={0.9} max={1} step={0.01} value={aiForm?.autoModeration.autoApproveMinimumConfidence ?? 0.98} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoApproveMinimumConfidence: Number(event.target.value) } })} /></label>
                     <label className="grid gap-1 text-sm">自动拒绝最低置信度<Input type="number" min={0.9} max={1} step={0.01} value={aiForm?.autoModeration.autoRejectMinimumConfidence ?? 0.99} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, autoRejectMinimumConfidence: Number(event.target.value) } })} /></label>
-                    <label className="grid gap-1 text-sm">校准样本门槛<Input type="number" min={5} max={10000} value={aiForm?.autoModeration.minimumValidatedSamples ?? 100} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, minimumValidatedSamples: Number(event.target.value) } })} /></label>
                     <label className="grid gap-1 text-sm">延迟执行秒数<Input type="number" min={30} max={120} value={aiForm?.autoModeration.delaySeconds ?? 60} disabled={busy || !aiForm || aiForm.aiReviewMode !== "auto"} onChange={(event) => aiForm && setAiForm({ ...aiForm, autoModeration: { ...aiForm.autoModeration, delaySeconds: Number(event.target.value) } })} /></label>
                     </div>
                     </div>
@@ -4252,14 +4247,9 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
       globalKillSwitch: settings.rules.autoModeration?.globalKillSwitch ?? false,
       autoApproveEnabled: settings.rules.autoModeration?.autoApproveEnabled ?? false,
       autoRejectEnabled: settings.rules.autoModeration?.autoRejectEnabled ?? false,
-      allowedAutoApproveCategories: settings.rules.autoModeration?.allowedAutoApproveCategories ?? ["campus_news", "campus_event", "lost_and_found"],
-      allowedAutoRejectCategories: settings.rules.autoModeration?.allowedAutoRejectCategories ?? ["scam", "harassment", "personal_information", "dangerous_content"],
-      autoRejectRiskLevels: settings.rules.autoModeration?.autoRejectRiskLevels ?? ["high", "critical"],
-      blockedPatterns: settings.rules.autoModeration?.blockedPatterns ?? [],
       minimumConfidence: settings.rules.autoModeration?.minimumConfidence ?? 0.98,
       autoApproveMinimumConfidence: settings.rules.autoModeration?.autoApproveMinimumConfidence ?? 0.98,
       autoRejectMinimumConfidence: settings.rules.autoModeration?.autoRejectMinimumConfidence ?? 0.99,
-      minimumValidatedSamples: settings.rules.autoModeration?.minimumValidatedSamples ?? 100,
       delaySeconds: settings.rules.autoModeration?.delaySeconds ?? 60,
     },
     postTaggingEnabled: settings.rules.postTaggingEnabled ?? true,

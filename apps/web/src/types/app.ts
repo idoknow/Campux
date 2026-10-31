@@ -678,7 +678,7 @@ export type AiRules = {
     strictPrivacy?: boolean | undefined;
   };
   aiReviewMode?: "off" | "shadow" | "assist" | "auto";
-  autoModeration: { enabled?: boolean | undefined; globalKillSwitch?: boolean | undefined; autoApproveEnabled?: boolean | undefined; autoRejectEnabled?: boolean | undefined; allowedAutoApproveCategories?: string[] | undefined; allowedAutoRejectCategories?: string[] | undefined; autoRejectRiskLevels?: Array<"high" | "critical"> | undefined; blockedPatterns?: string[] | undefined; minimumConfidence?: number | undefined; autoApproveMinimumConfidence?: number | undefined; autoRejectMinimumConfidence?: number | undefined; minimumValidatedSamples?: number | undefined; delaySeconds?: number | undefined; };
+  autoModeration: { enabled?: boolean | undefined; globalKillSwitch?: boolean | undefined; autoApproveEnabled?: boolean | undefined; autoRejectEnabled?: boolean | undefined; minimumConfidence?: number | undefined; autoApproveMinimumConfidence?: number | undefined; autoRejectMinimumConfidence?: number | undefined; delaySeconds?: number | undefined; };
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;
   /** 是否启用投稿后的 LLM 自动打标 */

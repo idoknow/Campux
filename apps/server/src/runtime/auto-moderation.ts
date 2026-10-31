@@ -4,14 +4,9 @@ export type AutoModerationPolicy = {
   enabled: boolean;
   autoApproveEnabled: boolean;
   autoRejectEnabled: boolean;
-  allowedAutoApproveCategories: string[];
-  allowedAutoRejectCategories: string[];
-  autoRejectRiskLevels: Array<"high" | "critical">;
-  blockedPatterns: string[];
   minimumConfidence: number;
   autoApproveMinimumConfidence: number;
   autoRejectMinimumConfidence: number;
-  minimumValidatedSamples: number;
   delaySeconds: number;
   globalKillSwitch: boolean;
 };
@@ -76,46 +71,33 @@ export function evaluateAutoModerationDecision(input: {
   if (!policy.enabled || policy.globalKillSwitch) return finish("manual_review", "自动审核已关闭或触发全局紧急停止");
 
   const validRisk = assessment.riskLevel === "low" || assessment.riskLevel === "medium" || assessment.riskLevel === "high" || assessment.riskLevel === "critical";
-  add("assessment.risk", !validRisk ? "indeterminate" : assessment.riskLevel === "low" ? "pass" : "fail", !validRisk ? "Risk level is unknown." : assessment.riskLevel === "low" ? "Risk level is low." : "Risk level is not low.");
+  add("assessment.risk", !validRisk ? "indeterminate" : assessment.riskLevel === "low" ? "pass" : "fail", !validRisk ? "Risk level is unknown." : assessment.riskLevel === "low" ? "Risk level is low." : assessment.riskLevel === "medium" ? "Risk level is medium." : "Risk level is high or critical.");
   if (!validRisk) return finish("manual_review", "未知风险必须人工审核");
   const highRisk = assessment.riskLevel === "high" || assessment.riskLevel === "critical";
   const { postIntent } = classifyHighRiskPostIntent(assessment, postText);
-  if (highRisk && postIntent === "solicitation") {
-    add("assessment.post_intent", "pass", "Text context indicates direct promotion or recruitment of a high-risk activity.");
-    add("reject.enabled", policy.autoRejectEnabled ? "pass" : "fail", policy.autoRejectEnabled ? "Automatic rejection is enabled." : "Automatic rejection is disabled.");
-    if (!policy.autoRejectEnabled) return finish("manual_review", "高风险自动拒绝未启用，已转人工审核");
-    return finish("reject", `高风险招募/诈骗推广按语义自动拒绝：${assessment.riskLevel}`);
+  if (highRisk && (postIntent === "contextual" || postIntent === "unclear")) {
+    add("assessment.post_intent", postIntent === "contextual" ? "pass" : "indeterminate", postIntent === "contextual" ? "Text indicates warning/debunking/discussion; follow AI action and confidence." : "High-risk intent is unclear; manual review is required.");
+    if (postIntent === "unclear") return finish("manual_review", "高风险内容意图不明确，需人工复审");
   }
-  if (highRisk && postIntent === "contextual") {
-    add("assessment.post_intent", "pass", "Text context indicates warning, debunking, or discussion; normal recommendation and confidence/category gates apply.");
-  } else if (highRisk) {
-    add("assessment.post_intent", "indeterminate", "High-risk intent is unclear; manual review is required.");
-    return finish("manual_review", "高风险内容意图不明确，需人工复核");
-  }
-  add("assessment.sensitive_findings", assessment.sensitiveFindings.length === 0 ? "pass" : "fail", assessment.sensitiveFindings.length === 0 ? "No sensitive findings." : "Sensitive findings require human review.");
-  if (assessment.sensitiveFindings.length > 0) return finish("manual_review", "敏感信息必须人工审核");
 
-  if (assessment.suggestedAction === "reject") {
+  add("assessment.sensitive_findings", assessment.sensitiveFindings.length === 0 ? "pass" : "fail", assessment.sensitiveFindings.length === 0 ? "No sensitive findings." : "Sensitive findings require human review.");
+  if (assessment.sensitiveFindings.length > 0 && assessment.suggestedAction !== "reject") return finish("manual_review", "敏感信息必须人工复审");
+  if (assessment.sensitiveFindings.length > 0 && highRisk && postIntent !== "solicitation") return finish("manual_review", "高风险内容存在敏感发现且语义未确认，转人工复审");
+
+  const rejectCandidate = assessment.suggestedAction === "reject" && (assessment.riskLevel === "high" || assessment.riskLevel === "critical" || assessment.riskLevel === "medium");
+  if (rejectCandidate) {
     add("reject.enabled", policy.autoRejectEnabled ? "pass" : "fail", policy.autoRejectEnabled ? "Automatic rejection is enabled." : "Automatic rejection is disabled.");
-    if (!policy.autoRejectEnabled) return finish("manual_review", "未启用自动拒绝");
-    const patternHit = policy.blockedPatterns.find((pattern) => pattern && postText.toLocaleLowerCase().includes(pattern.toLocaleLowerCase()));
-    add("reject.pattern_substring", patternHit ? "pass" : "fail", patternHit ? `Matched configured literal substring: ${patternHit}` : "No configured literal substring matched.", "literal_substring");
-    const riskPass = policy.autoRejectRiskLevels.includes(assessment.riskLevel as "high" | "critical");
-    const category = assessment.categories.find((item) => policy.allowedAutoRejectCategories.includes(item));
-    add("reject.risk", riskPass ? "pass" : "fail", riskPass ? `Risk level is configured for rejection: ${assessment.riskLevel}.` : "Risk level is not configured for automatic rejection.");
-    add("reject.category_allowlist", category ? "pass" : "fail", category ? `Category is allowlisted: ${category}` : "No assessed category is allowlisted for rejection.");
+    if (!policy.autoRejectEnabled) return finish("manual_review", "未启用自动拒绝，转人工复审");
     const confidencePass = assessment.confidence >= policy.autoRejectMinimumConfidence;
     add("reject.confidence", confidencePass ? "pass" : "fail", confidencePass ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
-    if (!patternHit || !riskPass || !category || !confidencePass) return finish("manual_review", !riskPass || !category ? "拒绝类别或风险级别未获管理员明确授权" : !confidencePass ? "拒绝建议置信度不足" : "没有命中管理员配置的明确拒绝规则");
-    if (assessment.sensitiveFindings.length > 0) return finish("manual_review", "敏感信息必须人工审核");
-    const escapedPattern = patternHit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const quotedPattern = new RegExp(`[“‘\"'][^“”‘’\"']*${escapedPattern}[^“”‘’\"']*[”’\"']`).test(postText);
-    const contextualDiscussion = /(?:引用|转述|讨论|举例|反对|辟谣|批评|不要|禁止|勿).{0,12}(?:规则|话术|内容|行为|说法)?/u.test(postText);
-    if (quotedPattern || contextualDiscussion) return finish("manual_review", "命中配置规则，但可能是引用或讨论语境，需人工确认");
-    return finish("reject", `高风险、命中拒绝白名单和配置规则且达到置信度门槛：${category}`);
+    if (!confidencePass) return finish("manual_review", "AI 拒绝建议置信度不足，转人工复审");
+      return finish("reject", assessment.rejectionReason?.trim() || assessment.reasons.find((reason) => reason.trim()) || "AI 建议拒绝；未提供参考拒绝理由。");
   }
 
-  if (assessment.riskLevel !== "low") return finish("manual_review", "中高风险必须人工审核");
+  if (assessment.suggestedAction === "manual_review") return finish("manual_review", "AI 建议人工复审");
+  if (assessment.suggestedAction === "reject") return finish("manual_review", "低风险拒绝建议需人工复审");
+  if (assessment.riskLevel !== "low") return finish("manual_review", "中高风险通过建议需人工复审");
+
   const approveThreshold = policy.autoApproveMinimumConfidence ?? policy.minimumConfidence;
   add("approve.enabled", policy.autoApproveEnabled ? "pass" : "fail", policy.autoApproveEnabled ? "Automatic approval is enabled." : "Automatic approval is disabled.");
   add("assessment.confidence", assessment.confidence >= approveThreshold ? "pass" : "fail", assessment.confidence >= approveThreshold ? "Confidence meets the configured minimum." : "Confidence is below the configured minimum.");
@@ -123,7 +105,9 @@ export function evaluateAutoModerationDecision(input: {
   if (!policy.autoApproveEnabled) return finish("manual_review", "未启用自动通过");
   if (assessment.suggestedAction !== "approve") return finish("manual_review", "AI 未建议通过");
   if (assessment.confidence < approveThreshold) return finish("manual_review", "AI 通过建议置信度不足");
-  return finish("approve", "低风险、AI 建议通过且达到置信度门槛");
+    const lowRiskMeaningful = /(?:仅为|只是|属于|内容仅是|表达了|写出了|分享了|通知|寻物|求助|祝福|观点|经历|感受|邀约|表白|告白|新闻|通知|活动|时间|地点|物品|失物|寻人|致谢|感谢)/u.test(assessment.reasons.join(" "));
+    if (!lowRiskMeaningful) return finish("manual_review", "低风险内容信息不足或意图不明确，转人工复审");
+    return finish("approve", "低风险、内容意图明确、AI 建议通过且达到置信度门槛");
 }
 
 export function beijingDayKey(date: Date): string {
