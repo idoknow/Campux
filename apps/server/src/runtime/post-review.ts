@@ -75,7 +75,7 @@ export function parseSchoolRelationExtraction(raw: string): ExtractedSchoolRelat
     for (const item of relations) {
       if (!item || typeof item !== "object" || Array.isArray(item)) return null;
       const r = item as Record<string, unknown>;
-      if (Object.keys(r).some((k) => !["subject", "predicate", "object", "evidence"].includes(k)) || typeof r.subject !== "string" || !r.subject.trim() || r.subject.length > 80 || typeof r.object !== "string" || !r.object.trim() || r.object.length > 80 || typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 240 || !SCHOOL_RELATION_PREDICATES.includes(r.predicate as typeof SCHOOL_RELATION_PREDICATES[number]) || /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(`${r.subject} ${r.object} ${r.evidence}`)) return null;
+      if (Object.keys(r).some((k) => !["subject", "predicate", "object", "evidence"].includes(k)) || typeof r.subject !== "string" || !r.subject.trim() || r.subject.length > 80 || typeof r.object !== "string" || !r.object.trim() || r.object.length > 80 || typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 240 || !SCHOOL_RELATION_PREDICATES.includes(r.predicate as typeof SCHOOL_RELATION_PREDICATES[number]) || /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(`${r.subject} ${r.object} ${r.evidence}`) || /(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u.test(`${r.subject} ${r.object} ${r.evidence}`)) return null;
       out.push({ subject: r.subject.trim(), predicate: r.predicate as typeof SCHOOL_RELATION_PREDICATES[number], object: r.object.trim(), evidence: r.evidence.trim() });
     }
     return out;
