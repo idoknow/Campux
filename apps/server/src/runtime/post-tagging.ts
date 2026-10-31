@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
-import { supportsAdvisoryLock } from "@campux/db";
+import { supportsAdvisoryLock, supportsSkipDuplicates } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
@@ -271,7 +271,7 @@ export async function generatePostTagSuggestion(options: {
                 "优先复用 existingTags 里的 name，selected 必须是已有标签名。",
                 "不要创建新标签；如果没有合适的已有标签，selected 返回空数组。",
                 "标签名 2-8 个汉字最佳，不能包含 #、表情、个人隐私、姓名、QQ、联系方式。",
-                "不确定时少打标。",
+                "打标标准放宽：主题相关、接近或属于同一大类就应打上；只有与标签完全无关时才不打。",
                 "返回格式：{\"selected\":[\"已有标签名\"],\"confidence\":0到1}",
               ].join("\n"),
             },
@@ -443,9 +443,9 @@ export async function maintainTenantPostTags(options: {
     "你是校园墙标签库的自治维护 agent。只返回 JSON，不要 Markdown。",
     `你只维护最近 ${lookbackDays} 天的稿件标签（这是一个近期活动特性，不回填历史稿件）。可以同时给出三类操作：create（新建标签）、merge（合并近义标签）、assign（给近期稿件补打标签）。`,
     `create：只有当最近 ${lookbackDays} 天里同一主题反复出现、相似稿件达到 ${minClusterSize} 条及以上（postIds 至少 ${minClusterSize} 个）时，才新建一个标签。postIds 必须来自输入 posts 的 id。`,
-    "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。",
-    "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；没有合适标签就不要硬打。",
-    "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。不确定时宁可少操作。",
+    "merge：当 tags 里存在含义重复或近义的标签时，把它们合并成一个规范名。from 是要被并入的标签名（可多个），into 是保留的规范标签名。不要制造近义重复标签。source 为 manual/user 的是人工维护的标签，禁止作为 merge 的 from（系统会拒绝）。",
+    "assign：把 posts 里仍缺合适标签的近期稿件映射到合适标签上（已有标签或本次 create 的标签都行）。tags 用标签名，每条稿件最多 " + maxTagsPerPost + " 个；主题相关、接近或属于同一大类就应打上，只有完全无关才不打。",
+    "标签名要短中文，不含 #、表情、个人隐私、姓名、QQ、联系方式。create 与 merge 保持谨慎；assign 放宽：相关即打标，不必强求精确匹配。",
     "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
     "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",
   ].join("\n");
@@ -668,25 +668,40 @@ export async function applyTagAgentPlan(
       continue;
     }
     try {
+      // 全程使用不抛 P2002 的容错写法（事务内 PG 的失败语句会中止整个事务，禁止 catch-recover）：
+      // 1) 已存在的 llm 标签：原子恢复并刷新配色/描述；
+      // 2) 已存在的人工标签：仅激活，不夺走来源与配色；
+      // 3) 都不存在：PG 用 skipDuplicates 容错插入（SQLite 事务内无并发写者，先查后插不会撞键）。
       const existing = await client.postTag.findUnique({
         where: { tenantId_name: { tenantId, name: item.name } },
-        select: { id: true },
+        select: { id: true, name: true },
       });
-      const tag = await client.postTag.upsert({
-        where: { tenantId_name: { tenantId, name: item.name } },
-        update: {
+      await client.postTag.updateMany({
+        where: { tenantId, name: item.name, source: "llm" },
+        data: {
           status: "active",
-          source: "llm",
           color: item.color,
           ...(item.description ? { description: item.description } : {}),
         },
-        create: {
-          tenantId,
-          name: item.name,
-          description: item.description,
-          color: item.color,
-          source: "llm",
-        },
+      });
+      await client.postTag.updateMany({
+        where: { tenantId, name: item.name, source: { not: "llm" } },
+        data: { status: "active" },
+      });
+      if (!existing && supportsSkipDuplicates) {
+        await client.postTag.createMany({
+          data: [{
+            tenantId,
+            name: item.name,
+            description: item.description,
+            color: item.color,
+            source: "llm",
+          }],
+          skipDuplicates: true,
+        });
+      }
+      const tag = await client.postTag.findUniqueOrThrow({
+        where: { tenantId_name: { tenantId, name: item.name } },
       });
       if (!existing) {
         created.push(tag.name);
@@ -707,8 +722,27 @@ export async function applyTagAgentPlan(
   // 2) MERGE — fold near-duplicate tags into one canonical tag. Assignments are
   // migrated to the canonical tag (upsert de-dupes), then the source tag's own
   // assignments are removed and the tag is archived (reversible, no post loses a tag).
+  // 人工添加的标签（manual/user）不允许被 AI 合并/下架：先校验存在可合并的 llm 来源，
+  // 再创建规范标签，避免所有来源都被保护时留下一个没有任何迁移打标的空 AI 标签。
   for (const item of plan.merge) {
     try {
+      const mergeable: Array<{ id: string; name: string }> = [];
+      for (const fromName of item.from) {
+        if (fromName === item.into) {
+          continue;
+        }
+        const fromTag = await client.postTag.findUnique({
+          where: { tenantId_name: { tenantId, name: fromName } },
+          select: { id: true, name: true, source: true },
+        });
+        if (!fromTag || fromTag.name === item.into || fromTag.source !== "llm") {
+          continue;
+        }
+        mergeable.push(fromTag);
+      }
+      if (mergeable.length === 0) {
+        continue;
+      }
       const canonical = await client.postTag.upsert({
         where: { tenantId_name: { tenantId, name: item.into } },
         update: { status: "active" },
@@ -721,15 +755,8 @@ export async function applyTagAgentPlan(
         },
       });
       const mergedFrom: string[] = [];
-      for (const fromName of item.from) {
-        if (fromName === canonical.name) {
-          continue;
-        }
-        const fromTag = await client.postTag.findUnique({
-          where: { tenantId_name: { tenantId, name: fromName } },
-          select: { id: true, name: true },
-        });
-        if (!fromTag || fromTag.id === canonical.id) {
+      for (const fromTag of mergeable) {
+        if (fromTag.id === canonical.id) {
           continue;
         }
         const assignments = await client.postTagAssignment.findMany({
@@ -824,6 +851,9 @@ async function archiveInactivePostTags(
       select: {
         id: true,
         name: true,
+        source: true,
+        createdAt: true,
+        lastUsedAt: true,
       },
     }),
     client.postTagAssignment.findMany({
@@ -840,16 +870,32 @@ async function archiveInactivePostTags(
     }),
   ]);
   const recentTagIds = new Set(recentAssignments.map((assignment) => assignment.tagId));
-  const inactiveTags = activeTags.filter((tag) => !recentTagIds.has(tag.id));
+  // 新建标签打标数为零是常态：归档只针对"创建已久且近期既无打标也无使用"的标签，
+  // 否则手动刚建的标签会在第一次整理时就被归档消失。
+  // 人工添加的标签（manual/user）不允许 AI 归档，只能由管理员手动删除。
+  const inactiveTags = activeTags.filter((tag) => {
+    if (tag.source !== "llm") {
+      return false;
+    }
+    if (recentTagIds.has(tag.id)) {
+      return false;
+    }
+    const lastActivity = tag.lastUsedAt ?? tag.createdAt;
+    return lastActivity < recentSince;
+  });
   if (inactiveTags.length === 0) {
     return [];
   }
   const inactiveIds = inactiveTags.map((tag) => tag.id);
+  // 更新时原子重验不活跃条件：查询与写入之间若有稿件被打上标签（lastUsedAt 更新），
+  // 该标签不再满足归档条件，避免刚被使用的标签被归档。
   const result = await client.postTag.updateMany({
     where: {
       tenantId,
       id: { in: inactiveIds },
       status: "active",
+      createdAt: { lt: recentSince },
+      OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: recentSince } }],
     },
     data: {
       status: "archived",
@@ -1143,7 +1189,7 @@ async function classifyPostsIntoTag(context: {
               `目标：判断下列稿件中哪些适合归入标签「${tag.name}」。`,
               tag.description ? `标签含义：${tag.description}` : "标签含义：按名称常见语义判断。",
               "只判断是否属于这一个标签，不要发明新标签，不要考虑其他标签。",
-              "判断标准从严：内容主题确实与标签一致才选中；拿不准就不选。",
+              "判断标准放宽：稿件主题与标签相关、接近或属于同一大类就应选中；只有明确无关时才不选。",
               "postIds 必须来自输入 posts 的 id。",
               "返回格式：{\"postIds\":[\"id1\",\"id2\"]}",
             ].join("\n"),

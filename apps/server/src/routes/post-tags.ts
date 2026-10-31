@@ -166,9 +166,32 @@ export function registerPostTagRoutes(app: FastifyInstance) {
       where: { tenantId_name: { tenantId: context.selectedTenant.id, name: tagName } },
     });
     if (existing) {
-      return reply.code(409).send({
-        message: existing.status === "active" ? `标签「${tagName}」已存在` : `标签「${tagName}」已存在但处于归档状态，打标时会自动恢复`,
-      });
+      // 归档状态的标签直接恢复使用：让「新建同名标签」成为重新启用的入口。
+      // 管理员手动重建视为人工标签（source=manual），不再被 AI 归档；恢复与审计同事务。
+      if (existing.status !== "active") {
+        const revived = await prisma.$transaction(async (tx) => {
+          const updated = await tx.postTag.update({
+            where: { id: existing.id },
+            data: {
+              status: "active",
+              lastUsedAt: new Date(),
+              source: "manual",
+              ...(body.description?.trim() ? { description: body.description.trim() } : {}),
+            },
+          });
+          await writeAuditLog({
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            action: "post.tag.create",
+            targetType: "post_tag",
+            targetId: updated.id,
+            detail: { tagName, reactivated: true },
+          }, tx);
+          return updated;
+        });
+        return { tag: serializePostTag(revived) };
+      }
+      return reply.code(409).send({ message: `标签「${tagName}」已存在` });
     }
     let tag;
     try {
@@ -181,6 +204,7 @@ export function registerPostTagRoutes(app: FastifyInstance) {
             description: body.description?.trim() || null,
             color: tagColorForName(tagName),
             source: "manual",
+            lastUsedAt: new Date(),
           },
         });
         await writeAuditLog({
