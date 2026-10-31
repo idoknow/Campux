@@ -296,18 +296,36 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       const settings = await readTenantAiSettings(context.selectedTenant.id);
       if (!settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured || (settings.rules.aiReviewMode ?? "off") === "off") {
         aiReassessInFlight.delete(post.id);
-        return reply.code(409).send({ message: "AI 审核未启用，无法重新发起分析" });
+        // 按具体原因返回不同文案：按钮恰好出现在分析"不可用"的场景，多数是缺 Key。
+        let reason: string;
+        if (!settings.enabled || (settings.rules.aiReviewMode ?? "off") === "off") {
+          reason = "AI 审核未启用";
+        } else if (settings.mode !== "llm") {
+          reason = "当前为规则模式，无法发起 AI 分析";
+        } else {
+          reason = "请先在 AI 设置中配置 API Key";
+        }
+        return reply.code(409).send({ message: `无法重新发起 AI 分析：${reason}` });
       }
       // 最新分析已完成（可能是并发重评刚完成）时不再重复评估，避免产生非预期的自动决策。
       const latest = await prisma.postAiAnalysis.findFirst({
         where: { postId: post.id, tenantId: context.selectedTenant.id },
         orderBy: { version: "desc" },
-        select: { status: true },
+        select: { id: true, status: true },
       });
       if (latest?.status === "completed") {
         aiReassessInFlight.delete(post.id);
         return reply.code(409).send({ message: "该稿件已有完成的 AI 分析，刷新页面即可查看" });
       }
+      // reviewer 手动触发的重评写入审计（与 approve/feedback 一致）。
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.ai_review.reassess",
+        targetType: "post",
+        targetId: post.id,
+        detail: { displayId: post.displayId, analysisId: latest?.id ?? null },
+      });
       void assessPostForReview({
         tenantId: context.selectedTenant.id,
         postId: post.id,

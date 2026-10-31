@@ -83,6 +83,14 @@ const TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS = 15 * 60 * 1000;
 const TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS = 3;
 const tagMaintenanceAutoRetryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; remaining: number }>();
 
+/** 维护任务进行中标记（按租户互斥，路由/调度器/自动重试共用）。 */
+const tagMaintenanceInFlight = new Map<string, true>();
+
+/** 该租户是否已有待执行的维护自动重试。 */
+export function hasPendingTagMaintenanceRetry(tenantId: string): boolean {
+  return tagMaintenanceAutoRetryTimers.has(tenantId);
+}
+
 function clearTagMaintenanceAutoRetry(tenantId: string) {
   const state = tagMaintenanceAutoRetryTimers.get(tenantId);
   if (state) {
@@ -102,9 +110,14 @@ export function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: 
   if (state) clearTimeout(state.timer);
   logger.warn({ tenantId, remaining, retryAfterMinutes: 15 }, "post tag maintenance: clustering failed, scheduling automatic retry");
   const timer = setTimeout(() => {
-    void maintainTenantPostTags({ tenantId, lookbackDays, logger }).catch((error) => {
-      logger.warn({ error, tenantId }, "post tag maintenance: automatic retry crashed");
-    });
+    void maintainTenantPostTags({ tenantId, lookbackDays, logger })
+      .catch((error) => {
+        logger.warn({ error, tenantId }, "post tag maintenance: automatic retry crashed");
+        // 抛出型失败（如读设置/DB 瞬时故障）同样纳入重试预算，保持自愈链不断。
+        if (!hasPendingTagMaintenanceRetry(tenantId)) {
+          scheduleTagMaintenanceAutoRetry(tenantId, lookbackDays, logger);
+        }
+      });
   }, TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS);
   tagMaintenanceAutoRetryTimers.set(tenantId, { timer, remaining });
 }
@@ -343,6 +356,16 @@ export async function maintainTenantPostTags(options: {
   lookbackDays?: number | undefined;
   logger: FastifyBaseLogger;
 }): Promise<PostTagMaintenanceResult> {
+  // 租户级互斥：路由、周期调度器、自动重试定时器共用同一把锁，
+  // 防止并发运行消耗双份 token、应用相互冲突的标签计划。
+  // 进程内互斥覆盖单实例部署；多副本需另引入分布式锁（当前部署为单实例）。
+  if (tagMaintenanceInFlight.has(options.tenantId)) {
+    options.logger.info({ tenantId: options.tenantId }, "post tag maintenance: already running, skipping");
+    return { created: [], merged: [], archived: [], deleted: [], assigned: [] };
+  }
+  tagMaintenanceInFlight.set(options.tenantId, true);
+  try {
+    return await (async (): Promise<PostTagMaintenanceResult> => {
   const emptyResult = (): PostTagMaintenanceResult => ({ created: [], merged: [], archived: [], deleted: [], assigned: [] });
   if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
     return emptyResult();
@@ -556,6 +579,10 @@ export async function maintainTenantPostTags(options: {
     ...applied,
     archived: uniqueStrings([...applied.archived, ...await archiveInactive()]),
   };
+    })();
+  } finally {
+    tagMaintenanceInFlight.delete(options.tenantId);
+  }
 }
 
 export function parsePostTagMaintenanceJson(raw: string): PostTagAgentPlan | null {

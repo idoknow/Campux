@@ -13,7 +13,12 @@ import {
   tagColorForName,
   upsertTenantTagByName,
 } from "../lib/post-tags";
-import { backfillPostsForTag, maintainTenantPostTags, scheduleTagMaintenanceAutoRetry } from "../runtime/post-tagging";
+import {
+  backfillPostsForTag,
+  hasPendingTagMaintenanceRetry,
+  maintainTenantPostTags,
+  scheduleTagMaintenanceAutoRetry,
+} from "../runtime/post-tagging";
 
 /** 进行中的标签整理（按租户去重）：防止并发运行消耗双份 token、应用相互冲突的计划。 */
 const maintenanceInFlight = new Set<string>();
@@ -83,8 +88,10 @@ export function registerPostTagRoutes(app: FastifyInstance) {
     })
       .catch((error) => {
         app.log.warn({ error, tenantId: context.selectedTenant.id }, "post tag maintenance: background run failed");
-        // 预检/归档阶段的暂时性失败也纳入 15 分钟自动重试，而不是只等周期维护。
-        scheduleTagMaintenanceAutoRetry(context.selectedTenant.id, body.lookbackDays, app.log);
+        // 聚类失败路径可能已自行排程：已有待执行重试时只记日志，避免 3 轮预算被重复扣减。
+        if (!hasPendingTagMaintenanceRetry(context.selectedTenant.id)) {
+          scheduleTagMaintenanceAutoRetry(context.selectedTenant.id, body.lookbackDays, app.log);
+        }
       })
       .finally(() => maintenanceInFlight.delete(context.selectedTenant.id));
     return { ok: true, started: true };
