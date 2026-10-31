@@ -20,6 +20,12 @@ describe("relation-extraction candidate scheduling", () => {
     expect(selected.candidates.map(({ id }) => id)).toEqual(["b", "c"]);
   });
 
+  it("reclaims expired processing checkpoints but keeps live claims ineligible", () => {
+    const live = candidate("live", { contentHash: "h", status: "processing", attempts: 1, attemptedAt: now });
+    const expired = candidate("expired", { contentHash: "h", status: "processing", attempts: 1, attemptedAt: new Date(now.getTime() - 5 * 60_001) });
+    expect(selectRelationExtractionCandidates({ now, limit: 3, candidates: [live, expired] }).candidates.map(({ id }) => id)).toEqual(["expired"]);
+  });
+
   it("treats edited content hashes as fresh work", () => {
     const result = selectRelationExtractionCandidates({ now, limit: 5, candidates: [candidate("p", { contentHash: "old", status: "complete", attempts: 5, attemptedAt: now }, "new")] });
     expect(result.candidates.map(({ id }) => id)).toEqual(["p"]);

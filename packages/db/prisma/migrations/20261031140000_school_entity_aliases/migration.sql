@@ -11,7 +11,7 @@ CREATE TABLE "SchoolEntityAlias" (
 CREATE UNIQUE INDEX "SchoolEntityAlias_tenantId_entityId_normalized_key" ON "SchoolEntityAlias"("tenantId", "entityId", "normalized");
 CREATE INDEX "SchoolEntityAlias_tenantId_normalized_idx" ON "SchoolEntityAlias"("tenantId", "normalized");
 INSERT INTO "SchoolEntityAlias" ("id", "tenantId", "entityId", "value", "normalized")
-SELECT gen_random_uuid()::text, e."tenantId", e."id", alias_value, lower(trim(alias_value))
+SELECT gen_random_uuid()::text, e."tenantId", e."id", alias_value, lower(regexp_replace(trim(alias_value), '\s+', ' ', 'g'))
 FROM "SchoolEntity" e
 CROSS JOIN LATERAL jsonb_array_elements_text(e."aliases") AS alias_value
 WHERE trim(alias_value) <> ''

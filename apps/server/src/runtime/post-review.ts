@@ -25,24 +25,25 @@ export const SCHOOL_RELATION_PREDICATES = ["located_at", "member_of", "offers", 
 export type ExtractedSchoolRelation = { subject: string; predicate: typeof SCHOOL_RELATION_PREDICATES[number]; object: string; evidence: string };
 export function validateSchoolRelationEvidence(relation: { subject: string; predicate: string; object: string; evidence: string }, postText: string): boolean {
   const evidence = relation.evidence.trim();
-  if (!evidence || !postText.includes(evidence)) return false;
+  if (!evidence || !postText.toLocaleLowerCase().includes(evidence.toLocaleLowerCase())) return false;
   const lower = evidence.toLocaleLowerCase();
   const subject = relation.subject.trim().toLocaleLowerCase();
   const object = relation.object.trim().toLocaleLowerCase();
   if (!subject || !object || subject === object) return false;
-  // Reject explicit negation anywhere in the evidence rather than treating a nearby
-  // positive-looking cue as support (e.g. “A不在B” / “A is not in B”).
-  if (/(?:不是|并非|不在|不位于|未在|未位于|没有|并不|非|无关|不相关|不属于|不提供|未提供|不举办|未举办)|(?:^|[^\p{L}\p{N}])(?:not|no|never|neither|without|unrelated|isn't|aren't|doesn't)(?:[^\p{L}\p{N}]|$)/iu.test(lower)) return false;
   const subjectAt = lower.indexOf(subject);
-  const objectAt = lower.indexOf(object);
-  if (subjectAt < 0 || objectAt < 0) return false;
-  const firstAt = Math.min(subjectAt, objectAt);
-  const firstEnd = firstAt === subjectAt ? subjectAt + subject.length : objectAt + object.length;
-  const secondAt = Math.max(subjectAt, objectAt);
+  const objectAt = lower.indexOf(object, subjectAt + subject.length);
+  if (subjectAt < 0 || objectAt < 0 || objectAt - subjectAt > 240) return false;
+  const relationSpan = lower.slice(subjectAt, objectAt + object.length);
+  if (/(?:不在|不位于|未在|未位于|不是|并非|并不|不属于|不提供|未提供|不举办|未举办|不存在|无关|不相关)|(?:not(?:\s+only)?|never|neither|without|unrelated|isn.t|aren.t|doesn.t)(?:\s|$)/iu.test(relationSpan)) return false;
+  const orderedObjectAt = lower.indexOf(object);
+  if (subjectAt < 0 || orderedObjectAt < 0) return false;
+  const firstAt = Math.min(subjectAt, orderedObjectAt);
+  const firstEnd = firstAt === subjectAt ? subjectAt + subject.length : orderedObjectAt + object.length;
+  const secondAt = Math.max(subjectAt, orderedObjectAt);
   if (secondAt <= firstEnd || secondAt - firstEnd > 32) return false;
   // Predicate support must connect the ordered endpoints, not merely appear somewhere nearby.
-  const subjectFirst = subjectAt < objectAt;
-  const connector = subjectFirst ? lower.slice(subjectAt + subject.length, objectAt).trim() : lower.slice(objectAt + object.length, subjectAt).trim();
+  const subjectFirst = subjectAt < orderedObjectAt;
+  const connector = subjectFirst ? lower.slice(subjectAt + subject.length, orderedObjectAt).trim() : lower.slice(orderedObjectAt + object.length, subjectAt).trim();
   const patterns: Record<string, RegExp> = {
     located_at: /^(?:在|位于|坐落于|坐落在|is located at|located at|is in|in|at)$/iu,
     member_of: /^(?:属于|隶属于|隶属|是其成员|成员为|member of|belongs to)$/iu,
@@ -51,7 +52,9 @@ export function validateSchoolRelationEvidence(relation: { subject: string; pred
     associated_with: /^(?:(?:与|和|同).{0,8}(?:有关|相关|关联)|(?:associated with|related to))$/iu,
   };
   const pattern = patterns[relation.predicate];
-  if (!pattern?.test(connector)) return false;
+  if (!pattern?.test(connector)) {
+    if (relation.predicate !== "associated_with" || !subjectFirst || !/^(?:与|和|同)$/u.test(connector) || !/^(?:有关|相关|关联)/u.test(lower.slice(orderedObjectAt + object.length))) return false;
+  }
   // These predicates are directional: their grammatical subject must be the extracted subject.
   if (["located_at", "member_of", "offers", "held_at"].includes(relation.predicate) && !subjectFirst) return false;
   return true;
@@ -89,10 +92,11 @@ export function buildSchoolRelationContext(relations: Array<{ subject: string; p
       const objectMatches = object.length >= 2 && normalizedText.includes(object);
       const evidence = normalize(relation.evidence);
       const evidenceSupportsEndpoints = evidence.includes(subject) && evidence.includes(object);
-      const score = Number(subjectMatches) + Number(objectMatches) + Number(evidenceSupportsEndpoints && subjectMatches && objectMatches);
+      const evidenceStillPresent = normalizedText.includes(evidence);
+      const score = Number(subjectMatches) + Number(objectMatches) + Number(evidenceSupportsEndpoints && subjectMatches && objectMatches && evidenceStillPresent);
       return { relation, index, score };
     })
-    .filter((entry) => entry.score === 2)
+    .filter((entry) => entry.score >= 2)
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .slice(0, Math.max(0, Math.min(5, Math.floor(maxRelations))));
   let text = "";

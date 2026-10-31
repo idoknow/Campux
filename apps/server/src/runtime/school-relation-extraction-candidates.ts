@@ -36,7 +36,8 @@ export function relationExtractionRetryDelayMs(attempts: number, baseDelayMs = 6
 function isEligible(candidate: RelationExtractionCandidate, now: Date, baseDelayMs: number, maxDelayMs: number): boolean {
   const checkpoint = candidate.checkpoint;
   if (!checkpoint || checkpoint.contentHash !== candidate.contentHash) return true;
-  if (checkpoint.status === "complete" || checkpoint.status === "no_relations" || checkpoint.status === "processing") return false;
+  if (checkpoint.status === "complete" || checkpoint.status === "no_relations") return false;
+  if (checkpoint.status === "processing") return checkpoint.attemptedAt.getTime() + 5 * 60_000 <= now.getTime();
   const retryAt = checkpoint.attemptedAt.getTime() + relationExtractionRetryDelayMs(checkpoint.attempts, baseDelayMs, maxDelayMs);
   return Number.isFinite(retryAt) && retryAt <= now.getTime();
 }
