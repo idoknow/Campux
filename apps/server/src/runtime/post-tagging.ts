@@ -59,6 +59,43 @@ export type PostTagMaintenanceResult = {
 
 const tagPromptMaxTextChars = 800;
 const tagAgentPostTextChars = 240;
+/** 单次维护请求携带的稿件数。整墙一次提交时输出会被 max_tokens 截断（78 篇约需 8k token，上限 4096）。 */
+const tagMaintenanceBatchSize = 30;
+/** 截断后继续折半的最小批；再小还截断就记失败，交给 15 分钟全量重跑。 */
+const tagMaintenanceMinSplitSize = 4;
+
+/**
+ * 把待维护稿件切成固定大小的批次。
+ * 批太小会让同一主题的稿件被拆散、create 的 ≥minClusterSize 判定不成立；批太大又会撞 max_tokens。
+ */
+export function chunkTagMaintenancePosts<T>(items: readonly T[], size: number = tagMaintenanceBatchSize): T[][] {
+  const batchSize = Number.isFinite(size) && size >= 1 ? Math.trunc(size) : tagMaintenanceBatchSize;
+  const batches: T[][] = [];
+  for (let offset = 0; offset < items.length; offset += batchSize) {
+    batches.push(items.slice(offset, offset + batchSize));
+  }
+  return batches;
+}
+
+/** 合并多批维护结果：created/archived/deleted 去重，merged 按「来源集合 + 目标」去重。 */
+export function mergeTagMaintenanceResults(target: PostTagMaintenanceResult, next: PostTagMaintenanceResult): PostTagMaintenanceResult {
+  const merged = [...target.merged];
+  const mergeKey = (item: { from: string[]; into: string }) => `${[...item.from].sort().join("|")}>${item.into}`;
+  const seen = new Set(merged.map(mergeKey));
+  for (const item of next.merged) {
+    const key = mergeKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+  return {
+    created: uniqueStrings([...target.created, ...next.created]),
+    merged,
+    archived: uniqueStrings([...target.archived, ...next.archived]),
+    deleted: uniqueStrings([...target.deleted, ...next.deleted]),
+    assigned: [...target.assigned, ...next.assigned],
+  };
+}
 const defaultTagMaintenanceLookbackDays = 14;
 const tagMaintenanceArchiveInactiveDays = 14;
 const maxTagMaintenanceLookbackDays = 90;
@@ -477,106 +514,168 @@ export async function maintainTenantPostTags(options: {
     "不需要也不要输出归档/删除操作；系统会自动归档过去两周无新稿件的标签。",
     "返回格式：{\"create\":[{\"name\":\"高考志愿\",\"description\":\"志愿填报相关\",\"color\":\"#dbeafe\",\"postIds\":[\"id1\",\"id2\",\"id3\"],\"confidence\":0到1}],\"merge\":[{\"from\":[\"近义名\"],\"into\":\"规范名\"}],\"assign\":[{\"postId\":\"id1\",\"tags\":[\"标签名\"]}]}",
   ].join("\n");
-  const userPayload = JSON.stringify({
-    tags: tags.map((tag) => ({
-      name: tag.name,
-      description: tag.description,
-      status: tag.status,
-      source: tag.source,
-      postCount: tag._count.assignments,
-      lastUsedAt: tag.lastUsedAt?.toISOString() ?? null,
-    })),
-    posts: visiblePosts.map((post) => ({
-      id: post.id,
-      displayId: post.displayId,
-      createdAt: post.createdAt.toISOString(),
-      text: post.text.slice(0, tagAgentPostTextChars),
-      tags: post.tagAssignments.map((assignment) => assignment.tag.name),
-    })),
-    lookbackDays,
-    minClusterSize,
-  });
-  // 每个动作占几十 token，稿件越多动作越多；给 2000 起步、4096 封顶。
-  const maxTokens = Math.min(4096, Math.max(2000, 800 + visiblePosts.length * 80));
 
-  options.logger.info(
-    { site: "post-tagging.maintenance", tenantId: options.tenantId, model: settings.model, maxTokens, promptChars: systemPrompt.length + userPayload.length, posts: visiblePosts.length, tags: tags.length },
-    "llm request",
-  );
-  // LLM 网络调用不进租户租约事务（避免 180 秒级调用长时间持有 Tenant 行锁、阻塞状态切换）：
-  // 每轮尝试前校验租户活跃，写库（applyTagAgentPlan）时才取 lease。
-  // 失败自动重试 5 次（间隔 10 秒，整体预算 5 分钟）；仍失败走 15 分钟间隔的自动重跑。
-  let clusteringSucceeded = false;
-  const retryStartedAt = Date.now();
-  for (let attempt = 1; attempt <= 1 + TAG_MAINTENANCE_RETRY_ATTEMPTS; attempt += 1) {
-    if (attempt > 1) {
-      if (Date.now() - retryStartedAt > TAG_MAINTENANCE_RETRY_BUDGET_MS) {
-        options.logger.warn({ tenantId: options.tenantId, attempt }, "post tag maintenance: retry budget exceeded");
-        break;
+  // 整墙一次提交时，动作 JSON 会被 max_tokens 截断（78 篇约需 8k token，上限 4096），
+  // 结果是整轮 JSON 非法、重试也只是重复同一个截断。改为按批提交：单批输出可控，
+  // 某批失败只影响该批，其余批次照常落库。
+  const batches = chunkTagMaintenancePosts(visiblePosts);
+  let succeededBatches = 0;
+  let failedBatches = 0;
+  // 每批落库后标签库就变了：next 批必须重读，否则会重复建近义标签、
+  // 甚至把上一批刚合并归档的标签 create 回来。
+  let tagsSnapshot: typeof tags | null = tags;
+
+  type BatchRun =
+    | { status: "ok"; value: PostTagMaintenanceResult }
+    | { status: "truncated" }
+    | { status: "failed" }
+    | { status: "stopped" };
+
+  const runBatch = async (batch: typeof visiblePosts, label: string): Promise<BatchRun> => {
+    // 停用/归档的墙不必再补一轮 15 分钟重试；已完成的批次直接返回。
+    if (!await isTenantRuntimeActive(prisma, options.tenantId)) return { status: "stopped" };
+    const batchTags = tagsSnapshot ?? await prisma.postTag.findMany({
+      where: { tenantId: options.tenantId },
+      include: { _count: { select: { assignments: true } } },
+      orderBy: [{ status: "asc" }, { lastUsedAt: "desc" }, { updatedAt: "desc" }],
+      take: 100,
+    }).catch(() => tags);
+    const userPayload = JSON.stringify({
+      tags: batchTags.map((tag) => ({
+        name: tag.name,
+        description: tag.description,
+        status: tag.status,
+        source: tag.source,
+        postCount: tag._count.assignments,
+        lastUsedAt: tag.lastUsedAt?.toISOString() ?? null,
+      })),
+      posts: batch.map((post) => ({
+        id: post.id,
+        displayId: post.displayId,
+        createdAt: post.createdAt.toISOString(),
+        text: post.text.slice(0, tagAgentPostTextChars),
+        tags: post.tagAssignments.map((assignment) => assignment.tag.name),
+      })),
+      lookbackDays,
+      minClusterSize,
+    });
+    // 输出规模按动作数估算，留约 25% 余量；仍受 4096 封顶（30 篇 → 4096）。
+    const maxTokens = Math.min(4096, Math.max(2000, Math.round(800 + batch.length * 110)));
+
+    options.logger.info(
+      { site: "post-tagging.maintenance", tenantId: options.tenantId, model: settings.model, maxTokens, promptChars: systemPrompt.length + userPayload.length, posts: batch.length, batch: label, batches: batches.length, tags: batchTags.length },
+      "llm request",
+    );
+    // LLM 网络调用不进租户租约事务（避免 180 秒级调用长时间持有 Tenant 行锁、阻塞状态切换）：
+    // 每轮尝试前校验租户活跃，写库（applyTagAgentPlan）时才取 lease。
+    // 失败自动重试 5 次（间隔 10 秒，整体预算 5 分钟）；仍失败走 15 分钟间隔的自动重跑。
+    const retryStartedAt = Date.now();
+    for (let attempt = 1; attempt <= 1 + TAG_MAINTENANCE_RETRY_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) {
+        if (Date.now() - retryStartedAt > TAG_MAINTENANCE_RETRY_BUDGET_MS) {
+          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label }, "post tag maintenance: retry budget exceeded");
+          break;
+        }
+        options.logger.warn({ tenantId: options.tenantId, attempt, batch: label }, "post tag maintenance: retrying LLM request");
+        await new Promise((resolve) => setTimeout(resolve, TAG_MAINTENANCE_RETRY_PAUSE_MS));
       }
-      options.logger.warn({ tenantId: options.tenantId, attempt }, "post tag maintenance: retrying LLM request");
-      await new Promise((resolve) => setTimeout(resolve, TAG_MAINTENANCE_RETRY_PAUSE_MS));
+      if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
+        return { status: "stopped" };
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
+      try {
+        const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: settings.model,
+            temperature: 0,
+            max_tokens: maxTokens,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPayload },
+            ],
+          }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+          | null;
+        if (!response.ok) {
+          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
+          continue;
+        }
+        if (llmFinishReason(data) === "length") {
+          // 原样重试只会再撞同一个上限：直接交给调用方折半。
+          options.logger.warn({ tenantId: options.tenantId, posts: batch.length, maxTokens, batch: label }, "post tag maintenance output truncated by max_tokens");
+          return { status: "truncated" };
+        }
+        const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
+        if (!plan) {
+          // 结构非法/截断：按失败处理，走既定重试策略，而不是当成功空跑。
+          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label }, "post tag maintenance: llm returned invalid plan JSON");
+          continue;
+        }
+        const planned = await runWithActiveTenantLease(
+          prisma,
+          options.tenantId,
+          (transaction) => applyTagAgentPlan(options.tenantId, plan, batch.map((post) => post.id), options.logger, transaction),
+        );
+        if (!planned.active) {
+          // 租约没拿到、事务未执行：这一批什么都没写，不能算成功。
+          return { status: "stopped" };
+        }
+        return { status: "ok", value: planned.value };
+      } catch (error) {
+        const aborted = error instanceof Error && error.name === "AbortError";
+        options.logger.warn({ error, tenantId: options.tenantId, aborted, attempt, batch: label }, "post tag maintenance: LLM call errored");
+      } finally {
+        clearTimeout(timeout);
+      }
     }
-    if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
-      return applied;
+    return { status: "failed" };
+  };
+
+  // 截断就折半（30 → 15 → 8 → 4），最小 4 篇；到最小还截断才记失败，交给 15 分钟全量重跑。
+  const processBatch = async (batch: typeof visiblePosts, label: string): Promise<"ok" | "failed" | "stopped"> => {
+    const outcome = await runBatch(batch, label);
+    if (outcome.status === "ok") {
+      applied = mergeTagMaintenanceResults(applied, outcome.value);
+      tagsSnapshot = null;
+      return "ok";
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
-    try {
-      const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          temperature: 0,
-          max_tokens: maxTokens,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPayload },
-          ],
-        }),
-      });
-      const data = (await response.json().catch(() => null)) as
-        | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-        | null;
-      if (!response.ok) {
-        options.logger.warn({ tenantId: options.tenantId, attempt, status: response.status, error: data?.error?.message }, "post tag maintenance: LLM request failed");
-        continue;
-      }
-      if (llmFinishReason(data) === "length") {
-        options.logger.warn({ tenantId: options.tenantId, posts: visiblePosts.length, maxTokens }, "post tag maintenance output truncated by max_tokens");
-      }
-      const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
-      if (!plan) {
-        // 结构非法/截断：按失败处理，走既定重试策略，而不是当成功空跑。
-        options.logger.warn({ tenantId: options.tenantId, attempt }, "post tag maintenance: llm returned invalid plan JSON");
-        continue;
-      }
-      const planned = await runWithActiveTenantLease(
-        prisma,
-        options.tenantId,
-        (transaction) => applyTagAgentPlan(options.tenantId, plan, visiblePosts.map((post) => post.id), options.logger, transaction),
-      );
-      if (planned.active) {
-        applied = planned.value;
-      }
-      clusteringSucceeded = true;
-      break;
-    } catch (error) {
-      const aborted = error instanceof Error && error.name === "AbortError";
-      options.logger.warn({ error, tenantId: options.tenantId, aborted, attempt }, "post tag maintenance: LLM call errored");
-    } finally {
-      clearTimeout(timeout);
+    if (outcome.status === "stopped") return "stopped";
+    if (outcome.status === "truncated" && batch.length > tagMaintenanceMinSplitSize) {
+      const middle = Math.ceil(batch.length / 2);
+      const left = await processBatch(batch.slice(0, middle), `${label}a`);
+      if (left === "stopped") return "stopped";
+      const right = await processBatch(batch.slice(middle), `${label}b`);
+      if (right === "stopped") return "stopped";
+      // 子批各自落库，失败的那半留给下一轮重跑。
+      return left === "ok" && right === "ok" ? "ok" : "failed";
     }
+    return "failed";
+  };
+
+  for (const [batchIndex, batch] of batches.entries()) {
+    if (!await isTenantRuntimeActive(prisma, options.tenantId)) return applied;
+    const outcome = await processBatch(batch, `${batchIndex + 1}/${batches.length}`);
+    if (outcome === "stopped") return applied;
+    if (outcome === "ok") succeededBatches += 1;
+    else failedBatches += 1;
   }
-  if (clusteringSucceeded) {
+
+  if (failedBatches === 0) {
     clearTagMaintenanceAutoRetry(options.tenantId);
   } else {
+    // 成功的批次已经落库；下一轮会按当前可见稿件重新全量分批跑一遍（打标幂等），
+    // 不是只补失败的那几批，这里不做持久化断点。
+    options.logger.warn({ tenantId: options.tenantId, failedBatches, succeededBatches, batches: batches.length }, "post tag maintenance: some batches failed, next run will retry the whole wall");
     scheduleTagMaintenanceAutoRetry(options.tenantId, lookbackDays, options.logger);
   }
   return {
