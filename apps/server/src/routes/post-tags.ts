@@ -67,15 +67,16 @@ export function registerPostTagRoutes(app: FastifyInstance) {
   app.post("/api/post-tags/maintain", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const body = maintainTagsBodySchema.parse(request.body ?? {});
-    const result = await maintainTenantPostTags({
+    // 整理含 LLM 请求与自动重试，耗时可达数分钟、会超过网关超时导致 "Failed to fetch"：
+    // 改为后台执行并立即返回；失败由维护任务自身的自动重试兜底。
+    void maintainTenantPostTags({
       tenantId: context.selectedTenant.id,
       lookbackDays: body.lookbackDays,
-      logger: request.log,
+      logger: app.log,
+    }).catch((error) => {
+      app.log.warn({ error, tenantId: context.selectedTenant.id }, "post tag maintenance: background run failed");
     });
-    return {
-      ok: true,
-      result,
-    };
+    return { ok: true, started: true };
   });
 
   // 手动打标：标签不存在则创建（source=manual），已归档则重新启用。
