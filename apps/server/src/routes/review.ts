@@ -10,7 +10,7 @@ import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedErro
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
-import { parsePostReviewAnalysisRecord } from "../runtime/post-review";
+import { parsePostReviewAnalysisRecord, assessPostForReview } from "../runtime/post-review";
 import { readTenantOperateMode, readTenantPublishMode } from "../lib/tenant-metadata";
 import { parsePostDisplayIdFilter } from "../lib/post-display-id-filter";
 import type { RuntimeQueue } from "../runtime/queue";
@@ -269,6 +269,23 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!lease.active) return reply.code(409).send({ error: "校园墙已暂停或归档" });
     if (!lease.value) return reply.code(409).send({ error: "自动审核决定已改变或无法撤销" });
     return { ok: true };
+  });
+
+  // AI 分析失败/不可用时的人工重试：重新发起评估（fire-and-forget，结果稍后写入）。
+  app.post("/api/review/posts/:id/ai-reassess", async (request, reply) => {
+    const context = await requireReadyTenant(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: { id: params.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
+      select: { id: true, displayId: true },
+    });
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在或不在待审核状态" });
+    }
+    void assessPostForReview({ tenantId: context.selectedTenant.id, postId: post.id, logger: request.log }).catch((error) => {
+      request.log.warn({ error, tenantId: context.selectedTenant.id, postId: post.id }, "ai review re-assessment failed");
+    });
+    return { ok: true, started: true };
   });
 
   app.post("/api/review/posts/:id/approve", async (request, reply) => {
