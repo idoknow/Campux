@@ -430,7 +430,7 @@ export function PostsPage({
     if (!allowed.includes(activeTab)) {
       onTabChange(canReview ? "review" : "mine");
     }
-  }, [activeTab, canReview, isAdmin, showFeedbackTab, showHistoryTab, onTabChange]);
+  }, [activeTab, canReview, showPendingPublishTab, showFeedbackTab, showHistoryTab, onTabChange]);
 
   useEffect(() => {
     // Tenant switch invalidates any in-flight feedback list for the old wall.
@@ -462,6 +462,14 @@ export function PostsPage({
       });
     return () => { cancelled = true; };
   }, [isAdmin, tenantId]);
+
+  useEffect(() => {
+    // 「待发布」筛选只在 bot 模式管理员下有效：模式切换或权限不足时把持久化的筛选值归位，
+    // 避免审核列表请求失效或在 manual 模式下渲染出不该有的面板。
+    if (reviewStatus === "pending_publish" && (!isAdmin || pendingResidual?.operateMode === "manual")) {
+      setReviewStatusWithQuery("pending_approval");
+    }
+  }, [reviewStatus, isAdmin, pendingResidual]);
 
   async function refreshPendingPublish() {
     setPendingPublishLoading(true);
@@ -836,11 +844,7 @@ export function PostsPage({
     }
 
     setReviewPosts([]);
-    void Promise.all([
-      refreshPendingRecallPosts(),
-      // bot 模式的「待发布」筛选走待发布面板，不请求审核列表（服务端不认识这个筛选值）。
-      reviewStatus === "pending_publish" ? Promise.resolve() : refreshReviewPosts(reviewPage),
-    ]).catch((caught) => {
+    void Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
   }, [canReview, reviewStatus, reviewPage, tenantId]);
@@ -926,6 +930,10 @@ export function PostsPage({
     if (activeTab === "pendingPublish" && showPendingPublishTab) {
       await refreshPendingPublish();
     }
+    // bot 模式下「待发布」面板挂在审核板块的筛选下，全局刷新时同样要更新它。
+    if (reviewPendingPublishActive && activeTab === "review" && reviewStatus === "pending_publish") {
+      await refreshPendingPublish();
+    }
   }
 
   async function refreshPendingRecallPosts() {
@@ -944,6 +952,10 @@ export function PostsPage({
   }
 
   async function refreshReviewPosts(page = reviewPage) {
+    // bot 模式的「待发布」筛选不走审核列表接口（服务端不认识这个值），所有调用方在此统一拦截。
+    if (reviewStatus === "pending_publish") {
+      return;
+    }
     const params = new URLSearchParams({
       status: reviewStatus,
       page: String(page),
@@ -1063,13 +1075,14 @@ export function PostsPage({
         body: JSON.stringify({ tagName, description: tagCreateDesc.trim() || undefined }),
       });
       try {
-        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number } }>(
+        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number; failedChunks: number } }>(
           `/api/post-tags/${created.tag.id}/backfill`,
           { method: "POST", body: JSON.stringify({ lookbackDays: Number(tagCreateDays) }) },
         );
         toast.success(
           `标签「${tagName}」已创建：AI 扫描近 ${tagCreateDays} 天 ${backfill.result.scannedCount} 条稿件，归类 ${backfill.result.assignedCount} 条`
-            + (backfill.result.skippedCount > 0 ? `，${backfill.result.skippedCount} 条因标签数已达上限跳过` : ""),
+            + (backfill.result.skippedCount > 0 ? `，${backfill.result.skippedCount} 条因标签数已达上限跳过` : "")
+            + (backfill.result.failedChunks > 0 ? `；${backfill.result.failedChunks} 批次归类失败，可稍后重试` : ""),
         );
       } catch (backfillError) {
         toast.warning(`标签「${tagName}」已创建，但回溯打标未完成：${backfillError instanceof Error ? backfillError.message : "可稍后重试"}`);
@@ -2036,7 +2049,7 @@ export function PostsPage({
                   )}
                 </section>
               ) : null}
-              {reviewStatus === "pending_publish" ? (
+              {reviewPendingPublishActive && reviewStatus === "pending_publish" ? (
                 renderPendingPublishPanel()
               ) : (
                 <>

@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
+import { supportsAdvisoryLock } from "@campux/db";
 import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
@@ -965,6 +966,8 @@ export type PostTagBackfillResult = {
   scannedCount: number;
   assignedCount: number;
   skippedCount: number;
+  /** LLM 调用失败/响应无效而未能归类的分批数量：区别于「正常判断为零匹配」。 */
+  failedChunks: number;
 };
 
 const tagBackfillMaxPosts = 300;
@@ -980,7 +983,7 @@ export async function backfillPostsForTag(options: {
   lookbackDays?: number | undefined;
   logger: FastifyBaseLogger;
 }): Promise<PostTagBackfillResult> {
-  const empty: PostTagBackfillResult = { scannedCount: 0, assignedCount: 0, skippedCount: 0 };
+  const empty: PostTagBackfillResult = { scannedCount: 0, assignedCount: 0, skippedCount: 0, failedChunks: 0 };
   const settings = await readTenantAiSettings(options.tenantId).catch((error) => {
     options.logger.warn({ error, tenantId: options.tenantId }, "post tag backfill: failed to read AI settings");
     return null;
@@ -1015,19 +1018,18 @@ export async function backfillPostsForTag(options: {
       id: true,
       displayId: true,
       text: true,
-      tagAssignments: { select: { tagId: true } },
     },
     orderBy: { createdAt: "desc" },
     take: tagBackfillMaxPosts,
   });
-  const result: PostTagBackfillResult = { scannedCount: candidates.length, assignedCount: 0, skippedCount: 0 };
+  const result: PostTagBackfillResult = { scannedCount: candidates.length, assignedCount: 0, skippedCount: 0, failedChunks: 0 };
   if (candidates.length === 0) {
     return result;
   }
 
   for (let offset = 0; offset < candidates.length; offset += tagBackfillChunkSize) {
     const chunk = candidates.slice(offset, offset + tagBackfillChunkSize);
-    const matchedIds = await classifyPostsIntoTag({
+    const { matched, failed } = await classifyPostsIntoTag({
       tenantId: options.tenantId,
       settings,
       apiKey,
@@ -1035,26 +1037,41 @@ export async function backfillPostsForTag(options: {
       chunk,
       logger: options.logger,
     });
-    if (matchedIds.size === 0) {
+    if (failed) {
+      // LLM 调用失败/响应无效：这一批未被真正评估，不能当作零匹配。
+      result.failedChunks += 1;
+      continue;
+    }
+    if (matched.size === 0) {
       continue;
     }
     for (const post of chunk) {
-      if (!matchedIds.has(post.id)) {
+      if (!matched.has(post.id)) {
         continue;
       }
-      if (post.tagAssignments.length >= maxTagsPerPost) {
-        result.skippedCount += 1;
-        continue;
-      }
-      const leased = await runWithActiveTenantLease(prisma, options.tenantId, (tx) =>
-        assignPostTags(tx, {
+      const leased = await runWithActiveTenantLease(prisma, options.tenantId, async (tx) => {
+        // PG 下锁定稿件行，防止并发打标把单稿标签数顶破上限；SQLite 单写者天然串行。
+        if (supportsAdvisoryLock) {
+          await tx.$queryRaw`SELECT "id" FROM "Post" WHERE "id" = ${post.id} AND "tenantId" = ${options.tenantId} FOR UPDATE`;
+        }
+        const assignmentCount = await tx.postTagAssignment.count({ where: { postId: post.id } });
+        if (assignmentCount >= maxTagsPerPost) {
+          return false;
+        }
+        await assignPostTags(tx, {
           tenantId: options.tenantId,
           postId: post.id,
           tags: [{ tagId: tag.id, source: "llm" }],
-        }),
-      );
-      if (leased.active) {
+        });
+        return true;
+      });
+      if (!leased.active) {
+        continue;
+      }
+      if (leased.value) {
         result.assignedCount += 1;
+      } else {
+        result.skippedCount += 1;
       }
     }
   }
@@ -1064,7 +1081,7 @@ export async function backfillPostsForTag(options: {
   return result;
 }
 
-/** 把一批稿件交给 LLM，判断哪些应归入指定标签；返回命中的稿件 id 集合。 */
+/** 把一批稿件交给 LLM，判断哪些应归入指定标签；failed 表示这批因调用失败而未被真正评估。 */
 async function classifyPostsIntoTag(context: {
   tenantId: string;
   settings: NonNullable<Awaited<ReturnType<typeof readTenantAiSettings>>>;
@@ -1072,7 +1089,7 @@ async function classifyPostsIntoTag(context: {
   tag: { id: string; name: string; description: string | null };
   chunk: Array<{ id: string; displayId: number; text: string }>;
   logger: FastifyBaseLogger;
-}): Promise<Set<string>> {
+}): Promise<{ matched: Set<string>; failed: boolean }> {
   const matched = new Set<string>();
   const { settings, apiKey, tag, chunk } = context;
   const knownIds = new Set(chunk.map((post) => post.id));
@@ -1133,7 +1150,7 @@ async function classifyPostsIntoTag(context: {
           { tag: tag.name, status: response.status, error: data?.error?.message ?? null },
           "post tag backfill: llm request failed",
         );
-        return matched;
+        return { matched, failed: true };
       }
       const raw = data.choices?.[0]?.message?.content ?? "";
       try {
@@ -1147,13 +1164,14 @@ async function classifyPostsIntoTag(context: {
         }
       } catch {
         context.logger.warn({ tag: tag.name, raw: raw.slice(0, 200) }, "post tag backfill: llm returned unparseable JSON");
+        return { matched, failed: true };
       }
-      return matched;
+      return { matched, failed: false };
     });
-    return leased.active ? leased.value : matched;
+    return leased.active ? leased.value : { matched, failed: true };
   } catch (caught) {
     context.logger.warn({ error: caught, tag: tag.name }, "post tag backfill: llm request threw");
-    return matched;
+    return { matched, failed: true };
   } finally {
     clearTimeout(timeout);
   }
