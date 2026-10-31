@@ -93,55 +93,62 @@ export function registerPostTagRoutes(app: FastifyInstance) {
     if (!post) {
       return reply.code(404).send({ message: "稿件不存在" });
     }
-    let assigned: boolean;
-    try {
-      assigned = await prisma.$transaction(async (tx) => {
-        // PG 下锁定稿件行串行化并发打标，避免并发把单稿标签数顶破上限；SQLite 单写者天然串行。
-        if (supportsAdvisoryLock) {
-          await tx.$queryRaw`SELECT "id" FROM "Post" WHERE "id" = ${post.id} AND "tenantId" = ${context.selectedTenant.id} FOR UPDATE`;
-        }
-        const tag = await upsertTenantTagByName(tx, { tenantId: context.selectedTenant.id, name: tagName });
-        const assignments = await tx.postTagAssignment.findMany({
-          where: { postId: post.id },
-          select: { tagId: true },
-        });
-        if (!assignments.some((assignment) => assignment.tagId === tag.id) && assignments.length >= maxTagsPerPost) {
-          throw new TagLimitError();
-        }
-        await tx.postTagAssignment.upsert({
-          where: { postId_tagId: { postId: post.id, tagId: tag.id } },
-          create: {
-            tenantId: context.selectedTenant.id,
-            postId: post.id,
-            tagId: tag.id,
-            source: "manual",
-            confidence: null,
-          },
-          update: { source: "manual", confidence: null },
-        });
-        await tx.postTag.update({ where: { id: tag.id }, data: { lastUsedAt: new Date() } });
-        await writeAuditLog({
-          tenantId: context.selectedTenant.id,
-          actorId: context.user.id,
-          action: "post.tag.assign",
-          targetType: "post",
-          targetId: post.id,
-          detail: { tagName: tag.name, source: "manual" },
-        }, tx);
-        return true;
+    const attemptAssign = () => prisma.$transaction(async (tx) => {
+      // PG 下锁定稿件行串行化并发打标，避免并发把单稿标签数顶破上限；SQLite 单写者天然串行。
+      if (supportsAdvisoryLock) {
+        await tx.$queryRaw`SELECT "id" FROM "Post" WHERE "id" = ${post.id} AND "tenantId" = ${context.selectedTenant.id} FOR UPDATE`;
+      }
+      const tag = await upsertTenantTagByName(tx, { tenantId: context.selectedTenant.id, name: tagName });
+      const assignments = await tx.postTagAssignment.findMany({
+        where: { postId: post.id },
+        select: { tagId: true },
       });
+      if (!assignments.some((assignment) => assignment.tagId === tag.id) && assignments.length >= maxTagsPerPost) {
+        throw new TagLimitError();
+      }
+      await tx.postTagAssignment.upsert({
+        where: { postId_tagId: { postId: post.id, tagId: tag.id } },
+        create: {
+          tenantId: context.selectedTenant.id,
+          postId: post.id,
+          tagId: tag.id,
+          source: "manual",
+          confidence: null,
+        },
+        update: { source: "manual", confidence: null },
+      });
+      await tx.postTag.update({ where: { id: tag.id }, data: { lastUsedAt: new Date() } });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.tag.assign",
+        targetType: "post",
+        targetId: post.id,
+        detail: { tagName: tag.name, source: "manual" },
+      }, tx);
+    });
+    try {
+      await attemptAssign();
     } catch (error) {
-      if (error instanceof TagLimitError) {
-        return reply.code(409).send({ message: `每条稿件最多 ${maxTagsPerPost} 个标签` });
+      // 并发创建同名标签的竞态：P2002 表示标签此刻已存在——这不是失败，重读并重试一次打标。
+      if (!(isPrismaKnownRequestError(error) && error.code === "P2002")) {
+        if (error instanceof TagLimitError) {
+          return reply.code(409).send({ message: `每条稿件最多 ${maxTagsPerPost} 个标签` });
+        }
+        throw error;
       }
-      // 并发创建同名标签的竞态落在这里：标签已存在，返回 409 而不是 500。
-      if (isPrismaKnownRequestError(error) && error.code === "P2002") {
-        return reply.code(409).send({ message: `标签「${tagName}」已存在` });
+      try {
+        await attemptAssign();
+      } catch (retryError) {
+        if (retryError instanceof TagLimitError) {
+          return reply.code(409).send({ message: `每条稿件最多 ${maxTagsPerPost} 个标签` });
+        }
+        // 二次竞态极端少见：仍按已存在处理。
+        if (isPrismaKnownRequestError(retryError) && retryError.code === "P2002") {
+          return reply.code(409).send({ message: `标签「${tagName}」已存在` });
+        }
+        throw retryError;
       }
-      throw error;
-    }
-    if (!assigned) {
-      return reply.code(409).send({ message: `每条稿件最多 ${maxTagsPerPost} 个标签` });
     }
     return { tags: await readPostAssignedTags(context.selectedTenant.id, post.id) };
   });

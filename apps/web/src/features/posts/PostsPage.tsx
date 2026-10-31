@@ -606,7 +606,7 @@ export function PostsPage({
             </Button>
           </div>
         ) : null}
-        {pendingPublishItems.length > 0 ? (
+        {pendingPublishItems.length > 0 && !botMode ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
             <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
               <input
@@ -672,23 +672,25 @@ export function PostsPage({
                 <CardContent className="space-y-3 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                     <div className="flex min-w-0 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="size-4 shrink-0 accent-sky-600"
-                        checked={pendingPublishSelected.has(item.id)}
-                        aria-label={`选择稿件 #${item.displayId}`}
-                        onChange={(event) => {
-                          setPendingPublishSelected((selected) => {
-                            const next = new Set(selected);
-                            if (event.target.checked) {
-                              next.add(item.id);
-                            } else {
-                              next.delete(item.id);
-                            }
-                            return next;
-                          });
-                        }}
-                      />
+                      {!botMode ? (
+                        <input
+                          type="checkbox"
+                          className="size-4 shrink-0 accent-sky-600"
+                          checked={pendingPublishSelected.has(item.id)}
+                          aria-label={`选择稿件 #${item.displayId}`}
+                          onChange={(event) => {
+                            setPendingPublishSelected((selected) => {
+                              const next = new Set(selected);
+                              if (event.target.checked) {
+                                next.add(item.id);
+                              } else {
+                                next.delete(item.id);
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                      ) : null}
                       <span className="font-semibold text-slate-700 dark:text-slate-200">
                         #{item.displayId}
                         {" · "}
@@ -730,14 +732,16 @@ export function PostsPage({
                         保存图片
                       </a>
                     </Button>
-                    <Button
-                      size="sm"
-                      disabled={pendingPublishBusyId === item.id}
-                      onClick={() => void confirmManualPublish(item)}
-                    >
-                      {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-                      确认已发布
-                    </Button>
+                    {!botMode ? (
+                      <Button
+                        size="sm"
+                        disabled={pendingPublishBusyId === item.id}
+                        onClick={() => void confirmManualPublish(item)}
+                      >
+                        {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+                        确认已发布
+                      </Button>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
@@ -3407,39 +3411,33 @@ function PublishedTagFilter({ tags, value, onChange, canDelete = false, onDelete
         全部
       </button>
       {tags.map((tag) => (
-        <button
+        <div
           key={tag.id}
-          type="button"
           className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-bold transition-colors ${
             value === tag.id ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           }`}
-          onClick={() => onChange(tag.id)}
-          title={tag.description ?? tag.name}
         >
-          <span className="size-2 rounded-full" style={{ backgroundColor: tag.color || "#cbd5e1" }} />
-          {tag.name}
-          {typeof tag.postCount === "number" ? <span className="text-[10px] opacity-70">{tag.postCount}</span> : null}
+          <button
+            type="button"
+            className="flex items-center gap-1"
+            onClick={() => onChange(tag.id)}
+            title={tag.description ?? tag.name}
+          >
+            <span className="size-2 rounded-full" style={{ backgroundColor: tag.color || "#cbd5e1" }} />
+            {tag.name}
+            {typeof tag.postCount === "number" ? <span className="text-[10px] opacity-70">{tag.postCount}</span> : null}
+          </button>
           {canDelete && onDeleteTag ? (
-            <span
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               aria-label={`删除标签 ${tag.name}`}
-              className="ml-0.5 text-[11px] font-bold text-slate-400 hover:text-red-600"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDeleteTag(tag);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.stopPropagation();
-                  onDeleteTag(tag);
-                }
-              }}
+              className="text-[11px] font-bold text-slate-400 hover:text-red-600"
+              onClick={() => onDeleteTag(tag)}
             >
               ×
-            </span>
+            </button>
           ) : null}
-        </button>
+        </div>
       ))}
     </div>
   );
