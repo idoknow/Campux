@@ -175,6 +175,7 @@ type AiSettingsForm = {
   privatePostAiEnabled: boolean;
   aiReviewRules: { blockedPatterns: string[]; allowedCategories: string[]; tone: string; strictPrivacy: boolean };
   aiReviewMode: "off" | "shadow" | "assist" | "auto";
+  aiReviewConcurrency: number;
   autoModeration: { enabled: boolean; globalKillSwitch: boolean; autoApproveEnabled: boolean; autoRejectEnabled: boolean; minimumConfidence: number; autoApproveMinimumConfidence: number; autoRejectMinimumConfidence: number; delaySeconds: number };
   postTaggingEnabled: boolean;
   postTagMaintenanceEnabled: boolean;
@@ -623,6 +624,7 @@ export function AdminPage({
       privatePostAiEnabled: aiForm.privatePostAiEnabled,
       aiReviewRules: aiForm.aiReviewRules,
       aiReviewMode: aiForm.aiReviewMode,
+      aiReviewConcurrency: aiForm.aiReviewConcurrency,
       autoModeration: aiForm.autoModeration,
       postTaggingEnabled: aiForm.postTaggingEnabled,
       postTagMaintenanceEnabled: aiForm.postTagMaintenanceEnabled,
@@ -1239,6 +1241,19 @@ export function AdminPage({
                         </SelectContent>
                       </Select>
                       <span className="text-xs font-normal text-slate-500">模型只生成建议，不是最终决定。服务端按自动审核开关、紧急暂停、风险等级、AI 建议动作与置信度门槛处理；不符合条件或无法判断时转人工。</span>
+                    </label>
+                    <label className="grid max-w-sm gap-1 text-sm font-medium">
+                      并发审核数（1-5）
+                      <Input
+                        type="number"
+                        min={1}
+                        max={5}
+                        step={1}
+                        value={aiForm?.aiReviewConcurrency ?? 2}
+                        disabled={busy || aiTesting || !aiForm}
+                        onChange={(event) => aiForm && setAiForm({ ...aiForm, aiReviewConcurrency: Math.min(5, Math.max(1, Math.trunc(Number(event.target.value) || 1))) })}
+                      />
+                      <span className="text-xs font-normal text-slate-500">同时进行的 AI 审核请求上限。短时间内超过该数量时会自动排队等待，不会跳过分析。</span>
                     </label>
                     <p className="text-xs leading-5 text-slate-600">建议与执行分开：AI 生成审核建议；是否自动执行由服务端安全门控决定。无法自动判断或未通过置信度门槛时，仍由审核员处理。</p>
                     <div className="mt-3 grid gap-3 rounded-lg border p-3">
@@ -4242,6 +4257,7 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
       strictPrivacy: settings.rules.aiReviewRules?.strictPrivacy ?? true,
     },
     aiReviewMode: settings.rules.aiReviewMode ?? "off",
+    aiReviewConcurrency: settings.rules.aiReviewConcurrency ?? 2,
     autoModeration: {
       enabled: settings.rules.autoModeration?.enabled ?? false,
       globalKillSwitch: settings.rules.autoModeration?.globalKillSwitch ?? false,

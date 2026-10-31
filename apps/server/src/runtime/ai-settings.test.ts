@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
-import { normalizeAiRules } from "./ai-settings";
+import { normalizeAiRules, mergeAiRules } from "./ai-settings";
 import { aiSettingsSchema } from "../routes/ai";
 
 describe("AI settings normalization", () => {
@@ -42,5 +42,17 @@ describe("AI settings normalization", () => {
 
   test("settings API accepts operation confidence thresholds", () => {
     expect(aiSettingsSchema.safeParse({ rules: { autoModeration: { autoApproveMinimumConfidence: 0.96, autoRejectMinimumConfidence: 0.995 } } }).success).toBe(true);
+  });
+
+  test("partial rule updates keep the saved rules and merge nested objects", () => {
+    const saved = normalizeAiRules({ aiReviewMode: "auto", aiReviewConcurrency: 4, postTaggingEnabled: true, autoModeration: { enabled: true, delaySeconds: 60 } });
+    const merged = normalizeAiRules(mergeAiRules(saved, { aiReviewConcurrency: 3 }));
+    expect(merged.aiReviewMode).toBe("auto");
+    expect(merged.aiReviewConcurrency).toBe(3);
+    expect(merged.postTaggingEnabled).toBe(true);
+    expect(merged.autoModeration).toMatchObject({ enabled: true, delaySeconds: 60 });
+
+    const nested = normalizeAiRules(mergeAiRules(saved, { autoModeration: { delaySeconds: 90 } }));
+    expect(nested.autoModeration).toMatchObject({ enabled: true, delaySeconds: 90 });
   });
 });

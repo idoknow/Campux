@@ -678,6 +678,8 @@ export type AiRules = {
     strictPrivacy?: boolean | undefined;
   };
   aiReviewMode?: "off" | "shadow" | "assist" | "auto";
+  /** 单租户同时进行的 AI 审核请求数上限（1-5） */
+  aiReviewConcurrency?: number;
   autoModeration: { enabled?: boolean | undefined; globalKillSwitch?: boolean | undefined; autoApproveEnabled?: boolean | undefined; autoRejectEnabled?: boolean | undefined; minimumConfidence?: number | undefined; autoApproveMinimumConfidence?: number | undefined; autoRejectMinimumConfidence?: number | undefined; delaySeconds?: number | undefined; };
   /** 是否启用私聊投稿 AI 语义收稿 */
   privatePostAiEnabled?: boolean;

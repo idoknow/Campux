@@ -28,6 +28,8 @@ export type AiRules = {
   } | undefined;
   /** Whether to run review assistance after a post is submitted. */
   aiReviewMode?: "off" | "shadow" | "assist" | "auto" | undefined;
+  /** 单租户同时进行的 AI 审核请求数上限（1-5）；超出的稿件排队等待，不丢弃。 */
+  aiReviewConcurrency?: number | undefined;
   autoModeration?: {
     enabled?: boolean | undefined;
     globalKillSwitch?: boolean | undefined;
@@ -87,6 +89,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
   timeoutSeconds: 30,
   rules: {
     aiReviewMode: "off",
+    aiReviewConcurrency: 2,
     autoModeration: { enabled: false, globalKillSwitch: false, autoApproveEnabled: false, autoRejectEnabled: false, minimumConfidence: 0.98, autoApproveMinimumConfidence: 0.98, autoRejectMinimumConfidence: 0.99, delaySeconds: 60 },
     privatePostAiEnabled: false,
     postTaggingEnabled: true,
@@ -143,7 +146,7 @@ export async function updateTenantAiSettings(
       apiKeySecret,
       ...(input.temperature === undefined ? {} : { temperature: clampNumber(input.temperature, 0, 1, defaultAiSettings.temperature) }),
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: Math.max(5, Math.min(120, input.timeoutSeconds)) }),
-      ...(input.rules === undefined ? {} : { rules: normalizeAiRules(input.rules) }),
+      ...(input.rules === undefined ? {} : { rules: normalizeAiRules(mergeAiRules(existing?.rules, input.rules)) }),
     },
     create: {
       tenantId,
@@ -289,6 +292,25 @@ export async function resolveTenantAiApiKey(
   return secret && typeof secret === "object" && "apiKey" in secret ? String(secret.apiKey) : "";
 }
 
+/**
+ * PATCH 里的 rules 是部分更新：先用库里已存的规则打底再合并，否则未提交的字段会被
+ * 默认值清空（例：只改 aiReviewConcurrency，却把 aiReviewMode 重置成 off）。
+ * 只做一层深合并——autoModeration / aiReviewRules 这类嵌套对象同样按字段合并。
+ */
+export function mergeAiRules(existing: unknown, update: unknown): unknown {
+  const base = existing && typeof existing === "object" && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {};
+  if (!update || typeof update !== "object" || Array.isArray(update)) return base;
+  const patch = update as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...base, ...patch };
+  for (const [key, value] of Object.entries(patch)) {
+    const current = base[key];
+    if (value && typeof value === "object" && !Array.isArray(value) && current && typeof current === "object" && !Array.isArray(current)) {
+      merged[key] = { ...(current as Record<string, unknown>), ...(value as Record<string, unknown>) };
+    }
+  }
+  return merged;
+}
+
 export function normalizeAiRules(value: unknown): AiRules {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return defaultAiSettings.rules;
@@ -297,6 +319,7 @@ export function normalizeAiRules(value: unknown): AiRules {
   return {
     privatePostAiEnabled: typeof candidate.privatePostAiEnabled === "boolean" ? candidate.privatePostAiEnabled : defaultAiSettings.rules.privatePostAiEnabled,
     aiReviewMode: candidate.aiReviewMode === "shadow" || candidate.aiReviewMode === "assist" || candidate.aiReviewMode === "auto" ? candidate.aiReviewMode : "off",
+    aiReviewConcurrency: normalizeNumber(candidate.aiReviewConcurrency, 1, 5, defaultAiSettings.rules.aiReviewConcurrency ?? 2),
     autoModeration: normalizeAutoModeration(candidate.autoModeration),
     aiReviewRules: normalizeAiReviewRules(candidate.aiReviewRules),
     postTaggingEnabled: typeof candidate.postTaggingEnabled === "boolean" ? candidate.postTaggingEnabled : defaultAiSettings.rules.postTaggingEnabled,
