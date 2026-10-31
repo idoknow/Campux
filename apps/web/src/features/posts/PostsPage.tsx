@@ -200,6 +200,9 @@ const reviewStatusOptions = [
   { value: "all", label: "全部" },
 ] as const;
 
+// bot 模式专用：审核板块筛选里的「待发布」（approved 且从未进过发布队列的滞留稿件）。
+const pendingPublishReviewOption = { value: "pending_publish", label: "待发布" } as const;
+
 const publishedTagMaintenanceOptions = [
   { value: "14", label: "近 14 天" },
   { value: "30", label: "近 30 天" },
@@ -218,7 +221,7 @@ type PostTagMaintenanceResult = {
   }>;
 };
 
-type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"];
+type ReviewStatusFilter = (typeof reviewStatusOptions)[number]["value"] | (typeof pendingPublishReviewOption)["value"];
 type ReviewListPreferences = {
   status: ReviewStatusFilter;
   keyword: string;
@@ -229,9 +232,13 @@ const defaultReviewListPreferences: ReviewListPreferences = {
   keyword: "",
 };
 
+function isReviewStatusFilterValue(value: unknown): value is ReviewStatusFilter {
+  return value === pendingPublishReviewOption.value || reviewStatusOptions.some((option) => option.value === value);
+}
+
 function readReviewStatusQuery(): ReviewStatusFilter {
   const status = readQueryParam("status");
-  return reviewStatusOptions.some((option) => option.value === status) ? (status as ReviewStatusFilter) : "pending_approval";
+  return isReviewStatusFilterValue(status) ? status : "pending_approval";
 }
 
 function reviewPreferencesKey(tenantId: string) {
@@ -241,7 +248,7 @@ function reviewPreferencesKey(tenantId: string) {
 function isReviewListPreferences(value: unknown): value is ReviewListPreferences {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ReviewListPreferences>;
-  return typeof candidate.keyword === "string" && reviewStatusOptions.some((option) => option.value === candidate.status);
+  return typeof candidate.keyword === "string" && isReviewStatusFilterValue(candidate.status);
 }
 
 function readReviewListPreferences(tenantId: string): ReviewListPreferences {
@@ -353,7 +360,10 @@ export function PostsPage({
   const [pendingRequeueBusy, setPendingRequeueBusy] = useState(false);
   const [pendingPublishLoading, setPendingPublishLoading] = useState(false);
   const [pendingPublishBusyId, setPendingPublishBusyId] = useState("");
-  const showPendingPublishTab = isAdmin;
+  // bot 模式下「待发布」不再是独立页签，并入审核板块的「待发布」筛选；
+  // manual 模式保留独立页签作为主工作队列。
+  const showPendingPublishTab = isAdmin && pendingResidual?.operateMode !== "bot";
+  const reviewPendingPublishActive = isAdmin && pendingResidual?.operateMode === "bot";
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
   const [detailPostId, setDetailPostId] = useState(() => readQueryParam("post"));
@@ -408,7 +418,7 @@ export function PostsPage({
     if (canReview) allowed.push("review");
     if (showFeedbackTab) allowed.push("feedback");
     if (showHistoryTab) allowed.push("history");
-    if (isAdmin) allowed.push("pendingPublish");
+    if (showPendingPublishTab) allowed.push("pendingPublish");
     if (!allowed.includes(activeTab)) {
       onTabChange(canReview ? "review" : "mine");
     }
@@ -421,11 +431,29 @@ export function PostsPage({
   }, [tenantId]);
 
   useEffect(() => {
-    if (!showPendingPublishTab) {
+    // bot 模式下面板挂在审核板块的「待发布」筛选下；manual 模式挂在独立页签下。
+    const mergedViewActive = reviewPendingPublishActive && activeTab === "review" && reviewStatus === "pending_publish";
+    if (!showPendingPublishTab && !mergedViewActive) {
       return;
     }
     void refreshPendingPublish();
-  }, [showPendingPublishTab, activeTab === "pendingPublish", pendingPublishPage, tenantId]);
+  }, [showPendingPublishTab, reviewPendingPublishActive, activeTab, reviewStatus, pendingPublishPage, tenantId]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+    // 独立读取运营模式：决定「待发布」是独立页签还是审核筛选，不能等面板刷新才拿到。
+    let cancelled = false;
+    api<{ operateMode: "bot" | "manual"; residual: number }>("/api/admin/pending-publish/residual")
+      .then((data) => {
+        if (!cancelled) setPendingResidual(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPendingResidual(null);
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, tenantId]);
 
   async function refreshPendingPublish() {
     setPendingPublishLoading(true);
@@ -527,6 +555,190 @@ export function PostsPage({
     }
   }
 
+  /**
+   * 待发布面板：manual 模式挂在独立页签下作为主工作队列；
+   * bot 模式并入审核板块的「待发布」筛选，用于滞留稿件查看与补投。
+   */
+  function renderPendingPublishPanel() {
+    const botMode = pendingResidual?.operateMode === "bot";
+    return (
+      <>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-500">
+            {botMode
+              ? "这里只显示审核通过但未进入发布队列的滞留稿件，不会自动发布；可一键补入队列。"
+              : "审核通过的稿件会在这里排队；渲染保存后手动发到 QQ 空间，再回来点「确认已发布」。"}
+            {pendingPublishPagination.total > 0 ? ` · 共 ${pendingPublishPagination.total} 条` : ""}
+          </p>
+          <Button variant="outline" size="sm" disabled={pendingPublishLoading} onClick={() => void refreshPendingPublish()}>
+            刷新
+          </Button>
+        </div>
+        {botMode && pendingResidual && pendingResidual.residual > 0 ? (
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <p>
+              切回机器人发布后，有 {pendingResidual.residual} 条审核通过的稿件仍滞留在这里，不会自动发布。
+            </p>
+            <Button
+              className="mt-2"
+              size="sm"
+              disabled={pendingRequeueBusy}
+              onClick={() => void requeueResidualPosts()}
+            >
+              {pendingRequeueBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+              一键补入自动发布队列
+            </Button>
+          </div>
+        ) : null}
+        {pendingPublishItems.length > 0 ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                className="size-4 accent-sky-600"
+                checked={pendingPublishItems.every((item) => pendingPublishSelected.has(item.id))}
+                onChange={(event) => {
+                  setPendingPublishSelected(event.target.checked
+                    ? new Set(pendingPublishItems.map((item) => item.id))
+                    : new Set());
+                }}
+              />
+              全选本页
+            </label>
+            <span className="text-xs text-slate-500">已选 {pendingPublishSelected.size} 条</span>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pendingPublishBatchBusy || pendingPublishSelected.size === 0}
+                onClick={() => void confirmPendingPublishBulk([...pendingPublishSelected])}
+              >
+                确认选中
+              </Button>
+              <Button
+                size="sm"
+                disabled={pendingPublishBatchBusy || pendingPublishPagination.total === 0}
+                onClick={() => void confirmPendingPublishBulk([])}
+              >
+                {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+                一键确认全部已发布（{pendingPublishPagination.total}）
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {pendingPublishFailures.length > 0 ? (
+          <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-bold">有 {pendingPublishFailures.length} 条稿件未能确认发布</p>
+              <button type="button" className="shrink-0 font-semibold underline-offset-4 hover:underline" onClick={() => setPendingPublishFailures([])}>
+                关闭
+              </button>
+            </div>
+            <ul className="mt-2 space-y-1">
+              {pendingPublishFailures.map((failure) => (
+                <li key={failure.id}>
+                  <span className="font-semibold">{failure.displayId === null ? failure.id : `#${failure.displayId}`}</span>
+                  {" · "}
+                  {failure.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {pendingPublishLoading && pendingPublishItems.length === 0 ? (
+          <LoadingBlock title="正在加载待发布稿件..." />
+        ) : pendingPublishItems.length === 0 ? (
+          <EmptyCard title="没有待发布的稿件" />
+        ) : (
+          <div className="space-y-3">
+            {pendingPublishItems.map((item) => (
+              <Card key={item.id} className={`border-amber-200 bg-white shadow-none dark:border-amber-900 dark:bg-slate-900 ${pendingPublishSelected.has(item.id) ? "ring-2 ring-sky-400" : ""}`}>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="size-4 shrink-0 accent-sky-600"
+                        checked={pendingPublishSelected.has(item.id)}
+                        aria-label={`选择稿件 #${item.displayId}`}
+                        onChange={(event) => {
+                          setPendingPublishSelected((selected) => {
+                            const next = new Set(selected);
+                            if (event.target.checked) {
+                              next.add(item.id);
+                            } else {
+                              next.delete(item.id);
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        #{item.displayId}
+                        {" · "}
+                        {item.anonymous
+                          ? "匿名投稿"
+                          : `${item.author.displayName || "未设置昵称"} · QQ ${item.author.qqUin}`}
+                      </span>
+                    </div>
+                    <span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span>
+                  </div>
+                  <p className="line-clamp-4 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
+                    {item.text}
+                  </p>
+                  <a
+                    href={`/api/posts/${item.id}/render-preview`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                    title="点击查看大图"
+                  >
+                    <img
+                      src={`/api/posts/${item.id}/render-preview`}
+                      alt={`稿件 #${item.displayId} 渲染图`}
+                      className="max-h-64 w-full object-contain"
+                      loading="lazy"
+                    />
+                  </a>
+                  <p className="text-xs text-slate-500">附件 {item.attachmentCount} 个</p>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`/api/posts/${item.id}/render-preview`} target="_blank" rel="noreferrer">
+                        <EyeIcon className="mr-1 size-4" />
+                        查看渲染图
+                      </a>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`/api/posts/${item.id}/render-preview`} download={`campux-post-${item.displayId}.jpg`}>
+                        <FileTextIcon className="mr-1 size-4" />
+                        保存图片
+                      </a>
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={pendingPublishBusyId === item.id}
+                      onClick={() => void confirmManualPublish(item)}
+                    >
+                      {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+                      确认已发布
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+        {pendingPublishPagination.total > 0 ? (
+          <PaginationControls
+            pagination={pendingPublishPagination}
+            busy={pendingPublishLoading || pendingPublishBatchBusy}
+            onPageChange={setPendingPublishPage}
+          />
+        ) : null}
+      </>
+    );
+  }
+
   useEffect(() => {
     if (activeTab !== "feedback" || !showFeedbackTab) {
       return;
@@ -616,7 +828,11 @@ export function PostsPage({
     }
 
     setReviewPosts([]);
-    void Promise.all([refreshPendingRecallPosts(), refreshReviewPosts(reviewPage)]).catch((caught) => {
+    void Promise.all([
+      refreshPendingRecallPosts(),
+      // bot 模式的「待发布」筛选走待发布面板，不请求审核列表（服务端不认识这个筛选值）。
+      reviewStatus === "pending_publish" ? Promise.resolve() : refreshReviewPosts(reviewPage),
+    ]).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取审核列表");
     });
   }, [canReview, reviewStatus, reviewPage, tenantId]);
@@ -1197,7 +1413,10 @@ export function PostsPage({
   }
 
   const activePreviewImage = imagePreview.images[imagePreview.index] ?? null;
-  const reviewStatusLabel = reviewStatusOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
+  const reviewStatusFilterOptions = reviewPendingPublishActive
+    ? [...reviewStatusOptions, pendingPublishReviewOption]
+    : reviewStatusOptions;
+  const reviewStatusLabel = reviewStatusFilterOptions.find((option) => option.value === reviewStatus)?.label ?? "筛选";
   const filteredReviewPosts = reviewPosts.filter((post) => !pendingRecallPosts.some((recallPost) => recallPost.id === post.id));
   const detailPost = detailPostId ? pendingRecallPosts.find((post) => post.id === detailPostId) ?? reviewPosts.find((post) => post.id === detailPostId) ?? null : null;
 
@@ -1505,176 +1724,7 @@ export function PostsPage({
         ) : null}
         {showPendingPublishTab ? (
           <TabsContent value="pendingPublish" className="mt-3 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-slate-500">
-                审核通过的稿件会在这里排队；渲染保存后手动发到 QQ 空间，再回来点「确认已发布」。
-                {pendingPublishPagination.total > 0 ? ` · 共 ${pendingPublishPagination.total} 条` : ""}
-              </p>
-              <Button variant="outline" size="sm" disabled={pendingPublishLoading} onClick={() => void refreshPendingPublish()}>
-                刷新
-              </Button>
-            </div>
-            {pendingResidual?.operateMode === "bot" && pendingResidual.residual > 0 ? (
-              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                <p>
-                  切回机器人发布后，有 {pendingResidual.residual} 条审核通过的稿件仍滞留在这里，不会自动发布。
-                </p>
-                <Button
-                  className="mt-2"
-                  size="sm"
-                  disabled={pendingRequeueBusy}
-                  onClick={() => void requeueResidualPosts()}
-                >
-                  {pendingRequeueBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
-                  一键补入自动发布队列
-                </Button>
-              </div>
-            ) : null}
-            {pendingPublishItems.length > 0 ? (
-              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
-                <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-sky-600"
-                    checked={pendingPublishItems.every((item) => pendingPublishSelected.has(item.id))}
-                    onChange={(event) => {
-                      setPendingPublishSelected(event.target.checked
-                        ? new Set(pendingPublishItems.map((item) => item.id))
-                        : new Set());
-                    }}
-                  />
-                  全选本页
-                </label>
-                <span className="text-xs text-slate-500">已选 {pendingPublishSelected.size} 条</span>
-                <div className="ml-auto flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={pendingPublishBatchBusy || pendingPublishSelected.size === 0}
-                    onClick={() => void confirmPendingPublishBulk([...pendingPublishSelected])}
-                  >
-                    确认选中
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={pendingPublishBatchBusy || pendingPublishPagination.total === 0}
-                    onClick={() => void confirmPendingPublishBulk([])}
-                  >
-                    {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-                    一键确认全部已发布（{pendingPublishPagination.total}）
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            {pendingPublishFailures.length > 0 ? (
-              <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-bold">有 {pendingPublishFailures.length} 条稿件未能确认发布</p>
-                  <button type="button" className="shrink-0 font-semibold underline-offset-4 hover:underline" onClick={() => setPendingPublishFailures([])}>
-                    关闭
-                  </button>
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {pendingPublishFailures.map((failure) => (
-                    <li key={failure.id}>
-                      <span className="font-semibold">{failure.displayId === null ? failure.id : `#${failure.displayId}`}</span>
-                      {" · "}
-                      {failure.reason}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {pendingPublishLoading && pendingPublishItems.length === 0 ? (
-              <LoadingBlock title="正在加载待发布稿件..." />
-            ) : pendingPublishItems.length === 0 ? (
-              <EmptyCard title="没有待发布的稿件" />
-            ) : (
-              <div className="space-y-3">
-                {pendingPublishItems.map((item) => (
-                  <Card key={item.id} className={`border-amber-200 bg-white shadow-none dark:border-amber-900 dark:bg-slate-900 ${pendingPublishSelected.has(item.id) ? "ring-2 ring-sky-400" : ""}`}>
-                  <CardContent className="space-y-3 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <input
-                          type="checkbox"
-                          className="size-4 shrink-0 accent-sky-600"
-                          checked={pendingPublishSelected.has(item.id)}
-                          aria-label={`选择稿件 #${item.displayId}`}
-                          onChange={(event) => {
-                            setPendingPublishSelected((selected) => {
-                              const next = new Set(selected);
-                              if (event.target.checked) {
-                                next.add(item.id);
-                              } else {
-                                next.delete(item.id);
-                              }
-                              return next;
-                            });
-                          }}
-                        />
-                        <span className="font-semibold text-slate-700 dark:text-slate-200">
-                          #{item.displayId}
-                          {" · "}
-                          {item.anonymous
-                            ? "匿名投稿"
-                            : `${item.author.displayName || "未设置昵称"} · QQ ${item.author.qqUin}`}
-                        </span>
-                        </div>
-                        <span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span>
-                      </div>
-                      <p className="line-clamp-4 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900 dark:text-slate-100">
-                        {item.text}
-                      </p>
-                      <a
-                        href={`/api/posts/${item.id}/render-preview`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
-                        title="点击查看大图"
-                      >
-                        <img
-                          src={`/api/posts/${item.id}/render-preview`}
-                          alt={`稿件 #${item.displayId} 渲染图`}
-                          className="max-h-64 w-full object-contain"
-                          loading="lazy"
-                        />
-                      </a>
-                      <p className="text-xs text-slate-500">附件 {item.attachmentCount} 个</p>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={`/api/posts/${item.id}/render-preview`} target="_blank" rel="noreferrer">
-                          <EyeIcon className="mr-1 size-4" />
-                          查看渲染图
-                          </a>
-                        </Button>
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={`/api/posts/${item.id}/render-preview`} download={`campux-post-${item.displayId}.jpg`}>
-                          <FileTextIcon className="mr-1 size-4" />
-                          保存图片
-                          </a>
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={pendingPublishBusyId === item.id}
-                          onClick={() => void confirmManualPublish(item)}
-                        >
-                          {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-                          确认已发布
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-            {pendingPublishPagination.total > 0 ? (
-              <PaginationControls
-                pagination={pendingPublishPagination}
-                busy={pendingPublishLoading || pendingPublishBatchBusy}
-                onPageChange={setPendingPublishPage}
-              />
-            ) : null}
+            {renderPendingPublishPanel()}
           </TabsContent>
         ) : null}
         {showFeedbackTab ? (
@@ -1799,7 +1849,7 @@ export function PostsPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {reviewStatusOptions.map((option) => (
+                  {reviewStatusFilterOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -1904,38 +1954,44 @@ export function PostsPage({
                   )}
                 </section>
               ) : null}
-              <PendingRecallQueue
-                posts={pendingRecallPosts}
-                loading={pendingRecallLoading}
-                busyPostId={busyPostId}
-                onPreview={(post) => void openRenderPreview(post)}
-                onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
-                onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
-                onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
-                onRecallIgnore={(post) => void ignoreRecallPost(post)}
-                onDetail={(post) => openPostDetail(post.id)}
-              />
-              {reviewLoading ? (
-                <LoadingBlock title="正在加载审核稿件..." />
+              {reviewStatus === "pending_publish" ? (
+                renderPendingPublishPanel()
               ) : (
                 <>
-                  <ReviewList
-                    posts={filteredReviewPosts}
+                  <PendingRecallQueue
+                    posts={pendingRecallPosts}
+                    loading={pendingRecallLoading}
                     busyPostId={busyPostId}
-                    isAdmin={isAdmin}
                     onPreview={(post) => void openRenderPreview(post)}
                     onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
-                    onApprove={(id) => void reviewPost(id, "approve")}
-                    onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
                     onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
-                    onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
-                    onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
+                    onRecallIgnore={(post) => void ignoreRecallPost(post)}
                     onDetail={(post) => openPostDetail(post.id)}
-                    onCancelAutoDecision={(post) => void cancelAutoDecision(post)}
-                    emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
                   />
-                  <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
+                  {reviewLoading ? (
+                    <LoadingBlock title="正在加载审核稿件..." />
+                  ) : (
+                    <>
+                      <ReviewList
+                        posts={filteredReviewPosts}
+                        busyPostId={busyPostId}
+                        isAdmin={isAdmin}
+                        onPreview={(post) => void openRenderPreview(post)}
+                        onImagePreview={(post, images, index) => openImagePreview(images, index, `稿件 ${post.displayId} 上传图片`)}
+                        onApprove={(id) => void reviewPost(id, "approve")}
+                        onReject={(post) => setRejectDialog({ open: true, postId: post.id, displayId: post.displayId, reason: "" })}
+                        onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
+                        onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
+                        onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
+                        onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
+                        onDetail={(post) => openPostDetail(post.id)}
+                        onCancelAutoDecision={(post) => void cancelAutoDecision(post)}
+                        emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
+                      />
+                      <PaginationControls pagination={reviewPagination} busy={reviewLoading} onPageChange={setReviewPageWithQuery} />
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1974,7 +2030,7 @@ export function PostsPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {reviewStatusOptions.map((option) => (
+                  {reviewStatusFilterOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
