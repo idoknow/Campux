@@ -81,20 +81,21 @@ const TAG_MAINTENANCE_RETRY_PAUSE_MS = 10_000;
 const TAG_MAINTENANCE_RETRY_BUDGET_MS = 5 * 60_000;
 const TAG_MAINTENANCE_AUTO_RETRY_INTERVAL_MS = 15 * 60 * 1000;
 const TAG_MAINTENANCE_AUTO_RETRY_MAX_ROUNDS = 3;
-const tagMaintenanceAutoRetryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; remaining: number }>();
+/** 维护自动重试状态：timer 为已排程的 15 分钟重试；定时器触发后置 null（rerun 进行中，remaining 保留）。 */
+const tagMaintenanceAutoRetryTimers = new Map<string, { timer: ReturnType<typeof setTimeout> | null; remaining: number }>();
 
 /** 维护任务进行中标记（按租户互斥，路由/调度器/自动重试共用）。 */
 const tagMaintenanceInFlight = new Map<string, true>();
 
-/** 该租户是否已有待执行的维护自动重试。 */
+/** 该租户是否已有待执行的维护自动重试（定时器已排程且未触发）。 */
 export function hasPendingTagMaintenanceRetry(tenantId: string): boolean {
-  return tagMaintenanceAutoRetryTimers.has(tenantId);
+  return tagMaintenanceAutoRetryTimers.get(tenantId)?.timer != null;
 }
 
 function clearTagMaintenanceAutoRetry(tenantId: string) {
   const state = tagMaintenanceAutoRetryTimers.get(tenantId);
   if (state) {
-    clearTimeout(state.timer);
+    if (state.timer) clearTimeout(state.timer);
     tagMaintenanceAutoRetryTimers.delete(tenantId);
   }
 }
@@ -107,13 +108,16 @@ export function scheduleTagMaintenanceAutoRetry(tenantId: string, lookbackDays: 
     logger.warn({ tenantId }, "post tag maintenance: automatic retries exhausted; waiting for the next scheduled maintenance");
     return;
   }
-  if (state) clearTimeout(state.timer);
+  if (state?.timer) clearTimeout(state.timer);
   logger.warn({ tenantId, remaining, retryAfterMinutes: 15 }, "post tag maintenance: clustering failed, scheduling automatic retry");
   const timer = setTimeout(() => {
+    // 触发后先把 timer 置 null（rerun 进行中、remaining 保留）：
+    // hasPendingTagMaintenanceRetry 只认未触发的定时器，rerun 内部的失败才能按剩余预算继续排程。
+    const entry = tagMaintenanceAutoRetryTimers.get(tenantId);
+    if (entry) entry.timer = null;
     void maintainTenantPostTags({ tenantId, lookbackDays, logger })
       .catch((error) => {
         logger.warn({ error, tenantId }, "post tag maintenance: automatic retry crashed");
-        // 抛出型失败（如读设置/DB 瞬时故障）同样纳入重试预算，保持自愈链不断。
         if (!hasPendingTagMaintenanceRetry(tenantId)) {
           scheduleTagMaintenanceAutoRetry(tenantId, lookbackDays, logger);
         }
