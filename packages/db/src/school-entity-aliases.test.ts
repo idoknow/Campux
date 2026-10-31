@@ -6,6 +6,11 @@ describe("school entity aliases", () => {
     expect(normalizeSchoolEntityAlias("  ＡＢＣ  Campus  ")).toBe("abc campus");
   });
 
+  it("backfills entity names as searchable normalized values as well as aliases", () => {
+    const rows = schoolEntityAliasRows([{ id: "e1", tenantId: "t1", name: "  Ｎorth  Hall ", aliases: '["North Hall", " north  hall ", "", 1]' }]);
+    expect(rows.map(({ value, normalized }) => [value, normalized])).toEqual([["Ｎorth  Hall", "north hall"]]);
+  });
+
   it("backfills valid distinct aliases from JSON values", () => {
     const rows = schoolEntityAliasRows([{ id: "e1", tenantId: "t1", aliases: '["North Hall", " north  hall ", "", 1]' }]);
     expect(rows.map(({ value, normalized }) => [value, normalized])).toEqual([["North Hall", "north hall"]]);

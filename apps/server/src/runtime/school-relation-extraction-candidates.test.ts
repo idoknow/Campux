@@ -38,6 +38,34 @@ describe("relation-extraction candidate scheduling", () => {
     expect([first.candidates[0]?.id, second.candidates[0]?.id]).toEqual(["b", "c"]);
   });
 
+  it("wraps to the beginning when the persisted cursor is past the last id", () => {
+    const candidates = [candidate("a"), candidate("b"), candidate("c")];
+    const result = selectRelationExtractionCandidates({ now, limit: 2, candidates, cursor: "c" });
+    expect(result.candidates.map(({ id }) => id)).toEqual(["a", "b"]);
+    expect(result.nextCursor).toBe("b");
+  });
+
+  it("advances the persisted cursor across ineligible rows so a restarted scan can reach later work", () => {
+    const candidates = [
+      candidate("a", { contentHash: "h", status: "complete", attempts: 1, attemptedAt: now }),
+      candidate("b", { contentHash: "h", status: "failed", attempts: 4, attemptedAt: now }),
+      candidate("c"),
+    ];
+    const first = selectRelationExtractionCandidates({ now, limit: 1, candidates });
+    expect(first.candidates.map(({ id }) => id)).toEqual(["c"]);
+    expect(first.nextCursor).toBe("c");
+
+    // After a crash/restart, feeding back the saved cursor wraps rather than
+    // repeatedly scanning only the completed/backoff rows at the front.
+    const restarted = selectRelationExtractionCandidates({ now, limit: 1, candidates, cursor: first.nextCursor });
+    expect(restarted.candidates).toEqual([]);
+    expect(restarted.nextCursor).toBe("b");
+
+    const resumed = selectRelationExtractionCandidates({ now, limit: 1, candidates, cursor: restarted.nextCursor });
+    expect(resumed.candidates.map(({ id }) => id)).toEqual(["c"]);
+    expect(resumed.nextCursor).toBe("c");
+  });
+
   it("makes no concurrency guarantee; caller must atomically claim before work", () => {
     const candidates = [candidate("p")];
     const one = selectRelationExtractionCandidates({ now, limit: 1, candidates });

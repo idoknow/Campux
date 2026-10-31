@@ -150,11 +150,6 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       posts.push(...candidates.filter((post) => selected.has(post.id)).map((post) => ({ ...post, contentHash: selected.get(post.id)! })));
       if (candidates.length < batchSize) break;
     }
-    if (cursor) {
-      const scanCursor = cursor;
-      const cursorWrite = await runWithActiveTenantLease(prisma, tenantId, async (tx) => tx.schoolRelationExtractionCursor.upsert({ where: { tenantId }, create: { tenantId, postId: scanCursor }, update: { postId: scanCursor } }));
-      if (!cursorWrite.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
-    }
     if (!posts.length) return { postsRead: 0, relationsStored: 0 };
     const baseUrl = (await assertSafeLlmUrl(normalizeBaseUrl(settings.baseUrl))).toString().replace(/\/$/, "");
     const initialLease = await runWithActiveTenantLease(prisma, tenantId, async () => true);
@@ -162,12 +157,17 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     let stored = 0;
     let completedCount = 0;
     let failedCount = 0;
+    const persistCursor = async (postId: string) => runWithActiveTenantLease(prisma, tenantId, async (tx) => tx.schoolRelationExtractionCursor.upsert({ where: { tenantId }, create: { tenantId, postId }, update: { postId } }));
     for (const post of posts) {
       const now = new Date();
       const claimLease = await runWithActiveTenantLease(prisma, tenantId, async (tx) => claimSchoolRelationExtraction(tx, { tenantId, postId: post.id, contentHash: post.contentHash, now, staleBefore: new Date(now.getTime() - 5 * 60_000) }));
       if (!claimLease.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
       const claim = claimLease.value;
-      if (!claim.claimed || !claim.attemptAt) continue;
+      if (!claim.claimed || !claim.attemptAt) {
+        const cursorWrite = await persistCursor(post.id);
+        if (!cursorWrite.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+        continue;
+      }
       const attemptAt = claim.attemptAt;
       const finish = async (status: "failed" | "complete" | "no_relations") => {
         const finished = await runWithActiveTenantLease(prisma, tenantId, async (tx) => tx.schoolRelationExtraction.updateMany({ where: { tenantId, postId: post.id, contentHash: post.contentHash, status: "processing", attemptedAt: attemptAt }, data: { status } }));
@@ -201,6 +201,8 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       else completedCount++;
       } catch { await finish("failed").catch(() => undefined); failedCount++; }
       finally { clearTimeout(timeout); }
+      const cursorWrite = await persistCursor(post.id);
+      if (!cursorWrite.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
     await writeAuditLog({ tenantId, actorId: context.user.id, action: "tenant.ai_review.graph.extract", targetType: "school_relation", detail: { postsRead: posts.length, relationsStored: stored, completed: completedCount, failed: failedCount } });
     return { postsRead: posts.length, relationsStored: stored, completed: completedCount, failed: failedCount };
@@ -218,16 +220,20 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       ]);
       return { entities, page: query.page, pageSize: query.pageSize, total, scanTruncated: false };
     }
-    const [nameMatches, aliasMatches] = await Promise.all([
-      prisma.schoolEntity.findMany({ where: { tenantId, name: { contains: query.q, ...(dbProvider === "postgresql" ? { mode: "insensitive" as const } : {}) } }, select: { id: true } }),
-      prisma.schoolEntityAlias.findMany({ where: { tenantId, normalized: { contains: normalizedQuery } }, distinct: ["entityId"], select: { entityId: true } }),
+    const scanLimit = 1000;
+    const [nameMatches, aliasMatches, legacyEntities] = await Promise.all([
+      prisma.schoolEntity.findMany({ where: { tenantId, name: { contains: query.q, ...(dbProvider === "postgresql" ? { mode: "insensitive" as const } : {}) } }, select: { id: true }, take: scanLimit }),
+      prisma.schoolEntityAlias.findMany({ where: { tenantId, normalized: { contains: normalizedQuery } }, distinct: ["entityId"], select: { entityId: true }, take: scanLimit }),
+      prisma.schoolEntity.findMany({ where: { tenantId }, orderBy: [{ type: "asc" }, { name: "asc" }, { id: "asc" }], take: scanLimit + 1 }),
     ]);
-    const entityIds = [...new Set([...nameMatches.map((entity) => entity.id), ...aliasMatches.map(({ entityId }) => entityId)])];
+    const scanTruncated = legacyEntities.length > scanLimit;
+    const legacyMatches = searchSchoolEntities(legacyEntities.slice(0, scanLimit), query.q);
+    const entityIds = [...new Set([...nameMatches.map((entity) => entity.id), ...aliasMatches.map(({ entityId }) => entityId), ...legacyMatches.map((entity) => entity.id)])];
     const [entities, total] = await Promise.all([
       entityIds.length ? prisma.schoolEntity.findMany({ where: { tenantId, id: { in: entityIds } }, orderBy: [{ type: "asc" }, { name: "asc" }, { id: "asc" }], skip: offset, take: query.pageSize }) : [],
       Promise.resolve(entityIds.length),
     ]);
-    return { entities, page: query.page, pageSize: query.pageSize, total, scanTruncated: false };
+    return { entities, page: query.page, pageSize: query.pageSize, total, scanTruncated };
   });
 
   app.post("/api/admin/ai-review/entities/evidence", async (request, reply) => {

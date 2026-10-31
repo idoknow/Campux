@@ -31,15 +31,16 @@ export async function syncSchoolEntityAliases(
 }
 
 /** Produce de-duplicated alias rows from the legacy JSON field for a backfill. */
-export function schoolEntityAliasRows(entities: readonly { id: string; tenantId: string; aliases: unknown }[]) {
+export function schoolEntityAliasRows(entities: readonly { id: string; tenantId: string; name?: string; aliases: unknown }[]) {
   return entities.flatMap((entity) => {
     let aliases: unknown = entity.aliases;
     if (typeof aliases === "string") {
       try { aliases = JSON.parse(aliases); } catch { aliases = []; }
     }
-    if (!Array.isArray(aliases)) return [];
+    if (!Array.isArray(aliases)) aliases = [];
+    const candidates = [...(entity.name ? [entity.name] : []), ...(aliases as unknown[])];
     const seen = new Set<string>();
-    return aliases.flatMap((candidate) => {
+    return candidates.flatMap((candidate) => {
       if (typeof candidate !== "string") return [];
       const normalized = normalizeSchoolEntityAlias(candidate);
       if (!normalized || seen.has(normalized)) return [];
