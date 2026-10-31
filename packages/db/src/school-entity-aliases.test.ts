@@ -22,7 +22,7 @@ describe("school entity aliases", () => {
       deleteMany: async (args: unknown) => { calls.push(["delete", args]); },
       createMany: async (args: unknown) => { calls.push(["create", args]); },
     } };
-    await syncSchoolEntityAliases(tx, "t1", "e1", ["East", " east ", "West"]);
+    await syncSchoolEntityAliases(tx, "t1", "e1", [" east ", "West"], "East");
     expect(calls[0]).toEqual(["delete", { where: { tenantId: "t1", entityId: "e1" } }]);
     expect((calls[1] as [string, { data: unknown[] }])[1].data).toHaveLength(2);
   });

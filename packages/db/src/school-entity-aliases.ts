@@ -18,9 +18,10 @@ export async function syncSchoolEntityAliases(
   tenantId: string,
   entityId: string,
   aliases: readonly string[],
+  name?: string,
 ): Promise<void> {
   const seen = new Set<string>();
-  const data = aliases.flatMap((value) => {
+  const data = [...(name ? [name] : []), ...aliases].flatMap((value) => {
     const normalized = normalizeSchoolEntityAlias(value);
     if (!normalized || seen.has(normalized)) return [];
     seen.add(normalized);

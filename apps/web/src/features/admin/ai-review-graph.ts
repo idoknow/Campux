@@ -21,5 +21,6 @@ export function graphNodePosition(index: number) {
 }
 
 export function graphLabel(value: string, maxLength = 16) {
-  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+  const segments = [...new Intl.Segmenter("und", { granularity: "grapheme" }).segment(value)].map(({ segment }) => segment);
+  return segments.length > maxLength ? `${segments.slice(0, Math.max(0, maxLength - 1)).join("")}…` : value;
 }

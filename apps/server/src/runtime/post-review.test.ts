@@ -86,6 +86,10 @@ describe("buildSchoolRelationContext", () => {
     const stale = { subject: "图书馆", predicate: "located_at", object: "东区", evidence: "图书馆位于东区" };
     expect(buildSchoolRelationContext([stale], "图书馆不位于东区")).toBe("");
   });
+  test("filters PII from otherwise grounded relation evidence", () => {
+    const relation = { subject: "活动", predicate: "held_at", object: "东区", evidence: "活动在东区，联系 138-1234-5678" };
+    expect(buildSchoolRelationContext([relation], relation.evidence)).toBe("");
+  });
   test("caps relation count and context characters", () => {
     const relations = Array.from({ length: 8 }, (_, index) => ({ subject: "图书馆", predicate: "located_at", object: `东区${index}`, evidence: "图书馆位于东区" }));
     const context = buildSchoolRelationContext(relations, "图书馆 东区", 100, 10000);

@@ -81,6 +81,11 @@ export function parseSchoolRelationExtraction(raw: string): ExtractedSchoolRelat
     return out;
   } catch { return null; }
 }
+const containsRelationPii = (value: string) => {
+  const normalized = value.normalize("NFKC");
+  return /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(normalized)
+    || /(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u.test(normalized);
+};
 export function buildSchoolRelationContext(relations: Array<{ subject: string; predicate: string; object: string; evidence: string }>, postText: string, maxRelations = 5, maxChars = 1200) {
   const normalize = (value: string) => value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
   const normalizedText = normalize(postText);
@@ -94,7 +99,8 @@ export function buildSchoolRelationContext(relations: Array<{ subject: string; p
       const evidenceSupportsEndpoints = evidence.includes(subject) && evidence.includes(object);
       const evidenceStillPresent = normalizedText.includes(evidence);
       const evidenceValid = validateSchoolRelationEvidence(relation, postText);
-      const score = Number(subjectMatches) + Number(objectMatches) + Number(evidenceSupportsEndpoints && evidenceStillPresent && evidenceValid);
+      const piiSafe = !containsRelationPii(`${relation.subject} ${relation.object} ${relation.evidence}`);
+      const score = Number(subjectMatches) + Number(objectMatches) + Number(evidenceSupportsEndpoints && evidenceStillPresent && evidenceValid && piiSafe);
       return { relation, index, score };
     })
     .filter((entry) => entry.score === 3)

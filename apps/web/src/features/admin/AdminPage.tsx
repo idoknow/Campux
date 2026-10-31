@@ -433,7 +433,17 @@ export function AdminPage({
     let cancelled = false;
     setAiPendingLoading(true);
     api<{ relations: AiReviewGraph["edges"]; page: number; pageSize: number; total: number }>(`/api/admin/ai-review/graph/pending?page=${aiPendingPage}&pageSize=${aiPendingPageSize}`)
-      .then((data) => { if (!cancelled) { setAiPendingRelations(data.relations); setAiPendingTotal(data.total); } })
+      .then((data) => {
+        if (!cancelled) {
+          const lastPage = Math.max(1, Math.ceil(data.total / aiPendingPageSize));
+          if (aiPendingPage > lastPage) {
+            setAiPendingPage(lastPage);
+            return;
+          }
+          setAiPendingRelations(data.relations);
+          setAiPendingTotal(data.total);
+        }
+      })
       .catch((caught) => { if (!cancelled) toast.error(caught instanceof Error ? caught.message : "待审核关系读取失败"); })
       .finally(() => { if (!cancelled) setAiPendingLoading(false); });
     return () => { cancelled = true; };
