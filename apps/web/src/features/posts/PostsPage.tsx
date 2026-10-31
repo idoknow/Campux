@@ -1065,8 +1065,8 @@ export function PostsPage({
     }
   }
 
-  // 手动新建标签 + AI 回溯打标：创建后立即让 LLM 把回溯范围内的存量稿件归入该标签；
-  // 之后的新稿件由 autoTagPost 即时纳入该标签的候选。
+  // 手动新建标签 + AI 回溯打标。同名标签已存在时不挡路：定位现有标签继续回溯，
+  // 因此「再次输入同名标签」就是存量稿件未处理完时的续跑入口。
   async function submitCreateTagWithBackfill() {
     const tagName = tagCreateName.trim();
     if (!tagName) {
@@ -1074,22 +1074,38 @@ export function PostsPage({
     }
     setTagCreateBusy(true);
     try {
-      const created = await api<{ tag: PostTag }>("/api/post-tags/create", {
-        method: "POST",
-        body: JSON.stringify({ tagName, description: tagCreateDesc.trim() || undefined }),
-      });
+      let tag = publishedTags.find((t) => t.name === tagName);
+      let existed = Boolean(tag);
+      if (!tag) {
+        try {
+          tag = (await api<{ tag: PostTag }>("/api/post-tags/create", {
+            method: "POST",
+            body: JSON.stringify({ tagName, description: tagCreateDesc.trim() || undefined }),
+          })).tag;
+        } catch (createError) {
+          // 并发竞态或列表过期导致 409：从标签列表定位现有标签后继续回溯。
+          const tags = await api<{ tags: PostTag[] }>("/api/post-tags").catch(() => null);
+          tag = tags?.tags.find((t) => t.name === tagName);
+          if (!tag) {
+            throw createError;
+          }
+          existed = true;
+        }
+      }
       try {
-        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number; failedChunks: number } }>(
-          `/api/post-tags/${created.tag.id}/backfill`,
+        const backfill = await api<{ result: { scannedCount: number; assignedCount: number; skippedCount: number; failedChunks: number; completed: boolean } }>(
+          `/api/post-tags/${tag.id}/backfill`,
           { method: "POST", body: JSON.stringify({ lookbackDays: Number(tagCreateDays) }) },
         );
         toast.success(
-          `标签「${tagName}」已创建：AI 扫描近 ${tagCreateDays} 天 ${backfill.result.scannedCount} 条稿件，归类 ${backfill.result.assignedCount} 条`
+          (existed ? `标签「${tagName}」已存在，继续回溯打标：` : `标签「${tagName}」已创建：`)
+            + `AI 扫描近 ${tagCreateDays} 天 ${backfill.result.scannedCount} 条稿件，归类 ${backfill.result.assignedCount} 条`
             + (backfill.result.skippedCount > 0 ? `，${backfill.result.skippedCount} 条因标签数已达上限跳过` : "")
-            + (backfill.result.failedChunks > 0 ? `；${backfill.result.failedChunks} 批次归类失败，可稍后重试` : ""),
+            + (backfill.result.failedChunks > 0 ? `；${backfill.result.failedChunks} 批次归类失败，可稍后重试` : "")
+            + (!backfill.result.completed ? "；本次触达处理预算，剩余稿件可再次回溯续跑" : ""),
         );
       } catch (backfillError) {
-        toast.warning(`标签「${tagName}」已创建，但回溯打标未完成：${backfillError instanceof Error ? backfillError.message : "可稍后重试"}`);
+        toast.warning(`标签「${tagName}」${existed ? "回溯打标未完成" : "已创建，但回溯打标未完成"}：${backfillError instanceof Error ? backfillError.message : "可稍后重试"}`);
       }
       setTagCreateOpen(false);
       setTagCreateName("");
@@ -2211,7 +2227,7 @@ export function PostsPage({
           <DialogHeader>
             <DialogTitle>新建标签并回溯打标</DialogTitle>
             <DialogDescription>
-              创建后 AI 会把回溯范围内的存量稿件归类到这个标签；之后的新稿件由自动打标即时处理。
+              创建标签后 AI 会把回溯范围内的存量稿件归类到这个标签，之后的新稿件由自动打标即时处理；标签已存在时会对其继续回溯打标。
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 px-5 pb-5">
