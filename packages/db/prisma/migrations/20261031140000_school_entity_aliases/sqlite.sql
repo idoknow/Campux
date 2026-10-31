@@ -11,7 +11,7 @@ CREATE TABLE "SchoolEntityAlias" (
 CREATE UNIQUE INDEX "SchoolEntityAlias_tenantId_entityId_normalized_key" ON "SchoolEntityAlias"("tenantId", "entityId", "normalized");
 CREATE INDEX "SchoolEntityAlias_tenantId_normalized_idx" ON "SchoolEntityAlias"("tenantId", "normalized");
 INSERT INTO "SchoolEntityAlias" ("id", "tenantId", "entityId", "value", "normalized")
-SELECT lower(hex(randomblob(16))), e."tenantId", e."id", trim(j.value), lower(trim(j.value))
+SELECT lower(hex(randomblob(16))), e."tenantId", e."id", trim(j.value), lower(trim(replace(replace(replace(j.value, char(9), ' '), char(10), ' '), char(13), ' ')))
 FROM "SchoolEntity" e, json_each(e."aliases") j
 WHERE j.type = 'text' AND trim(j.value) <> ''
 ON CONFLICT ("tenantId", "entityId", "normalized") DO NOTHING;

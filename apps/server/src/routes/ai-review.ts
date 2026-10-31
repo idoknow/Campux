@@ -49,10 +49,13 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
 
   app.get("/api/admin/ai-review/graph", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
-    const relations = await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id }, orderBy: { createdAt: "desc" }, take: 150, select: { id: true, subject: true, predicate: true, object: true, evidence: true, approved: true, sourcePostId: true } });
+    const relationSelect = { id: true, subject: true, predicate: true, object: true, evidence: true, approved: true, sourcePostId: true } as const;
+    const pendingRelations = await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: false }, orderBy: { createdAt: "desc" }, take: 150, select: relationSelect });
+    const approvedRelations = pendingRelations.length < 150 ? await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: true }, orderBy: { createdAt: "desc" }, take: 150 - pendingRelations.length, select: relationSelect }) : [];
+    const relations = [...pendingRelations, ...approvedRelations];
     const nodes = [...new Set(relations.flatMap((r) => [r.subject, r.object]))].slice(0, 100);
     const included = new Set(nodes);
-    const edges = relations.filter((r) => included.has(r.subject) && included.has(r.object)).slice(0, 150);
+    const edges = [...pendingRelations.filter((r) => included.has(r.subject) && included.has(r.object)), ...approvedRelations.filter((r) => included.has(r.subject) && included.has(r.object))].slice(0, 150);
     return { nodes: nodes.map((id, i) => ({ id, x: 40 + (i % 10) * 100, y: 40 + Math.floor(i / 10) * 70 })), edges };
   });
 
@@ -96,8 +99,8 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     const maxPages = 20;
     const batchLimit = 20;
     const posts: Array<{ id: string; text: string; contentHash: string }> = [];
-    const lastCheckpoint = await prisma.schoolRelationExtraction.findFirst({ where: { tenantId }, orderBy: [{ attemptedAt: "desc" }, { postId: "desc" }], select: { postId: true } });
-    let cursor: string | null = lastCheckpoint?.postId ?? null;
+    const cursorCheckpoint = await prisma.schoolRelationExtraction.findFirst({ where: { tenantId }, orderBy: [{ attemptedAt: "desc" }, { postId: "desc" }], select: { postId: true } });
+    let cursor: string | null = cursorCheckpoint?.postId ?? null;
     let wrapped = false;
     for (let page = 0; page < maxPages && posts.length < batchLimit; page++) {
       const candidates = await prisma.post.findMany({ where: { tenantId, status: { in: ["approved", "published"] } }, orderBy: { id: "asc" }, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), take: batchSize, select: { id: true, text: true } }) as Array<{ id: string; text: string }>;
@@ -117,7 +120,11 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
         now: new Date(), limit: batchLimit - posts.length, cursor: null,
         candidates: candidates.map((post, index) => {
           const checkpoint = latestByPost.get(post.id);
-          return { id: post.id, contentHash: hashes[index]!, ...(checkpoint ? { checkpoint: { contentHash: checkpoint.contentHash, status: checkpoint.status as "processing" | "failed" | "complete" | "no_relations", attempts: checkpoint.attempts, attemptedAt: checkpoint.attemptedAt } } : {}) };
+          const currentHash = hashes[index]!;
+          const eligibleCheckpoint = checkpoint && checkpoint.contentHash === currentHash && checkpoint.status === "processing" && checkpoint.attemptedAt.getTime() < Date.now() - 5 * 60_000
+            ? { ...checkpoint, status: "failed" as const }
+            : checkpoint;
+          return { id: post.id, contentHash: currentHash, ...(eligibleCheckpoint ? { checkpoint: { contentHash: eligibleCheckpoint.contentHash, status: eligibleCheckpoint.status as "processing" | "failed" | "complete" | "no_relations", attempts: eligibleCheckpoint.attempts, attemptedAt: eligibleCheckpoint.attemptedAt } } : {}) };
         }),
       });
       const selected = new Map(selection.candidates.map((candidate) => [candidate.id, candidate.contentHash]));
@@ -126,15 +133,22 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
     }
     if (!posts.length) return { postsRead: 0, relationsStored: 0 };
     const baseUrl = (await assertSafeLlmUrl(normalizeBaseUrl(settings.baseUrl))).toString().replace(/\/$/, "");
+    const initialLease = await runWithActiveTenantLease(prisma, tenantId, async () => true);
+    if (!initialLease.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
     let stored = 0;
     let completedCount = 0;
     let failedCount = 0;
     for (const post of posts) {
       const now = new Date();
-      const claim = await claimSchoolRelationExtraction(prisma, { tenantId, postId: post.id, contentHash: post.contentHash, now, staleBefore: new Date(now.getTime() - 5 * 60_000) });
+      const claimLease = await runWithActiveTenantLease(prisma, tenantId, async () => claimSchoolRelationExtraction(prisma, { tenantId, postId: post.id, contentHash: post.contentHash, now, staleBefore: new Date(now.getTime() - 5 * 60_000) }));
+      if (!claimLease.active) return reply.code(409).send({ message: "校园墙已暂停或归档" });
+      const claim = claimLease.value;
       if (!claim.claimed || !claim.attemptAt) continue;
       const attemptAt = claim.attemptAt;
-      const finish = async (status: "failed" | "complete" | "no_relations") => prisma.schoolRelationExtraction.updateMany({ where: { tenantId, postId: post.id, contentHash: post.contentHash, status: "processing", attemptedAt: attemptAt }, data: { status } });
+      const finish = async (status: "failed" | "complete" | "no_relations") => {
+        const finished = await runWithActiveTenantLease(prisma, tenantId, async (tx) => tx.schoolRelationExtraction.updateMany({ where: { tenantId, postId: post.id, contentHash: post.contentHash, status: "processing", attemptedAt: attemptAt }, data: { status } }));
+        return finished.active ? finished.value : null;
+      };
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 30) * 1000);
       try {
@@ -145,12 +159,20 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
       if (!extracted) { await finish("failed"); failedCount++; continue; }
       for (const relation of extracted) {
         if (!validateSchoolRelationEvidence(relation, post.text)) continue;
-        await prisma.schoolRelation.upsert({ where: { tenantId_subject_predicate_object_sourcePostId: { tenantId, subject: relation.subject, predicate: relation.predicate, object: relation.object, sourcePostId: post.id } }, create: { tenantId, ...relation, sourcePostId: post.id, approved: false }, update: { evidence: relation.evidence } });
-        stored++;
+        const saved = await runWithActiveTenantLease(prisma, tenantId, async (tx) => {
+          const sourcePost = await tx.post.findFirst({ where: { id: post.id, tenantId, status: { in: ["approved", "published"] } }, select: { id: true, text: true } });
+          if (!sourcePost || !validateSchoolRelationEvidence(relation, sourcePost.text)) return 0;
+          const existingRelation = await tx.schoolRelation.findUnique({ where: { tenantId_subject_predicate_object_sourcePostId: { tenantId, subject: relation.subject, predicate: relation.predicate, object: relation.object, sourcePostId: post.id } }, select: { approved: true } });
+          if (existingRelation?.approved) return 0;
+          await tx.schoolRelation.upsert({ where: { tenantId_subject_predicate_object_sourcePostId: { tenantId, subject: relation.subject, predicate: relation.predicate, object: relation.object, sourcePostId: post.id } }, create: { tenantId, ...relation, sourcePostId: post.id, approved: false }, update: { evidence: relation.evidence } });
+          return 1;
+        });
+        if (!saved.active) { await finish("failed"); failedCount++; break; }
+        stored += saved.value;
       }
       const finalized = await finish(extracted.length ? "complete" : "no_relations");
-      if (finalized.count) completedCount++;
-      else failedCount++;
+      if (!finalized?.count) failedCount++;
+      else completedCount++;
       } catch { await finish("failed").catch(() => undefined); failedCount++; }
       finally { clearTimeout(timeout); }
     }
