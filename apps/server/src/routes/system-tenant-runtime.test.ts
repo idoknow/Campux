@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toSystemTenant } from "./system";
+import { platformRoleCondition, toSystemTenant } from "./system";
 
 describe("toSystemTenant runtime status", () => {
   test("serializes live OneBot connections and QZone target readiness", () => {
@@ -38,5 +38,20 @@ describe("toSystemTenant runtime status", () => {
 
     expect(result.bots[0]?.connection.online).toBe(false);
     expect(result.bots[0]?.publishTargets[0]?.status).toBe("unavailable");
+  });
+});
+
+describe("platformRoleCondition", () => {
+  test("指定租户时要求该租户的成员记录", () => {
+    expect(platformRoleCondition("operations_admin", ["tenant-1"])).toEqual({
+      systemRole: "operations_admin",
+      memberships: { some: { tenantId: { in: ["tenant-1"] } } },
+    });
+  });
+
+  test("未指定租户时不加成员限制", () => {
+    const condition = platformRoleCondition("system_operator", null);
+    expect(condition).toEqual({ systemRole: "system_operator" });
+    expect("memberships" in condition).toBe(false);
   });
 });
