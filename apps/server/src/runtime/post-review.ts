@@ -86,6 +86,21 @@ const containsRelationPii = (value: string) => {
   return /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(normalized)
     || /(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u.test(normalized);
 };
+export async function fetchBoundedSchoolRelationPages<T extends { id: string }>(fetchPage: (cursorId: string | undefined, take: number) => Promise<T[]>, pageSize = 250, maxRows = 10_000): Promise<T[]> {
+  const size = Math.max(1, Math.min(500, Math.floor(pageSize)));
+  const limit = Math.max(1, Math.min(10_000, Math.floor(maxRows)));
+  const rows: T[] = [];
+  let cursorId: string | undefined;
+  while (rows.length < limit) {
+    const page = await fetchPage(cursorId, Math.min(size, limit - rows.length));
+    if (page.length === 0) break;
+    rows.push(...page);
+    cursorId = page[page.length - 1]!.id;
+    if (page.length < Math.min(size, limit - (rows.length - page.length))) break;
+  }
+  return rows;
+}
+
 export function buildSchoolRelationContext(relations: Array<{ subject: string; predicate: string; object: string; evidence: string }>, postText: string, maxRelations = 5, maxChars = 1200) {
   const normalize = (value: string) => value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
   const normalizedText = normalize(postText);
@@ -475,7 +490,7 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
           const entities = await prisma.schoolEntity.findMany({ where: { tenantId: options.tenantId, source: { not: "ai_candidate" } }, orderBy: [{ sensitivity: "desc" }, { updatedAt: "desc" }], take: 80 });
           const rules = (settings.rules as Record<string, unknown>).aiReviewRules;
           const snapshot = await prisma.schoolModelSnapshot.findFirst({ where: { tenantId: options.tenantId }, orderBy: { version: "desc" } });
-          const graphRelations = await prisma.schoolRelation.findMany({ where: { tenantId: options.tenantId, approved: true, sourcePost: { status: { in: ["approved", "published"] } } }, select: { subject: true, predicate: true, object: true, evidence: true }, take: 500 });
+          const graphRelations = await fetchBoundedSchoolRelationPages((cursorId, take) => prisma.schoolRelation.findMany({ where: { tenantId: options.tenantId, approved: true, sourcePost: { status: { in: ["approved", "published"] } } }, orderBy: { id: "asc" }, ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}), select: { id: true, subject: true, predicate: true, object: true, evidence: true }, take }));
           const graphContext = buildSchoolRelationContext(graphRelations, post.text);
           snapshotId = snapshot?.id ?? null;
           const maxTokens = llmOutputTokenBudget(post.text.length, { floor: 1000, multiplier: 2.4, padding: 600 });

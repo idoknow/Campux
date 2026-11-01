@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildSchoolRelationContext, buildPostReviewMessages, parseSchoolRelationExtraction, validateSchoolRelationEvidence, schoolRelationSourceExcerpt } from "./post-review";
+import { buildSchoolRelationContext, buildPostReviewMessages, fetchBoundedSchoolRelationPages, parseSchoolRelationExtraction, validateSchoolRelationEvidence, schoolRelationSourceExcerpt } from "./post-review";
 import type { FastifyBaseLogger } from "fastify";
 import { withTenantReviewSlot, clampAiReviewConcurrency, parsePersistedPostReviewDetail, parsePostReviewAnalysisRecord, parsePostReviewAssessment, validatePostReviewEvidence, readBoundedLlmResponse, llmOutputTokenBudget, llmFinishReason, postReviewSystemPrompt, writeAutoAssessmentDecision, retryLlmReviewRequest } from "./post-review";
 import { assertSafeLlmUrl } from "./llm-url";
@@ -53,6 +53,33 @@ describe("school relation extraction", () => {
     const excerpt = schoolRelationSourceExcerpt("前言。" + "甲".repeat(3000) + "图书馆位于东区" + "乙".repeat(3000), "图书馆位于东区", 200);
     expect(excerpt).toContain("图书馆位于东区");
     expect(excerpt.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("fetchBoundedSchoolRelationPages", () => {
+  test("paginates beyond the former 500-row cap and retains a later relevant relation", async () => {
+    const rows = Array.from({ length: 751 }, (_, index) => ({ id: `r${String(index).padStart(4, "0")}`, subject: "irrelevant", predicate: "located_at", object: "place", evidence: "" }));
+    rows[700] = { id: "r0700", subject: "图书馆", predicate: "located_at", object: "东区", evidence: "图书馆位于东区" };
+    const visited: Array<string | undefined> = [];
+    const collected = await fetchBoundedSchoolRelationPages(async (cursor, take) => {
+      visited.push(cursor);
+      const start = cursor ? rows.findIndex((row) => row.id === cursor) + 1 : 0;
+      return rows.slice(start, start + take);
+    }, 200, 2000);
+    expect(collected).toHaveLength(751);
+    expect(visited).toHaveLength(4);
+    expect(buildSchoolRelationContext(collected, "图书馆位于东区")).toContain("图书馆");
+  });
+
+  test("stops at the hard row budget", async () => {
+    let fetched = 0;
+    const collected = await fetchBoundedSchoolRelationPages(async (_cursor, take) => {
+      const page = Array.from({ length: take }, (_, index) => ({ id: String(fetched + index) }));
+      fetched += page.length;
+      return page;
+    }, 250, 600);
+    expect(collected).toHaveLength(600);
+    expect(fetched).toBe(600);
   });
 });
 
