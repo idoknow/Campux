@@ -23,6 +23,11 @@ export type PersistedPostReview = { mode: "assist" | "auto" | "shadow"; status: 
 
 export const SCHOOL_RELATION_PREDICATES = ["located_at", "member_of", "offers", "held_at", "associated_with"] as const;
 export type ExtractedSchoolRelation = { subject: string; predicate: typeof SCHOOL_RELATION_PREDICATES[number]; object: string; evidence: string };
+const containsRelationPii = (value: string) => {
+  const normalized = value.normalize("NFKC");
+  return /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(normalized)
+    || /(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u.test(normalized);
+};
 export function validateSchoolRelationEvidence(relation: { subject: string; predicate: string; object: string; evidence: string }, postText: string): boolean {
   const evidence = relation.evidence.trim();
   if (!evidence || !postText.toLocaleLowerCase().includes(evidence.toLocaleLowerCase())) return false;
@@ -30,8 +35,24 @@ export function validateSchoolRelationEvidence(relation: { subject: string; pred
   const subject = relation.subject.trim().toLocaleLowerCase();
   const object = relation.object.trim().toLocaleLowerCase();
   if (!subject || !object || subject === object) return false;
-  const subjectAt = lower.indexOf(subject);
-  const objectAt = lower.indexOf(object, subjectAt + subject.length);
+  const endpointOccurrences = (endpoint: string) => {
+    const positions: number[] = [];
+    let offset = lower.indexOf(endpoint);
+    while (offset >= 0) {
+      const before = lower[offset - 1] ?? "";
+      const after = lower[offset + endpoint.length] ?? "";
+      const latinEndpoint = /[a-z0-9]/iu.test(endpoint);
+      const latinNeighbor = (value: string) => /^[a-z0-9]$/iu.test(value);
+      if (!latinEndpoint || (!latinNeighbor(before) && !latinNeighbor(after))) positions.push(offset);
+      offset = lower.indexOf(endpoint, offset + 1);
+    }
+    return positions;
+  };
+  const subjectOccurrences = endpointOccurrences(subject);
+  const objectOccurrences = endpointOccurrences(object);
+  if (subjectOccurrences.length !== 1 || objectOccurrences.length !== 1) return false;
+  const subjectAt = subjectOccurrences[0]!;
+  const objectAt = objectOccurrences[0]!;
   if (subjectAt < 0 || objectAt < 0 || objectAt - subjectAt > 240) return false;
   const relationSpan = lower.slice(subjectAt, objectAt + object.length);
   if (/(?:不在|不位于|未在|未位于|不是|并非|并不|不属于|不提供|未提供|不举办|未举办|不存在|无关|不相关)|(?:not(?:\s+only)?|never|neither|without|unrelated|isn.t|aren.t|doesn.t)(?:\s|$)/iu.test(relationSpan)) return false;
@@ -75,17 +96,12 @@ export function parseSchoolRelationExtraction(raw: string): ExtractedSchoolRelat
     for (const item of relations) {
       if (!item || typeof item !== "object" || Array.isArray(item)) return null;
       const r = item as Record<string, unknown>;
-      if (Object.keys(r).some((k) => !["subject", "predicate", "object", "evidence"].includes(k)) || typeof r.subject !== "string" || !r.subject.trim() || r.subject.length > 80 || typeof r.object !== "string" || !r.object.trim() || r.object.length > 80 || typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 240 || !SCHOOL_RELATION_PREDICATES.includes(r.predicate as typeof SCHOOL_RELATION_PREDICATES[number]) || /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(`${r.subject} ${r.object} ${r.evidence}`) || /(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u.test(`${r.subject} ${r.object} ${r.evidence}`)) return null;
+      if (Object.keys(r).some((k) => !["subject", "predicate", "object", "evidence"].includes(k)) || typeof r.subject !== "string" || !r.subject.trim() || r.subject.length > 80 || typeof r.object !== "string" || !r.object.trim() || r.object.length > 80 || typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 240 || !SCHOOL_RELATION_PREDICATES.includes(r.predicate as typeof SCHOOL_RELATION_PREDICATES[number]) || containsRelationPii(`${r.subject} ${r.object} ${r.evidence}`)) return null;
       out.push({ subject: r.subject.trim(), predicate: r.predicate as typeof SCHOOL_RELATION_PREDICATES[number], object: r.object.trim(), evidence: r.evidence.trim() });
     }
     return out;
   } catch { return null; }
 }
-const containsRelationPii = (value: string) => {
-  const normalized = value.normalize("NFKC");
-  return /(?:\b\d{7,}\b|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|1[3-9]\d{9})/iu.test(normalized)
-    || /(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u.test(normalized);
-};
 export async function fetchBoundedSchoolRelationPages<T extends { id: string }>(fetchPage: (cursorId: string | undefined, take: number) => Promise<T[]>, pageSize = 250, maxRows = 10_000): Promise<T[]> {
   const size = Math.max(1, Math.min(500, Math.floor(pageSize)));
   const limit = Math.max(1, Math.min(10_000, Math.floor(maxRows)));

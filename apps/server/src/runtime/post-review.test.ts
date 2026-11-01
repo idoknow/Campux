@@ -13,9 +13,14 @@ describe("school relation extraction", () => {
     expect(validateSchoolRelationEvidence({ ...relation, evidence: `图书馆${"旁边".repeat(20)}位于东区` }, `图书馆${"旁边".repeat(20)}位于东区` )).toBe(false);
     expect(validateSchoolRelationEvidence({ ...relation, evidence: "图书馆 东区" }, "图书馆 东区" )).toBe(false);
   });
-  test("rejects phone-number patterns with formatting", () => {
-    expect(parseSchoolRelationExtraction(JSON.stringify({ relations: [{ subject: "活动", predicate: "held_at", object: "东区", evidence: "活动在东区" }] }))).toHaveLength(1);
-    expect(parseSchoolRelationExtraction(JSON.stringify({ relations: [{ subject: "活动", predicate: "held_at", object: "东区", evidence: "联系 138-1234-5678" }] }))).toBeNull();
+  test("rejects normalized full-width and formatted phone numbers in every relation field", () => {
+    const safe = { subject: "活动", predicate: "held_at", object: "东区", evidence: "活动在东区" };
+    expect(parseSchoolRelationExtraction(JSON.stringify({ relations: [safe] }))).toHaveLength(1);
+    for (const phone of ["１３８１２３４５６７８", "138 1234 5678", "138-1234-5678"]) {
+      for (const field of ["subject", "object", "evidence"] as const) {
+        expect(parseSchoolRelationExtraction(JSON.stringify({ relations: [{ ...safe, [field]: `${safe[field]} ${phone}` }] }))).toBeNull();
+      }
+    }
   });
   test("returns a bounded source excerpt containing the evidence", () => {
     const text = `${"前文".repeat(100)}图书馆位于东区${"后文".repeat(100)}`;
@@ -32,6 +37,12 @@ describe("school relation extraction", () => {
     const relation = { subject: "图书馆", predicate: "located_at" as const, object: "东区", evidence: "图书馆位于东区" };
     expect(validateSchoolRelationEvidence(relation, "图书馆位于东区。欢迎来访。")).toBe(true);
     expect(validateSchoolRelationEvidence(relation, "图书馆很漂亮，东区有很多楼。无关系。" )).toBe(false);
+  });
+  test("rejects Latin endpoint prefixes and repeated or competing endpoint relations", () => {
+    const relation = { subject: "North Campus", predicate: "located_at" as const, object: "Building B", evidence: "North Campus is located at Building B" };
+    expect(validateSchoolRelationEvidence({ ...relation, evidence: "North Campus is located at Building B2" }, "North Campus is located at Building B2")).toBe(false);
+    expect(validateSchoolRelationEvidence({ ...relation, evidence: "North Campus is in Building B, but Building B is in North Campus" }, "North Campus is in Building B, but Building B is in North Campus")).toBe(false);
+    expect(validateSchoolRelationEvidence({ ...relation, evidence: "North Campus is located at Building B" }, "North Campus is located at Building B")).toBe(true);
   });
   test("grounds the claimed predicate between the ordered entities and rejects negation, reverse direction, and incidental cues", () => {
     const relation = { subject: "图书馆", predicate: "located_at" as const, object: "东区", evidence: "图书馆位于东区" };

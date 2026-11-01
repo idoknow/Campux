@@ -31,7 +31,8 @@ describe("claimSchoolRelationExtraction", () => {
       const result = await claimSchoolRelationExtraction(db, { tenantId: "t", postId: "p", contentHash: "h", staleBefore: new Date(500), now: new Date(1000) });
       expect(result.claimed).toBe(false);
       expect(state).toEqual({ status: initialStatus, attemptedAt: new Date(900), attempts: 1 });
-      expect(whereCalls).toHaveLength(initialStatus === "processing" ? 2 : 1);
+      // Claiming checks both failed rows and stale processing rows.
+      expect(whereCalls).toHaveLength(2);
     }
     const state = { status: "failed", attemptedAt: new Date(900), attempts: 1 };
     const db = { schoolRelationExtraction: {
