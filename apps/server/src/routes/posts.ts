@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { TransactionIsolationLevel, isTransactionSerializationFailure } from "@campux/db";
 import { getStorageDriver } from "@campux/integrations";
@@ -23,8 +23,10 @@ import {
   buildVideoGifFfmpegArgs,
   convertedVideoGifSizeErrorMessage,
   createConvertedGifClaim,
+  detectRasterImageMime,
   hasGifSignature,
   imageStorageHardMaxBytes,
+  isAllowedPostImageMime,
   isAttachmentOrderCompatible,
   isTrustedConvertedGifUrl,
   readResponseBufferWithLimit,
@@ -148,18 +150,6 @@ export function sanitizeUploadExtension(fileName: string | undefined): string {
   return raw.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "bin";
 }
 
-const IMAGE_MIME_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "image/bmp",
-  "image/tiff",
-  "image/svg+xml",
-]);
-
 const VIDEO_CONVERT_MIME_TYPES = new Set([
   "video/mp4",
   "video/webm",
@@ -168,10 +158,6 @@ const VIDEO_CONVERT_MIME_TYPES = new Set([
   "video/x-matroska",
   "video/3gpp",
 ]);
-
-function isAllowedImageType(contentType: string): boolean {
-  return IMAGE_MIME_TYPES.has(contentType);
-}
 
 function isConvertibleVideoType(contentType: string): boolean {
   return VIDEO_CONVERT_MIME_TYPES.has(contentType);
@@ -425,6 +411,42 @@ function isMultipartContentTypeError(error: unknown): boolean {
     && error.code === "FST_INVALID_MULTIPART_CONTENT_TYPE");
 }
 
+/**
+ * 回放已存储的图片：统一 nosniff；只有字节确实是位图才内联。
+ * 存储里的 Content-Type 不可信（OneBot 会原样保存远端 image/*，历史附件可能没有类型），
+ * SVG/XML 等文档一旦被当作图片内联，就是同源 XSS。
+ */
+export function storedImageResponseHeaders(bytes: Uint8Array): { headers: Record<string, string>; cacheable: boolean } {
+  const mime = detectRasterImageMime(bytes);
+  if (mime) {
+    return {
+      headers: {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Type": mime,
+      },
+      cacheable: true,
+    };
+  }
+  return {
+    headers: {
+      "X-Content-Type-Options": "nosniff",
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": "attachment; filename=\"image\"",
+      "Cache-Control": "no-store",
+    },
+    cacheable: false,
+  };
+}
+
+/** 返回 true 表示可以按图片缓存，调用方自行补 Cache-Control。 */
+function applyStoredImageHeaders(reply: FastifyReply, bytes: Uint8Array): boolean {
+  const { headers, cacheable } = storedImageResponseHeaders(bytes);
+  for (const [name, value] of Object.entries(headers)) {
+    reply.header(name, value);
+  }
+  return cacheable;
+}
+
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/public/forum-media", async (request, reply) => {
     const query = publicForumMediaQuerySchema.parse(request.query);
@@ -440,10 +462,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (!object) {
       return reply.code(404).send({ message: "图片不存在" });
     }
-    if (object.contentType) {
-      reply.header("Content-Type", object.contentType);
+    if (applyStoredImageHeaders(reply, object.bytes)) {
+      reply.header("Cache-Control", "public, max-age=3600");
     }
-    reply.header("Cache-Control", "public, max-age=3600");
     return reply.send(Buffer.from(object.bytes));
   });
 
@@ -488,12 +509,10 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       if (!assertTenantLogoUpload({ contentType: object.contentType ?? "application/octet-stream", size: 0 }).ok) {
         return reply.code(404).send({ message: "图片不存在" });
       }
-      reply.header("X-Content-Type-Options", "nosniff");
     }
-    if (object.contentType) {
-      reply.header("Content-Type", object.contentType);
+    if (applyStoredImageHeaders(reply, object.bytes)) {
+      reply.header("Cache-Control", decision.cacheControl);
     }
-    reply.header("Cache-Control", decision.cacheControl);
     return reply.send(Buffer.from(object.bytes));
   });
 
@@ -725,7 +744,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
 
         const mime = part.mimetype || "application/octet-stream";
 
-        if (!isAllowedImageType(mime) && !isConvertibleVideoType(mime)) {
+        if (!isAllowedPostImageMime(mime) && !isConvertibleVideoType(mime)) {
           part.file.destroy();
           throw {
             status: 415,

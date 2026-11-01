@@ -182,6 +182,25 @@ function manageableTenantIds(context: PlatformContext) {
   return context.memberships.filter((membership) => membership.role === "admin").map((membership) => membership.tenantId);
 }
 
+/**
+ * 平台级角色（系统运维 / 运营管理员）本身不带租户归属：
+ * 一旦指定了租户筛选，就必须再要求该用户在这个租户里有成员记录，
+ * 否则「按租户筛选运营管理员」会把其它墙的运营管理一起列出来。
+ *
+ * 注意：这里只要求「存在任意一条 membership」，不校验 membership.role。
+ * 也就是说，某墙的 submitter / 审核员只要全局角色是 operations_admin，
+ * 也会被算作该墙的运营管理。这是有意为之（成员即算），不要改成只认 admin。
+ */
+export function platformRoleCondition(
+  role: "system_operator" | "operations_admin",
+  tenantIds: string[] | null,
+): Prisma.UserWhereInput {
+  return {
+    systemRole: role,
+    ...(tenantIds === null ? {} : { memberships: { some: { tenantId: { in: tenantIds } } } }),
+  };
+}
+
 function assertCanManageTenant(context: PlatformContext, tenantId: string, reply: FastifyReply) {
   const tenantIds = manageableTenantIds(context);
   if (tenantIds === null || tenantIds.includes(tenantId)) {
@@ -732,8 +751,8 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (roleFilters.length > 0) {
       const roleFilterTenantIds = query.tenantId ? [query.tenantId] : scopedTenantIds;
       const roleConditions: Prisma.UserWhereInput[] = [
-        ...(includeSystemOperator ? [{ systemRole: "system_operator" as const }] : []),
-        ...(includeOperationsAdmin ? [{ systemRole: "operations_admin" as const }] : []),
+        ...(includeSystemOperator ? [platformRoleCondition("system_operator", roleFilterTenantIds)] : []),
+        ...(includeOperationsAdmin ? [platformRoleCondition("operations_admin", roleFilterTenantIds)] : []),
       ];
 
       if (tenantRoleFilters.length > 0) {

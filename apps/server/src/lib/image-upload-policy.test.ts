@@ -3,12 +3,14 @@ import {
   buildVideoGifFfmpegArgs,
   createConvertedGifClaim,
   defaultImageMaxSizeMb,
+  detectRasterImageMime,
   hasGifSignature,
   imageUploadSourceHardMaxSizeMb,
   maxImageMaxSizeMb,
   minImageMaxSizeMb,
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
+  isAllowedPostImageMime,
   isTrustedConvertedGifUrl,
   normalizeImageMaxSizeMb,
   readResponseBufferWithLimit,
@@ -162,5 +164,38 @@ describe("tenant image upload policy", () => {
       },
     }));
     await expect(readResponseBufferWithLimit(streamed, 5)).rejects.toBeInstanceOf(ResponseBodyTooLargeError);
+  });
+});
+
+describe("post image mime allowlist", () => {
+  test("拒绝 SVG（可执行文档）", () => {
+    expect(isAllowedPostImageMime("image/svg+xml")).toBe(false);
+    expect(isAllowedPostImageMime("image/svg")).toBe(false);
+  });
+
+  test("接受常见位图格式", () => {
+    for (const mime of ["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]) {
+      expect(isAllowedPostImageMime(mime)).toBe(true);
+    }
+  });
+});
+
+describe("detectRasterImageMime", () => {
+  const bytesOf = (text: string) => new Uint8Array([...text].map((char) => char.charCodeAt(0)));
+
+  test("识别常见位图签名", () => {
+    expect(detectRasterImageMime(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+    expect(detectRasterImageMime(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe("image/png");
+    expect(detectRasterImageMime(bytesOf("GIF89a......"))).toBe("image/gif");
+    expect(detectRasterImageMime(bytesOf("RIFF\0\0\0\0WEBPVP8 "))).toBe("image/webp");
+    expect(detectRasterImageMime(bytesOf("BM\0\0\0\0"))).toBe("image/bmp");
+    expect(detectRasterImageMime(bytesOf("\0\0\0\u0018ftypheic"))).toBe("image/heic");
+    expect(detectRasterImageMime(bytesOf("\0\0\0\u0018ftypavif"))).toBe("image/avif");
+  });
+
+  test("SVG / HTML / 空内容不当作位图", () => {
+    expect(detectRasterImageMime(bytesOf("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"))).toBeNull();
+    expect(detectRasterImageMime(bytesOf("<html><body>hi</body></html>"))).toBeNull();
+    expect(detectRasterImageMime(new Uint8Array([]))).toBeNull();
   });
 });
