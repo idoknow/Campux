@@ -46,6 +46,14 @@ import {
 import { lockActiveTenantRuntime, runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { extractDisplayIdFromReviewText, readQuotedReplyPayload, type QuotedReplyPayload } from "./review-reply-resolve";
 import {
+  findForwardMessageId,
+  parsePrivateForwardHeader,
+  readForwardNodeIdentity,
+  readForwardNodes,
+  readMessageSenderQq,
+  readSegmentText,
+} from "../lib/private-forward-resolve";
+import {
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
   imageUploadSourceHardMaxSizeMb,
@@ -4535,7 +4543,7 @@ export class OneBotRuntime {
       if (!msgId) {
         // 两次合并转发都被拒：降级为普通群消息，图片保留、at/reply 换成文本
         const fallbackSegments: OneBotMessageSegment[] = [
-          { type: "text", data: { text: `📩 ${buffer.userNickname}（${buffer.userQqUin}）发来私聊消息：` } },
+          { type: "text", data: { text: `📩 [QQ ${buffer.userQqUin}] ${buffer.userNickname} 发来私聊消息：` } },
         ];
         buffer.messages.forEach((entry, index) => {
           const content = sanitizeSegmentsForGroupSend(
@@ -4880,7 +4888,29 @@ export class OneBotRuntime {
       return;
     }
 
-    const target = this.privateForwardMsgIdMap.get(`${botQqUin}:${replyToMsgId}`);
+    let target = this.privateForwardMsgIdMap.get(`${botQqUin}:${replyToMsgId}`);
+    if (!target) {
+      // 映射只在内存里，部署/重启后清空；这里从被引用的消息本身还原用户，恢复历史卡片。
+      const recovered = await this.resolvePrivateReplyTargetFromQuoted(botQqUin, replyToMsgId);
+      if (recovered.status === "not-mine") {
+        // 卡片是同一转发群里别的墙号发的：对方会自己处理，本墙号不要抢答。
+        return;
+      }
+      if (recovered.status === "recovered") {
+        target = {
+          tenantId: bot.tenantId,
+          userQqUin: recovered.qqUin,
+          userNickname: recovered.nickname,
+          botQqUin,
+        };
+        // 补写映射：同一张卡片被连续回复时不必每次都走协议反查。
+        this.storePrivateForwardMapping(replyToMsgId, bot.tenantId, recovered.qqUin, recovered.nickname, botQqUin);
+        this.logger.info(
+          { botQqUin, replyToMsgId, userQqUin: recovered.qqUin },
+          "私聊转发映射缺失，已按被引用消息还原用户",
+        );
+      }
+    }
     if (!target) {
       // 多墙号共用转发群时，未命中也只让本墙首选通知墙号回一次，避免每个墙号各发一条错误。
       const preferredBotId = await this.findTenantReviewNotificationBot(bot.tenantId)
@@ -4909,6 +4939,55 @@ export class OneBotRuntime {
     })).catch((error) => {
       this.logger.warn({ error, botId: bot.id }, "failed to increment admin reply counter");
     });
+  }
+
+  /**
+   * 映射缺失时，从被引用的那条群消息反查私聊用户。
+   *
+   * 只接受「本墙号自己发的消息」：既避免别人伪造 `📩 昵称（QQ）` 头部让机器人私聊陌生人，
+   * 也让多墙号共用转发群时各墙号只认自己的转发。
+   */
+  private async resolvePrivateReplyTargetFromQuoted(
+    botQqUin: string,
+    replyToMsgId: string,
+  ): Promise<
+    | { status: "recovered"; qqUin: string; nickname: string }
+    | { status: "not-mine" }
+    | { status: "unresolved" }
+  > {
+    try {
+      const quoted = await this.callAction(botQqUin, "get_msg", { message_id: replyToMsgId }).catch(() => null);
+      if (!quoted) {
+        return { status: "unresolved" };
+      }
+      // 别的墙号发的卡片：本墙号应当保持沉默，不能回「请先引用」误导管理员。
+      if (readMessageSenderQq(quoted) !== botQqUin) {
+        return { status: "not-mine" };
+      }
+
+      // 情况 1：被引用的是合并转发卡片 —— 取回节点，用首个非本墙号节点作为用户。
+      const forwardId = findForwardMessageId((quoted as any).message);
+      if (forwardId) {
+        const payload = await this.callAction(botQqUin, "get_forward_msg", { id: forwardId }).catch(() => null);
+        for (const node of readForwardNodes(payload)) {
+          const identity = readForwardNodeIdentity(node);
+          if (identity && identity.qqUin !== botQqUin) {
+            return { status: "recovered", qqUin: identity.qqUin, nickname: identity.nickname };
+          }
+        }
+      }
+
+      // 情况 2：合并转发被降级成普通消息，正文以 `📩 昵称（QQ）发来私聊消息：` 开头。
+      const text = readSegmentText((quoted as any).message) || readSegmentText((quoted as any).raw_message);
+      const header = parsePrivateForwardHeader(text);
+      if (header && header.qqUin !== botQqUin) {
+        return { status: "recovered", qqUin: header.qqUin, nickname: header.nickname };
+      }
+      return { status: "unresolved" };
+    } catch (error) {
+      this.logger.warn({ error, botQqUin, replyToMsgId }, "反查被引用的转发消息失败");
+      return { status: "unresolved" };
+    }
   }
 
   private storePrivateForwardMapping(msgId: string, tenantId: string, userQqUin: string, userNickname: string, botQqUin: string) {
