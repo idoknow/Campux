@@ -136,15 +136,6 @@ export async function uploadAttachmentBytes({
 }
 
 /**
- * SVG 是文档而不是位图：浏览器直接打开会执行其中的脚本，不能以 inline 回放。
- * 其余图片类型（含 HEIC/TIFF）最多是显示不出来，不会执行代码。
- */
-export function isScriptCapableImageMime(contentType: string | null | undefined): boolean {
-  const normalized = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-  return normalized === "image/svg+xml" || normalized === "image/svg";
-}
-
-/**
  * 站内上传链接 → storage key。
  * 只识别本系统生成的 `/api/uploads/post-image?key=...`，外链与相对路径统一返回 null，
  * 避免把任意字段当成可读取的 key。

@@ -37,6 +37,31 @@ export function isAllowedPostImageMime(contentType: string): boolean {
   return postImageMimeTypes.has(contentType);
 }
 
+/**
+ * 按魔术字节识别真正可安全内联的位图。
+ * 回放时不信任存储里的 Content-Type（OneBot 会把远端 image/* 原样存下来，
+ * 历史附件也可能没有 contentType），只有字节确实是位图才内联。
+ */
+export function detectRasterImageMime(bytes: Uint8Array): string | null {
+  const ascii = (start: number, end: number) => String.fromCharCode(...bytes.subarray(start, end));
+  const matches = (signature: readonly number[], offset = 0) => signature.every((byte, index) => bytes[offset + index] === byte);
+
+  if (bytes.length >= 3 && matches([0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (bytes.length >= 8 && matches([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (bytes.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  if (bytes.length >= 2 && ascii(0, 2) === "BM") return "image/bmp";
+  if (bytes.length >= 4 && (matches([0x49, 0x49, 0x2a, 0x00]) || matches([0x4d, 0x4d, 0x00, 0x2a]))) return "image/tiff";
+  if (bytes.length >= 12 && ascii(4, 8) === "ftyp") {
+    const brand = ascii(8, 12);
+    if (["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"].includes(brand)) {
+      return "image/heic";
+    }
+    if (brand === "avif" || brand === "avis") return "image/avif";
+  }
+  return null;
+}
+
 export type AttachmentOrderKind = "local" | "remote";
 
 export function isAttachmentOrderCompatible(

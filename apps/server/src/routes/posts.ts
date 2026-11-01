@@ -23,6 +23,7 @@ import {
   buildVideoGifFfmpegArgs,
   convertedVideoGifSizeErrorMessage,
   createConvertedGifClaim,
+  detectRasterImageMime,
   hasGifSignature,
   imageStorageHardMaxBytes,
   isAllowedPostImageMime,
@@ -44,7 +45,6 @@ import {
   decideUploadAccess,
   deleteAttachmentObjects,
   extractPostImageKey,
-  isScriptCapableImageMime,
   parseTenantIdFromUploadKey,
   uploadAttachmentBytes,
   type PostAttachment,
@@ -412,22 +412,22 @@ function isMultipartContentTypeError(error: unknown): boolean {
 }
 
 /**
- * 回放已存储的图片：统一 nosniff；SVG 一律当附件下载。
- * 历史上传里可能存在带 <script> 的 SVG，直接用 image/svg+xml 回放等于同源 XSS。
- * 返回 true 表示这是不能缓存的脚本类内容，调用方应改用 no-store。
+ * 回放已存储的图片：统一 nosniff；只有字节确实是位图才内联。
+ * 存储里的 Content-Type 不可信（OneBot 会原样保存远端 image/*，历史附件可能没有类型），
+ * SVG/XML 等文档一旦被当作图片内联，就是同源 XSS。
+ * 返回 true 表示这是不能缓存的非位图内容，调用方应改用附件下载。
  */
-function applyStoredImageHeaders(reply: FastifyReply, contentType: string | null | undefined): boolean {
+function applyStoredImageHeaders(reply: FastifyReply, bytes: Uint8Array): boolean {
   reply.header("X-Content-Type-Options", "nosniff");
-  if (isScriptCapableImageMime(contentType)) {
-    reply.header("Content-Type", "application/octet-stream");
-    reply.header("Content-Disposition", "attachment; filename=\"image.svg\"");
-    reply.header("Cache-Control", "no-store");
-    return true;
+  const mime = detectRasterImageMime(bytes);
+  if (mime) {
+    reply.header("Content-Type", mime);
+    return false;
   }
-  if (contentType) {
-    reply.header("Content-Type", contentType);
-  }
-  return false;
+  reply.header("Content-Type", "application/octet-stream");
+  reply.header("Content-Disposition", "attachment; filename=\"image\"");
+  reply.header("Cache-Control", "no-store");
+  return true;
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -445,7 +445,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (!object) {
       return reply.code(404).send({ message: "图片不存在" });
     }
-    if (!applyStoredImageHeaders(reply, object.contentType)) {
+    if (!applyStoredImageHeaders(reply, object.bytes)) {
       reply.header("Cache-Control", "public, max-age=3600");
     }
     return reply.send(Buffer.from(object.bytes));
@@ -493,7 +493,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         return reply.code(404).send({ message: "图片不存在" });
       }
     }
-    if (!applyStoredImageHeaders(reply, object.contentType)) {
+    if (!applyStoredImageHeaders(reply, object.bytes)) {
       reply.header("Cache-Control", decision.cacheControl);
     }
     return reply.send(Buffer.from(object.bytes));
