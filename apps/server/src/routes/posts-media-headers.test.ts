@@ -123,7 +123,7 @@ describe("storedImageResponseHeaders（post-image 共用）", () => {
 
 /**
  * 上传侧拒绝 SVG 的判定点在 posts.ts 的 multipart 循环里（isAllowedPostImageMime）。
- * 路由级 multipart 用例需要额外的会话/租户上下文与 ban 查询替身，这里直接锁住该判定函数的边界值。
+ * multipart 路由级用例（真实流 + 415）见 posts-upload-svg.test.ts，这里锁判定函数的边界值。
  */
 describe("上传白名单拒绝 SVG", () => {
   test("image/svg+xml 与 image/svg 均不通过", () => {
