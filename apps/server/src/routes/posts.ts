@@ -415,19 +415,36 @@ function isMultipartContentTypeError(error: unknown): boolean {
  * 回放已存储的图片：统一 nosniff；只有字节确实是位图才内联。
  * 存储里的 Content-Type 不可信（OneBot 会原样保存远端 image/*，历史附件可能没有类型），
  * SVG/XML 等文档一旦被当作图片内联，就是同源 XSS。
- * 返回 true 表示这是不能缓存的非位图内容，调用方应改用附件下载。
  */
-function applyStoredImageHeaders(reply: FastifyReply, bytes: Uint8Array): boolean {
-  reply.header("X-Content-Type-Options", "nosniff");
+export function storedImageResponseHeaders(bytes: Uint8Array): { headers: Record<string, string>; cacheable: boolean } {
   const mime = detectRasterImageMime(bytes);
   if (mime) {
-    reply.header("Content-Type", mime);
-    return false;
+    return {
+      headers: {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Type": mime,
+      },
+      cacheable: true,
+    };
   }
-  reply.header("Content-Type", "application/octet-stream");
-  reply.header("Content-Disposition", "attachment; filename=\"image\"");
-  reply.header("Cache-Control", "no-store");
-  return true;
+  return {
+    headers: {
+      "X-Content-Type-Options": "nosniff",
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": "attachment; filename=\"image\"",
+      "Cache-Control": "no-store",
+    },
+    cacheable: false,
+  };
+}
+
+/** 返回 true 表示可以按图片缓存，调用方自行补 Cache-Control。 */
+function applyStoredImageHeaders(reply: FastifyReply, bytes: Uint8Array): boolean {
+  const { headers, cacheable } = storedImageResponseHeaders(bytes);
+  for (const [name, value] of Object.entries(headers)) {
+    reply.header(name, value);
+  }
+  return cacheable;
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -445,7 +462,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (!object) {
       return reply.code(404).send({ message: "图片不存在" });
     }
-    if (!applyStoredImageHeaders(reply, object.bytes)) {
+    if (applyStoredImageHeaders(reply, object.bytes)) {
       reply.header("Cache-Control", "public, max-age=3600");
     }
     return reply.send(Buffer.from(object.bytes));
@@ -493,7 +510,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         return reply.code(404).send({ message: "图片不存在" });
       }
     }
-    if (!applyStoredImageHeaders(reply, object.bytes)) {
+    if (applyStoredImageHeaders(reply, object.bytes)) {
       reply.header("Cache-Control", decision.cacheControl);
     }
     return reply.send(Buffer.from(object.bytes));
