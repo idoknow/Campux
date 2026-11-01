@@ -9,6 +9,7 @@ import {
   minImageMaxSizeMb,
   buildImageSourceSizeErrorMessage,
   imageStorageHardMaxBytes,
+  isAllowedPostImageMime,
   isTrustedConvertedGifUrl,
   normalizeImageMaxSizeMb,
   readResponseBufferWithLimit,
@@ -162,5 +163,18 @@ describe("tenant image upload policy", () => {
       },
     }));
     await expect(readResponseBufferWithLimit(streamed, 5)).rejects.toBeInstanceOf(ResponseBodyTooLargeError);
+  });
+});
+
+describe("post image mime allowlist", () => {
+  test("拒绝 SVG（可执行文档）", () => {
+    expect(isAllowedPostImageMime("image/svg+xml")).toBe(false);
+    expect(isAllowedPostImageMime("image/svg")).toBe(false);
+  });
+
+  test("接受常见位图格式", () => {
+    for (const mime of ["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]) {
+      expect(isAllowedPostImageMime(mime)).toBe(true);
+    }
   });
 });

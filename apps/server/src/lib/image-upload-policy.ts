@@ -18,6 +18,25 @@ export const trustedConvertedGifHostname = "cloudflarecnimg.scdn.io";
 export const convertedGifClaimTtlMs = 15 * 60 * 1000;
 export { normalizeImageMaxSizeMb };
 
+/**
+ * 允许作为稿件图片提交的 MIME。
+ * SVG 是文档而不是位图（可直接执行脚本），因此不在允许列表里。
+ */
+export const postImageMimeTypes: ReadonlySet<string> = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/bmp",
+  "image/tiff",
+]);
+
+export function isAllowedPostImageMime(contentType: string): boolean {
+  return postImageMimeTypes.has(contentType);
+}
+
 export type AttachmentOrderKind = "local" | "remote";
 
 export function isAttachmentOrderCompatible(

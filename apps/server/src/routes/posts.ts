@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { TransactionIsolationLevel, isTransactionSerializationFailure } from "@campux/db";
 import { getStorageDriver } from "@campux/integrations";
@@ -25,6 +25,7 @@ import {
   createConvertedGifClaim,
   hasGifSignature,
   imageStorageHardMaxBytes,
+  isAllowedPostImageMime,
   isAttachmentOrderCompatible,
   isTrustedConvertedGifUrl,
   readResponseBufferWithLimit,
@@ -43,6 +44,7 @@ import {
   decideUploadAccess,
   deleteAttachmentObjects,
   extractPostImageKey,
+  isScriptCapableImageMime,
   parseTenantIdFromUploadKey,
   uploadAttachmentBytes,
   type PostAttachment,
@@ -148,18 +150,6 @@ export function sanitizeUploadExtension(fileName: string | undefined): string {
   return raw.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "bin";
 }
 
-const IMAGE_MIME_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "image/bmp",
-  "image/tiff",
-  "image/svg+xml",
-]);
-
 const VIDEO_CONVERT_MIME_TYPES = new Set([
   "video/mp4",
   "video/webm",
@@ -168,10 +158,6 @@ const VIDEO_CONVERT_MIME_TYPES = new Set([
   "video/x-matroska",
   "video/3gpp",
 ]);
-
-function isAllowedImageType(contentType: string): boolean {
-  return IMAGE_MIME_TYPES.has(contentType);
-}
 
 function isConvertibleVideoType(contentType: string): boolean {
   return VIDEO_CONVERT_MIME_TYPES.has(contentType);
@@ -425,6 +411,22 @@ function isMultipartContentTypeError(error: unknown): boolean {
     && error.code === "FST_INVALID_MULTIPART_CONTENT_TYPE");
 }
 
+/**
+ * 回放已存储的图片：统一 nosniff；SVG 一律当附件下载。
+ * 历史上传里可能存在带 <script> 的 SVG，直接用 image/svg+xml 回放等于同源 XSS。
+ */
+function applyStoredImageHeaders(reply: FastifyReply, contentType: string | null | undefined) {
+  reply.header("X-Content-Type-Options", "nosniff");
+  if (isScriptCapableImageMime(contentType)) {
+    reply.header("Content-Type", "application/octet-stream");
+    reply.header("Content-Disposition", "attachment; filename=\"image.svg\"");
+    return;
+  }
+  if (contentType) {
+    reply.header("Content-Type", contentType);
+  }
+}
+
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
   app.get("/api/public/forum-media", async (request, reply) => {
     const query = publicForumMediaQuerySchema.parse(request.query);
@@ -440,9 +442,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (!object) {
       return reply.code(404).send({ message: "图片不存在" });
     }
-    if (object.contentType) {
-      reply.header("Content-Type", object.contentType);
-    }
+    applyStoredImageHeaders(reply, object.contentType);
     reply.header("Cache-Control", "public, max-age=3600");
     return reply.send(Buffer.from(object.bytes));
   });
@@ -488,11 +488,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       if (!assertTenantLogoUpload({ contentType: object.contentType ?? "application/octet-stream", size: 0 }).ok) {
         return reply.code(404).send({ message: "图片不存在" });
       }
-      reply.header("X-Content-Type-Options", "nosniff");
     }
-    if (object.contentType) {
-      reply.header("Content-Type", object.contentType);
-    }
+    applyStoredImageHeaders(reply, object.contentType);
     reply.header("Cache-Control", decision.cacheControl);
     return reply.send(Buffer.from(object.bytes));
   });
@@ -725,7 +722,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
 
         const mime = part.mimetype || "application/octet-stream";
 
-        if (!isAllowedImageType(mime) && !isConvertibleVideoType(mime)) {
+        if (!isAllowedPostImageMime(mime) && !isConvertibleVideoType(mime)) {
           part.file.destroy();
           throw {
             status: 415,

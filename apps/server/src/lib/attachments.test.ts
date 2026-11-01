@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decideUploadAccess, extractPostImageKey, parseTenantIdFromUploadKey } from "./attachments";
+import { decideUploadAccess, extractPostImageKey, isScriptCapableImageMime, parseTenantIdFromUploadKey } from "./attachments";
 
 const tenantId = "e7b86499-dfa8-4130-8356-76b0c4ccbf19";
 const key = `tenants/${tenantId}/uploads/5eb21d73-0843-4926-8ca5-5a5d1a676218.png`;
@@ -90,5 +90,23 @@ describe("parseTenantIdFromUploadKey", () => {
     expect(parseTenantIdFromUploadKey(`tenants/${tenantId}/published/qq-forum/a.png`)).toBeNull();
     expect(parseTenantIdFromUploadKey("logo.svg")).toBeNull();
     expect(parseTenantIdFromUploadKey("")).toBeNull();
+  });
+});
+
+describe("isScriptCapableImageMime", () => {
+  test("SVG 视为可执行文档", () => {
+    expect(isScriptCapableImageMime("image/svg+xml")).toBe(true);
+    expect(isScriptCapableImageMime("image/svg")).toBe(true);
+    expect(isScriptCapableImageMime("IMAGE/SVG+XML")).toBe(true);
+    expect(isScriptCapableImageMime("image/svg+xml; charset=utf-8")).toBe(true);
+  });
+
+  test("位图不算", () => {
+    expect(isScriptCapableImageMime("image/jpeg")).toBe(false);
+    expect(isScriptCapableImageMime("image/png")).toBe(false);
+    expect(isScriptCapableImageMime("image/heic")).toBe(false);
+    expect(isScriptCapableImageMime(null)).toBe(false);
+    expect(isScriptCapableImageMime(undefined)).toBe(false);
+    expect(isScriptCapableImageMime("")).toBe(false);
   });
 });
