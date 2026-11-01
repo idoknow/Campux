@@ -414,17 +414,20 @@ function isMultipartContentTypeError(error: unknown): boolean {
 /**
  * 回放已存储的图片：统一 nosniff；SVG 一律当附件下载。
  * 历史上传里可能存在带 <script> 的 SVG，直接用 image/svg+xml 回放等于同源 XSS。
+ * 返回 true 表示这是不能缓存的脚本类内容，调用方应改用 no-store。
  */
-function applyStoredImageHeaders(reply: FastifyReply, contentType: string | null | undefined) {
+function applyStoredImageHeaders(reply: FastifyReply, contentType: string | null | undefined): boolean {
   reply.header("X-Content-Type-Options", "nosniff");
   if (isScriptCapableImageMime(contentType)) {
     reply.header("Content-Type", "application/octet-stream");
     reply.header("Content-Disposition", "attachment; filename=\"image.svg\"");
-    return;
+    reply.header("Cache-Control", "no-store");
+    return true;
   }
   if (contentType) {
     reply.header("Content-Type", contentType);
   }
+  return false;
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -442,8 +445,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
     if (!object) {
       return reply.code(404).send({ message: "图片不存在" });
     }
-    applyStoredImageHeaders(reply, object.contentType);
-    reply.header("Cache-Control", "public, max-age=3600");
+    if (!applyStoredImageHeaders(reply, object.contentType)) {
+      reply.header("Cache-Control", "public, max-age=3600");
+    }
     return reply.send(Buffer.from(object.bytes));
   });
 
@@ -489,8 +493,9 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         return reply.code(404).send({ message: "图片不存在" });
       }
     }
-    applyStoredImageHeaders(reply, object.contentType);
-    reply.header("Cache-Control", decision.cacheControl);
+    if (!applyStoredImageHeaders(reply, object.contentType)) {
+      reply.header("Cache-Control", decision.cacheControl);
+    }
     return reply.send(Buffer.from(object.bytes));
   });
 
