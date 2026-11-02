@@ -5,6 +5,7 @@ import { PostPage } from "@/features/posts/PostPage";
 import { PostsPage } from "@/features/posts/PostsPage";
 import { StatsPage } from "@/features/stats/StatsPage";
 import { ServicesPage } from "@/features/services/ServicesPage";
+import { AiPage } from "@/features/ai/AiPage";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { Header } from "./Header";
@@ -181,6 +182,12 @@ export function AppShell({
             <TabsContent value="services" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
               <ServicesPage me={me} metadata={metadata} loading={dataLoading} onProfileSaved={onRefreshMe} />
             </TabsContent>
+
+            {canAccess(me.currentMembership.role, "admin") ? (
+              <TabsContent value="ai" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">
+                <AiPage me={me} />
+              </TabsContent>
+            ) : null}
 
             {canAccess(me.currentMembership.role, "reviewer") ? (
               <TabsContent value="stats" forceMount className="m-0 flex h-full min-h-0 flex-col overflow-hidden data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=inactive]:hidden duration-300">

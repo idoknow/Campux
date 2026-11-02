@@ -53,15 +53,30 @@ export function registerAiReviewRoutes(app: FastifyInstance) {
 
   app.get("/api/admin/ai-review/graph", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
+    const graphQuery = z.object({ limit: z.coerce.number().int().min(1).max(200).default(100), edgeLimit: z.coerce.number().int().min(1).max(300).default(150), q: z.string().trim().max(120).optional(), node: z.string().trim().min(1).max(120).optional() }).parse(request.query ?? {});
     const relationSelect = { id: true, subject: true, predicate: true, object: true, evidence: true, approved: true, sourcePostId: true } as const;
     const sourcePost = { is: { status: { in: ["approved", "published"] as PostStatus[] } } };
-    const pendingRelations = await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: false, sourcePost }, orderBy: { createdAt: "desc" }, take: 150, select: relationSelect });
-    const approvedRelations = pendingRelations.length < 150 ? await prisma.schoolRelation.findMany({ where: { tenantId: context.selectedTenant.id, approved: true, sourcePost }, orderBy: { createdAt: "desc" }, take: 150 - pendingRelations.length, select: relationSelect }) : [];
-    const relations = [...pendingRelations, ...approvedRelations];
-    const nodes = [...new Set(relations.flatMap((r) => [r.subject, r.object]))].slice(0, 100);
-    const included = new Set(nodes);
-    const edges = [...pendingRelations.filter((r) => included.has(r.subject) && included.has(r.object)), ...approvedRelations.filter((r) => included.has(r.subject) && included.has(r.object))].slice(0, 150);
-    return { nodes: nodes.map((id, i) => ({ id, x: 40 + (i % 10) * 100, y: 40 + Math.floor(i / 10) * 70 })), edges };
+    const where = {
+      tenantId: context.selectedTenant.id,
+      approved: true,
+      sourcePost,
+      ...(graphQuery.node
+        ? { OR: [{ subject: graphQuery.node }, { object: graphQuery.node }] }
+        : graphQuery.q
+          ? { OR: [{ subject: { contains: graphQuery.q } }, { predicate: { contains: graphQuery.q } }, { object: { contains: graphQuery.q } }] }
+          : {}),
+    };
+    const relations = await prisma.schoolRelation.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: graphQuery.edgeLimit, select: relationSelect });
+    const nodeIds = new Set<string>();
+    const edges: Array<typeof relations[number]> = [];
+    for (const relation of relations) {
+      const newNodes = Number(!nodeIds.has(relation.subject)) + Number(!nodeIds.has(relation.object));
+      if (edges.length >= graphQuery.edgeLimit || nodeIds.size + newNodes > graphQuery.limit) continue;
+      nodeIds.add(relation.subject);
+      nodeIds.add(relation.object);
+      edges.push(relation);
+    }
+    return { nodes: [...nodeIds].map((id) => ({ id })), edges };
   });
 
   app.get("/api/admin/ai-review/graph/pending", async (request, reply) => {
