@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import type { FastifyBaseLogger } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import type { EventBus } from "@campux/plugin";
-import { getStorageDriver, setQZoneEmotionPrivate } from "@campux/integrations";
+import { getStorageDriver, QZoneRecallError, setQZoneEmotionPrivate } from "@campux/integrations";
 import { Prisma, TransactionIsolationLevel, hashPassword, isTransactionSerializationFailure } from "@campux/db";
 import {
   BotWorkflowError,
@@ -66,6 +66,7 @@ import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
+import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
 import { isQZoneProtocolAutoRefreshTransientError, QZoneProtocolAutoRefreshCooldownError, QZoneProtocolAutoRefreshTransientError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { enqueuePublishFanout, requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
@@ -1030,7 +1031,7 @@ export class OneBotRuntime {
     await this.sendTenantReviewNotification(post.tenantId, message);
   }
 
-  async notifyPostRecalled(postId: string, targetCount: number, opts?: { skipAuthor?: boolean }) {
+  async notifyPostRecalled(postId: string, targetCount: number, opts?: { skipAuthor?: boolean; skipGroup?: boolean }) {
     const post = await prisma.post.findUnique({
       where: {
         id: postId,
@@ -1044,7 +1045,9 @@ export class OneBotRuntime {
     }
     const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
     const groupSuffix = opts?.skipAuthor ? "\n（静默撤回，未通知作者）" : "";
-    await this.sendTenantReviewNotification(post.tenantId, formatPostRecalledGroup(post.displayId, targetCount, stylishEnabled) + groupSuffix);
+    if (!opts?.skipGroup) {
+      await this.sendTenantReviewNotification(post.tenantId, formatPostRecalledGroup(post.displayId, targetCount, stylishEnabled) + groupSuffix);
+    }
 
     if (opts?.skipAuthor) {
       return;
@@ -4191,25 +4194,71 @@ export class OneBotRuntime {
       }
 
       if (command.name === "撤回") {
-        await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+        const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
-        // 尝试从回复消息中提取 qzoneTid；带了参数但解析不出时直接报错，避免误撤回复的消息
+        // 参数可以是稿件编号（#撤回 164 / #164 / ！164），也可以是 qzoneTid（回复成功消息或手动 tid）
         const rawArgs = command.args.trim();
-        let qzoneTid: string | null = sanitizeQZoneTid(rawArgs);
-        if (!qzoneTid && rawArgs) {
-          await this.sendGroupMessage(botQqUin, groupId, "无法识别的 tid，请使用 #撤回 <tid>，或回复 #发布 成功消息后使用 #撤回");
-          return;
-        }
-        if (!qzoneTid) {
-          // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
-          qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
-        }
-        if (!qzoneTid) {
-          await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
-          return;
-        }
+        const parsedDisplayId = parseDisplayId(rawArgs);
+        // 只把 9 位以内的数字当稿件编号，避免把纯数字的长 tid 误当编号
+        const displayIdArg =
+          parsedDisplayId !== null && String(parsedDisplayId).length <= 9 ? parsedDisplayId : null;
+        let qzoneTid: string | null = null;
 
         try {
+          if (displayIdArg !== null) {
+            const post = await prisma.post.findFirst({
+              where: { tenantId: bot.tenantId, displayId: displayIdArg },
+              select: { id: true },
+            });
+            if (!post) {
+              await this.sendGroupMessage(botQqUin, groupId, `没有找到稿件 #${displayIdArg}，请确认编号`);
+              return;
+            }
+            const publishedCount = await prisma.publishAttempt.count({
+              where: { tenantId: bot.tenantId, postId: post.id, status: "succeeded" },
+            });
+            if (publishedCount === 0) {
+              await this.sendGroupMessage(botQqUin, groupId, `稿件 #${displayIdArg} 还没有发布成功，无法撤回`);
+              return;
+            }
+            const recalled = await executePostRecall({
+              tenantId: bot.tenantId,
+              postId: post.id,
+              actorId: operator.id,
+              logger: this.logger,
+            });
+            const targetCount = recalled.results.length;
+            // 通知作者（群公告由下面的 #撤回 回复承担，避免重复）
+            await this.notifyPostRecalled(post.id, targetCount, { skipGroup: true }).catch((error) => {
+              this.logger.warn({ error, postId: post.id }, "failed to notify post recalled");
+            });
+            await this.sendGroupMessage(
+              botQqUin,
+              groupId,
+              targetCount > 1
+                ? `✅ 已撤回，共处理 ${targetCount} 个发布目标`
+                : formatBotRecallSuccess(stylishEnabled),
+            ).catch((error) => {
+              this.logger.warn({ error, groupId, postId: post.id }, "failed to send recall success message");
+            });
+            return;
+          }
+
+          // 带了参数但解析不出时直接报错，避免误撤回复的消息
+          qzoneTid = sanitizeQZoneTid(rawArgs);
+          if (!qzoneTid && rawArgs) {
+            await this.sendGroupMessage(botQqUin, groupId, "无法识别的参数，请使用 #撤回 <稿件编号>，或回复 #发布 成功消息后使用 #撤回");
+            return;
+          }
+          if (!qzoneTid) {
+            // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
+            qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
+          }
+          if (!qzoneTid) {
+            await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+            return;
+          }
+
           const recall = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
             const session = await transaction.botSession.findFirst({
               where: {
@@ -4228,7 +4277,7 @@ export class OneBotRuntime {
             }
             await setQZoneEmotionPrivate({
               targetName: bot.displayName ?? `QQ ${botQqUin}`,
-              externalId: qzoneTid,
+              externalId: qzoneTid!,
               cookies,
             });
             return true;
@@ -4236,10 +4285,43 @@ export class OneBotRuntime {
           if (!recall.active) {
             throw new BotWorkflowError("校园墙已暂停或归档", 409);
           }
-          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled));
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled)).catch((error) => {
+            this.logger.warn({ error, groupId, qzoneTid }, "failed to send recall success message");
+          });
         } catch (error) {
-          const message = error instanceof Error ? error.message : "未知错误";
-          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed(message, stylishEnabled));
+          // 只把业务错误原文发到群里；数据库/网络等未预期异常留在日志，避免把诊断信息刷进群
+          const businessMessage = (() => {
+            if (error instanceof PostRecallExecutionError) {
+              return (
+                error.results
+                  .filter((result) => !result.ok)
+                  .map((result) => `${result.targetName}：${result.message}`)
+                  .join("；") || "撤回失败"
+              );
+            }
+            if (
+              error instanceof PostRecallNotSupportedError ||
+              error instanceof BotWorkflowError ||
+              error instanceof QZoneRecallError
+            ) {
+              return error.message;
+            }
+            return "撤回失败，请稍后重试或到后台处理";
+          })();
+          this.logger.warn(
+            {
+              errName: error instanceof Error ? error.name : typeof error,
+              errMessage: error instanceof Error ? error.message : String(error),
+              qzoneTid,
+              displayId: displayIdArg,
+              groupId,
+              botId: bot.id,
+            },
+            "review group recall failed",
+          );
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed(businessMessage, stylishEnabled)).catch(
+            () => undefined,
+          );
         }
         return;
       }
