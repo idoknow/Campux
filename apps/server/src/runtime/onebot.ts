@@ -509,6 +509,15 @@ function readRecallReason(comment: string | undefined): string | null {
   return comment.slice(prefix.length).trim() || null;
 }
 
+/** 从「#撤回 <tid>」参数或发布成功消息文本中提取合法的 QZone tid。 */
+function sanitizeQZoneTid(raw: string | null | undefined): string | null {
+  if (!raw) {
+    return null;
+  }
+  const match = raw.match(/tid[:：]?([A-Za-z0-9_-]+)|([A-Za-z0-9_-]+)/);
+  return match ? (match[1] ?? match[2] ?? null) : null;
+}
+
 /**
  * Classify a OneBot connection liveness probe.
  *
@@ -4164,7 +4173,7 @@ export class OneBotRuntime {
         await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
         // 尝试从回复消息中提取 qzoneTid
-        let qzoneTid: string | null = command.args.trim();
+        let qzoneTid: string | null = sanitizeQZoneTid(command.args.trim());
         if (!qzoneTid) {
           // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
           qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
@@ -4726,8 +4735,8 @@ export class OneBotRuntime {
 
       if (!text) return null;
 
-      // Extract qzoneTid from pattern `tid:xxxxx`
-      const m = text.match(/tid:(\S+)/);
+      // Extract qzoneTid from pattern `tid:xxxxx`（发布成功消息里是 `(tid:xxx)`，不能把结尾括号带进去）
+      const m = text.match(/tid[:：]([A-Za-z0-9_-]+)/);
       return m ? (m[1] ?? null) : null;
     } catch (error) {
       return null;
