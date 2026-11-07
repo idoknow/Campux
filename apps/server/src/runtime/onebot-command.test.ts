@@ -29,7 +29,6 @@ import {
   buildAiReviewForwardNodes,
   sanitizeForwardSegments,
   sanitizeQZoneTid,
-  pickRecallResponderBotId,
   sanitizeSegmentsForGroupSend,
   isDefinitiveForwardRejection,
 } from "./onebot";
@@ -961,32 +960,5 @@ describe("审核群 #撤回 的 tid 解析", () => {
     expect(extractQZoneTidFromMessageText("✅ 已发布到 QQ 空间！")).toBeNull();
     expect(extractQZoneTidFromMessageText("外部 ID：123")).toBeNull();
     expect(extractQZoneTidFromMessageText("")).toBeNull();
-  });
-
-  test("pickRecallResponderBotId：多 bot 同群时只选一个回应者（QQ 号最小）", () => {
-    expect(
-      pickRecallResponderBotId(
-        [
-          { id: "bot-b", qqUin: 3789138548n, enabled: true, reviewGroupId: "887392" },
-          { id: "bot-a", qqUin: 3023317473n, enabled: true, reviewGroupId: "887392" },
-        ],
-        "887392",
-      ),
-    ).toBe("bot-a");
-  });
-
-  test("pickRecallResponderBotId：停用或不在本群的 bot 不参与，无人可回应时返回 null", () => {
-    expect(
-      pickRecallResponderBotId(
-        [
-          { id: "bot-a", qqUin: 100n, enabled: false, reviewGroupId: "888" },
-          { id: "bot-b", qqUin: 200n, enabled: true, reviewGroupId: "999" },
-        ],
-        "888",
-      ),
-    ).toBeNull();
-    expect(
-      pickRecallResponderBotId([{ id: "bot-c", qqUin: 300n, enabled: true, reviewGroupId: "888" }], "888"),
-    ).toBe("bot-c");
   });
 });

@@ -541,24 +541,6 @@ export function extractQZoneTidFromMessageText(text: string | null | undefined):
 }
 
 /**
- * 审核群里有多个 bot（如同一校园墙的一墙/二墙 QQ）时，每条群消息会被每个 bot 各处理一次。
- * QZone 的说说详情接口只对发布该说说的 QQ 可见，让别的 bot 去撤回会得到
- * 「对不起，原文已经被删除，无法查看」。所以按稿件的发布记录挑一个回应者：
- * 在同群、启用的发布 bot 里选 QQ 号最小的那个，其余 bot 静默让出。
- * 返回 null 表示没有归属本群的发布 bot（例如手工 tid），由当前 bot 自己处理。
- */
-export function pickRecallResponderBotId(
-  owners: Array<{ id: string; qqUin: bigint | string; enabled: boolean; reviewGroupId: string | null }>,
-  groupId: string,
-): string | null {
-  const candidates = owners.filter((owner) => owner.enabled && owner.reviewGroupId === groupId);
-  if (candidates.length === 0) {
-    return null;
-  }
-  return [...candidates].sort((left, right) => Number(BigInt(left.qqUin) - BigInt(right.qqUin)))[0]!.id;
-}
-
-/**
  * Classify a OneBot connection liveness probe.
  *
  * `stale` means the socket is no longer the registered connection: a reconnect
@@ -4212,23 +4194,38 @@ export class OneBotRuntime {
       if (command.name === "撤回") {
         const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
-        // 目标解析：管理员习惯用稿件编号（#撤回 164），也支持 qzoneTid（回复成功消息或手动 tid）
+        // 参数可以是稿件编号（#撤回 164），也可以是 qzoneTid（回复成功消息或手动 tid）
         const rawArgs = command.args.trim();
         const displayIdArg = /^\d{1,9}$/.test(rawArgs) ? Number(rawArgs) : null;
         let qzoneTid: string | null = null;
-        let targetPostId: string | null = null;
 
-        if (displayIdArg !== null) {
-          const post = await prisma.post.findFirst({
-            where: { tenantId: bot.tenantId, displayId: displayIdArg },
-            select: { id: true },
-          });
-          if (!post) {
-            await this.sendGroupMessage(botQqUin, groupId, `没有找到稿件 #${displayIdArg}，请确认编号`);
+        try {
+          if (displayIdArg !== null) {
+            const post = await prisma.post.findFirst({
+              where: { tenantId: bot.tenantId, displayId: displayIdArg },
+              select: { id: true },
+            });
+            if (!post) {
+              await this.sendGroupMessage(botQqUin, groupId, `没有找到稿件 #${displayIdArg}，请确认编号`);
+              return;
+            }
+            const recalled = await executePostRecall({
+              tenantId: bot.tenantId,
+              postId: post.id,
+              actorId: operator.id,
+              logger: this.logger,
+            });
+            const targetCount = recalled.results.length;
+            await this.sendGroupMessage(
+              botQqUin,
+              groupId,
+              targetCount > 1
+                ? `✅ 已撤回，共处理 ${targetCount} 个发布目标`
+                : formatBotRecallSuccess(stylishEnabled),
+            );
             return;
           }
-          targetPostId = post.id;
-        } else {
+
           // 带了参数但解析不出时直接报错，避免误撤回复的消息
           qzoneTid = sanitizeQZoneTid(rawArgs);
           if (!qzoneTid && rawArgs) {
@@ -4243,113 +4240,43 @@ export class OneBotRuntime {
             await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
             return;
           }
-          const attempt = await prisma.publishAttempt.findFirst({
-            where: { tenantId: bot.tenantId, qzoneTid, status: "succeeded" },
-            select: { postId: true },
-          });
-          targetPostId = attempt?.postId ?? null;
-        }
 
-        try {
-          if (targetPostId) {
-            // 同群多个 bot 时只让一个回应（发布过该稿件、且在本群、启用、QQ 号最小），
-            // 否则另一个 bot 会拿自己的登录态去撤回别人的说说，报「原文已经被删除」。
-            const ownerAttempts = await prisma.publishAttempt.findMany({
+          const recall = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+            const session = await transaction.botSession.findFirst({
               where: {
-                tenantId: bot.tenantId,
-                postId: targetPostId,
-                status: "succeeded",
+                botAccountId: bot.id,
+                type: "qzone",
+                domain: qzoneCookieDomain,
               },
-              select: {
-                publishTarget: {
-                  select: {
-                    botAccount: {
-                      select: {
-                        id: true,
-                        qqUin: true,
-                        enabled: true,
-                        reviewGroupId: true,
-                      },
-                    },
-                  },
-                },
-              },
+              orderBy: { refreshedAt: "desc" },
             });
-            const responderId = pickRecallResponderBotId(
-              ownerAttempts.map((item) => item.publishTarget.botAccount),
-              groupId,
-            );
-            if (responderId && responderId !== bot.id) {
-              this.logger.info(
-                { postId: targetPostId, botId: bot.id, responderId, groupId },
-                "recall deferred to the publishing bot in this group",
-              );
-              return;
+            if (!session || session.healthStatus !== "available") {
+              throw new BotWorkflowError("机器人 QZone 登录态不可用", 409);
             }
-
-            // 同一稿件可能同步发布到多个 QZone（多墙/多 bot），按稿件撤回全部发布目标，
-            // 每个目标用自己 bot 的登录态，和后台「撤回稿件」保持一致。
-            const recalled = await executePostRecall({
-              tenantId: bot.tenantId,
-              postId: targetPostId,
-              actorId: operator.id,
-              logger: this.logger,
+            const cookies = decryptJson(session.cookies) as Record<string, string> | null;
+            if (!cookies) {
+              throw new BotWorkflowError("QZone cookies 解析失败", 502);
+            }
+            await setQZoneEmotionPrivate({
+              targetName: bot.displayName ?? `QQ ${botQqUin}`,
+              externalId: qzoneTid!,
+              cookies,
             });
-            const targetCount = recalled.results.length;
-            await this.sendGroupMessage(
-              botQqUin,
-              groupId,
-              targetCount > 1
-                ? `✅ 已撤回，共处理 ${targetCount} 个发布目标（含同步发布）`
-                : formatBotRecallSuccess(stylishEnabled),
-            );
-          } else {
-            if (!qzoneTid) {
-              throw new BotWorkflowError("缺少 QZone tid", 400);
-            }
-            // 库里查不到这条 tid（手工输入或历史数据）：沿用当前 bot 的登录态按 tid 直接撤回
-            const recall = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
-              const session = await transaction.botSession.findFirst({
-                where: {
-                  botAccountId: bot.id,
-                  type: "qzone",
-                  domain: qzoneCookieDomain,
-                },
-                orderBy: { refreshedAt: "desc" },
-              });
-              if (!session || session.healthStatus !== "available") {
-                throw new BotWorkflowError("机器人 QZone 登录态不可用", 409);
-              }
-              const cookies = decryptJson(session.cookies) as Record<string, string> | null;
-              if (!cookies) {
-                throw new BotWorkflowError("QZone cookies 解析失败", 502);
-              }
-              await setQZoneEmotionPrivate({
-                targetName: bot.displayName ?? `QQ ${botQqUin}`,
-                externalId: qzoneTid,
-                cookies,
-              });
-              return true;
-            });
-            if (!recall.active) {
-              throw new BotWorkflowError("校园墙已暂停或归档", 409);
-            }
-            await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled));
+            return true;
+          });
+          if (!recall.active) {
+            throw new BotWorkflowError("校园墙已暂停或归档", 409);
           }
+          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled));
         } catch (error) {
           const message =
-            error instanceof PostRecallExecutionError
-              ? error.results
-                  .filter((result) => !result.ok)
-                  .map((result) => `${result.targetName}：${result.message}`)
-                  .join("；") || "撤回失败"
-              : error instanceof PostRecallNotSupportedError
+            error instanceof PostRecallNotSupportedError
+              ? error.message
+              : error instanceof Error
                 ? error.message
-                : error instanceof Error
-                  ? error.message
-                  : "未知错误";
+                : "未知错误";
           this.logger.warn(
-            { error, qzoneTid, groupId, botId: bot.id },
+            { error, qzoneTid, displayId: displayIdArg, groupId, botId: bot.id },
             "review group recall failed",
           );
           await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed(message, stylishEnabled));
