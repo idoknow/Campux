@@ -4,6 +4,7 @@ import { parsePrivatePostConfirmText } from "../lib/private-posting";
 import { BotWorkflowError, OneBotActionTimeoutError, OneBotConnectionUnavailableError } from "../lib/bot-workflows";
 import {
   buildReviewHelp,
+  extractQZoneTidFromMessageText,
   isPrivatePostAiIntakeActive,
   shouldAppendPrivatePostContentForSemantic,
   shouldApplyPrivatePostSemanticText,
@@ -27,6 +28,7 @@ import {
   buildForwardNodes,
   buildAiReviewForwardNodes,
   sanitizeForwardSegments,
+  sanitizeQZoneTid,
   sanitizeSegmentsForGroupSend,
   isDefinitiveForwardRejection,
 } from "./onebot";
@@ -920,5 +922,43 @@ describe("原样转发与媒体降级", () => {
       { type: "text", data: { text: "[文件] 成绩单.pdf" } },
       { type: "text", data: { text: "[语音]" } },
     ]);
+  });
+});
+
+describe("审核群 #撤回 的 tid 解析", () => {
+  test("sanitizeQZoneTid：回复消息里 (tid:xxx) 复制粘贴可识别（本次 bug 回归）", () => {
+    expect(sanitizeQZoneTid("(tid:abc-123)")).toBe("abc-123");
+    expect(sanitizeQZoneTid("tid:abc-123)")).toBe("abc-123");
+    expect(sanitizeQZoneTid("（tid：999）")).toBe("999");
+  });
+
+  test("sanitizeQZoneTid：tid: 前缀容忍冒号后空白", () => {
+    expect(sanitizeQZoneTid("tid： 123")).toBe("123");
+    expect(sanitizeQZoneTid("tid: 123")).toBe("123");
+  });
+
+  test("sanitizeQZoneTid：裸 tid 原样通过", () => {
+    expect(sanitizeQZoneTid("123456789")).toBe("123456789");
+    expect(sanitizeQZoneTid("abc_X-1")).toBe("abc_X-1");
+  });
+
+  test("sanitizeQZoneTid：其他形式一律拒绝", () => {
+    expect(sanitizeQZoneTid("tid:")).toBeNull();
+    expect(sanitizeQZoneTid("tid")).toBeNull();
+    expect(sanitizeQZoneTid("外部 ID：123")).toBeNull();
+    expect(sanitizeQZoneTid("tid:abc extra")).toBeNull();
+    expect(sanitizeQZoneTid("tid123")).toBe("tid123");
+    expect(sanitizeQZoneTid("abc。def")).toBeNull();
+    expect(sanitizeQZoneTid("？？？")).toBeNull();
+    expect(sanitizeQZoneTid("")).toBeNull();
+    expect(sanitizeQZoneTid(null)).toBeNull();
+  });
+
+  test("extractQZoneTidFromMessageText：发布成功消息提取 tid", () => {
+    expect(extractQZoneTidFromMessageText("📢 发布成功！内容已推送至 QQ 空间~ (tid:abc-123)")).toBe("abc-123");
+    expect(extractQZoneTidFromMessageText("✅ 已发布到 QQ 空间！(tid:12345)")).toBe("12345");
+    expect(extractQZoneTidFromMessageText("✅ 已发布到 QQ 空间！")).toBeNull();
+    expect(extractQZoneTidFromMessageText("外部 ID：123")).toBeNull();
+    expect(extractQZoneTidFromMessageText("")).toBeNull();
   });
 });

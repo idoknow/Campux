@@ -513,9 +513,10 @@ function readRecallReason(comment: string | undefined): string | null {
  * 清洗「#撤回 <tid>」参数：接受完整裸 tid 或 `tid:`/`tid：` 前缀形式（容忍冒号后空白），
  * 首尾包裹的括号、标点会被剥除后再整体校验，其他输入返回 null。
  * 注意：字符类用 \uXXXX 转义而非字面 CJK 字符——bun(JSC) 对类内 `\】` 这类
- * identity escape 解析有误，会让其他字符错误匹配。
+ * identity escape 解析有误，实测双重失败：被转义字符本身不再匹配（首尾标点剥不干净、
+ * 合法 tid 被拒），且会让无关字符（如数字）错误落入字符类。node(V8) 行为正常。
  */
-function sanitizeQZoneTid(raw: string | null | undefined): string | null {
+export function sanitizeQZoneTid(raw: string | null | undefined): string | null {
   if (!raw) {
     return null;
   }
@@ -527,6 +528,15 @@ function sanitizeQZoneTid(raw: string | null | undefined): string | null {
   const bare = trimmed.match(/^([A-Za-z0-9_-]+)$/);
   const value = prefixed?.[1] ?? bare?.[1] ?? null;
   return value && !/^tid$/i.test(value) ? value : null;
+}
+
+/** 从 bot 消息文本中提取 `(tid:xxx)` 形式的 qzoneTid（发布成功消息），解析不出返回 null。 */
+export function extractQZoneTidFromMessageText(text: string | null | undefined): string | null {
+  if (!text) {
+    return null;
+  }
+  const match = text.match(/tid[:：]([A-Za-z0-9_-]+)/);
+  return match ? (match[1] ?? null) : null;
 }
 
 /**
@@ -4752,8 +4762,7 @@ export class OneBotRuntime {
       if (!text) return null;
 
       // Extract qzoneTid from pattern `tid:xxxxx`（发布成功消息里是 `(tid:xxx)`，不能把结尾括号带进去）
-      const m = text.match(/tid[:：]([A-Za-z0-9_-]+)/);
-      return m ? (m[1] ?? null) : null;
+      return extractQZoneTidFromMessageText(text);
     } catch (error) {
       return null;
     }
