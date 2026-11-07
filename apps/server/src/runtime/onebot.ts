@@ -509,13 +509,22 @@ function readRecallReason(comment: string | undefined): string | null {
   return comment.slice(prefix.length).trim() || null;
 }
 
-/** 清洗「#撤回 <tid>」参数：只接受完整裸 tid 或 `tid:`/`tid：` 前缀形式，其他输入返回 null。 */
+/**
+ * 清洗「#撤回 <tid>」参数：接受完整裸 tid 或 `tid:`/`tid：` 前缀形式（容忍冒号后空白），
+ * 首尾包裹的括号、标点会被剥除后再整体校验，其他输入返回 null。
+ * 注意：字符类用 \uXXXX 转义而非字面 CJK 字符——bun(JSC) 对类内 `\】` 这类
+ * identity escape 解析有误，会让其他字符错误匹配。
+ */
 function sanitizeQZoneTid(raw: string | null | undefined): string | null {
   if (!raw) {
     return null;
   }
-  const prefixed = raw.match(/^tid[:：]([A-Za-z0-9_-]+)$/i);
-  const bare = raw.match(/^([A-Za-z0-9_-]+)$/);
+  const trimmed = raw
+    .trim()
+    .replace(/^[(\uFF08\[\{\u3010\u300C\u300E\u300A<\uFF1C]+/, "")
+    .replace(/[)\uFF09\]\}\u3011\u300D\u300F\u300B>\uFF1E.,\uFF0C\u3001\u3002;\uFF1B!\uFF01?\uFF1F]+$/, "");
+  const prefixed = trimmed.match(/^tid[:：]\s*([A-Za-z0-9_-]+)$/i);
+  const bare = trimmed.match(/^([A-Za-z0-9_-]+)$/);
   const value = prefixed?.[1] ?? bare?.[1] ?? null;
   return value && !/^tid$/i.test(value) ? value : null;
 }
