@@ -29,6 +29,7 @@ import {
   buildAiReviewForwardNodes,
   sanitizeForwardSegments,
   sanitizeQZoneTid,
+  shouldDeferRecallToOwnerBot,
   sanitizeSegmentsForGroupSend,
   isDefinitiveForwardRejection,
 } from "./onebot";
@@ -960,5 +961,37 @@ describe("审核群 #撤回 的 tid 解析", () => {
     expect(extractQZoneTidFromMessageText("✅ 已发布到 QQ 空间！")).toBeNull();
     expect(extractQZoneTidFromMessageText("外部 ID：123")).toBeNull();
     expect(extractQZoneTidFromMessageText("")).toBeNull();
+  });
+
+  test("shouldDeferRecallToOwnerBot：同群另一个在用的 bot 发过这条说说时让出处理权", () => {
+    expect(
+      shouldDeferRecallToOwnerBot({
+        currentBotId: "bot-b",
+        ownerBotId: "bot-a",
+        ownerEnabled: true,
+        ownerReviewGroupId: "888",
+        groupId: "888",
+      }),
+    ).toBe(true);
+  });
+
+  test("shouldDeferRecallToOwnerBot：自己发的、归属 bot 不在本群/已停用、无归属记录时都自己处理", () => {
+    const base = { currentBotId: "bot-b", groupId: "888" };
+    // 自己发的
+    expect(
+      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: "bot-b", ownerEnabled: true, ownerReviewGroupId: "888" }),
+    ).toBe(false);
+    // 归属 bot 已停用
+    expect(
+      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: "bot-a", ownerEnabled: false, ownerReviewGroupId: "888" }),
+    ).toBe(false);
+    // 归属 bot 不在本群（用它自己的登录态撤回）
+    expect(
+      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: "bot-a", ownerEnabled: true, ownerReviewGroupId: "999" }),
+    ).toBe(false);
+    // 库里没有这条 tid 的发布记录（手工 tid）
+    expect(
+      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: null, ownerEnabled: false, ownerReviewGroupId: null }),
+    ).toBe(false);
   });
 });

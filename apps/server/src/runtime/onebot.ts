@@ -66,6 +66,7 @@ import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
+import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
 import { isQZoneProtocolAutoRefreshTransientError, QZoneProtocolAutoRefreshCooldownError, QZoneProtocolAutoRefreshTransientError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { enqueuePublishFanout, requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
@@ -537,6 +538,28 @@ export function extractQZoneTidFromMessageText(text: string | null | undefined):
   }
   const match = text.match(/tid[:：]([A-Za-z0-9_-]+)/);
   return match ? (match[1] ?? null) : null;
+}
+
+/**
+ * 同一审核群可能挂着同一校园墙的多个 bot（例如一墙/二墙各一个 QQ）。群消息会同时投递给
+ * 每个 bot 的连接，但 QZone 的说说详情接口只对「发布该说说的 QQ」可见：拿另一个 bot 的
+ * cookies 去撤回，会得到「对不起，原文已经被删除，无法查看」，看起来像 tid 解析失败。
+ * 所以：说说归属另一个仍在本群且在用的 bot 时，本 bot 静默让出处理权；
+ * 其余情况（没有归属记录、归属 bot 已停用/不在本群）用归属 bot 的登录态执行撤回。
+ */
+export function shouldDeferRecallToOwnerBot(input: {
+  currentBotId: string;
+  ownerBotId: string | null | undefined;
+  ownerEnabled: boolean;
+  ownerReviewGroupId: string | null | undefined;
+  groupId: string;
+}): boolean {
+  return Boolean(
+    input.ownerBotId &&
+      input.ownerBotId !== input.currentBotId &&
+      input.ownerEnabled &&
+      input.ownerReviewGroupId === input.groupId,
+  );
 }
 
 /**
@@ -4191,7 +4214,7 @@ export class OneBotRuntime {
       }
 
       if (command.name === "撤回") {
-        await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+        const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
         // 尝试从回复消息中提取 qzoneTid；带了参数但解析不出时直接报错，避免误撤回复的消息
         const rawArgs = command.args.trim();
@@ -4210,35 +4233,110 @@ export class OneBotRuntime {
         }
 
         try {
-          const recall = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
-            const session = await transaction.botSession.findFirst({
-              where: {
-                botAccountId: bot.id,
-                type: "qzone",
-                domain: qzoneCookieDomain,
+          const attempt = await prisma.publishAttempt.findFirst({
+            where: {
+              tenantId: bot.tenantId,
+              qzoneTid,
+              status: "succeeded",
+            },
+            select: {
+              postId: true,
+              publishTarget: {
+                select: {
+                  botAccount: {
+                    select: {
+                      id: true,
+                      enabled: true,
+                      reviewGroupId: true,
+                    },
+                  },
+                },
               },
-              orderBy: { refreshedAt: "desc" },
-            });
-            if (!session || session.healthStatus !== "available") {
-              throw new BotWorkflowError("机器人 QZone 登录态不可用", 409);
-            }
-            const cookies = decryptJson(session.cookies) as Record<string, string> | null;
-            if (!cookies) {
-              throw new BotWorkflowError("QZone cookies 解析失败", 502);
-            }
-            await setQZoneEmotionPrivate({
-              targetName: bot.displayName ?? `QQ ${botQqUin}`,
-              externalId: qzoneTid,
-              cookies,
-            });
-            return true;
+            },
           });
-          if (!recall.active) {
-            throw new BotWorkflowError("校园墙已暂停或归档", 409);
+          const ownerBot = attempt?.publishTarget.botAccount ?? null;
+          if (
+            ownerBot &&
+            shouldDeferRecallToOwnerBot({
+              currentBotId: bot.id,
+              ownerBotId: ownerBot.id,
+              ownerEnabled: ownerBot.enabled,
+              ownerReviewGroupId: ownerBot.reviewGroupId,
+              groupId,
+            })
+          ) {
+            // 同一审核群挂着多个 bot 时，每条群消息会被每个 bot 各处理一次；
+            // 只有发布这条说说的 bot 回应，避免另一个 bot 拿自己的登录态误报「原文已经被删除」。
+            this.logger.info(
+              { qzoneTid, botId: bot.id, ownerBotId: ownerBot.id, groupId },
+              "recall deferred to the bot that published the post",
+            );
+            return;
           }
-          await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled));
+
+          if (attempt) {
+            // 同一稿件可能同步发布到多个 QZone（多墙/多 bot），按稿件撤回全部发布目标，
+            // 每个目标用自己 bot 的登录态，和后台「撤回稿件」保持一致。
+            const recalled = await executePostRecall({
+              tenantId: bot.tenantId,
+              postId: attempt.postId,
+              actorId: operator.id,
+              logger: this.logger,
+            });
+            const targetCount = recalled.results.length;
+            await this.sendGroupMessage(
+              botQqUin,
+              groupId,
+              targetCount > 1
+                ? `✅ 已撤回，共处理 ${targetCount} 个发布目标（含同步发布）`
+                : formatBotRecallSuccess(stylishEnabled),
+            );
+          } else {
+            // 库里查不到这条 tid（手工输入或历史数据）：沿用当前 bot 的登录态按 tid 直接撤回
+            const recall = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+              const session = await transaction.botSession.findFirst({
+                where: {
+                  botAccountId: bot.id,
+                  type: "qzone",
+                  domain: qzoneCookieDomain,
+                },
+                orderBy: { refreshedAt: "desc" },
+              });
+              if (!session || session.healthStatus !== "available") {
+                throw new BotWorkflowError("机器人 QZone 登录态不可用", 409);
+              }
+              const cookies = decryptJson(session.cookies) as Record<string, string> | null;
+              if (!cookies) {
+                throw new BotWorkflowError("QZone cookies 解析失败", 502);
+              }
+              await setQZoneEmotionPrivate({
+                targetName: bot.displayName ?? `QQ ${botQqUin}`,
+                externalId: qzoneTid,
+                cookies,
+              });
+              return true;
+            });
+            if (!recall.active) {
+              throw new BotWorkflowError("校园墙已暂停或归档", 409);
+            }
+            await this.sendGroupMessage(botQqUin, groupId, formatBotRecallSuccess(stylishEnabled));
+          }
         } catch (error) {
-          const message = error instanceof Error ? error.message : "未知错误";
+          const message =
+            error instanceof PostRecallExecutionError
+              ? error.results
+                  .filter((result) => !result.ok)
+                  .map((result) => `${result.targetName}：${result.message}`)
+                  .join("；") || "撤回失败"
+              : error instanceof PostRecallNotSupportedError
+                ? error.message
+                : error instanceof Error
+                  ? error.message
+                  : "未知错误";
+          this.logger.warn(
+            { error, qzoneTid, groupId, botId: bot.id },
+            "review group recall failed",
+          );
           await this.sendGroupMessage(botQqUin, groupId, formatBotRecallFailed(message, stylishEnabled));
         }
         return;
