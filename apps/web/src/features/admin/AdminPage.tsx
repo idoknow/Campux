@@ -317,6 +317,7 @@ function writeBanListPreferences(tenantId: string, preferences: BanListPreferenc
 export function AdminPage({
   activeTab,
   currentUserId,
+  viewerSystemRole,
   selectedTenant,
   metadata,
   detailTarget,
@@ -327,6 +328,7 @@ export function AdminPage({
 }: {
   activeTab: AdminTab;
   currentUserId: string;
+  viewerSystemRole: string | null;
   selectedTenant: TenantSummary;
   metadata: TenantMetadata;
   detailTarget?: { userId: string; nonce: number } | null;
@@ -1214,6 +1216,7 @@ export function AdminPage({
                   writeQueryParams({ member_page: page > 1 ? page : null, page: null });
                 }}
                 currentUserId={currentUserId}
+                viewerSystemRole={viewerSystemRole}
                 enableBroadcast={metadata.enableBroadcast}
                 onFormChange={setMemberForm}
                 onAddMember={() => void addMember()}
@@ -1581,6 +1584,7 @@ function UsersPanel({
   busy,
   loading,
   currentUserId,
+  viewerSystemRole,
   enableBroadcast,
   onKeywordChange,
   onRoleFilterChange,
@@ -1602,6 +1606,7 @@ function UsersPanel({
   busy: boolean;
   loading: boolean;
   currentUserId: string;
+  viewerSystemRole: string | null;
   enableBroadcast: boolean;
   onKeywordChange: (value: string) => void;
   onRoleFilterChange: (value: "all" | TenantRole) => void;
@@ -1706,7 +1711,7 @@ function UsersPanel({
                   <Badge variant="outline" title="运营管理员的墙内管理员身份受平台保护，只有系统运维或本人可以变更">运营管理员</Badge>
                 ) : null}
                 <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                  <Select value={member.role} onValueChange={(role) => onRoleChange(member, role as TenantRole)} disabled={member.user.systemRole === "operations_admin" && currentUserId !== member.user.id}>
+                  <Select value={member.role} onValueChange={(role) => onRoleChange(member, role as TenantRole)} disabled={member.user.systemRole === "operations_admin" && currentUserId !== member.user.id && viewerSystemRole !== "system_operator"}>
                     <SelectTrigger className="bg-white font-bold">
                       <SelectValue />
                     </SelectTrigger>
