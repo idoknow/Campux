@@ -541,25 +541,21 @@ export function extractQZoneTidFromMessageText(text: string | null | undefined):
 }
 
 /**
- * 同一审核群可能挂着同一校园墙的多个 bot（例如一墙/二墙各一个 QQ）。群消息会同时投递给
- * 每个 bot 的连接，但 QZone 的说说详情接口只对「发布该说说的 QQ」可见：拿另一个 bot 的
- * cookies 去撤回，会得到「对不起，原文已经被删除，无法查看」，看起来像 tid 解析失败。
- * 所以：说说归属另一个仍在本群且在用的 bot 时，本 bot 静默让出处理权；
- * 其余情况（没有归属记录、归属 bot 已停用/不在本群）用归属 bot 的登录态执行撤回。
+ * 审核群里有多个 bot（如同一校园墙的一墙/二墙 QQ）时，每条群消息会被每个 bot 各处理一次。
+ * QZone 的说说详情接口只对发布该说说的 QQ 可见，让别的 bot 去撤回会得到
+ * 「对不起，原文已经被删除，无法查看」。所以按稿件的发布记录挑一个回应者：
+ * 在同群、启用的发布 bot 里选 QQ 号最小的那个，其余 bot 静默让出。
+ * 返回 null 表示没有归属本群的发布 bot（例如手工 tid），由当前 bot 自己处理。
  */
-export function shouldDeferRecallToOwnerBot(input: {
-  currentBotId: string;
-  ownerBotId: string | null | undefined;
-  ownerEnabled: boolean;
-  ownerReviewGroupId: string | null | undefined;
-  groupId: string;
-}): boolean {
-  return Boolean(
-    input.ownerBotId &&
-      input.ownerBotId !== input.currentBotId &&
-      input.ownerEnabled &&
-      input.ownerReviewGroupId === input.groupId,
-  );
+export function pickRecallResponderBotId(
+  owners: Array<{ id: string; qqUin: bigint | string; enabled: boolean; reviewGroupId: string | null }>,
+  groupId: string,
+): string | null {
+  const candidates = owners.filter((owner) => owner.enabled && owner.reviewGroupId === groupId);
+  if (candidates.length === 0) {
+    return null;
+  }
+  return [...candidates].sort((left, right) => Number(BigInt(left.qqUin) - BigInt(right.qqUin)))[0]!.id;
 }
 
 /**
@@ -4216,70 +4212,86 @@ export class OneBotRuntime {
       if (command.name === "撤回") {
         const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
-        // 尝试从回复消息中提取 qzoneTid；带了参数但解析不出时直接报错，避免误撤回复的消息
+        // 目标解析：管理员习惯用稿件编号（#撤回 164），也支持 qzoneTid（回复成功消息或手动 tid）
         const rawArgs = command.args.trim();
-        let qzoneTid: string | null = sanitizeQZoneTid(rawArgs);
-        if (!qzoneTid && rawArgs) {
-          await this.sendGroupMessage(botQqUin, groupId, "无法识别的 tid，请使用 #撤回 <tid>，或回复 #发布 成功消息后使用 #撤回");
-          return;
-        }
-        if (!qzoneTid) {
-          // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
-          qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
-        }
-        if (!qzoneTid) {
-          await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
-          return;
+        const displayIdArg = /^\d{1,9}$/.test(rawArgs) ? Number(rawArgs) : null;
+        let qzoneTid: string | null = null;
+        let targetPostId: string | null = null;
+
+        if (displayIdArg !== null) {
+          const post = await prisma.post.findFirst({
+            where: { tenantId: bot.tenantId, displayId: displayIdArg },
+            select: { id: true },
+          });
+          if (!post) {
+            await this.sendGroupMessage(botQqUin, groupId, `没有找到稿件 #${displayIdArg}，请确认编号`);
+            return;
+          }
+          targetPostId = post.id;
+        } else {
+          // 带了参数但解析不出时直接报错，避免误撤回复的消息
+          qzoneTid = sanitizeQZoneTid(rawArgs);
+          if (!qzoneTid && rawArgs) {
+            await this.sendGroupMessage(botQqUin, groupId, "无法识别的参数，请使用 #撤回 <稿件编号>，或回复 #发布 成功消息后使用 #撤回");
+            return;
+          }
+          if (!qzoneTid) {
+            // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
+            qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
+          }
+          if (!qzoneTid) {
+            await this.sendGroupMessage(botQqUin, groupId, reviewHelp);
+            return;
+          }
+          const attempt = await prisma.publishAttempt.findFirst({
+            where: { tenantId: bot.tenantId, qzoneTid, status: "succeeded" },
+            select: { postId: true },
+          });
+          targetPostId = attempt?.postId ?? null;
         }
 
         try {
-          const attempt = await prisma.publishAttempt.findFirst({
-            where: {
-              tenantId: bot.tenantId,
-              qzoneTid,
-              status: "succeeded",
-            },
-            select: {
-              postId: true,
-              publishTarget: {
-                select: {
-                  botAccount: {
-                    select: {
-                      id: true,
-                      enabled: true,
-                      reviewGroupId: true,
+          if (targetPostId) {
+            // 同群多个 bot 时只让一个回应（发布过该稿件、且在本群、启用、QQ 号最小），
+            // 否则另一个 bot 会拿自己的登录态去撤回别人的说说，报「原文已经被删除」。
+            const ownerAttempts = await prisma.publishAttempt.findMany({
+              where: {
+                tenantId: bot.tenantId,
+                postId: targetPostId,
+                status: "succeeded",
+              },
+              select: {
+                publishTarget: {
+                  select: {
+                    botAccount: {
+                      select: {
+                        id: true,
+                        qqUin: true,
+                        enabled: true,
+                        reviewGroupId: true,
+                      },
                     },
                   },
                 },
               },
-            },
-          });
-          const ownerBot = attempt?.publishTarget.botAccount ?? null;
-          if (
-            ownerBot &&
-            shouldDeferRecallToOwnerBot({
-              currentBotId: bot.id,
-              ownerBotId: ownerBot.id,
-              ownerEnabled: ownerBot.enabled,
-              ownerReviewGroupId: ownerBot.reviewGroupId,
+            });
+            const responderId = pickRecallResponderBotId(
+              ownerAttempts.map((item) => item.publishTarget.botAccount),
               groupId,
-            })
-          ) {
-            // 同一审核群挂着多个 bot 时，每条群消息会被每个 bot 各处理一次；
-            // 只有发布这条说说的 bot 回应，避免另一个 bot 拿自己的登录态误报「原文已经被删除」。
-            this.logger.info(
-              { qzoneTid, botId: bot.id, ownerBotId: ownerBot.id, groupId },
-              "recall deferred to the bot that published the post",
             );
-            return;
-          }
+            if (responderId && responderId !== bot.id) {
+              this.logger.info(
+                { postId: targetPostId, botId: bot.id, responderId, groupId },
+                "recall deferred to the publishing bot in this group",
+              );
+              return;
+            }
 
-          if (attempt) {
             // 同一稿件可能同步发布到多个 QZone（多墙/多 bot），按稿件撤回全部发布目标，
             // 每个目标用自己 bot 的登录态，和后台「撤回稿件」保持一致。
             const recalled = await executePostRecall({
               tenantId: bot.tenantId,
-              postId: attempt.postId,
+              postId: targetPostId,
               actorId: operator.id,
               logger: this.logger,
             });
@@ -4292,6 +4304,9 @@ export class OneBotRuntime {
                 : formatBotRecallSuccess(stylishEnabled),
             );
           } else {
+            if (!qzoneTid) {
+              throw new BotWorkflowError("缺少 QZone tid", 400);
+            }
             // 库里查不到这条 tid（手工输入或历史数据）：沿用当前 bot 的登录态按 tid 直接撤回
             const recall = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
               const session = await transaction.botSession.findFirst({

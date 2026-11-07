@@ -29,7 +29,7 @@ import {
   buildAiReviewForwardNodes,
   sanitizeForwardSegments,
   sanitizeQZoneTid,
-  shouldDeferRecallToOwnerBot,
+  pickRecallResponderBotId,
   sanitizeSegmentsForGroupSend,
   isDefinitiveForwardRejection,
 } from "./onebot";
@@ -963,35 +963,30 @@ describe("审核群 #撤回 的 tid 解析", () => {
     expect(extractQZoneTidFromMessageText("")).toBeNull();
   });
 
-  test("shouldDeferRecallToOwnerBot：同群另一个在用的 bot 发过这条说说时让出处理权", () => {
+  test("pickRecallResponderBotId：多 bot 同群时只选一个回应者（QQ 号最小）", () => {
     expect(
-      shouldDeferRecallToOwnerBot({
-        currentBotId: "bot-b",
-        ownerBotId: "bot-a",
-        ownerEnabled: true,
-        ownerReviewGroupId: "888",
-        groupId: "888",
-      }),
-    ).toBe(true);
+      pickRecallResponderBotId(
+        [
+          { id: "bot-b", qqUin: 3789138548n, enabled: true, reviewGroupId: "887392" },
+          { id: "bot-a", qqUin: 3023317473n, enabled: true, reviewGroupId: "887392" },
+        ],
+        "887392",
+      ),
+    ).toBe("bot-a");
   });
 
-  test("shouldDeferRecallToOwnerBot：自己发的、归属 bot 不在本群/已停用、无归属记录时都自己处理", () => {
-    const base = { currentBotId: "bot-b", groupId: "888" };
-    // 自己发的
+  test("pickRecallResponderBotId：停用或不在本群的 bot 不参与，无人可回应时返回 null", () => {
     expect(
-      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: "bot-b", ownerEnabled: true, ownerReviewGroupId: "888" }),
-    ).toBe(false);
-    // 归属 bot 已停用
+      pickRecallResponderBotId(
+        [
+          { id: "bot-a", qqUin: 100n, enabled: false, reviewGroupId: "888" },
+          { id: "bot-b", qqUin: 200n, enabled: true, reviewGroupId: "999" },
+        ],
+        "888",
+      ),
+    ).toBeNull();
     expect(
-      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: "bot-a", ownerEnabled: false, ownerReviewGroupId: "888" }),
-    ).toBe(false);
-    // 归属 bot 不在本群（用它自己的登录态撤回）
-    expect(
-      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: "bot-a", ownerEnabled: true, ownerReviewGroupId: "999" }),
-    ).toBe(false);
-    // 库里没有这条 tid 的发布记录（手工 tid）
-    expect(
-      shouldDeferRecallToOwnerBot({ ...base, ownerBotId: null, ownerEnabled: false, ownerReviewGroupId: null }),
-    ).toBe(false);
+      pickRecallResponderBotId([{ id: "bot-c", qqUin: 300n, enabled: true, reviewGroupId: "888" }], "888"),
+    ).toBe("bot-c");
   });
 });

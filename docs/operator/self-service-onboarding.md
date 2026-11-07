@@ -99,7 +99,7 @@ wss://app.campux.top/onebot/v11/ws?bot_id=<bot-id>&token=<connection-token>
 #通过 <稿件编号>
 #拒绝 <理由> <稿件编号>
 #重发 <稿件编号>
-#撤回 [tid]（可回复 #发布 成功消息，撤回对应说说）
+#撤回 <稿件编号|tid>（可回复 #发布 成功消息，撤回对应说说）
 #登录
 #扫码登录
 ```
