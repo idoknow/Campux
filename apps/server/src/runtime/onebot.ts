@@ -509,13 +509,15 @@ function readRecallReason(comment: string | undefined): string | null {
   return comment.slice(prefix.length).trim() || null;
 }
 
-/** 从「#撤回 <tid>」参数或发布成功消息文本中提取合法的 QZone tid。 */
+/** 清洗「#撤回 <tid>」参数：只接受完整裸 tid 或 `tid:`/`tid：` 前缀形式，其他输入返回 null。 */
 function sanitizeQZoneTid(raw: string | null | undefined): string | null {
   if (!raw) {
     return null;
   }
-  const match = raw.match(/tid[:：]?([A-Za-z0-9_-]+)|([A-Za-z0-9_-]+)/);
-  return match ? (match[1] ?? match[2] ?? null) : null;
+  const prefixed = raw.match(/^tid[:：]([A-Za-z0-9_-]+)$/i);
+  const bare = raw.match(/^([A-Za-z0-9_-]+)$/);
+  const value = prefixed?.[1] ?? bare?.[1] ?? null;
+  return value && !/^tid$/i.test(value) ? value : null;
 }
 
 /**
@@ -4172,8 +4174,13 @@ export class OneBotRuntime {
       if (command.name === "撤回") {
         await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
 
-        // 尝试从回复消息中提取 qzoneTid
-        let qzoneTid: string | null = sanitizeQZoneTid(command.args.trim());
+        // 尝试从回复消息中提取 qzoneTid；带了参数但解析不出时直接报错，避免误撤回复的消息
+        const rawArgs = command.args.trim();
+        let qzoneTid: string | null = sanitizeQZoneTid(rawArgs);
+        if (!qzoneTid && rawArgs) {
+          await this.sendGroupMessage(botQqUin, groupId, "无法识别的 tid，请使用 #撤回 <tid>，或回复 #发布 成功消息后使用 #撤回");
+          return;
+        }
         if (!qzoneTid) {
           // 如果 #撤回 没有带参数，尝试从回复的 bot 消息中提取
           qzoneTid = await this.tryResolveQZoneTidFromReply(event, botQqUin);
