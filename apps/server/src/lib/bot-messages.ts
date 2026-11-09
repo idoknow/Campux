@@ -317,14 +317,14 @@ export function formatFirstPrivateMessageRegistrationNotice(
 // ── 对话投稿正文编辑引导（选择模式后一次性提示） ──────
 
 const privatePostBodyStartDefault =
-  "好的，以下是正文内容，直接发送文字或图片即可添加。发送 #撤回 可撤回上一条，发送 #结束 提交投稿。（发送 #取消 取消本次投稿）";
+  "直接发图文添加稿件内容：发 #撤回 删上一条内容，发 #结束 提交稿件，发 #取消 取消投稿。";
 const privatePostBodyStartAiDefault =
   "内容都准备好了吗？接下来你可以继续发图文补充，如果确认没问题，直接告诉我发布即可，也可以随时撤回或取消！";
 
 const privatePostBodyStartStylish = [
-  "📝 好的，以下是正文内容~ 直接发文字或图片就行，发完记得 #结束 提交！",
-  "✏️ 好嘞，直接发送正文内容和图片吧。发 #撤回 删上一条，发 #结束 完成投稿~",
-  "✨ 开始编辑正文吧~ 直接发送文字或图片添加内容。发 #撤回 撤回上一条，发 #结束 提交投稿。",
+  "📝 直接发图文吧~ 发 #撤回 删上一条，发 #结束 提交！",
+  "✏️ 直接发正文和图片~ 发 #撤回 删上一条，发 #结束 完成投稿。",
+  "✨ 开始编辑~ 发 #撤回 删上一条，发 #结束 提交。",
   privatePostBodyStartDefault,
 ];
 const privatePostBodyStartAiStylish = [
