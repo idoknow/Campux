@@ -6,6 +6,7 @@ import {
   formatPrivateHelp,
   formatPrivatePostBodyStart,
   formatPrivatePostConfirmPrompt,
+  formatPrivatePostContinuePrompt,
   formatPrivatePostDraftPrompt,
   formatRegisterAlready,
   formatRegisterExtended,
@@ -87,8 +88,8 @@ describe("bot private post messages", () => {
   test("keeps legacy command copy for non-AI intake", () => {
     const message = formatPrivatePostBodyStart(false, false);
 
-    expect(message).toContain("以下是正文内容");
     expect(message).toContain("#结束");
+    expect(message).toContain("#撤回");
   });
 
   test("uses semantic edit-state copy for AI intake", () => {
@@ -147,6 +148,25 @@ describe("bot private post messages", () => {
     expect(message).not.toContain("如果内容无误，就用自然语言告诉我可以发布");
     expect(message).not.toContain("确认提交/可以发布");
     expect(message).not.toContain("#确认");
+  });
+});
+
+describe("私聊投稿的 #撤回 提示", () => {
+  const originalRandom = Math.random;
+
+  test("选完匿名/实名后的第一句要讲清 #撤回，并保持简短", () => {
+    try {
+      for (const value of [0, 0.2, 0.45, 0.7, 0.95]) {
+        Math.random = () => value;
+        const message = formatPrivatePostBodyStart(true, false);
+        expect(message).toContain("#撤回");
+        expect(message.length).toBeLessThanOrEqual(50);
+      }
+    } finally {
+      Math.random = originalRandom;
+    }
+    const plain = formatPrivatePostBodyStart(false, false);
+    expect(plain).toBe("直接发图文添加稿件内容：发 #撤回 删上一条内容，发 #结束 提交稿件，发 #取消 取消投稿。");
   });
 });
 
