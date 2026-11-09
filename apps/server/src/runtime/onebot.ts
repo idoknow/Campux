@@ -110,6 +110,7 @@ import {
   formatPrivatePostContinuePrompt,
   formatPrivatePostBodyStart,
   formatPrivatePostAppendAck,
+  formatPrivatePostConfirmAppendAck,
   formatPrivatePostConfirmPrompt,
   formatPrivatePostCancelled,
   formatPrivateHelp,
@@ -574,6 +575,10 @@ export class OneBotRuntime {
   private readonly privatePostAggregateBuffers = new Map<string, PrivatePostAggregateBuffer>();
   private readonly privatePostPendingModes = new Map<string, PrivatePostPendingMode>();
   private readonly privatePostPendingConfirms = new Map<string, PrivatePostPendingConfirm>();
+  /** 确认阶段已合并的消息 id：OneBot 重投同一条消息时不重复追加正文/图片。 */
+  private readonly privatePostAppendedMessageIds = new Map<string, Set<string>>();
+  /** 同一份草稿的写操作（提交/追加/取消）串行执行，避免确认与补内容交错时互相覆盖。 */
+  private readonly privatePostLocks = new Map<string, Promise<void>>();
   private readonly privatePostDrafts = new Map<string, PrivatePostDraft>();
   private readonly reviewPublishModeSelections = new Map<string, ReviewPublishModeSelection>();
   private readonly privateRegistrationCoordinator = new PrivateRegistrationCoordinator<{
@@ -726,10 +731,19 @@ export class OneBotRuntime {
         this.privatePostAggregateBuffers.delete(key);
       }
     }
+    const clearedPostKeys = new Set<string>();
     for (const stateMap of [this.privatePostPendingModes, this.privatePostPendingConfirms, this.privatePostDrafts]) {
       for (const [key, state] of stateMap) {
-        if (state.tenantId === tenantId) stateMap.delete(key);
+        if (state.tenantId === tenantId) {
+          stateMap.delete(key);
+          clearedPostKeys.add(key);
+        }
       }
+    }
+    // 草稿键是 `botQqUin:userQqUin`，只能按被清掉的键回收去重表与写锁。
+    for (const key of clearedPostKeys) {
+      this.privatePostAppendedMessageIds.delete(key);
+      this.privatePostLocks.delete(key);
     }
     for (const [flag, pending] of this.pendingFriendRequestTimers) {
       if (pending.tenantId === tenantId) {
@@ -1970,39 +1984,39 @@ export class OneBotRuntime {
 
       const semanticAction = resolvePrivatePostSemanticAction(semanticForExistingFlow);
       if (semanticAction === "cancel") {
-        await this.cancelPrivatePostDraft({
+        await this.withPrivatePostLock(draftKey, () => this.cancelPrivatePostDraft({
           bot,
           botQqUin,
           userQqUin,
-        });
+        }));
         return;
       }
 
       if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostCancelText(plainText)) {
-        await this.cancelPrivatePostDraft({
+        await this.withPrivatePostLock(draftKey, () => this.cancelPrivatePostDraft({
           bot,
           botQqUin,
           userQqUin,
-        });
+        }));
         return;
       }
 
       const pendingConfirm = existingPendingConfirm;
       if (pendingConfirm) {
         if (semanticAction === "undo") {
-          await this.undoPrivatePostDraftEntry({
+          await this.withPrivatePostLock(draftKey, () => this.undoPrivatePostDraftEntry({
             bot,
             botQqUin,
             userQqUin,
-          });
+          }));
           return;
         }
         if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText)) {
-          await this.undoPrivatePostDraftEntry({
+          await this.withPrivatePostLock(draftKey, () => this.undoPrivatePostDraftEntry({
             bot,
             botQqUin,
             userQqUin,
-          });
+          }));
           return;
         }
 
@@ -2010,11 +2024,30 @@ export class OneBotRuntime {
         const keywordConfirm = shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
         const confirmation = semanticConfirm ?? keywordConfirm;
         if (confirmation?.confirmed === true) {
-          await this.submitPrivatePostPendingConfirm({
+          // 确认消息里可能还带着正文/图片：先把它们补进稿件再提交，否则会被静默丢掉。
+          const confirmStage = await this.stagePrivatePostAppendContent({
             bot,
             botQqUin,
             userQqUin,
+            event,
+            semantic: semanticForExistingFlow,
+            stripCommandText: true,
           });
+          if (confirmStage) {
+            await this.withPrivatePostLock(draftKey, () => this.applyPrivatePostAppendContent({
+              draftKey,
+              bot,
+              botQqUin,
+              userQqUin,
+              target: pendingConfirm,
+              stage: confirmStage,
+            }));
+          }
+          await this.withPrivatePostLock(draftKey, () => this.submitPrivatePostPendingConfirm({
+            bot,
+            botQqUin,
+            userQqUin,
+          }));
           return;
         }
         if (confirmation?.confirmed === false) {
@@ -2026,32 +2059,84 @@ export class OneBotRuntime {
           return;
         }
 
-        const shouldAppendContent = privatePostAiEnabled && shouldAppendPrivatePostContentForSemantic(semanticForExistingFlow);
-        const appended = shouldAppendContent
-          ? await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: pendingConfirm, semantic: semanticForExistingFlow })
-          : false;
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, pendingConfirm.aiIntakeEnabled));
-        if (!appended) {
+        // 确认阶段收到的正文/图片要真的补进稿件：旧实现只重发同一条确认提示，
+        // 用户按提示补正文时会被反复要求「确认」，形成死循环。
+        const imageSegmentsInMessage = extractOneBotImageSegments(event.message);
+        const imageSegmentCount = imageSegmentsInMessage.length;
+        // OneBot 会重投未确认的消息：同一 message_id（或同正文+同图）只合并一次，避免重复追加。
+        const messageId = event.message_id === undefined || event.message_id === null
+          ? this.buildPrivatePostAppendFingerprint(plainText, imageSegmentsInMessage)
+          : String(event.message_id);
+        if (shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+          text: plainText,
+          imageCount: imageSegmentCount,
+          aiIntakeEnabled: privatePostAiEnabled,
+          semantic: semanticForExistingFlow,
+        })) {
+          // 附件上传在锁外完成（慢操作不阻塞 #确认/#取消），
+          // 去重判定与写入再一起进临界区，避免并发重投同时通过检查。
+          const stage = await this.stagePrivatePostAppendContent({
+            bot,
+            botQqUin,
+            userQqUin,
+            event,
+            semantic: semanticForExistingFlow,
+          });
+          const appended = stage
+            ? await this.withPrivatePostLock(draftKey, async () => {
+              const appendedMessageIds = this.privatePostAppendedMessageIds.get(draftKey);
+              if (messageId && appendedMessageIds?.has(messageId)) {
+                if (stage.staged) await this.clearStagedPrivatePostAttachments(stage.staged.uploadedKeys);
+                return "duplicate" as const;
+              }
+              const ok = await this.applyPrivatePostAppendContent({
+                draftKey,
+                bot,
+                botQqUin,
+                userQqUin,
+                target: pendingConfirm,
+                stage,
+              });
+              if (ok && messageId) {
+                const ids = appendedMessageIds ?? new Set<string>();
+                ids.add(messageId);
+                this.privatePostAppendedMessageIds.set(draftKey, ids);
+              }
+              return ok;
+            })
+            : false;
+          if (appended === "duplicate") {
+            return;
+          }
+          // 追加失败（超长/上传失败）时 appendPrivatePostContent 已自行提示，不再重复确认提示。
+          if (appended) {
+            await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmAppendAck(
+              pendingConfirm.text,
+              pendingConfirm.attachments.length,
+              privatePostAiEnabled,
+            ));
+          }
           return;
         }
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, privatePostAiEnabled));
         return;
       }
 
       if (semanticAction === "undo") {
-        await this.undoPrivatePostDraftEntry({
+        await this.withPrivatePostLock(draftKey, () => this.undoPrivatePostDraftEntry({
           bot,
           botQqUin,
           userQqUin,
-        });
+        }));
         return;
       }
 
       if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText)) {
-        await this.undoPrivatePostDraftEntry({
+        await this.withPrivatePostLock(draftKey, () => this.undoPrivatePostDraftEntry({
           bot,
           botQqUin,
           userQqUin,
-        });
+        }));
         return;
       }
 
@@ -2094,7 +2179,17 @@ export class OneBotRuntime {
 
         const shouldAppendContent = privatePostAiEnabled && shouldAppendPrivatePostContentForSemantic(semantic);
         if (shouldAppendContent) {
-          await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: pendingMode, semantic });
+          const modeStage = await this.stagePrivatePostAppendContent({ bot, botQqUin, userQqUin, event, semantic });
+          if (modeStage) {
+            await this.withPrivatePostLock(draftKey, () => this.applyPrivatePostAppendContent({
+              draftKey,
+              bot,
+              botQqUin,
+              userQqUin,
+              target: pendingMode,
+              stage: modeStage,
+            }));
+          }
         }
         await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pendingMode.aiIntakeEnabled === true));
         return;
@@ -2124,8 +2219,18 @@ export class OneBotRuntime {
         }
 
         const shouldAppendContent = shouldAppendPrivatePostContentForSemantic(semantic);
-        const appended = shouldAppendContent
-          ? await this.appendPrivatePostContent({ bot, botQqUin, userQqUin, event, target: draft, semantic })
+        const draftStage = shouldAppendContent
+          ? await this.stagePrivatePostAppendContent({ bot, botQqUin, userQqUin, event, semantic })
+          : null;
+        const appended = draftStage
+          ? await this.withPrivatePostLock(draftKey, () => this.applyPrivatePostAppendContent({
+            draftKey,
+            bot,
+            botQqUin,
+            userQqUin,
+            target: draft,
+            stage: draftStage,
+          }))
           : false;
         if (shouldSubmitBySemantic) {
           await this.requestPrivatePostSubmitConfirmation({
@@ -2489,64 +2594,102 @@ export class OneBotRuntime {
     await this.sendPrivateMessage(botQqUin, userQqUin, summary);
   }
 
-  private async appendPrivatePostContent({
+  /** 暂存阶段：附件上传等慢操作不持锁，避免卡住 #确认 / #取消 / #撤回。 */
+  private async stagePrivatePostAppendContent({
     bot,
     botQqUin,
     userQqUin,
     event,
-    target,
     semantic,
+    stripCommandText = false,
   }: {
     bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
     botQqUin: string;
     userQqUin: string;
     event: OneBotMessageEvent;
-    target: PrivatePostDraft | PrivatePostPendingMode | PrivatePostPendingConfirm;
     semantic?: PrivatePostSemanticResult | undefined;
+    stripCommandText?: boolean;
   }) {
-    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
     const permit = this.interactionFence.snapshot(bot.tenantId);
     if (!this.interactionFence.isCurrent(permit)) {
-      return false;
+      return null;
     }
 
-    const rawDraftText = extractOneBotPlainText(event.message, event.raw_message).trim();
-    const draftText = semantic?.intent === "post" ? this.extractSemanticAppendText(target.text, semantic.text) : rawDraftText;
+    const rawText = stripCommandText ? "" : extractOneBotPlainText(event.message, event.raw_message).trim();
     const imageSegments = extractOneBotImageSegments(event.message);
 
-    if (draftText.length > 0) {
-      const combined = (target.text ? `${target.text}\n${draftText}` : draftText).trim();
-      if (combined.length > 1_000) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
-        return false;
-      }
-    }
-
     let staged: { attachments: PostAttachment[]; uploadedKeys: string[] } | null = null;
-
     if (imageSegments.length > 0) {
       try {
         staged = await this.stagePrivatePostAttachments(bot, event, permit);
       } catch (error) {
         this.logger.warn({ error }, "stage private post attachments failed");
         await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
-        return false;
+        return null;
       }
       if (staged.attachments.length === 0) {
         staged = null;
       }
     }
 
-    if (staged) {
-      if (target.attachments.length + staged.attachments.length > 9) {
-        await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
-        await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
+    if (!rawText && !staged) {
+      return null;
+    }
+    return {
+      rawText,
+      semanticText: semantic?.intent === "post" ? semantic.text : "",
+      semanticIsPost: semantic?.intent === "post",
+      staged,
+    };
+  }
+
+  /**
+   * 落盘阶段：必须在 withPrivatePostLock 内调用。
+   * 追加的文本按「当前草稿正文」重新算增量，避免把分析快照里已有的内容再加一遍。
+   */
+  private async applyPrivatePostAppendContent({
+    draftKey,
+    bot,
+    botQqUin,
+    userQqUin,
+    target,
+    stage,
+  }: {
+    draftKey: string;
+    bot: { id: string; tenantId: string; qqUin: bigint; displayName?: string | null };
+    botQqUin: string;
+    userQqUin: string;
+    target: PrivatePostDraft | PrivatePostPendingMode | PrivatePostPendingConfirm;
+    stage: { rawText: string; semanticText: string; semanticIsPost: boolean; staged: { attachments: PostAttachment[]; uploadedKeys: string[] } | null };
+  }) {
+    const permit = this.interactionFence.snapshot(bot.tenantId);
+    if (!this.interactionFence.isCurrent(permit)) {
+      if (stage.staged) await this.clearStagedPrivatePostAttachments(stage.staged.uploadedKeys);
+      return false;
+    }
+
+    if (!this.isPrivatePostContentTargetCurrent(draftKey, target)) {
+      if (stage.staged) await this.clearStagedPrivatePostAttachments(stage.staged.uploadedKeys);
+      await this.sendPrivateMessage(botQqUin, userQqUin, "这条补充没有生效：稿件已经提交或取消，请重新发送，或重新 #投稿。").catch(() => undefined);
+      return false;
+    }
+
+    const draftText = stage.semanticIsPost
+      ? this.extractSemanticAppendText(target.text, stage.semanticText)
+      : stage.rawText;
+
+    if (draftText.length > 0) {
+      const combined = (target.text ? `${target.text}\n${draftText}` : draftText).trim();
+      if (combined.length > 1_000) {
+        if (stage.staged) await this.clearStagedPrivatePostAttachments(stage.staged.uploadedKeys);
+        await this.sendPrivateMessage(botQqUin, userQqUin, "正文太长了，合并后请控制在 1000 字以内。");
         return false;
       }
     }
 
-    if (!this.interactionFence.isCurrent(permit)) {
-      if (staged) await this.clearStagedPrivatePostAttachments(staged.uploadedKeys);
+    if (stage.staged && target.attachments.length + stage.staged.attachments.length > 9) {
+      await this.clearStagedPrivatePostAttachments(stage.staged.uploadedKeys);
+      await this.sendPrivateMessage(botQqUin, userQqUin, "图片最多 9 张，请删减后再继续发送。");
       return false;
     }
 
@@ -2555,13 +2698,13 @@ export class OneBotRuntime {
       target.history.push({ type: "text", text: draftText });
     }
 
-    if (staged) {
-      target.attachments.push(...staged.attachments);
-      target.uploadedKeys.push(...staged.uploadedKeys);
-      target.history.push({ type: "images", attachmentCount: staged.attachments.length, uploadedKeys: staged.uploadedKeys });
+    if (stage.staged) {
+      target.attachments.push(...stage.staged.attachments);
+      target.uploadedKeys.push(...stage.staged.uploadedKeys);
+      target.history.push({ type: "images", attachmentCount: stage.staged.attachments.length, uploadedKeys: stage.staged.uploadedKeys });
     }
 
-    const didAppend = draftText.length > 0 || staged !== null;
+    const didAppend = draftText.length > 0 || stage.staged !== null;
     if (didAppend) {
       target.updatedAt = Date.now();
     }
@@ -2613,6 +2756,15 @@ export class OneBotRuntime {
     await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
   }
 
+  /** 现读当前私聊语义收稿开关：草稿里的快照可能已过期（管理员中途切换模式）。 */
+  private async readPrivatePostAiIntakeEnabled(tenantId: string) {
+    const aiSettings = await readTenantAiSettings(tenantId);
+    return isPrivatePostAiIntakeActive(
+      aiSettings.rules.privatePostAiEnabled === true,
+      aiSettings.mode === "llm" && aiSettings.apiKeyConfigured,
+    );
+  }
+
   private async requestPrivatePostSubmitConfirmation({
     bot,
     botQqUin,
@@ -2631,23 +2783,29 @@ export class OneBotRuntime {
       return;
     }
 
-    const text = draft.text.trim();
-    if (!text && draft.attachments.length === 0) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, draft.aiIntakeEnabled ? "请先发送稿件正文或图片，再确认提交。" : "请先发送稿件正文或图片，再发送 #结束。");
+    // 用当前模式生成提示与校验（草稿里的开关快照可能已过期）。
+    const aiIntakeEnabled = await this.readPrivatePostAiIntakeEnabled(bot.tenantId);
+    // 读设置的 await 期间草稿可能被取消或替换，也不能沿用 await 前读到的正文。
+    const currentDraft = this.privatePostDrafts.get(draftKey);
+    if (currentDraft !== draft) {
       return;
     }
-    if (text.length > 1_000) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, draft.aiIntakeEnabled ? "正文太长了，请控制在 1000 字以内，再确认提交。" : "正文太长了，请控制在 1000 字以内，再发送 #结束。");
+    const text = currentDraft.text.trim();
+    // 与最终提交共用同一套闸门：缺正文在这里就提示，不再等用户点了确认才报错。
+    const blockReason = privatePostSubmitBlockReason(text, currentDraft.attachments.length, aiIntakeEnabled);
+    if (blockReason) {
+      await this.sendPrivateMessage(botQqUin, userQqUin, blockReason);
       return;
     }
 
     this.privatePostDrafts.delete(draftKey);
     this.privatePostPendingConfirms.set(draftKey, {
-      ...draft,
+      ...currentDraft,
       text,
+      aiIntakeEnabled,
       updatedAt: Date.now(),
     });
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(text, draft.attachments.length, draft.aiIntakeEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(text, currentDraft.attachments.length, aiIntakeEnabled));
   }
 
   private async submitPrivatePostPendingConfirm({
@@ -2659,8 +2817,8 @@ export class OneBotRuntime {
     botQqUin: string;
     userQqUin: string;
   }) {
-    await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
-
+    // 账号校验交给 createPostFromPrivateDraft（它在错误分支里会把稿件退回草稿）。
+    // 这里再查一遍会抛到 catch 之外，用户就永远停在确认态。
     const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     const pending = this.privatePostPendingConfirms.get(draftKey);
     if (!pending) {
@@ -2670,6 +2828,22 @@ export class OneBotRuntime {
 
     const result = await this.createPostFromPrivateDraft(bot, userQqUin, pending).catch(async (error) => {
       if (error instanceof BotWorkflowError) {
+        // 校验失败（缺图片/超长/账号不可用）不能把用户卡在确认态：退回可编辑草稿，
+        // 用户补齐后再 #结束。只有「同一份待确认稿件仍是当前状态」时才恢复，
+        // 期间新建的投稿优先保留，旧稿的附件直接清理。
+        const stillCurrent = this.privatePostPendingConfirms.get(draftKey) === pending;
+        if (stillCurrent) {
+          this.privatePostPendingConfirms.delete(draftKey);
+          this.privatePostAppendedMessageIds.delete(draftKey);
+        }
+        const hasNewerState = this.privatePostDrafts.has(draftKey)
+          || this.privatePostPendingModes.has(draftKey)
+          || this.privatePostPendingConfirms.has(draftKey);
+        if (stillCurrent && !hasNewerState) {
+          this.privatePostDrafts.set(draftKey, { ...pending, updatedAt: Date.now() });
+        } else {
+          await this.clearStagedPrivatePostAttachments(pending.uploadedKeys);
+        }
         await this.sendPrivateMessage(botQqUin, userQqUin, error.message).catch(() => undefined);
         return null;
       }
@@ -2681,6 +2855,7 @@ export class OneBotRuntime {
 
     const { post } = result;
     this.privatePostPendingConfirms.delete(draftKey);
+    this.privatePostAppendedMessageIds.delete(draftKey);
     const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
   }
@@ -2705,6 +2880,46 @@ export class OneBotRuntime {
     }
 
     return { operator, membership };
+  }
+
+  /** 没有 message_id 时的重投判据：同一段正文 + 同一组图片再发一次就忽略。 */
+  private buildPrivatePostAppendFingerprint(text: string, imageSegments: unknown[]) {
+    const trimmed = text.trim();
+    const images = imageSegments
+      .map((segment) => {
+        const data = (segment as { data?: Record<string, unknown> } | null)?.data;
+        return String(data?.file ?? data?.url ?? "");
+      })
+      .filter(Boolean);
+    if (!trimmed && images.length === 0) {
+      return "";
+    }
+    return `fp:${trimmed}|${images.join(",")}`;
+  }
+
+  /** 同一 draftKey 的写操作排队执行。 */
+  private async withPrivatePostLock<T>(draftKey: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.privatePostLocks.get(draftKey) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(task);
+    const settled = current.then(() => undefined, () => undefined);
+    this.privatePostLocks.set(draftKey, settled);
+    try {
+      return await current;
+    } finally {
+      if (this.privatePostLocks.get(draftKey) === settled) {
+        this.privatePostLocks.delete(draftKey);
+      }
+    }
+  }
+
+  /** 目标对象是否仍是该用户的当前草稿/待选模式/待确认稿件（防止await 期间被替换或提交）。 */
+  private isPrivatePostContentTargetCurrent(
+    draftKey: string,
+    target: PrivatePostDraft | PrivatePostPendingMode | PrivatePostPendingConfirm,
+  ) {
+    return this.privatePostDrafts.get(draftKey) === target
+      || this.privatePostPendingModes.get(draftKey) === target
+      || this.privatePostPendingConfirms.get(draftKey) === target;
   }
 
   private async clearPrivatePostDraft(draftKey: string) {
@@ -2734,6 +2949,7 @@ export class OneBotRuntime {
   }
 
   private async clearPrivatePostPendingConfirm(draftKey: string) {
+    this.privatePostAppendedMessageIds.delete(draftKey);
     const existing = this.privatePostPendingConfirms.get(draftKey);
     if (!existing) {
       return;
@@ -3333,6 +3549,20 @@ export class OneBotRuntime {
       return null;
     }
 
+    // #撤回 只让被撤掉的那条能重新追加：文本条目按指纹精确删除，
+    // 保留其它仍在草稿里的消息的重投保护。图片条目没有稳定指纹，只能整组放开。
+    const appendedIds = this.privatePostAppendedMessageIds.get(draftKey);
+    if (appendedIds) {
+      if (entry.type === "text") {
+        appendedIds.delete(`fp:${entry.text}|`);
+      } else {
+        appendedIds.clear();
+      }
+      if (appendedIds.size === 0) {
+        this.privatePostAppendedMessageIds.delete(draftKey);
+      }
+    }
+
     if (entry.type === "text") {
       target.text = this.rebuildPrivatePostText(target.history);
       target.updatedAt = Date.now();
@@ -3381,12 +3611,10 @@ export class OneBotRuntime {
   ) {
     const access = await this.ensurePrivatePostingAllowed(bot.tenantId, userQqUin);
     const text = draft.text.trim();
-
-    if (!text) {
-      throw new BotWorkflowError("请先发送稿件正文或图片，再发送 #结束。", 400);
-    }
-    if (text.length > 1_000) {
-      throw new BotWorkflowError("正文太长了，请控制在 1000 字以内，再发送 #结束。", 400);
+    const aiIntakeEnabled = await this.readPrivatePostAiIntakeEnabled(bot.tenantId);
+    const blockReason = privatePostSubmitBlockReason(text, draft.attachments.length, aiIntakeEnabled);
+    if (blockReason) {
+      throw new BotWorkflowError(blockReason, 400);
     }
 
     // 注入检测：XSS、CSS、代码、CQ 码
@@ -5491,6 +5719,98 @@ export function shouldAppendPrivatePostContentForSemantic(semantic: PrivatePostS
     return false;
   }
   return semantic.action === "none" || semantic.intent === "post";
+}
+
+/**
+ * 私聊投稿的统一提交闸门：`#结束`（进入二次确认）与最终提交必须共用同一套规则。
+ * 返回需要提示给用户的原因，null 表示可以继续。
+ * 旧实现只在最终提交时要求正文，纯图片草稿能一路走到「确认」，点确认才报错，
+ * 而报错后草稿仍停在确认态，用户又无法补正文——这就是循环的根源。
+ */
+export function privatePostSubmitBlockReason(text: string, attachmentCount: number, aiIntakeEnabled = false) {
+  const trimmed = text.trim();
+  if (trimmed.length > 1_000) {
+    return aiIntakeEnabled
+      ? "正文太长了，请控制在 1000 字以内，再确认提交。"
+      : "正文太长了，请控制在 1000 字以内，再发送 #结束。";
+  }
+  // 私聊投稿必须带正文（图片可选）：没有文字就在进确认前直接拦下，
+  // 不要等用户点了确认才报错（那会把人卡在确认态、又没法补正文）。
+  if (!trimmed) {
+    return aiIntakeEnabled
+      ? "私聊投稿必须带正文：先发一段文字，再确认提交。"
+      : "私聊投稿必须带正文：先发一段文字，再发送 #结束。";
+  }
+  return null;
+}
+
+/**
+ * 等待确认时，这条消息是否该当作「补充内容」写进稿件。
+ * 只有 #/！ 开头的命令交给既有分发，其余有文字或图片的消息一律追加，
+ * 否则用户按提示补正文时会被反复要求确认（旧实现的死循环）。
+ */
+/**
+ * 关键词模式下容易被当成正文的裸确认短语（真正的确认命令是 #确认）。
+ * 这类消息要重新提示确认，而不是真的写进稿件。
+ */
+export function isPrivatePostBareConfirmPhrase(text: string) {
+  const normalized = text.trim().replace(/[\s，。！？!?,.；;：:、~～]/g, "").toLowerCase();
+  if (!normalized || normalized.length > 8) {
+    return false;
+  }
+  return /^(?:确认|确认发布|确定|好的?|行|可以|没问题|发布|提交|发出去|就这样|是的?|对的?|嗯+|ok|okay|yes)$/.test(normalized);
+}
+
+const PRIVATE_POST_COMMAND_NAMES = new Set([
+  "确认",
+  "取消",
+  "取消提交",
+  "取消本次投稿",
+  "撤回",
+  "撤销",
+  "结束",
+  "完成",
+  "帮助",
+  "投稿",
+  "匿名",
+  "实名",
+  "重来",
+  "重新开始",
+  "注册账号",
+  "重置密码",
+]);
+
+/** 是否是真命令（按名字白名单），`#校园活动 明晚七点集合` 这种话题正文不算。 */
+export function isPrivatePostCommandText(text: string) {
+  const trimmed = text.trim();
+  const command = parseCommand(trimmed) ?? parseCommand(trimmed.replace(/^[！!／]/, "#"));
+  if (!command) {
+    return false;
+  }
+  return PRIVATE_POST_COMMAND_NAMES.has(command.name);
+}
+
+export function shouldAppendPrivatePostContentWhileAwaitingConfirmation(input: {
+  text: string;
+  imageCount: number;
+  aiIntakeEnabled: boolean;
+  semantic?: PrivatePostSemanticResult | undefined;
+}) {
+  const trimmed = input.text.trim();
+  if (isPrivatePostCommandText(trimmed)) {
+    return false;
+  }
+  if (input.imageCount > 0) {
+    return true;
+  }
+  if (!trimmed) {
+    return false;
+  }
+  // 关键词模式的「确认 / 好的 / 发布」是确认意图，不能当成正文吞掉。
+  if (!input.aiIntakeEnabled && isPrivatePostBareConfirmPhrase(trimmed)) {
+    return false;
+  }
+  return input.aiIntakeEnabled ? shouldAppendPrivatePostContentForSemantic(input.semantic) : true;
 }
 
 export function shouldApplyPrivatePostSemanticText(semantic: PrivatePostSemanticResult | undefined) {

@@ -6,7 +6,11 @@ import {
   buildReviewHelp,
   extractQZoneTidFromMessageText,
   isPrivatePostAiIntakeActive,
+  isPrivatePostBareConfirmPhrase,
+  isPrivatePostCommandText,
+  privatePostSubmitBlockReason,
   shouldAppendPrivatePostContentForSemantic,
+  shouldAppendPrivatePostContentWhileAwaitingConfirmation,
   shouldApplyPrivatePostSemanticText,
   shouldConfirmPrivatePostSubmissionFromSemantic,
   shouldNotifyReviewGroupAfterPrivatePostCreate,
@@ -960,5 +964,88 @@ describe("审核群 #撤回 的 tid 解析", () => {
     expect(extractQZoneTidFromMessageText("✅ 已发布到 QQ 空间！")).toBeNull();
     expect(extractQZoneTidFromMessageText("外部 ID：123")).toBeNull();
     expect(extractQZoneTidFromMessageText("")).toBeNull();
+  });
+});
+
+describe("私聊投稿提交闸门", () => {
+  test("只有图片、没有正文：拦下并提示必须带正文", () => {
+    expect(privatePostSubmitBlockReason("", 3)).toBe("私聊投稿必须带正文：先发一段文字，再发送 #结束。");
+    expect(privatePostSubmitBlockReason("   ", 1, true)).toBe("私聊投稿必须带正文：先发一段文字，再确认提交。");
+    expect(privatePostSubmitBlockReason("", 0)).toBe("私聊投稿必须带正文：先发一段文字，再发送 #结束。");
+  });
+
+  test("只有文字、没有图片：允许提交", () => {
+    expect(privatePostSubmitBlockReason("今晚七点操场集合", 0)).toBeNull();
+    expect(privatePostSubmitBlockReason("今晚七点操场集合", 0, true)).toBeNull();
+    expect(privatePostSubmitBlockReason("配一句话", 2)).toBeNull();
+  });
+
+  test("正文超长按模式给不同结尾", () => {
+    expect(privatePostSubmitBlockReason("字".repeat(1001), 0)).toBe("正文太长了，请控制在 1000 字以内，再发送 #结束。");
+    expect(privatePostSubmitBlockReason("字".repeat(1001), 2, true)).toBe("正文太长了，请控制在 1000 字以内，再确认提交。");
+  });
+});
+
+describe("等待确认时补充内容", () => {
+  test("普通文字与图片都当作补充内容", () => {
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "补充一句", imageCount: 0, aiIntakeEnabled: false })).toBe(true);
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "", imageCount: 1, aiIntakeEnabled: false })).toBe(true);
+  });
+
+  test("半角/全角命令前缀与斜杠命令都不追加", () => {
+    for (const text of ["#确认", "！取消", "＃确认", "/确认", "／取消"]) {
+      expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text, imageCount: 0, aiIntakeEnabled: false })).toBe(false);
+    }
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "   ", imageCount: 0, aiIntakeEnabled: false })).toBe(false);
+  });
+
+  test("AI 模式按语义判定，语义判成命令时不追加", () => {
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+      text: "再加一句地点",
+      imageCount: 0,
+      aiIntakeEnabled: true,
+      semantic: { intent: "post", action: "none", text: "再加一句地点", anonymous: null, shouldSubmit: false, sections: ["再加一句地点"], confidence: 0.8, reason: "补充" },
+    })).toBe(true);
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+      text: "撤回上一条",
+      imageCount: 0,
+      aiIntakeEnabled: true,
+      semantic: { intent: "command", action: "undo", text: "", anonymous: null, shouldSubmit: false, sections: [], confidence: 0.9, reason: "命令" },
+    })).toBe(false);
+  });
+});
+
+describe("裸确认短语", () => {
+  test("确认/好的/嗯 等短语在关键词模式不写进正文", () => {
+    for (const text of ["确认", "好的", "嗯", "可以", "发布", "OK", "行"]) {
+      expect(isPrivatePostBareConfirmPhrase(text)).toBe(true);
+      expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text, imageCount: 0, aiIntakeEnabled: false })).toBe(false);
+    }
+  });
+
+  test("长句或带内容时不当作确认短语", () => {
+    expect(isPrivatePostBareConfirmPhrase("确认一下地点是操场")).toBe(false);
+    expect(isPrivatePostBareConfirmPhrase("好的，那我把图片发你")).toBe(false);
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "确认一下地点是操场", imageCount: 0, aiIntakeEnabled: false })).toBe(true);
+  });
+
+  test("AI 模式不做裸短语拦截（交给语义判定）", () => {
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "确认", imageCount: 0, aiIntakeEnabled: true, semantic: undefined })).toBe(true);
+  });
+});
+
+describe("确认态命令识别", () => {
+  test("真命令不追加进正文", () => {
+    for (const text of ["#确认", "＃取消", "#结束", "#帮助", "#撤回", "#注册账号", "#重置密码"]) {
+      expect(isPrivatePostCommandText(text)).toBe(true);
+      expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text, imageCount: 0, aiIntakeEnabled: false })).toBe(false);
+    }
+  });
+
+  test("话题正文即使以 # 开头也照常追加", () => {
+    for (const text of ["#校园活动 明晚七点集合", "#失物招领 捡到一张校园卡"]) {
+      expect(isPrivatePostCommandText(text)).toBe(false);
+      expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text, imageCount: 0, aiIntakeEnabled: false })).toBe(true);
+    }
   });
 });
