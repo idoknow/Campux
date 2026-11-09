@@ -737,6 +737,22 @@ export function formatPrivatePostConfirmPrompt(text: string, attachmentCount: nu
   return [formatPrivatePostPreview(text, attachmentCount), "", actionHint].join("\n");
 }
 
+/** 二次确认阶段补充正文/图片后的回执：既确认「真的收到了」，也给下一步。 */
+export function formatPrivatePostConfirmAppendAck(text: string, attachmentCount: number, aiIntakeEnabled = false): string {
+  const trimmed = text.trim();
+  const summary = [
+    trimmed ? `正文 ${trimmed.length} 字` : null,
+    attachmentCount > 0 ? `图片 ${attachmentCount} 张` : null,
+  ].filter(Boolean).join(" · ");
+  const actionHint = aiIntakeEnabled
+    ? "确认无误直接跟我说发布就行；还要改就继续发。"
+    : "确认发布请发送 #确认；还要改就继续发。";
+  if (!trimmed) {
+    return [`已补充：${summary || "内容已更新"}`, "", "还需要一段正文，直接发文字就行（图片已经留着，不用重发）。"].join("\n");
+  }
+  return [`已补充：${summary || "内容已更新"}`, "", actionHint].join("\n");
+}
+
 // ── 对话投稿取消提示 ──────────────────────────────────
 
 const privatePostCancelledDefault = "已取消发布";
