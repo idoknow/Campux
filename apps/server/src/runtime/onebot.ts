@@ -2023,7 +2023,10 @@ export class OneBotRuntime {
         const semanticConfirm = privatePostAiEnabled ? shouldConfirmPrivatePostSubmissionFromSemantic(semanticForExistingFlow) : null;
         const keywordConfirm = shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
         const confirmation = semanticConfirm ?? keywordConfirm;
-        if (confirmation?.confirmed === true) {
+        // 「确认 / 好的 / 发布」这类裸确认短语，在 AI 模式语义没识别出来时也要按确认处理，
+        // 不能写进正文（那会让用户看到自己的「确认」变成稿件内容）。
+        const bareConfirmWhilePending = isPrivatePostBareConfirmPhrase(plainText);
+        if (confirmation?.confirmed === true || bareConfirmWhilePending) {
           // 确认消息里可能还带着正文/图片：先把它们补进稿件再提交，否则会被静默丢掉。
           const confirmStage = await this.stagePrivatePostAppendContent({
             bot,
@@ -5758,7 +5761,7 @@ export function isPrivatePostBareConfirmPhrase(text: string) {
   if (!normalized || normalized.length > 8) {
     return false;
   }
-  return /^(?:确认|确认发布|确定|好的?|行|可以|没问题|发布|提交|发出去|就这样|是的?|对的?|嗯+|ok|okay|yes)$/.test(normalized);
+  return /^(?:确认|确认发布|确定|好的?|好滴|行|可以|没问题|发布|提交|发出去|就这样|是的?|对的?|嗯+|收到|ok|okay|yes)$/.test(normalized);
 }
 
 const PRIVATE_POST_COMMAND_NAMES = new Set([
@@ -5806,8 +5809,9 @@ export function shouldAppendPrivatePostContentWhileAwaitingConfirmation(input: {
   if (!trimmed) {
     return false;
   }
-  // 关键词模式的「确认 / 好的 / 发布」是确认意图，不能当成正文吞掉。
-  if (!input.aiIntakeEnabled && isPrivatePostBareConfirmPhrase(trimmed)) {
+  // 「确认 / 好的 / 发布」在两种模式下都是确认意图，不能当成正文吞掉；
+  // AI 模式的语义识别偶尔把这类短句判成正文，这里兜一层。
+  if (isPrivatePostBareConfirmPhrase(trimmed)) {
     return false;
   }
   return input.aiIntakeEnabled ? shouldAppendPrivatePostContentForSemantic(input.semantic) : true;

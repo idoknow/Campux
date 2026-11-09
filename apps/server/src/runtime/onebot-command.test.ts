@@ -967,6 +967,40 @@ describe("审核群 #撤回 的 tid 解析", () => {
   });
 });
 
+describe("等待确认时的裸确认短语", () => {
+  test("AI 模式下「确认」也不能被当成正文", () => {
+    for (const text of ["确认", "确认。", "好的", "嗯", "发布", "可以", "收到"]) {
+      expect(isPrivatePostBareConfirmPhrase(text)).toBe(true);
+      expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+        text,
+        imageCount: 0,
+        aiIntakeEnabled: true,
+      })).toBe(false);
+    }
+  });
+
+  test("AI 模式语义缺失时，正常补充的正文照常追加", () => {
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+      text: "地点改到操场，晚上七点开始",
+      imageCount: 0,
+      aiIntakeEnabled: true,
+    })).toBe(true);
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+      text: "确认一下地点是操场，不是体育馆",
+      imageCount: 0,
+      aiIntakeEnabled: true,
+    })).toBe(true);
+  });
+
+  test("「确认 + 图片」仍按追加图片处理，不丢图", () => {
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({
+      text: "确认",
+      imageCount: 2,
+      aiIntakeEnabled: false,
+    })).toBe(true);
+  });
+});
+
 describe("私聊投稿提交闸门", () => {
   test("只有图片、没有正文：拦下并提示必须带正文", () => {
     expect(privatePostSubmitBlockReason("", 3)).toBe("私聊投稿必须带正文：先发一段文字，再发送 #结束。");
@@ -1029,8 +1063,8 @@ describe("裸确认短语", () => {
     expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "确认一下地点是操场", imageCount: 0, aiIntakeEnabled: false })).toBe(true);
   });
 
-  test("AI 模式不做裸短语拦截（交给语义判定）", () => {
-    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "确认", imageCount: 0, aiIntakeEnabled: true, semantic: undefined })).toBe(true);
+  test("AI 模式同样拦截裸短语：语义缺失时「确认」不能变成正文", () => {
+    expect(shouldAppendPrivatePostContentWhileAwaitingConfirmation({ text: "确认", imageCount: 0, aiIntakeEnabled: true, semantic: undefined })).toBe(false);
   });
 });
 
