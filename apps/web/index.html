@@ -22,6 +22,17 @@
         }
       })();
     </script>
+    <script>
+      // Visitor stats (self-hosted Umami, cookieless) for the official service only.
+      // Self-hosted and tenant-domain deployments never load or send anything.
+      if (location.hostname === "app.campux.top") {
+        const s = document.createElement("script");
+        s.defer = true;
+        s.src = "https://stats.rcpd.cc/k.js";
+        s.dataset.websiteId = "ddd0ad5e-7008-4e6d-aea7-1740518ea9bb";
+        document.head.appendChild(s);
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
