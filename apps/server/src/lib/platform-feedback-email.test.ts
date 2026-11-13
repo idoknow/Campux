@@ -13,7 +13,6 @@ const baseEmail = {
   authorQqUin: "1623746337",
   authorEmail: null,
   content: "希望支持按标签批量撤回。",
-  feedbackId: "feedback-1",
   createdAt: new Date("2026-11-13T13:48:00.000Z"),
 };
 
@@ -128,5 +127,52 @@ describe("sendPlatformFeedbackNotice", () => {
     expect(result.delivered).toEqual(["ops@campux.top"]);
     expect(result.error).toContain("bad@campux.top");
     expect(result.error).toContain("422");
+  });
+
+  test("默认发送路径真的调用 Resend，并沿用注册验证码的发件人", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ id: "email-1" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await sendPlatformFeedbackNotice({
+        config: { resend: { apiKey: "re_test", fromEmail: "Campux <noreply@campux.top>" } } as unknown as CampuxConfig,
+        recipients: [{ userId: "a", address: "ops@campux.top" }],
+        email,
+      });
+      expect(result).toEqual({ delivered: ["ops@campux.top"], skipped: false, error: null });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe("https://api.resend.com/emails");
+      const body = JSON.parse(String(calls[0]!.init.body)) as { from: string; to: string[]; subject: string };
+      expect(body.from).toBe("Campux <noreply@campux.top>");
+      expect(body.to).toEqual(["ops@campux.top"]);
+      expect(body.subject).toBe("Campux 开发意见 - 广府校园墙");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("默认发送路径在未配置 API key 时跳过，不发起请求", async () => {
+    const originalFetch = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await sendPlatformFeedbackNotice({
+        config,
+        recipients: [{ userId: "a", address: "ops@campux.top" }],
+        email,
+      });
+      expect(result).toEqual({ delivered: [], skipped: true, error: null });
+      expect(called).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

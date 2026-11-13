@@ -178,6 +178,7 @@ export function OpsPanel({
   const isSystemMode = mode === "system";
   const tenantRequestGate = useRef(createLatestRequestGate());
   const overviewRequestGate = useRef(createLatestRequestGate());
+  const platformFeedbackRequestGate = useRef(createLatestRequestGate());
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -415,17 +416,28 @@ export function OpsPanel({
 
   async function refreshPlatformFeedback(page = platformFeedbackPage) {
     if (!isSystemMode) return;
+    const generation = platformFeedbackRequestGate.current.begin();
     setLoadingPlatformFeedback(true);
     try {
       const data = await api<{ items: PlatformFeedbackItem[]; pagination: Pagination; emailConfigured: boolean }>(
         `/api/system/platform-feedback?page=${page}&limit=${platformFeedbackPagination.limit}`,
       );
+      // refreshAll 的 page 1 请求可能晚于分页请求返回，旧响应不能覆盖新页面。
+      if (!platformFeedbackRequestGate.current.isCurrent(generation)) return;
       setPlatformFeedbackItems(data.items);
       setPlatformFeedbackPagination(data.pagination);
       setPlatformFeedbackPage(data.pagination.page);
       setPlatformFeedbackEmailConfigured(data.emailConfigured);
+    } catch (error) {
+      // 失败时回到上一次成功的页码，否则「下一页」停在同一个失败页，点了也不会重发请求。
+      if (platformFeedbackRequestGate.current.isCurrent(generation) && page !== platformFeedbackPagination.page) {
+        setPlatformFeedbackPage(platformFeedbackPagination.page);
+      }
+      throw error;
     } finally {
-      setLoadingPlatformFeedback(false);
+      if (platformFeedbackRequestGate.current.isCurrent(generation)) {
+        setLoadingPlatformFeedback(false);
+      }
     }
   }
 
@@ -1986,8 +1998,15 @@ function PlatformFeedbackList({
                 <ClockIcon className="size-4" />
                 {formatDateTime(item.createdAt)}
               </span>
-              <span className={item.notifyError && !item.notifiedAt ? "text-amber-700" : ""} title={item.notifyError ?? undefined}>
-                {item.notifiedAt ? `已邮件通知 · ${formatDateTime(item.notifiedAt)}` : "邮件未发出"}
+              <span
+                className={item.notifyError ? "text-amber-700" : ""}
+                title={item.notifyError ?? undefined}
+              >
+                {item.notifiedAt
+                  ? item.notifyError
+                    ? `部分未送达 · ${formatDateTime(item.notifiedAt)}`
+                    : `已邮件通知 · ${formatDateTime(item.notifiedAt)}`
+                  : "邮件未发出"}
               </span>
             </div>
           </div>

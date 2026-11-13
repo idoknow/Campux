@@ -13,6 +13,9 @@ export function hashEmailCode(email: string, code: string) {
   return createHash("sha256").update(`${normalizeEmail(email)}:${code}`).digest("hex");
 }
 
+/** Resend 请求的超时上限：避免网络/服务商卡住时把调用方的请求一起拖住。 */
+export const EMAIL_REQUEST_TIMEOUT_MS = 10_000;
+
 export async function sendEmail(config: CampuxConfig, options: { to: string; subject: string; html: string; text: string }) {
   if (!config.resend.apiKey) {
     // Without a configured mail provider we cannot deliver the message. Rather
@@ -24,21 +27,31 @@ export async function sendEmail(config: CampuxConfig, options: { to: string; sub
     return { skipped: true as const };
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.resend.apiKey}`,
-      "Content-Type": "application/json",
-      "User-Agent": "Campux/1.0",
-    },
-    body: JSON.stringify({
-      from: config.resend.fromEmail,
-      to: [options.to],
-      subject: options.subject,
-      html: options.html,
-      text: options.text,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.resend.apiKey}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Campux/1.0",
+      },
+      body: JSON.stringify({
+        from: config.resend.fromEmail,
+        to: [options.to],
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+      }),
+      signal: AbortSignal.timeout(EMAIL_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new Error(`邮件发送超时（${EMAIL_REQUEST_TIMEOUT_MS / 1000} 秒）`);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
