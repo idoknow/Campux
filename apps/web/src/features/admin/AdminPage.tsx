@@ -52,6 +52,7 @@ import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from
 import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { PluginConfigPage } from "./PluginConfigPage";
+import { PlatformFeedbackBanner } from "./PlatformFeedbackBanner";
 import { capAiReviewGraph, graphLabel, graphNodePosition, type AiReviewGraph } from "./ai-review-graph";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1152,6 +1153,7 @@ export function AdminPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-4">
+      <PlatformFeedbackBanner tenantName={selectedTenant.name} />
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AdminTab)} className="min-h-0 flex-1 overflow-hidden">
         <TabsList className={managementTabsListClassName}>
           <TabsTrigger value="users" className={managementTabsTriggerClassName}>

@@ -53,6 +53,7 @@ import { registerSystemRoutes } from "./routes/system";
 import { registerTenantRoutes } from "./routes/tenants";
 import { registerPluginRoutes } from "./routes/plugins";
 import { registerFeedbackRoutes } from "./routes/feedback";
+import { registerPlatformFeedbackRoutes } from "./routes/platform-feedback";
 import { registerManualPublishRoutes } from "./routes/manual-publish";
 import { registerBotAlertTestRoutes } from "./routes/bot-alert-test";
 import { runDatabaseMigrations } from "./lib/migrations";
@@ -186,6 +187,7 @@ registerStatsRoutes(app);
 registerSystemRoutes(app, queue, config, oneBot);
 registerPluginRoutes(app, pluginRegistry);
 registerFeedbackRoutes(app, oneBot);
+registerPlatformFeedbackRoutes(app, config);
 registerManualPublishRoutes(app, queue);
 registerBotAlertTestRoutes(app);
 
