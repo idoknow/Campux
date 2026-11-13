@@ -10,6 +10,7 @@ import {
   ClockIcon,
   FilterIcon,
   Globe2Icon,
+  InboxIcon,
   LayoutDashboardIcon,
   PauseCircleIcon,
   PlayCircleIcon,
@@ -31,9 +32,10 @@ import {
   buildMembershipRoleChangeConfirmation,
 } from "./membership-removal-confirmation";
 import { buildOverviewTenantNavigation } from "./overview-tenant-navigation";
+import type { OpsSection } from "./ops-section";
 import { createLatestRequestGate } from "./latest-request-gate";
 import { summarizeTenantRuntime } from "./tenant-runtime-summary";
-import type { AuditLogItem, Pagination, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
+import type { AuditLogItem, Pagination, PlatformFeedbackItem, SystemQueueSnapshot, SystemRole, SystemTenant, SystemUser, TenantRole, TenantStatus } from "@/types/app";
 import { PaginationControls } from "@/components/app/utility";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,7 +70,6 @@ const lifecycleActions: Array<{ status: TenantStatus; label: string; icon: typeo
   { status: "archived", label: "归档租户", icon: ArchiveIcon },
 ];
 
-type OpsSection = "overview" | "tenants" | "users" | "audit" | "platform";
 type OpsPanelMode = "system" | "operations";
 type SystemUserRoleFilter = TenantRole | SystemRole;
 type OpsUserListPreferences = {
@@ -193,12 +194,17 @@ export function OpsPanel({
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
   const [auditPage, setAuditPage] = useState(1);
+  const [platformFeedbackItems, setPlatformFeedbackItems] = useState<PlatformFeedbackItem[]>([]);
+  const [platformFeedbackPagination, setPlatformFeedbackPagination] = useState<Pagination>(() => defaultPagination());
+  const [platformFeedbackPage, setPlatformFeedbackPage] = useState(1);
+  const [platformFeedbackEmailConfigured, setPlatformFeedbackEmailConfigured] = useState(true);
   const [activeSection, setActiveSection] = useState<OpsSection>("overview");
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingOperationsAdmins, setLoadingOperationsAdmins] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
+  const [loadingPlatformFeedback, setLoadingPlatformFeedback] = useState(false);
   const [assigningMembership, setAssigningMembership] = useState(false);
   const [accessBusyKey, setAccessBusyKey] = useState("");
   const [grantTenantByUserId, setGrantTenantByUserId] = useState<Record<string, string>>({});
@@ -407,8 +413,32 @@ export function OpsPanel({
     }
   }
 
+  async function refreshPlatformFeedback(page = platformFeedbackPage) {
+    if (!isSystemMode) return;
+    setLoadingPlatformFeedback(true);
+    try {
+      const data = await api<{ items: PlatformFeedbackItem[]; pagination: Pagination; emailConfigured: boolean }>(
+        `/api/system/platform-feedback?page=${page}&limit=${platformFeedbackPagination.limit}`,
+      );
+      setPlatformFeedbackItems(data.items);
+      setPlatformFeedbackPagination(data.pagination);
+      setPlatformFeedbackPage(data.pagination.page);
+      setPlatformFeedbackEmailConfigured(data.emailConfigured);
+    } finally {
+      setLoadingPlatformFeedback(false);
+    }
+  }
+
   async function refreshAll() {
-    await Promise.all([refreshOverview(), refreshSettings(), refreshUsers(userPage), refreshOperationsAdmins(), refreshAudit(auditPage)]);
+    await Promise.all([
+      refreshOverview(),
+      refreshSettings(),
+      refreshUsers(userPage),
+      refreshOperationsAdmins(),
+      refreshAudit(auditPage),
+      // 开发意见只有系统运维能读，运营面板不要触发 403。
+      isSystemMode ? refreshPlatformFeedback(1).catch(() => undefined) : Promise.resolve(),
+    ]);
   }
 
   async function refreshCurrentSection() {
@@ -426,6 +456,10 @@ export function OpsPanel({
     }
     if (activeSection === "audit") {
       await refreshAudit(auditPage);
+      return;
+    }
+    if (activeSection === "feedback") {
+      await refreshPlatformFeedback(platformFeedbackPage);
       return;
     }
     await Promise.all([refreshSettings(), refreshOperationsAdmins()]);
@@ -450,7 +484,17 @@ export function OpsPanel({
     if (!isSystemMode && activeSection === "platform") {
       setActiveSection("overview");
     }
+    if (!isSystemMode && activeSection === "feedback") {
+      setActiveSection("overview");
+    }
   }, [activeSection, isSystemMode]);
+
+  useEffect(() => {
+    if (activeSection !== "feedback" || !isSystemMode) return;
+    void refreshPlatformFeedback(platformFeedbackPage).catch((caught) => {
+      toast.error(caught instanceof Error ? caught.message : "无法读取开发意见");
+    });
+  }, [activeSection, isSystemMode, platformFeedbackPage]);
 
   useEffect(() => {
     const preferences = readOpsUserListPreferences(mode);
@@ -882,6 +926,7 @@ ${impact}`)) {
     { value: "audit", label: "审计日志", description: "平台操作记录", icon: ClipboardListIcon },
   ];
   if (isSystemMode) {
+    navigationItems.push({ value: "feedback", label: "开发意见", description: "租户管理员提交的意见", icon: InboxIcon });
     navigationItems.push({ value: "platform", label: "平台设置", description: "域名与运营资源", icon: Settings2Icon });
   }
   const activeNavigationItem = navigationItems.find((item) => item.value === activeSection) ?? navigationItems[0]!;
@@ -891,7 +936,9 @@ ${impact}`)) {
       ? loadingUsers
       : activeSection === "audit"
         ? loadingAudit
-        : loadingSettings || loadingOperationsAdmins;
+        : activeSection === "feedback"
+          ? loadingPlatformFeedback
+          : loadingSettings || loadingOperationsAdmins;
 
   return (
     <div className="pb-8">
@@ -1237,6 +1284,20 @@ ${impact}`)) {
             <Card className="rounded-lg">
               <CardContent className="p-4">
                 <AuditLogTable logs={auditLogs} loading={loadingAudit} pagination={auditPagination} onPageChange={setAuditPage} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeSection === "feedback" && isSystemMode ? (
+            <Card className="rounded-lg">
+              <CardContent className="p-4">
+                <PlatformFeedbackList
+                  items={platformFeedbackItems}
+                  loading={loadingPlatformFeedback}
+                  pagination={platformFeedbackPagination}
+                  emailConfigured={platformFeedbackEmailConfigured}
+                  onPageChange={setPlatformFeedbackPage}
+                />
               </CardContent>
             </Card>
           ) : null}
@@ -1875,6 +1936,64 @@ function AuditLogTable({
         ))}
       </div>
       {logs.length === 0 ? <p className="px-3 py-8 text-center text-sm font-bold text-slate-500">没有审计日志。</p> : null}
+      <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
+    </div>
+  );
+}
+
+function PlatformFeedbackList({
+  items,
+  loading,
+  pagination,
+  emailConfigured,
+  onPageChange,
+}: {
+  items: PlatformFeedbackItem[];
+  loading: boolean;
+  pagination: Pagination;
+  emailConfigured: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  if (loading && items.length === 0) {
+    return <InlineLoading title="正在加载开发意见..." />;
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-700">
+          共 {pagination.total} 条 · 由租户管理员在管理页提交，仅系统运维可见
+        </p>
+        <span className={`text-xs font-bold ${emailConfigured ? "text-green-700" : "text-amber-700"}`}>
+          {emailConfigured ? "提交时会邮件通知运维管理员" : "未配置邮件服务（RESEND_API_KEY），提交时不会发信"}
+        </span>
+      </div>
+      <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className="grid gap-3 border-b border-slate-100 bg-white p-3 last:border-b-0 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]"
+          >
+            <div className="min-w-0">
+              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">{item.content}</p>
+              <p className="mt-2 text-xs font-bold text-slate-500">
+                {item.tenant.name} · {item.author.displayName ?? "未设置昵称"}（QQ {item.author.qqUin}
+                {item.author.email ? ` · ${item.author.email}` : ""}）
+              </p>
+            </div>
+            <div className="flex flex-col gap-1 text-xs text-slate-500 md:items-end md:text-right">
+              <span className="inline-flex items-center gap-1">
+                <ClockIcon className="size-4" />
+                {formatDateTime(item.createdAt)}
+              </span>
+              <span className={item.notifyError && !item.notifiedAt ? "text-amber-700" : ""} title={item.notifyError ?? undefined}>
+                {item.notifiedAt ? `已邮件通知 · ${formatDateTime(item.notifiedAt)}` : "邮件未发出"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+      {items.length === 0 ? <p className="px-3 py-8 text-center text-sm font-bold text-slate-500">还没有租户管理员提交意见。</p> : null}
       <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
     </div>
   );

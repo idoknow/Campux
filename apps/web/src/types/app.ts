@@ -1049,3 +1049,23 @@ export type FeedbackItem = {
   canViewIdentity: boolean;
   messages: FeedbackMessageItem[];
 };
+
+/** 租户管理员 → Campux 开发/运维的平台意见（运维面板「开发意见」）。 */
+export type PlatformFeedbackItem = {
+  id: string;
+  content: string;
+  createdAt: string;
+  notifiedAt: string | null;
+  notifyError: string | null;
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  author: {
+    id: string;
+    displayName: string | null;
+    qqUin: string;
+    email: string | null;
+  };
+};

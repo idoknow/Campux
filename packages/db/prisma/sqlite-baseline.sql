@@ -716,6 +716,19 @@ CREATE TABLE "TenantFeedbackMessage" (
     CONSTRAINT "TenantFeedbackMessage_feedbackId_fkey" FOREIGN KEY ("feedbackId") REFERENCES "TenantFeedback" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- CreateTable
+CREATE TABLE "PlatformFeedback" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "notifiedAt" DATETIME,
+    "notifyError" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "PlatformFeedback_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "PlatformFeedback_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Tenant_slug_key" ON "Tenant"("slug");
 
@@ -1041,4 +1054,10 @@ CREATE INDEX "TenantFeedbackMessage_feedbackId_createdAt_idx" ON "TenantFeedback
 
 -- CreateIndex
 CREATE INDEX "TenantFeedbackMessage_tenantId_createdAt_idx" ON "TenantFeedbackMessage"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "PlatformFeedback_createdAt_idx" ON "PlatformFeedback"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "PlatformFeedback_tenantId_createdAt_idx" ON "PlatformFeedback"("tenantId", "createdAt");
 

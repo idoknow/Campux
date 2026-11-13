@@ -25,6 +25,7 @@ const CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME = "20260906150000_add_campaign_admin_on
 const BROADCAST_NOTIFICATIONS_MIGRATION_NAME = "20260924120000_add_broadcast_notifications";
 const TENANT_FEEDBACK_MIGRATION_NAME = "20260913140000_add_tenant_feedback";
 const TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME = "20260913160000_add_tenant_feedback_messages";
+const PLATFORM_FEEDBACK_MIGRATION_NAME = "20261113220000_add_platform_feedback";
 
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
@@ -1035,6 +1036,72 @@ function applySchoolRelationExtractionsSqliteMigration(db: Database, doneNames: 
   doneNames.add(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME); applied.push(SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME);
 }
 
+/**
+ * PlatformFeedback：租户管理员发往平台的「开发意见」存档表。老库缺表时补建。
+ * 新库由刷新后的 baseline 自带，迁移会幂等跳过。
+ */
+function applyPlatformFeedbackSqliteMigration(
+  db: Database,
+  doneNames: Set<string>,
+  applied: string[],
+  skipped: string[],
+  logger: SqliteMigrateLogger,
+): void {
+  const tenantTable = db
+    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'Tenant'`)
+    .get() as { present: number } | null;
+  if (!tenantTable) return;
+
+  if (doneNames.has(PLATFORM_FEEDBACK_MIGRATION_NAME)) {
+    skipped.push(PLATFORM_FEEDBACK_MIGRATION_NAME);
+    return;
+  }
+
+  const hasTable =
+    db.query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'PlatformFeedback'`).get() !== null;
+
+  logger.info({ migration: PLATFORM_FEEDBACK_MIGRATION_NAME }, "applying sqlite incremental migration");
+  db.exec("BEGIN");
+  try {
+    if (!hasTable) {
+      db.exec(`CREATE TABLE "PlatformFeedback" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "tenantId" TEXT NOT NULL,
+        "authorId" TEXT NOT NULL,
+        "content" TEXT NOT NULL,
+        "notifiedAt" DATETIME,
+        "notifyError" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PlatformFeedback_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "PlatformFeedback_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+      db.exec(`CREATE INDEX "PlatformFeedback_createdAt_idx" ON "PlatformFeedback"("createdAt")`);
+      db.exec(`CREATE INDEX "PlatformFeedback_tenantId_createdAt_idx" ON "PlatformFeedback"("tenantId", "createdAt")`);
+    }
+    const violations = db.query("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error(`sqlite migration introduced ${violations.length} foreign-key violation(s)`);
+    }
+    db.run(
+      `INSERT INTO "_prisma_migrations"
+         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
+      [
+        randomUUID(),
+        checksumOf(hasTable ? "platform-feedback-present" : "platform-feedback-created"),
+        PLATFORM_FEEDBACK_MIGRATION_NAME,
+      ],
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  doneNames.add(PLATFORM_FEEDBACK_MIGRATION_NAME);
+  applied.push(PLATFORM_FEEDBACK_MIGRATION_NAME);
+  logger.info({ migration: PLATFORM_FEEDBACK_MIGRATION_NAME }, "sqlite incremental migration applied");
+}
+
 export function applySqliteBaseline(
   baselineSql: string,
   databaseUrl: string,
@@ -1093,7 +1160,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, PLATFORM_FEEDBACK_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -1115,6 +1182,7 @@ export function applySqliteBaseline(
     applyCampaignAdminOnlySqliteMigration(db, doneNames, applied, skipped, logger);
     applyTenantFeedbackSqliteMigration(db, doneNames, applied, skipped, logger);
     applyTenantFeedbackMessagesSqliteMigration(db, doneNames, applied, skipped, logger);
+    applyPlatformFeedbackSqliteMigration(db, doneNames, applied, skipped, logger);
     applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);

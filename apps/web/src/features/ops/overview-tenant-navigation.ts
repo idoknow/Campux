@@ -1,5 +1,7 @@
+import type { OpsSection } from "./ops-section";
+
 type OverviewTenantNavigationState = {
-  activeSection: "overview" | "tenants" | "users" | "audit" | "platform";
+  activeSection: OpsSection;
   selectedTenantId: string;
   tenantKeyword: string;
 };

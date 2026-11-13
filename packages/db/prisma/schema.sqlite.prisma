@@ -9,6 +9,7 @@ datasource db {
 }
 
 
+
 enum TenantStatus {
   active
   paused
@@ -115,6 +116,7 @@ model Tenant {
   botFriendSnapshots BotFriendSnapshot[]
   publishBatches PublishBatch[]
   feedbacks      TenantFeedback[]
+  platformFeedbacks PlatformFeedback[]
   quotaReservations TenantPublishQuotaReservation[]
 }
 
@@ -144,6 +146,7 @@ model User {
   postFollows PostFollow[]
   oauthIdentities OAuthIdentity[]
   feedbacks   TenantFeedback[]
+  platformFeedbacks PlatformFeedback[]
 }
 
 // 广播通知：投稿页发起，有明确时效结束时间（最长 7 天）。
@@ -980,5 +983,24 @@ model TenantFeedbackMessage {
   feedback    TenantFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
 
   @@index([feedbackId, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+/// 租户管理员 → Campux 开发/运维的意见建议（平台级意见箱）。
+/// 与 TenantFeedback（用户在墙内向审核员反馈）不同：这是墙管理员向平台提出的意见，
+/// 只有系统运维（system_operator）可以查看，提交时会邮件通知运维管理员。
+model PlatformFeedback {
+  id          String    @id @default(uuid())
+  tenantId    String
+  authorId    String
+  content     String
+  /// 邮件通知结果：成功时写 notifiedAt，失败时写 notifyError，便于运维核实是否漏收。
+  notifiedAt  DateTime?
+  notifyError String?
+  createdAt   DateTime  @default(now())
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
   @@index([tenantId, createdAt])
 }
