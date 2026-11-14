@@ -4,17 +4,25 @@ import { buildReviewQueueReminderMessages } from "../runtime/review-queue";
 import {
   formatFirstPrivateMessageRegistrationNotice,
   formatPrivateHelp,
+  formatPrivatePostAppendAck,
   formatPrivatePostBodyStart,
+  formatPrivatePostCancelled,
   formatPrivatePostConfirmPrompt,
   formatPrivatePostContinuePrompt,
   formatPrivatePostDraftPrompt,
+  formatPrivatePostModePrompt,
+  formatPublishSuccess,
+  formatRecallSuccess,
   formatRegisterAlready,
   formatRegisterExtended,
   formatRegisterSuccess,
+  formatReviewApproved,
   formatReviewQueue,
   formatReviewQueueMessages,
   formatReviewQueueReminder,
   formatReviewQueueReminderMessages,
+  formatReviewRejected,
+  formatSubmissionSuccess,
   type ReviewQueueItem,
 } from "./bot-messages";
 
@@ -260,5 +268,36 @@ describe("review queue messages", () => {
     expect(messages.length).toBeGreaterThan(1);
     expect(messages[0]).toEqual(expect.arrayContaining([{ type: "at", data: { qq: "all" } }]));
     expect(messages.slice(1).every((message) => typeof message === "string")).toBe(true);
+  });
+});
+
+describe("bot stylish message switch", () => {
+  const adminTemplates = ["✨ 自定义语句 {id}"];
+
+  test("switch off always yields the built-in plain copy, even with admin templates present", () => {
+    expect(formatSubmissionSuccess(42, false, adminTemplates)).toBe("投稿成功！当前稿件编号#42");
+    expect(formatReviewApproved(42, false, adminTemplates)).toBe("您的稿件 #42 已通过审核");
+    expect(formatReviewRejected(42, "图片不清晰", false, adminTemplates)).toBe("您的稿件 #42 未通过审核，原因：图片不清晰");
+    expect(formatRecallSuccess(42, false, adminTemplates)).toBe("您的稿件 #42 已撤回。");
+    expect(formatPublishSuccess(42, "ext-1", false, adminTemplates)).toBe("已成功发表：#42\n外部 ID：ext-1");
+  });
+
+  test("switch on lets admin templates replace the built-in pool", () => {
+    expect(formatSubmissionSuccess(7, true, ["✨ 自定义语句 {id}"])).toBe("✨ 自定义语句 7");
+    expect(formatReviewRejected(7, "太短了", true, ["📋 自定义拒绝 {id}：{reason}"]))
+      .toBe("📋 自定义拒绝 7：太短了");
+  });
+
+  test("private post copy follows the same switch as the rest of the bot messages", () => {
+    expect(formatPrivatePostModePrompt(false, false))
+      .toBe("现在回复 #匿名 或 #实名 选择投稿方式。（取消本次投稿请发送 #取消）");
+    expect(formatPrivatePostModePrompt(false, true))
+      .toBe("请告诉我这次投稿是否匿名，可以直接回复“匿名/实名/是/否”等自然语言。也可以说“取消本次投稿”。");
+    expect(formatPrivatePostDraftPrompt(false, false))
+      .toBe("继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）");
+    expect(formatPrivatePostDraftPrompt(false, true))
+      .toBe("继续发送添加稿件正文及图片；完成后直接说清楚想继续补充、发布、撤回或取消，我会按语义理解你的意思。");
+    expect(formatPrivatePostAppendAck(false)).toBe("已添加 ✓");
+    expect(formatPrivatePostCancelled(false)).toBe("已取消发布");
   });
 });

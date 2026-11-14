@@ -126,31 +126,6 @@ export async function readTenantPendingPostLimit(client: MetadataClient, tenantI
   return normalizePendingPostLimit(entry?.value);
 }
 
-export const botPrivatePostStylishEnabledKey = "bot_private_post_stylish_enabled";
-export const botPrivatePostStylishEnabledDefault = false;
-
-export function normalizeBotPrivatePostStylishEnabled(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return botPrivatePostStylishEnabledDefault;
-}
-
-export async function readTenantBotPrivatePostStylishEnabled(client: MetadataClient, tenantId: string): Promise<boolean> {
-  const entry = await client.tenantMetadata.findUnique({
-    where: {
-      tenantId_key: {
-        tenantId,
-        key: botPrivatePostStylishEnabledKey,
-      },
-    },
-    select: {
-      value: true,
-    },
-  });
-
-  return normalizeBotPrivatePostStylishEnabled(entry?.value);
-}
-
 export async function readTenantImageCompression(client: MetadataClient, tenantId: string) {
   const entries = await client.tenantMetadata.findMany({
     where: {
@@ -301,57 +276,9 @@ export async function readTenantPublishLlmSummaryEnabled(client: MetadataClient,
   return normalizePublishLlmSummaryEnabled(entry?.value);
 }
 
-export const enableColorSelectionKey = "enable_color_selection";
-export const enableColorSelectionDefault = false;
-
-export function normalizeEnableColorSelection(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return enableColorSelectionDefault;
-}
-
-export const enableMarkdownRenderKey = "enable_markdown_render";
-export const enableMarkdownRenderDefault = false;
-
-export function normalizeEnableMarkdownRender(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return enableMarkdownRenderDefault;
-}
-
-export const enableFontSelectionKey = "enable_font_selection";
-export const enableFontSelectionDefault = false;
-
-export function normalizeEnableFontSelection(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return enableFontSelectionDefault;
-}
-
-export const enableAnonymousAvatarSelectionKey = "enable_anonymous_avatar_selection";
-export const enableAnonymousAvatarSelectionDefault = false;
-
-export function normalizeEnableAnonymousAvatarSelection(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value === "true" || value === "1";
-  return enableAnonymousAvatarSelectionDefault;
-}
-
-export async function readTenantEnableAnonymousAvatarSelection(client: MetadataClient, tenantId: string): Promise<boolean> {
-  const entry = await client.tenantMetadata.findUnique({
-    where: {
-      tenantId_key: {
-        tenantId,
-        key: enableAnonymousAvatarSelectionKey,
-      },
-    },
-    select: {
-      value: true,
-    },
-  });
-
-  return normalizeEnableAnonymousAvatarSelection(entry?.value);
-}
+// 多彩投稿、Markdown 渲染、字体选择、匿名头像选择都已是预设插件的配置项，
+// 这里不再保留 tenant_metadata 里的 enable_* 旧键：两处各自为政时会出现
+// "插件已关闭但旧键仍是 true"的幽灵开关。
 
 // 关注稿件有新评论时是否私信推送摘要。默认开启，保持既有行为。
 export const followedPostCommentNotifyEnabledKey = "followed_post_comment_notify_enabled";

@@ -32,9 +32,8 @@ import { prisma } from "../lib/prisma";
 import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, parsePostRecallOrCancelCommand, type OneBotMessageSegment } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { assessPostForReview, parsePostReviewAnalysisRecord, type PostReviewAssessment } from "./post-review";
-import { readTenantImageCompression, readTenantPendingPostLimit, readTenantBotPrivatePostStylishEnabled } from "../lib/tenant-metadata";
+import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
-import { setBotCustomStylishMessages } from "../lib/bot-messages";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 import {
   BOT_OFFLINE_ALERT_GRACE_MS,
@@ -419,18 +418,32 @@ export function toReviewPluginFlags(config: Pick<TenantPluginConfig, "graduation
 }
 
 /**
- * 把 Bot 多彩消息配置同步到 bot-messages 模块，并返回实际启用标志。
+ * Bot 多彩消息的租户配置快照：开关 + 按消息类型取管理员自定义语句。
+ * 语句随快照一起传递，不再写模块级全局——同一进程里多个租户的消息并发格式化时，
+ * 全局表会被相邻租户的读取覆盖，导致串用他人语句。
+ */
+export type BotStylishSection = {
+  enabled: boolean;
+  messages: (type: string) => string[] | undefined;
+};
+
+const disabledBotStylishSection: BotStylishSection = { enabled: false, messages: () => undefined };
+
+/**
+ * 从租户插件配置里取出多彩消息快照。
  * 同步调用，便于与 readTenantPluginConfig 共用同一次读取。
  */
-function applyBotStylishMessages(config: TenantPluginConfig): boolean {
-  const mapping: Record<string, string[]> = {};
+function readBotStylishSection(config: TenantPluginConfig): BotStylishSection {
+  const pool: Record<string, string[]> = {};
   for (const entry of config.botStylishMessages.messageTypes) {
     if (entry.enabled && entry.messages.length > 0) {
-      mapping[entry.type] = entry.messages;
+      pool[entry.type] = entry.messages;
     }
   }
-  setBotCustomStylishMessages(mapping);
-  return config.botStylishMessages.enabled;
+  return {
+    enabled: config.botStylishMessages.enabled,
+    messages: (type) => pool[type],
+  };
 }
 
 /**
@@ -619,21 +632,22 @@ export class OneBotRuntime {
   }
 
   /**
-   * 读取 tenant 的插件配置，把 Bot 多彩消息类型对应的自定义语句表
-   * 同步到 bot-messages 模块；消息类型未配置时自动回退到内置语句池。
-   * 同时返回“实际启用”标志（即插件配置里的 enabled）。
+   * 读取 tenant 的 Bot 多彩消息配置快照（开关 + 自定义语句）。
+   * 读取失败按「关闭」处理。
+   */
+  private async resolveBotStylish(tenantId: string): Promise<BotStylishSection> {
+    try {
+      return readBotStylishSection(await readTenantPluginConfig(prisma, tenantId));
+    } catch {
+      return disabledBotStylishSection;
+    }
+  }
+
+  /**
+   * 多彩消息唯一开关 = 插件配置里的 enabled（插件配置页是唯一管理入口）。
    */
   private async resolveStylishEnabled(tenantId: string): Promise<boolean> {
-    // 多彩消息唯一开关 = 插件配置里的 enabled（旧 TenantMetadata 开关已移除，
-    // 插件配置页是唯一管理入口）。
-    try {
-      // 并发注意：自定义语句表是模块级全局，resolve 完成后应紧接着同步调用
-      // format* 函数，中间不得插入 await，否则多租户并发时可能串用他人语句。
-      return applyBotStylishMessages(await readTenantPluginConfig(prisma, tenantId));
-    } catch {
-      setBotCustomStylishMessages(null);
-      return false;
-    }
+    return (await this.resolveBotStylish(tenantId)).enabled;
   }
 
   /** 读取租户插件配置；失败时记录日志并返回 null（调用方据此失败关闭）。 */
@@ -1057,7 +1071,8 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
+    const botStylish = await this.resolveBotStylish(post.tenantId);
+    const stylishEnabled = botStylish.enabled;
     const groupSuffix = opts?.skipAuthor ? "\n（静默撤回，未通知作者）" : "";
     if (!opts?.skipGroup) {
       await this.sendTenantReviewNotification(post.tenantId, formatPostRecalledGroup(post.displayId, targetCount, stylishEnabled) + groupSuffix);
@@ -1077,7 +1092,7 @@ export class OneBotRuntime {
       },
     });
     for (const bot of bots) {
-      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, formatRecallSuccess(post.displayId, stylishEnabled)).catch((error) => {
+      await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, formatRecallSuccess(post.displayId, stylishEnabled, botStylish.messages("recallSuccess"))).catch((error) => {
         this.logger.warn({ error, botQqUin: bot.qqUin.toString(), userQqUin: post.author.qqUin.toString(), postId }, "failed to notify post recalled");
       });
     }
@@ -1155,10 +1170,10 @@ export class OneBotRuntime {
         createdAt: "asc",
       },
     });
-    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
+    const botStylish = await this.resolveBotStylish(post.tenantId);
     const message = status === "approved"
-      ? formatReviewApproved(post.displayId, stylishEnabled)
-      : formatReviewRejected(post.displayId, comment?.trim() || "审核拒绝", stylishEnabled);
+      ? formatReviewApproved(post.displayId, botStylish.enabled, botStylish.messages("reviewApproved"))
+      : formatReviewRejected(post.displayId, comment?.trim() || "审核拒绝", botStylish.enabled, botStylish.messages("reviewRejected"));
 
     for (const bot of bots) {
       await this.sendPrivateMessage(bot.qqUin.toString(), post.author.qqUin, message).catch((error) => {
@@ -1187,12 +1202,12 @@ export class OneBotRuntime {
     if (!post) {
       return;
     }
-    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
+    const botStylish = await this.resolveBotStylish(post.tenantId);
     if (!target) {
-      await this.sendTenantReviewNotification(post.tenantId, formatPublishSuccess(post.displayId, externalId, stylishEnabled));
+      await this.sendTenantReviewNotification(post.tenantId, formatPublishSuccess(post.displayId, externalId, botStylish.enabled, botStylish.messages("publishSuccess")));
       return;
     }
-    await this.sendBotReviewGroupMessage(target.botAccount, formatPublishSuccessWithTarget(post.displayId, target.displayName, externalId, stylishEnabled), "failed to notify publish succeeded");
+    await this.sendBotReviewGroupMessage(target.botAccount, formatPublishSuccessWithTarget(post.displayId, target.displayName, externalId, botStylish.enabled), "failed to notify publish succeeded");
   }
 
   async notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }) {
@@ -2145,7 +2160,7 @@ export class OneBotRuntime {
 
       const pendingMode = existingPendingMode;
       if (pendingMode) {
-        const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+        const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
         const semantic = semanticForExistingFlow;
         const semanticModeSelection = resolvePrivatePostModeSelectionFromSemantic(semantic);
         if (semanticModeSelection !== null) {
@@ -2244,7 +2259,7 @@ export class OneBotRuntime {
           return;
         }
         if (appended) {
-          const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+          const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
           await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostAppendAck(privateStylishEnabled));
           return;
         }
@@ -2576,7 +2591,7 @@ export class OneBotRuntime {
         await this.requestPrivatePostSubmitConfirmation({ bot, botQqUin, userQqUin });
         return;
       }
-      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled, aiIntakeEnabled));
       return;
     }
@@ -2592,7 +2607,7 @@ export class OneBotRuntime {
       submitAfterModeSelection: shouldSubmitPrivatePostAfterModeSelection(semantic),
     });
 
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+    const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     const summary = this.formatPrivatePostPendingSummary(text, attachments.length, privateStylishEnabled, aiIntakeEnabled);
     await this.sendPrivateMessage(botQqUin, userQqUin, summary);
   }
@@ -2733,7 +2748,7 @@ export class OneBotRuntime {
       await this.clearPrivatePostPending(draftKey);
       await this.clearPrivatePostPendingConfirm(draftKey);
       await this.clearPrivatePostDraft(draftKey);
-      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
       return;
     }
@@ -2743,7 +2758,7 @@ export class OneBotRuntime {
       await this.clearPrivatePostPending(draftKey);
       await this.clearPrivatePostPendingConfirm(draftKey);
       await this.clearPrivatePostDraft(draftKey);
-      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+      const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
       return;
     }
@@ -2755,7 +2770,7 @@ export class OneBotRuntime {
     }
 
     await this.clearPrivatePostDraft(draftKey);
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+    const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostCancelled(privateStylishEnabled));
   }
 
@@ -2859,8 +2874,8 @@ export class OneBotRuntime {
     const { post } = result;
     this.privatePostPendingConfirms.delete(draftKey);
     this.privatePostAppendedMessageIds.delete(draftKey);
-    const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, stylishEnabled));
+    const botStylish = await this.resolveBotStylish(bot.tenantId);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatSubmissionSuccess(post.displayId, botStylish.enabled, botStylish.messages("submissionSuccess")));
   }
 
   private async ensurePrivatePostingAllowed(tenantId: string, userQqUin: string) {
@@ -3493,7 +3508,7 @@ export class OneBotRuntime {
       return;
     }
 
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
+    const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
     await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled, pending.aiIntakeEnabled === true));
   }
 
@@ -3512,13 +3527,12 @@ export class OneBotRuntime {
     const pending = this.privatePostPendingModes.get(draftKey);
     if (pending) {
       const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-      const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
       const undone = await this.popPrivatePostHistoryEntry(draftKey, pending, stylishEnabled);
       if (!undone) {
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pending.aiIntakeEnabled === true));
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(stylishEnabled, pending.aiIntakeEnabled === true));
         return;
       }
-      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, privateStylishEnabled, pending.aiIntakeEnabled === true));
+      await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostPendingSummary(pending.text, pending.attachments.length, stylishEnabled, pending.aiIntakeEnabled === true));
       return;
     }
 
@@ -3537,13 +3551,12 @@ export class OneBotRuntime {
     }
 
     const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-    const privateStylishEnabled = await readTenantBotPrivatePostStylishEnabled(prisma, bot.tenantId);
     const undone = await this.popPrivatePostHistoryEntry(draftKey, draft, stylishEnabled);
     if (!undone) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(privateStylishEnabled, draft.aiIntakeEnabled === true));
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftPrompt(stylishEnabled, draft.aiIntakeEnabled === true));
       return;
     }
-    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, privateStylishEnabled, draft.aiIntakeEnabled === true));
+    await this.sendPrivateMessage(botQqUin, userQqUin, this.formatPrivatePostDraftSummary(draft.text, draft.attachments.length, draft.anonymous, stylishEnabled, draft.aiIntakeEnabled === true));
   }
 
   private async popPrivatePostHistoryEntry(draftKey: string, target: PrivatePostDraft | PrivatePostPendingMode, stylishEnabled = false) {
@@ -3970,9 +3983,7 @@ export class OneBotRuntime {
     }
 
     try {
-      // 一次读取同时拿到审核指令开关与多彩消息语句，避免每条指令多查一次配置。
-      // 注意：applyBotStylishMessages 之后到 format* 调用之间不能插入额外 await
-      //（自定义语句表是模块级全局，多租户并发会串用）。
+      // 一次读取同时拿到审核指令开关与多彩消息开关，避免每条指令多查一次配置。
       const pluginConfig = await this.readPluginConfigSafe(bot.tenantId);
       const reviewPluginFlags = pluginConfig ? toReviewPluginFlags(pluginConfig) : null;
       const pluginBlockedMessage = resolveReviewPluginCommandBlock(command.name, reviewPluginFlags);
@@ -3981,12 +3992,8 @@ export class OneBotRuntime {
         return;
       }
       const reviewHelp = buildReviewHelp(reviewPluginFlags, { includePrivateReply: isPrivateReplyGroup });
-      let stylishEnabled = false;
-      if (pluginConfig) {
-        stylishEnabled = applyBotStylishMessages(pluginConfig);
-      } else {
-        setBotCustomStylishMessages(null);
-      }
+      // 审核群消息只用开关本身；配置读取失败按关闭处理。
+      const stylishEnabled = pluginConfig ? readBotStylishSection(pluginConfig).enabled : false;
 
       if (command.name === "全部通过") {
         const result = await approveAllPendingPostsViaBot({

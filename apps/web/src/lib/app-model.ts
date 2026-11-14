@@ -36,7 +36,6 @@ export const defaultMetadata: TenantMetadata = {
   },
   imageMaxSizeMb: DEFAULT_IMAGE_MAX_SIZE_MB,
   botStylishMessagesEnabled: false,
-  botPrivatePostStylishEnabled: false,
   publishMode: "single",
   publishAccumulate: {
     minImages: 6,

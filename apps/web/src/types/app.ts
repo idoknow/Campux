@@ -124,7 +124,6 @@ export type TenantMetadata = {
   };
   publishLlmSummaryEnabled: boolean;
   botStylishMessagesEnabled: boolean;
-  botPrivatePostStylishEnabled: boolean;
   enableColorSelection: boolean;
   enableMarkdownRender: boolean;
   enableFontSelection: boolean;

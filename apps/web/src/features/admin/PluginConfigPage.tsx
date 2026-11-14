@@ -1818,7 +1818,7 @@ export function PluginConfigPage({ tenantId, metadata, onSaved }: { tenantId: st
     setEnabledPresetNames(nextSet);
     // 预设插件的启用状态也写入 plugin_config.<id>.enabled，重拉一次配置，
     // 避免本地 config state 里的旧 enabled 在下次「保存」时把开启状态覆盖回禁用。
-    void loadConfig();
+    await loadConfig();
     // 启停会改变插件透出的租户元数据（如 enableBroadcast），通知父级刷新，
     // 否则管理页「用户」面板的角色选项不会立即跟随开关状态。
     try { await onSaved?.(); } catch { /* 元数据刷新失败不影响插件启停 */ }

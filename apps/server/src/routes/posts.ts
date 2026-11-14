@@ -54,6 +54,12 @@ import { formatBanNotify } from "../lib/bot-messages";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import type { TenantPluginConfig } from "../lib/tenant-plugin-config";
+import {
+  disabledPresentationPluginGates,
+  presentationPluginGatesFrom,
+  stripDisabledPresentationFields,
+  type PresentationPluginGates,
+} from "../lib/presentation-plugins";
 import type { EventBus } from "@campux/plugin";
 import type { RuntimeQueue } from "../runtime/queue";
 import type { OneBotRuntime } from "../runtime/onebot";
@@ -445,6 +451,18 @@ function applyStoredImageHeaders(reply: FastifyReply, bytes: Uint8Array): boolea
     reply.header(name, value);
   }
   return cacheable;
+}
+
+/**
+ * 读取投稿样式类插件的开关。读取失败按全部关闭处理：宁可少一个样式，
+ * 也不要出现"插件关了还生效"。
+ */
+async function readPresentationPluginGates(tenantId: string): Promise<PresentationPluginGates> {
+  try {
+    return presentationPluginGatesFrom(await readTenantPluginConfig(prisma, tenantId));
+  } catch {
+    return disabledPresentationPluginGates;
+  }
 }
 
 export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, queue: RuntimeQueue, oneBot?: OneBotRuntime) {
@@ -910,6 +928,13 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
           message: `投稿包含不安全内容，账号已被封禁 24 小时：${injectionResult.reason}`,
         };
       }
+
+      // 样式字段受预设插件控制：注入检测之后再看插件开关，插件关闭时服务端一律丢弃，
+      // 避免旧草稿、缓存的前端包或构造的请求把已关闭的效果带进新稿件。
+      ({ anonymousAvatar, bgColor, textColor, font, pendingTagNames } = stripDisabledPresentationFields(
+        { anonymousAvatar, bgColor, textColor, font, pendingTagNames },
+        await readPresentationPluginGates(context.selectedTenant.id),
+      ));
 
       const remoteGifUrls = remoteGifClaims.map((claim) => claim.url);
       const remoteGifSigningSecret = remoteGifClaims.length > 0
@@ -1797,6 +1822,18 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
   app.post("/api/posts/render-preview", async (request, reply) => {
     const context = await requireTenantContext(request, reply);
     const body = renderPreviewBodySchema.parse(request.body);
+    // 预览也遵守插件开关：字体/配色插件关闭时按默认样式渲染，否则预览会给出
+    // 一个投稿时并不会生效的效果。
+    const previewStyle = stripDisabledPresentationFields(
+      {
+        anonymousAvatar: null,
+        bgColor: body.bgColor ?? null,
+        textColor: body.textColor ?? null,
+        font: body.font ?? null,
+        pendingTagNames: [],
+      },
+      await readPresentationPluginGates(context.selectedTenant.id),
+    );
 
     const previewBot = await prisma.botAccount.findFirst({
       where: {
@@ -1818,17 +1855,17 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
         text: body.text,
         createdAt: new Date(),
         anonymous: body.anonymous ?? false,
-        anonymousAvatar: undefined,
-        bgColor: body.bgColor ?? null,
-        textColor: body.textColor ?? null,
-        font: body.font ?? null,
+        anonymousAvatar: previewStyle.anonymousAvatar ?? undefined,
+        bgColor: previewStyle.bgColor,
+        textColor: previewStyle.textColor,
+        font: previewStyle.font,
       });
 
       reply.header("Cache-Control", "no-store");
       reply.type("image/jpeg");
       return reply.send(Buffer.from(bytes));
     } catch (err) {
-      app.log.error({ err, font: body.font }, "render-preview failed");
+      app.log.error({ err, font: previewStyle.font }, "render-preview failed");
       return reply.code(500).send({ message: "渲染预览失败，请稍后重试" });
     }
   });

@@ -25,8 +25,6 @@ import {
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
   imageMaxSizeMetadataKey,
-  botPrivatePostStylishEnabledKey,
-  normalizeBotPrivatePostStylishEnabled,
   readTenantImageCompression,
   publishModeKey,
   publishAccumulateMinImagesKey,
@@ -39,14 +37,6 @@ import {
   readTenantPublishMode,
   publishLlmSummaryEnabledKey,
   normalizePublishLlmSummaryEnabled,
-  enableColorSelectionKey,
-  normalizeEnableColorSelection,
-  enableMarkdownRenderKey,
-  normalizeEnableMarkdownRender,
-  enableFontSelectionKey,
-  normalizeEnableFontSelection,
-  enableAnonymousAvatarSelectionKey,
-  normalizeEnableAnonymousAvatarSelection,
   followedPostCommentNotifyEnabledKey,
   normalizeFollowedPostCommentNotifyEnabled,
   operateModeKey,
@@ -65,16 +55,11 @@ const publicMetadataKeys = [
   imageCompressionQualityKey,
   imageCompressionMaxDimensionKey,
   imageMaxSizeMetadataKey,
-  botPrivatePostStylishEnabledKey,
   publishModeKey,
   publishAccumulateMinImagesKey,
   publishAccumulateMaxImagesKey,
   publishAccumulateStaleMinutesKey,
   publishLlmSummaryEnabledKey,
-  enableColorSelectionKey,
-  enableMarkdownRenderKey,
-  enableFontSelectionKey,
-  enableAnonymousAvatarSelectionKey,
   followedPostCommentNotifyEnabledKey,
   operateModeKey,
 ] as const;
@@ -101,16 +86,11 @@ const patchMetadataSchema = z.object({
   imageCompressionQuality: z.number().int().min(40).max(95).optional(),
   imageCompressionMaxDimension: z.number().int().min(512).max(4096).optional(),
   imageMaxSizeMb: z.number().int().min(minImageMaxSizeMb).max(maxImageMaxSizeMb).optional(),
-  botPrivatePostStylishEnabled: z.boolean().optional(),
   publishMode: z.enum(["single", "accumulate"]).optional(),
   publishAccumulateMinImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
   publishAccumulateMaxImages: z.number().int().min(1).max(publishAccumulateImageHardMax).optional(),
   publishAccumulateStaleMinutes: z.number().int().min(1).max(1440).optional(),
   publishLlmSummaryEnabled: z.boolean().optional(),
-  enableColorSelection: z.boolean().optional(),
-  enableMarkdownRender: z.boolean().optional(),
-  enableFontSelection: z.boolean().optional(),
-  enableAnonymousAvatarSelection: z.boolean().optional(),
   followedPostCommentNotifyEnabled: z.boolean().optional(),
   operateMode: z.enum(["bot", "manual"]).optional(),
 });
@@ -143,17 +123,17 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     },
     imageMaxSizeMb: normalizeImageMaxSizeMb(record[imageMaxSizeMetadataKey]),
     botStylishMessagesEnabled: false,
-    botPrivatePostStylishEnabled: normalizeBotPrivatePostStylishEnabled(record[botPrivatePostStylishEnabledKey]),
     publishMode: normalizePublishMode(record[publishModeKey]),
     publishAccumulate: {
       ...normalizeAccumulateImages(record[publishAccumulateMinImagesKey], record[publishAccumulateMaxImagesKey]),
       staleMinutes: normalizeAccumulateStaleMinutes(record[publishAccumulateStaleMinutesKey]),
     },
     publishLlmSummaryEnabled: normalizePublishLlmSummaryEnabled(record[publishLlmSummaryEnabledKey]),
-    enableColorSelection: normalizeEnableColorSelection(record[enableColorSelectionKey]),
-    enableMarkdownRender: normalizeEnableMarkdownRender(record[enableMarkdownRenderKey]),
-    enableFontSelection: normalizeEnableFontSelection(record[enableFontSelectionKey]),
-    enableAnonymousAvatarSelection: normalizeEnableAnonymousAvatarSelection(record[enableAnonymousAvatarSelectionKey]),
+    // 四个样式开关的唯一真相是插件配置；读不到插件配置时按关闭处理（fail-closed）。
+    enableColorSelection: false,
+    enableMarkdownRender: false,
+    enableFontSelection: false,
+    enableAnonymousAvatarSelection: false,
     followedPostCommentNotifyEnabled: normalizeFollowedPostCommentNotifyEnabled(record[followedPostCommentNotifyEnabledKey]),
     operateMode: normalizeOperateMode(record[operateModeKey]),
     availableFonts: [] as string[],
@@ -288,7 +268,8 @@ async function readPublicMetadata(tenantId: string, includeAdminLimits = false) 
     metadata.enableLingling = pluginConfig.lingling.enabled;
     metadata.enableGuestSubmission = pluginConfig.guestSubmission.enabled;
   } catch {
-    // 缺少插件配置时保留 tenant_metadata 里的旧开关
+    // 读取插件配置失败：上面的默认值全部为关闭，前端按"插件未启用"渲染，
+    // 不再回落到 tenant_metadata 里的旧开关（旧值可能是关闭插件之前的残留）。
   }
   return metadata;
 }
@@ -457,9 +438,6 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     if (body.imageMaxSizeMb !== undefined) {
       updates.push({ key: imageMaxSizeMetadataKey, value: normalizeImageMaxSizeMb(body.imageMaxSizeMb) });
     }
-    if (body.botPrivatePostStylishEnabled !== undefined) {
-      updates.push({ key: botPrivatePostStylishEnabledKey, value: body.botPrivatePostStylishEnabled });
-    }
     if (body.publishMode !== undefined) {
       updates.push({ key: publishModeKey, value: body.publishMode });
     }
@@ -477,18 +455,6 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.publishLlmSummaryEnabled !== undefined) {
       updates.push({ key: publishLlmSummaryEnabledKey, value: body.publishLlmSummaryEnabled });
-    }
-    if (body.enableColorSelection !== undefined) {
-      updates.push({ key: enableColorSelectionKey, value: body.enableColorSelection });
-    }
-    if (body.enableMarkdownRender !== undefined) {
-      updates.push({ key: enableMarkdownRenderKey, value: body.enableMarkdownRender });
-    }
-    if (body.enableFontSelection !== undefined) {
-      updates.push({ key: enableFontSelectionKey, value: body.enableFontSelection });
-    }
-    if (body.enableAnonymousAvatarSelection !== undefined) {
-      updates.push({ key: enableAnonymousAvatarSelectionKey, value: body.enableAnonymousAvatarSelection });
     }
     if (body.followedPostCommentNotifyEnabled !== undefined) {
       updates.push({ key: followedPostCommentNotifyEnabledKey, value: body.followedPostCommentNotifyEnabled });
