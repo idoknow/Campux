@@ -205,6 +205,11 @@ describe("review group ban command parsing", () => {
     expect(parseReviewGroupCommand("＃全部通过")).toEqual({ name: "全部通过", args: "" });
   });
 
+  test("解析撤回申请处理命令", () => {
+    expect(parseReviewGroupCommand("#撤回通过 12")).toEqual({ name: "撤回通过", args: "12" });
+    expect(parseReviewGroupCommand("＃撤回拒绝 图片重复 12")).toEqual({ name: "撤回拒绝", args: "图片重复 12" });
+  });
+
   test("裸 ban/unban 不在通用解析中识别", () => {
     expect(parseCommand("ban 123456789 刷屏广告")).toBeNull();
     expect(parseCommand("unban 123456789")).toBeNull();
@@ -713,6 +718,12 @@ describe("审核群帮助文本按插件开关裁剪", () => {
     expect(help).toContain("#投票通过 <竞选编号>");
     expect(help).toContain("#投票拒绝 <理由> <竞选编号>");
     expect(help).not.toContain("#毕业通过");
+  });
+
+  test("帮助里给出处理撤回申请的指令", () => {
+    const help = buildReviewHelp({ graduation: false, campaigns: false });
+    expect(help).toContain("#撤回通过 <稿件id>");
+    expect(help).toContain("#撤回拒绝 <理由> <稿件id>");
   });
 });
 

@@ -14,6 +14,7 @@ import {
   formatPrivatePostModeSelected,
   formatPrivatePostDraftStarted,
   formatPublishSuccess,
+  formatRecallRequestNotification,
   formatRecallSuccess,
   formatRegisterAlready,
   formatRegisterExtended,
@@ -368,5 +369,15 @@ describe("私聊投稿确认提示", () => {
     } finally {
       Math.random = originalRandom;
     }
+  });
+});
+
+describe("撤回申请审核群通知", () => {
+  test("带上可直接回复的同意与拒绝指令", () => {
+    const message = formatRecallRequestNotification(42, "小明", "10001", "发错图了");
+    expect(message).toContain("稿件申请撤回：#42");
+    expect(message).toContain("理由：发错图了");
+    expect(message).toContain("#撤回通过 42");
+    expect(message).toContain("#撤回拒绝 <理由> 42");
   });
 });

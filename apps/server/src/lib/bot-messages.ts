@@ -512,7 +512,9 @@ export function formatRecallRequestNotification(
     `${prefix}稿件申请撤回：#${displayId}`,
     `申请人：${authorName}（QQ ${qqUin.toString()}）`,
     `理由：${reason}`,
-    "审核员或管理员可在稿件页面同意撤回；同意后系统会把每个 QZone 发布目标设置为仅自己可见。",
+    `同意撤回：#撤回通过 ${displayId}`,
+    `拒绝撤回：#撤回拒绝 <理由> ${displayId}`,
+    "同意后系统会把每个 QZone 发布目标设置为仅自己可见。",
   ].join("\n");
 }
 

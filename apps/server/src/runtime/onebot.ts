@@ -467,6 +467,8 @@ export function buildReviewHelp(
     ...(options.includePrivateReply === false ? [] : ["#回复 <内容> （引用转发私信后使用）"]),
     "#发布 <内容> （可附带图片，选择直接发布或以墙的身份投稿发布）",
     "#撤回 [tid] （回复 #发布 成功消息可撤回刚发布的说说）",
+    "#撤回通过 <稿件id> （同意作者的撤回申请）",
+    "#撤回拒绝 <理由> <稿件id> （拒绝撤回申请）",
     "#封禁 <QQ号> <理由> 或 ban <QQ号> <理由>",
     "#解封 <QQ号> 或 unban <QQ号>",
     ...(flags?.graduation ? ["#毕业通过 <毕业去向编号>", "#毕业拒绝 <理由> <毕业去向编号>"] : []),
@@ -4602,6 +4604,149 @@ export class OneBotRuntime {
             () => undefined,
           );
         }
+        return;
+      }
+
+      if (command.name === "撤回通过" || command.name === "撤回拒绝") {
+        const approving = command.name === "撤回通过";
+        const { operator } = await requireBotTenantRole(bot.tenantId, operatorQqUin, "reviewer");
+
+        let displayId = parseDisplayId(command.args);
+        let comment = "";
+        if (approving) {
+          // 「#撤回通过 12」之外，也支持引用撤回申请通知 + @机器人
+          if (!displayId && isMentioningBot(event, botQqUin)) {
+            displayId = await this.resolveDisplayIdFromQuotedReply(quoted, botQqUin, bot.tenantId);
+          }
+        } else {
+          const parsed = parseRejectArgs(command.args);
+          if (parsed) {
+            displayId = parsed.displayId;
+            comment = parsed.comment;
+          } else if (command.args.trim() && isMentioningBot(event, botQqUin)) {
+            const fromReply = await this.resolveDisplayIdFromQuotedReply(quoted, botQqUin, bot.tenantId);
+            if (fromReply) {
+              displayId = fromReply;
+              comment = command.args.trim();
+            }
+          }
+          if (!displayId) {
+            // 只给了编号没给理由：明确提示，别让管理员以为是编号没解析出来
+            const onlyId = parseDisplayId(command.args);
+            if (onlyId) {
+              await this.sendGroupMessage(
+                botQqUin,
+                groupId,
+                `拒绝撤回需要说明理由：请发送 #撤回拒绝 <理由> ${onlyId}`,
+              );
+              return;
+            }
+          }
+        }
+
+        if (!displayId) {
+          await this.sendGroupMessage(botQqUin, groupId, [
+            approving
+              ? "未解析到稿件编号。可发送：#撤回通过 <稿件id>"
+              : "未解析到稿件编号。可发送：#撤回拒绝 <理由> <稿件id>",
+            "或直接回复（引用）撤回申请通知，并 @机器人 发送对应指令。",
+          ].join("\n"));
+          return;
+        }
+
+        const recallPost = await prisma.post.findFirst({
+          where: { tenantId: bot.tenantId, displayId },
+          select: { id: true, status: true, displayId: true },
+        });
+        if (!recallPost) {
+          await this.sendGroupMessage(botQqUin, groupId, `没有找到稿件 #${displayId}，请确认编号`);
+          return;
+        }
+        if (recallPost.status !== "pending_recall") {
+          await this.sendGroupMessage(botQqUin, groupId, `稿件 #${displayId} 当前没有待处理的撤回申请`);
+          return;
+        }
+
+        if (approving) {
+          try {
+            const recalled = await executePostRecall({
+              tenantId: bot.tenantId,
+              postId: recallPost.id,
+              actorId: operator.id,
+              logger: this.logger,
+            });
+            const targetCount = recalled.results.length;
+            // 群里的结果由下面的指令回复承担，这里只通知作者
+            await this.notifyPostRecalled(recallPost.id, targetCount, { skipGroup: true }).catch((error) => {
+              this.logger.warn({ error, postId: recallPost.id }, "failed to notify post recalled");
+            });
+            await this.sendGroupMessage(botQqUin, groupId, formatPostRecalledGroup(displayId, targetCount, stylishEnabled));
+          } catch (error) {
+            const businessMessage = (() => {
+              if (error instanceof PostRecallExecutionError) {
+                return (
+                  error.results
+                    .filter((result) => !result.ok)
+                    .map((result) => `${result.targetName}：${result.message}`)
+                    .join("；") || "撤回失败"
+                );
+              }
+              if (error instanceof PostRecallNotSupportedError || error instanceof BotWorkflowError) {
+                return error.message;
+              }
+              return "撤回失败，请稍后重试或到后台处理";
+            })();
+            this.logger.warn(
+              {
+                errName: error instanceof Error ? error.name : typeof error,
+                errMessage: error instanceof Error ? error.message : String(error),
+                displayId,
+                groupId,
+                botId: bot.id,
+              },
+              "review group recall approve failed",
+            );
+            await this.sendGroupMessage(botQqUin, groupId, businessMessage).catch(() => undefined);
+          }
+          return;
+        }
+
+        const rejectReason = comment.trim() || "拒绝撤回申请";
+        const rejected = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
+          const updated = await transaction.post.update({
+            where: { id: recallPost.id },
+            data: {
+              status: "published",
+              recallIgnored: false,
+              recallIgnoredAt: null,
+              logs: {
+                create: {
+                  tenantId: bot.tenantId,
+                  actorId: operator.id,
+                  oldStatus: recallPost.status,
+                  newStatus: "published",
+                  comment: rejectReason,
+                },
+              },
+            },
+          });
+          await writeAuditLog({
+            tenantId: bot.tenantId,
+            actorId: operator.id,
+            action: "bot.recall.reject",
+            targetType: "post",
+            targetId: recallPost.id,
+            detail: { displayId: recallPost.displayId, groupId, comment: rejectReason },
+          }, transaction);
+          return updated;
+        });
+        if (!rejected.active) {
+          throw new BotWorkflowError("校园墙当前不可用", 409);
+        }
+        // 这条通知同时发审核群与作者，不再额外补群消息
+        await this.notifyPostRecallRejected(recallPost.id, rejectReason).catch((error) => {
+          this.logger.warn({ error, postId: recallPost.id }, "failed to notify post recall rejected");
+        });
         return;
       }
 
