@@ -1,6 +1,7 @@
 import { DEFAULT_PRIVATE_POST_PROMPT, PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import { DbNull, type Prisma } from "@campux/db";
 import { prisma } from "../lib/prisma";
+import { DEFAULT_PRIVATE_POST_KEYWORDS, normalizePrivatePostKeywords, type PrivatePostKeywords } from "../lib/private-posting";
 import { decryptJson, encryptJson } from "../lib/secret-json";
 import { assertSafeLlmUrl } from "./llm-url";
 import { readBoundedLlmResponse } from "./post-review";
@@ -51,6 +52,8 @@ export type AiRules = {
   privatePostAggregateDelaySeconds?: number | undefined;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"]，不含 # 前缀 */
   postTriggerKeywords?: string[] | undefined;
+  /** 对话投稿各操作的关键词（允许不带 # 直接发送）；未配置时用内置默认值 */
+  privatePostKeywords?: PrivatePostKeywords | undefined;
   /** 私聊投稿 AI 语义收稿的完整系统提示词，留空使用内置默认提示词 */
   privatePostPrompt?: string | undefined;
 };
@@ -96,6 +99,7 @@ const defaultAiSettings: TenantAiSettingsPayload = {
     postTagMaintenanceEnabled: true,
     privatePostAggregateDelaySeconds: 8,
     postTriggerKeywords: [],
+    privatePostKeywords: DEFAULT_PRIVATE_POST_KEYWORDS,
     privatePostPrompt: DEFAULT_PRIVATE_POST_PROMPT,
   },
 };
@@ -326,6 +330,7 @@ export function normalizeAiRules(value: unknown): AiRules {
     postTagMaintenanceEnabled: typeof candidate.postTagMaintenanceEnabled === "boolean" ? candidate.postTagMaintenanceEnabled : defaultAiSettings.rules.postTagMaintenanceEnabled,
     privatePostAggregateDelaySeconds: normalizeNumber(candidate.privatePostAggregateDelaySeconds, 0, 120, defaultAiSettings.rules.privatePostAggregateDelaySeconds ?? 8),
     postTriggerKeywords: normalizeStringArray(candidate.postTriggerKeywords ?? defaultAiSettings.rules.postTriggerKeywords),
+    privatePostKeywords: normalizePrivatePostKeywords(candidate.privatePostKeywords),
     privatePostPrompt: normalizePrivatePostPrompt(candidate.privatePostPrompt),
   };
 }

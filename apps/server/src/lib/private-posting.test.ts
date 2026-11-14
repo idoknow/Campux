@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractOneBotImageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePostRecallOrCancelCommand, parsePrivatePostModeText, parsePrivatePostStartText } from "./private-posting";
+import { DEFAULT_PRIVATE_POST_KEYWORDS, extractOneBotImageSegments, extractOneBotPlainText, findPrivatePostKeywordMatch, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, matchPrivatePostKeywords, normalizePrivatePostKeywords, parsePostRecallOrCancelCommand, parsePrivatePostModeText, parsePrivatePostStartText } from "./private-posting";
 
 describe("private posting command parsing", () => {
   test("parses English hash start command", () => {
@@ -132,6 +132,59 @@ describe("parsePostRecallOrCancelCommand (issue 162)", () => {
 
   test("rejects when trailing token is not a numeric id", () => {
     expect(parsePostRecallOrCancelCommand("#撤回 有误")).toBeNull();
+  });
+});
+
+describe("bare private post keywords", () => {
+  test("defaults let users start without a # prefix", () => {
+    expect(matchPrivatePostKeywords("投稿 今天食堂")).toEqual([{ name: "start", body: "今天食堂" }]);
+    expect(matchPrivatePostKeywords("表白 隔壁班的猫")).toEqual([{ name: "start", body: "隔壁班的猫" }]);
+    expect(matchPrivatePostKeywords("墙墙投稿")).toEqual([{ name: "start", body: "" }]);
+    expect(matchPrivatePostKeywords("＃投稿 带井号也认")).toEqual([{ name: "start", body: "带井号也认" }]);
+  });
+
+  test("longest keyword wins so 墙墙投稿 is not read as 墙 + 投稿", () => {
+    expect(matchPrivatePostKeywords("墙墙投稿 你好")).toEqual([{ name: "start", body: "你好" }]);
+  });
+
+  test("ordinary sentences are not commands", () => {
+    expect(matchPrivatePostKeywords("投稿箱在哪")).toEqual([]);
+    expect(matchPrivatePostKeywords("墙裂推荐这家店")).toEqual([]);
+    expect(matchPrivatePostKeywords("今天天气不错")).toEqual([]);
+    expect(matchPrivatePostKeywords("确认一下")).toEqual([]);
+  });
+
+  test("control keywords ignore trailing punctuation", () => {
+    expect(matchPrivatePostKeywords("算了。")).toEqual([{ name: "cancel" }]);
+    expect(matchPrivatePostKeywords("结束！")).toEqual([{ name: "finish" }]);
+    expect(matchPrivatePostKeywords("确认。")).toEqual([{ name: "confirm" }]);
+    expect(matchPrivatePostKeywords("匿名")).toEqual([{ name: "anonymous" }]);
+    expect(matchPrivatePostKeywords("不匿名")).toEqual([{ name: "realname" }]);
+  });
+
+  test("admin overrides replace defaults and empty lists disable a group", () => {
+    const custom = normalizePrivatePostKeywords({ start: ["投个稿", "墙墙来稿"], cancel: [] });
+
+    expect(custom.start).toEqual(["投个稿", "墙墙来稿"]);
+    expect(custom.cancel).toEqual([]);
+    expect(custom.finish).toEqual(DEFAULT_PRIVATE_POST_KEYWORDS.finish);
+    expect(matchPrivatePostKeywords("投个稿 你好", custom)).toEqual([{ name: "start", body: "你好" }]);
+    expect(matchPrivatePostKeywords("投稿 你好", custom)).toEqual([]);
+    expect(matchPrivatePostKeywords("算了", custom)).toEqual([]);
+  });
+
+  test("normalizes hashes and duplicates", () => {
+    const normalized = normalizePrivatePostKeywords({ start: ["#投稿", "投#稿", "投稿"], confirm: ["#发吧"] });
+
+    expect(normalized.start).toEqual(["投稿", "投#稿"]);
+    expect(normalized.confirm).toEqual(["发吧"]);
+  });
+
+  test("findPrivatePostKeywordMatch picks by name", () => {
+    const matches = matchPrivatePostKeywords("结束");
+
+    expect(findPrivatePostKeywordMatch(matches, "finish")?.name).toBe("finish");
+    expect(findPrivatePostKeywordMatch(matches, "confirm")).toBeUndefined();
   });
 });
 

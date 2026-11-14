@@ -49,7 +49,7 @@ import {
 } from "../ops/membership-removal-confirmation";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PrivatePostKeywordGroup, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { PluginConfigPage } from "./PluginConfigPage";
 import { PlatformFeedbackBanner } from "./PlatformFeedbackBanner";
@@ -183,8 +183,23 @@ type AiSettingsForm = {
   postTagMaintenanceEnabled: boolean;
   privatePostAggregateDelaySeconds: number;
   postTriggerKeywordsText: string;
+  privatePostKeywordsText: Record<PrivatePostKeywordGroup, string>;
   privatePostPrompt: string;
 };
+
+/**
+ * 对话投稿关键词分组：顺序即成表单顺序。
+ * 与 apps/server/src/lib/private-posting.ts 的 DEFAULT_PRIVATE_POST_KEYWORDS 一一对应。
+ */
+const PRIVATE_POST_KEYWORD_FIELDS: { key: PrivatePostKeywordGroup; label: string; placeholder: string }[] = [
+  { key: "start", label: "开始投稿", placeholder: "投稿，墙墙，表白" },
+  { key: "anonymous", label: "选择匿名", placeholder: "匿名，匿" },
+  { key: "realname", label: "选择实名", placeholder: "实名，不匿名" },
+  { key: "cancel", label: "取消投稿", placeholder: "取消，算了" },
+  { key: "finish", label: "结束并提交", placeholder: "结束，完成" },
+  { key: "undo", label: "撤回上一条", placeholder: "撤回" },
+  { key: "confirm", label: "确认发布", placeholder: "确认，发，发布" },
+];
 
 type LlmTestResult = {
   ok: boolean;
@@ -687,6 +702,9 @@ export function AdminPage({
       postTagMaintenanceEnabled: aiForm.postTagMaintenanceEnabled,
       privatePostAggregateDelaySeconds: aiForm.privatePostAggregateDelaySeconds,
       postTriggerKeywords: lines(aiForm.postTriggerKeywordsText),
+      privatePostKeywords: Object.fromEntries(
+        PRIVATE_POST_KEYWORD_FIELDS.map((field) => [field.key, privatePostKeywordLines(aiForm.privatePostKeywordsText[field.key])]),
+      ),
       privatePostPrompt: aiForm.privatePostPrompt.trim(),
     };
     return {
@@ -2557,7 +2575,7 @@ function AdminAiSettingsPanel({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-slate-900">AI 语义收稿</p>
-                  <p className="text-xs text-slate-500">开启后，私聊可由 AI 自动判断投稿内容、匿名意图、分段和是否提交；关闭时仅保留 #投稿 等显式命令。</p>
+                  <p className="text-xs text-slate-500">开启后，私聊可由 AI 自动判断投稿内容、匿名意图、分段和是否提交；关闭时只按下面的对话投稿关键词响应。</p>
                 </div>
                 <Switch checked={form.privatePostAiEnabled} disabled={busy || testing} onCheckedChange={(checked) => onFormChange({ ...form, privatePostAiEnabled: checked })} aria-label="启用 AI 语义收稿" />
               </div>
@@ -2587,7 +2605,7 @@ function AdminAiSettingsPanel({
               </label>
             </div>
             <label className="grid gap-1 text-sm font-medium">
-              投稿触发关键词
+              投稿触发关键词（AI 语义收稿）
               <Textarea
                 className="min-h-24"
                 value={form.postTriggerKeywordsText}
@@ -2595,8 +2613,32 @@ function AdminAiSettingsPanel({
                 onChange={(event) => onFormChange({ ...form, postTriggerKeywordsText: event.target.value })}
                 placeholder="每行一个关键词，如 发帖、吐槽、表白"
               />
-              <span className="text-xs text-muted-foreground">发送 #关键词 即可开始对话投稿。默认 #投稿 始终生效。</span>
+              <span className="text-xs text-muted-foreground">仅开启 AI 语义收稿时使用，作为额外线索交给模型；不开启时请看下面的对话投稿关键词。</span>
             </label>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">对话投稿关键词</p>
+                <p className="text-xs text-slate-500">墙友私聊发这些词就能完成对应操作，不需要带 #。一组里多个词用逗号分隔；某组留空表示关闭该操作。</p>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {PRIVATE_POST_KEYWORD_FIELDS.map((field) => (
+                  <label key={field.key} className="grid gap-1 text-sm font-medium">
+                    {field.label}
+                    <Input
+                      value={form.privatePostKeywordsText[field.key]}
+                      disabled={busy || testing}
+                      onChange={(event) => onFormChange({
+                        ...form,
+                        privatePostKeywordsText: { ...form.privatePostKeywordsText, [field.key]: event.target.value },
+                      })}
+                      placeholder={field.placeholder}
+                    />
+                  </label>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">「开始投稿」后面直接写正文即可，例如「表白 今天食堂的番茄炒蛋」；带 # 的旧写法仍然可用。</p>
+            </div>
           </div>
 
           {testResult ? (
@@ -4350,12 +4392,24 @@ function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
     postTagMaintenanceEnabled: settings.rules.postTagMaintenanceEnabled ?? true,
     privatePostAggregateDelaySeconds: settings.rules.privatePostAggregateDelaySeconds ?? 8,
     postTriggerKeywordsText: (settings.rules.postTriggerKeywords ?? []).join("\n"),
+    privatePostKeywordsText: Object.fromEntries(
+      PRIVATE_POST_KEYWORD_FIELDS.map((field) => [field.key, (settings.rules.privatePostKeywords?.[field.key] ?? []).join("，")]),
+    ) as Record<PrivatePostKeywordGroup, string>,
     privatePostPrompt: settings.rules.privatePostPrompt ?? "",
   };
 }
 
 function lines(value: string) {
   return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+}
+
+/** 一行里用逗号/顿号/空白分隔多个关键词，去掉 # 前缀与超长词。 */
+function privatePostKeywordLines(value: string): string[] {
+  return value
+    .split(/[,，、\s]+/)
+    .map((item) => item.replace(/^[#＃]+/, "").trim().slice(0, 12))
+    .filter(Boolean)
+    .slice(0, 20);
 }
 
 function defaultOAuthClientForm(): OAuthClientForm {

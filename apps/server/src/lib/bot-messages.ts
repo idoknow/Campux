@@ -229,7 +229,7 @@ const registerSuccessDefault = (password: string, loginUrl: string) => [
   `初始密码：\n${password}`,
   `登录链接：${loginUrl}`,
   "忘记密码时，请发送 #重置密码 获取新密码。",
-  "发 #投稿 开始投稿吧~",
+  "发「投稿」开始投稿吧~",
 ].join("\n\n");
 
 const registerSuccessStylish = [
@@ -239,7 +239,7 @@ const registerSuccessStylish = [
     `初始密码：\n${password}`,
     `登录链接：${loginUrl}`,
     "忘记密码时，请发送 #重置密码 获取新密码。",
-    "发 #投稿 开始投稿吧~",
+    "发「投稿」开始投稿吧~",
   ].join("\n\n"),
   (password: string, loginUrl: string) => [
     "✅ 注册完成！",
@@ -247,7 +247,7 @@ const registerSuccessStylish = [
     `初始密码：\n${password}`,
     `登录链接：${loginUrl}`,
     "忘记密码时，请发送 #重置密码 获取新密码。",
-    "发 #投稿 开始投稿吧~",
+    "发「投稿」开始投稿吧~",
   ].join("\n\n"),
   registerSuccessDefault,
 ];
@@ -261,12 +261,12 @@ const registerAlreadyDefault = (loginUrl: string) => [
   "这个 QQ 已经注册过啦。",
   `登录链接：${loginUrl}`,
   "忘记密码时，请发送 #重置密码 获取新密码。",
-  "发 #投稿 开始投稿吧~",
+  "发「投稿」开始投稿吧~",
 ].join("\n");
 
 const registerAlreadyStylish = [
-  (loginUrl: string) => `🤔 这个 QQ 早就注册过了呀~\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发 #投稿 开始投稿吧~`,
-  (loginUrl: string) => `📌 已经注册过啦。\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发 #投稿 开始投稿吧~`,
+  (loginUrl: string) => `🤔 这个 QQ 早就注册过了呀~\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发「投稿」开始投稿吧~`,
+  (loginUrl: string) => `📌 已经注册过啦。\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发「投稿」开始投稿吧~`,
   registerAlreadyDefault,
 ];
 
@@ -279,11 +279,11 @@ const registerExtendedDefault = (loginUrl: string) => [
   "已经帮你开通本校园墙的访问权限了，登录密码沿用原账号。",
   `登录链接：${loginUrl}`,
   "忘记密码时，请发送 #重置密码 获取新密码。",
-  "发 #投稿 开始投稿吧~",
+  "发「投稿」开始投稿吧~",
 ].join("\n");
 
 const registerExtendedStylish = [
-  (loginUrl: string) => `🔓 已开通本墙权限，登录密码沿用原账号。\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发 #投稿 开始投稿吧~`,
+  (loginUrl: string) => `🔓 已开通本墙权限，登录密码沿用原账号。\n登录链接：${loginUrl}\n忘记密码时，请发送 #重置密码 获取新密码。\n发「投稿」开始投稿吧~`,
   registerExtendedDefault,
 ];
 
@@ -306,14 +306,14 @@ export function formatFirstPrivateMessageRegistrationNotice(
 // ── 对话投稿正文编辑引导（选择模式后一次性提示） ──────
 
 const privatePostBodyStartDefault =
-  "直接发图文添加稿件内容：发 #撤回 删上一条内容，发 #结束 提交稿件，发 #取消 取消投稿。";
+  "直接发图文添加稿件内容：发「撤回」删上一条内容，发「结束」提交稿件，发「取消」取消投稿。";
 const privatePostBodyStartAiDefault =
   "内容都准备好了吗？接下来你可以继续发图文补充，如果确认没问题，直接告诉我发布即可，也可以随时撤回或取消！";
 
 const privatePostBodyStartStylish = [
-  "📝 直接发图文吧~ 发 #撤回 删上一条，发 #结束 提交！",
-  "✏️ 直接发正文和图片~ 发 #撤回 删上一条，发 #结束 完成投稿。",
-  "✨ 开始编辑~ 发 #撤回 删上一条，发 #结束 提交。",
+  "📝 直接发图文吧~ 发「撤回」删上一条，发「结束」提交！",
+  "✏️ 直接发正文和图片~ 发「撤回」删上一条，发「结束」完成投稿。",
+  "✨ 开始编辑~ 发「撤回」删上一条，发「结束」提交。",
   privatePostBodyStartDefault,
 ];
 const privatePostBodyStartAiStylish = [
@@ -639,13 +639,13 @@ export function formatQZoneAutoRefreshReason(reason: string): string {
 // ── 对话投稿提示 ──────────────────────────────────────
 
 const privatePostModeDefault =
-  "现在回复 #匿名 或 #实名 选择投稿方式。（取消本次投稿请发送 #取消）";
+  "现在回复「匿名」或「实名」选择投稿方式。（取消本次投稿请发「取消」）";
 const privatePostModeAiDefault =
   "请告诉我这次投稿是否匿名，可以直接回复“匿名/实名/是/否”等自然语言。也可以说“取消本次投稿”。";
 
 const privatePostModeStylish = [
-  "✨ 好嘞！回复 #匿名 悄悄说，或者 #实名 光明正大发~（发 #取消 就不投了）",
-  "📝 选择投稿方式吧~ #匿名 还是 #实名？（要取消就发 #取消）",
+  "✨ 好嘞！回复「匿名」悄悄说，或者「实名」光明正大发~（发「取消」就不投了）",
+  "📝 选择投稿方式吧~ 「匿名」还是「实名」？（要取消就发「取消」）",
   privatePostModeDefault,
 ];
 const privatePostModeAiStylish = [
@@ -666,13 +666,13 @@ export function formatPrivatePostModePrompt(stylishEnabled = false, aiIntakeEnab
 // ── 对话投稿草稿提示 ──────────────────────────────────
 
 const privatePostDraftDefault =
-  "继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）";
+  "继续发送添加稿件正文及图片，删除上一句话请发「撤回」，写完了发「结束」提交。（取消本次投稿请发「取消」）";
 const privatePostDraftAiDefault =
   "继续发送添加稿件正文及图片；完成后直接说清楚想继续补充、发布、撤回或取消，我会按语义理解你的意思。";
 
 const privatePostDraftStylish = [
-  "📎 继续发正文或图片吧~ 发 #撤回 删掉上一条，写完了发 #结束 提交！（发 #取消 就取消）",
-  "继续发送添加稿件正文及图片，发 #撤回 删除上一条，发 #结束 完成投稿。（取消请发 #取消）",
+  "📎 继续发正文或图片吧~ 发「撤回」删掉上一条，写完了发「结束」提交！（发「取消」就取消）",
+  "继续发送添加稿件正文及图片，发「撤回」删除上一条，发「结束」完成投稿。（取消请发「取消」）",
   privatePostDraftDefault,
 ];
 const privatePostDraftAiStylish = [
@@ -695,8 +695,8 @@ export function formatPrivatePostDraftPrompt(stylishEnabled = false, aiIntakeEna
 const privatePostContinueDefault = "继续发送添加稿件正文及图片";
 
 const privatePostContinueStylish = [
-  "📝 继续~ 可以再发正文或图片，发完记得 #结束 哦",
-  "继续发送添加稿件正文及图片，写好了发 #结束 提交~",
+  "📝 继续~ 可以再发正文或图片，发完记得发「结束」哦",
+  "继续发送添加稿件正文及图片，写好了发「结束」提交~",
   privatePostContinueDefault,
 ];
 
@@ -707,7 +707,7 @@ export function formatPrivatePostContinuePrompt(stylishEnabled = false): string 
 
 // ── 对话投稿最终确认 ──────────────────────────────────
 
-function formatPrivatePostPreview(text: string, attachmentCount: number) {
+function formatPrivatePostPreview(text: string, attachmentCount: number, anonymous?: boolean) {
   const trimmed = text.trim();
   const parts = ["请确认投稿内容："];
   if (trimmed) {
@@ -716,14 +716,38 @@ function formatPrivatePostPreview(text: string, attachmentCount: number) {
   if (attachmentCount > 0) {
     parts.push("", `图片：${attachmentCount} 张`);
   }
+  if (anonymous !== undefined) {
+    parts.push("", `投稿方式：${anonymous ? "匿名" : "实名"}`);
+  }
   return parts.join("\n");
 }
 
-export function formatPrivatePostConfirmPrompt(text: string, attachmentCount: number, aiIntakeEnabled = false): string {
+/** 二次确认提示：显示当前是匿名还是实名，避免用户到最后一步才发现投错身份。 */
+export function formatPrivatePostConfirmPrompt(
+  text: string,
+  attachmentCount: number,
+  aiIntakeEnabled = false,
+  anonymous?: boolean,
+): string {
   const actionHint = aiIntakeEnabled
     ? "检查一下没问题的话，直接跟我说发布就行；要是想取消，也请随时告诉我。"
-    : "确认无误请发送 #确认，取消提交请发送 #取消。";
-  return [formatPrivatePostPreview(text, attachmentCount), "", actionHint].join("\n");
+    : "确认无误请发「确认」提交，取消提交请发「取消」。";
+  return [formatPrivatePostPreview(text, attachmentCount, anonymous), "", actionHint].join("\n");
+}
+
+// ── 对话投稿模式切换回执（关键词切换匿名/实名）──────────
+
+const privatePostModeSelectedPlain = (anonymous: boolean) =>
+  `已切换为${anonymous ? "匿名" : "实名"}投稿，继续发送正文或图片即可。`;
+
+const privatePostModeSelectedStylish = [
+  (anonymous: boolean) => `✨ 收到，已经切成${anonymous ? "匿名" : "实名"}投稿啦~ 继续发正文或图片就行`,
+  (anonymous: boolean) => `✅ 已改为${anonymous ? "匿名" : "实名"}投稿，接着发内容吧`,
+];
+
+export function formatPrivatePostModeSelected(anonymous: boolean, stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostModeSelectedPlain(anonymous);
+  return pick(privatePostModeSelectedStylish)(anonymous);
 }
 
 /** 二次确认阶段补充正文/图片后的回执：既确认「真的收到了」，也给下一步。 */
@@ -735,7 +759,7 @@ export function formatPrivatePostConfirmAppendAck(text: string, attachmentCount:
   ].filter(Boolean).join(" · ");
   const actionHint = aiIntakeEnabled
     ? "确认无误直接跟我说发布就行；还要改就继续发。"
-    : "确认发布请发送 #确认；还要改就继续发。";
+    : "确认发布请发「确认」；还要改就继续发。";
   if (!trimmed) {
     return [`已补充：${summary || "内容已更新"}`, "", "还需要一段正文，直接发文字就行（图片已经留着，不用重发）。"].join("\n");
   }
@@ -762,9 +786,10 @@ export function formatPrivatePostCancelled(stylishEnabled = false): string {
 const privateHelpDefault = [
   "首次给墙号发送私聊消息时，系统会自动注册本校园墙的 Campux 账号。",
   "忘记密码时，请发送 #重置密码 获取新密码。",
-  "想投稿时先发 #投稿，然后回复 #匿名 或 #实名 选择投稿方式。",
-  "选择后继续发送添加稿件正文及图片，删除上一句话请发送 #撤回，结束投稿并发布请发送 #结束。",
-  "取消本次投稿请发送 #取消。",
+  "想投稿时直接发「投稿」「墙墙」「表白」等关键词即可（带 # 也行），然后回复「匿名」或「实名」选择投稿方式。",
+  "选择后继续发送添加稿件正文及图片，删除上一句话请发「撤回」，写完了发「结束」提交。",
+  "取消本次投稿请发「取消」。",
+  "上面这些关键词可以在管理端的对话投稿设置里改成你们墙习惯的说法。",
 ].join("\n");
 
 const privateHelpStylish = [
@@ -773,16 +798,18 @@ const privateHelpStylish = [
     "",
     "首次私聊 — 自动注册本墙 Campux 账号",
     "忘记密码时发送 #重置密码 — 获取新密码",
-    "#投稿 正文 — 开始对话投稿",
-    "#取消 — 取消本次投稿",
+    "投稿 / 墙墙 / 表白 — 开始对话投稿（不带 # 也行）",
+    "匿名 / 实名 — 选投稿方式",
+    "撤回 / 结束 / 取消 — 改稿、提交、放弃",
   ].join("\n"),
   [
     "✨ 试试这些功能吧：",
     "",
     "• 首次私聊会自动注册本墙 Campux 账号",
     "• 忘记密码时发送 #重置密码 获取新密码",
-    "• #投稿 正文/图片 — 开始投稿",
-    "• #取消 — 取消投稿",
+    "• 直接发「投稿」或「表白」+ 正文/图片 — 开始投稿",
+    "• 说「匿名」/「实名」— 切换投稿方式",
+    "• 说「撤回」/「结束」/「取消」— 改稿、提交、放弃",
   ].join("\n"),
   privateHelpDefault,
 ];

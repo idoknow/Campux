@@ -178,6 +178,152 @@ export function parsePrivatePostModeText(input: string) {
   };
 }
 
+// ── 可配置的对话投稿关键词 ──────────────────────────────
+//
+// 关键词模式（未开启 AI 语义收稿，或 AI 判断不出意图时）靠这些词触发操作，
+// 默认值允许用户不带 `#` 直接发「投稿 / 匿名 / 结束 / 确认」等。管理员可以在
+// 设置里改每一组关键词；某组设为空数组即关闭该组（`#` 前缀命令仍然生效）。
+
+export type PrivatePostKeywordName = "start" | "anonymous" | "realname" | "cancel" | "finish" | "undo" | "confirm";
+
+export type PrivatePostKeywordMatch =
+  | { name: "start"; body: string }
+  | { name: Exclude<PrivatePostKeywordName, "start"> };
+
+export type PrivatePostKeywords = {
+  /** 开始投稿：允许关键词语后直接跟正文，如「投稿 今天下雨了」。 */
+  start: string[];
+  /** 选择匿名投稿。 */
+  anonymous: string[];
+  /** 选择实名投稿。 */
+  realname: string[];
+  /** 取消本次投稿。 */
+  cancel: string[];
+  /** 结束编辑、进入二次确认。 */
+  finish: string[];
+  /** 撤回上一条正文/图片。 */
+  undo: string[];
+  /** 在二次确认阶段提交。 */
+  confirm: string[];
+};
+
+export const DEFAULT_PRIVATE_POST_KEYWORDS: PrivatePostKeywords = {
+  start: ["墙墙投稿", "投稿", "墙墙", "墙", "吐槽", "表白"],
+  anonymous: ["匿名", "匿", "腻"],
+  realname: ["不匿名", "不匿", "不腻", "实名", "实"],
+  cancel: ["取消", "算了"],
+  finish: ["结束", "完成"],
+  undo: ["撤回"],
+  confirm: ["确认", "可以", "发", "发布", "没问题", "发吧"],
+};
+
+const PRIVATE_POST_KEYWORD_MAX_LENGTH = 12;
+const PRIVATE_POST_KEYWORDS_MAX_COUNT = 20;
+
+/** 关键词统一成「不带 # 前缀、无零宽字符、已 trim」的形态，便于逐字比对。 */
+function canonicalizeKeyword(input: string) {
+  return stripZeroWidthChars(input).replace(/^[#＃\s]+/, "").trim().slice(0, PRIVATE_POST_KEYWORD_MAX_LENGTH);
+}
+
+function normalizeKeywordList(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const keyword = canonicalizeKeyword(item);
+    if (!keyword || seen.has(keyword)) continue;
+    seen.add(keyword);
+    out.push(keyword);
+    if (out.length >= PRIVATE_POST_KEYWORDS_MAX_COUNT) break;
+  }
+  return out;
+}
+
+/** 未配置时回落默认值；显式给空数组表示关闭该组关键词（不是回落默认）。 */
+export function normalizePrivatePostKeywords(value: unknown): PrivatePostKeywords {
+  const candidate = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return {
+    start: normalizeKeywordList(candidate.start, DEFAULT_PRIVATE_POST_KEYWORDS.start),
+    anonymous: normalizeKeywordList(candidate.anonymous, DEFAULT_PRIVATE_POST_KEYWORDS.anonymous),
+    realname: normalizeKeywordList(candidate.realname, DEFAULT_PRIVATE_POST_KEYWORDS.realname),
+    cancel: normalizeKeywordList(candidate.cancel, DEFAULT_PRIVATE_POST_KEYWORDS.cancel),
+    finish: normalizeKeywordList(candidate.finish, DEFAULT_PRIVATE_POST_KEYWORDS.finish),
+    undo: normalizeKeywordList(candidate.undo, DEFAULT_PRIVATE_POST_KEYWORDS.undo),
+    confirm: normalizeKeywordList(candidate.confirm, DEFAULT_PRIVATE_POST_KEYWORDS.confirm),
+  };
+}
+
+// 整句比对时忽略首尾/句中的标点与空白：「算了。」等同于「算了」。
+const MESSAGE_NOISE_RE = /[\s。．.!！?？~～、,，;；:：…—\-·"'“”‘’（）()【】\[\]]/g;
+
+function canonicalizeMessage(input: string) {
+  return stripZeroWidthChars(input).replace(/^[#＃／/]+/, "").replace(MESSAGE_NOISE_RE, "").toLowerCase();
+}
+
+/** 关键词后面必须紧跟空白或标点，避免「投稿箱在哪」被当成「投稿 + 正文」。 */
+const START_KEYWORD_BOUNDARY_RE = /^[\s。．.!！?？~～、,，;；:：…—\-·]/;
+
+function matchStartKeyword(text: string, keywords: string[]): { body: string } | null {
+  const stripped = stripZeroWidthChars(text).replace(/^[#＃\s]+/, "").trim();
+  if (!stripped) return null;
+  // 长关键词优先：「墙墙投稿」不能被「墙」抢走
+  const sorted = [...keywords].sort((a, b) => b.length - a.length);
+  for (const keyword of sorted) {
+    if (!keyword) continue;
+    if (stripped === keyword) return { body: "" };
+    if (!stripped.startsWith(keyword)) continue;
+    const rest = stripped.slice(keyword.length);
+    if (!START_KEYWORD_BOUNDARY_RE.test(rest)) continue;
+    return { body: rest.trim() };
+  }
+  return null;
+}
+
+function matchesAnyKeyword(canonicalMessage: string, keywords: string[]) {
+  return keywords.some((keyword) => {
+    const canonical = canonicalizeMessage(keyword);
+    return canonical.length > 0 && canonical === canonicalMessage;
+  });
+}
+
+/**
+ * 解析一条私聊消息命中了哪些关键词操作。
+ * 返回全部命中项（而不是单个），由调用方按当前投稿状态决定优先级：
+ * 同一句话可能既是「结束」又是「确认」——只有处于二次确认时才该按确认处理。
+ */
+export function matchPrivatePostKeywords(
+  input: string,
+  keywords: PrivatePostKeywords = DEFAULT_PRIVATE_POST_KEYWORDS,
+): PrivatePostKeywordMatch[] {
+  const matches: PrivatePostKeywordMatch[] = [];
+  const trimmed = stripZeroWidthChars(input).trim();
+  if (!trimmed) return matches;
+
+  const start = matchStartKeyword(trimmed, keywords.start);
+  if (start) matches.push({ name: "start", body: start.body });
+
+  const canonical = canonicalizeMessage(trimmed);
+  if (!canonical) return matches;
+
+  if (matchesAnyKeyword(canonical, keywords.finish)) matches.push({ name: "finish" });
+  if (matchesAnyKeyword(canonical, keywords.cancel)) matches.push({ name: "cancel" });
+  if (matchesAnyKeyword(canonical, keywords.undo)) matches.push({ name: "undo" });
+  if (matchesAnyKeyword(canonical, keywords.confirm)) matches.push({ name: "confirm" });
+  if (matchesAnyKeyword(canonical, keywords.anonymous)) matches.push({ name: "anonymous" });
+  if (matchesAnyKeyword(canonical, keywords.realname)) matches.push({ name: "realname" });
+  return matches;
+}
+
+export function findPrivatePostKeywordMatch(
+  matches: PrivatePostKeywordMatch[],
+  ...names: PrivatePostKeywordName[]
+): PrivatePostKeywordMatch | undefined {
+  return matches.find((match) => names.includes(match.name));
+}
+
 export function parsePrivatePostConfirmText(input: string) {
   const trimmed = input.trim();
   if (/^(?:#|＃)确认\s*$/.test(trimmed)) {

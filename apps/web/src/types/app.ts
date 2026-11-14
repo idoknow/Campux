@@ -690,9 +690,14 @@ export type AiRules = {
   privatePostAggregateDelaySeconds?: number;
   /** 对话投稿额外触发关键词，如 ["发帖", "吐槽", "表白"] */
   postTriggerKeywords?: string[];
+  /** 私聊投稿的关键词（可不带 #），按操作分组；空数组表示关闭该组 */
+  privatePostKeywords?: Partial<Record<PrivatePostKeywordGroup, string[]>>;
   /** 私聊投稿 AI 语义收稿的完整系统提示词，留空使用内置默认提示词 */
   privatePostPrompt?: string;
 };
+
+/** 私聊投稿关键词分组：开始、选匿名/实名、取消、结束、撤回、确认。 */
+export type PrivatePostKeywordGroup = "start" | "anonymous" | "realname" | "cancel" | "finish" | "undo" | "confirm";
 
 export type PostTag = {
   id: string;

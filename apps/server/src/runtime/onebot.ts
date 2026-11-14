@@ -29,7 +29,7 @@ import { compressImageBuffer, deleteAttachmentObjects, uploadAttachmentBytes, ty
 import { findActiveBan, hasTenantRole } from "../lib/auth";
 import { buildCampuxLoginUrl } from "../lib/campux-login-url";
 import { prisma } from "../lib/prisma";
-import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, parsePostRecallOrCancelCommand, type OneBotMessageSegment } from "../lib/private-posting";
+import { extractOneBotImageSegments, extractOneBotMessageSegments, extractOneBotPlainText, findPrivatePostKeywordMatch, isPrivatePostCancelText, isPrivatePostFinishText, isPrivatePostUndoText, matchPrivatePostKeywords, normalizePrivatePostKeywords, parsePrivatePostConfirmText, parsePrivatePostModeText, parsePrivatePostStartText, parsePostRecallOrCancelCommand, type OneBotMessageSegment, type PrivatePostKeywordName } from "../lib/private-posting";
 import { analyzePrivatePostSemantics, type PrivatePostSemanticResult } from "../lib/private-posting-ai";
 import { assessPostForReview, parsePostReviewAnalysisRecord, type PostReviewAssessment } from "./post-review";
 import { readTenantImageCompression, readTenantPendingPostLimit } from "../lib/tenant-metadata";
@@ -110,6 +110,7 @@ import {
   formatPrivatePostBodyStart,
   formatPrivatePostAppendAck,
   formatPrivatePostConfirmAppendAck,
+  formatPrivatePostModeSelected,
   formatPrivatePostConfirmPrompt,
   formatPrivatePostCancelled,
   formatPrivateHelp,
@@ -1949,13 +1950,28 @@ export class OneBotRuntime {
       const privatePostAiEnabled = isPrivatePostAiIntakeActive(privatePostAiConfigured, aiSettings.mode === "llm" && aiSettings.apiKeyConfigured);
       const privatePostAggregateDelaySeconds = Math.max(0, Math.min(120, Math.trunc(aiSettings.rules.privatePostAggregateDelaySeconds ?? 8)));
       const extraKeywords = aiSettings.rules.postTriggerKeywords;
+      const privatePostKeywords = normalizePrivatePostKeywords(aiSettings.rules.privatePostKeywords);
+      const keywordMatches = matchPrivatePostKeywords(plainText, privatePostKeywords);
+      const findKeyword = (...names: PrivatePostKeywordName[]) => findPrivatePostKeywordMatch(keywordMatches, ...names);
 
-      const startBody = parsePrivatePostStartText(plainText, {
+      // 进行中的投稿状态：取消/撤回/结束/匿名等关键词只有在这个上下文里才有意义，
+      // 否则普通闲聊里的「算了」「可以」会被当成投稿指令。
+      const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
+      const activeDraftState = this.privatePostPendingModes.get(draftKey)
+        ?? this.privatePostPendingConfirms.get(draftKey)
+        ?? this.privatePostDrafts.get(draftKey);
+
+      const keywordStart = findKeyword("start");
+      const explicitStartBody = parsePrivatePostStartText(plainText, {
         extraKeywords,
         aiIntakeEnabled: privatePostAiEnabled,
       });
+      // 已有进行中的投稿时，裸关键词不再重开草稿（否则正文里一句「表白」就把稿子清了），
+      // 只有显式带 # 前缀的命令才允许重开。
+      const keywordMayRestart = !activeDraftState || /^[#＃]/.test(plainText.trim());
+      const startBody = keywordStart?.name === "start" && keywordMayRestart ? keywordStart.body : explicitStartBody;
       if (startBody !== null) {
-        this.clearPrivatePostAggregateBuffer(this.getPrivatePostDraftKey(botQqUin, userQqUin));
+        this.clearPrivatePostAggregateBuffer(draftKey);
         await this.startPrivatePostDraft({
           bot,
           botQqUin,
@@ -1982,7 +1998,6 @@ export class OneBotRuntime {
         return;
       }
 
-      const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
       const existingPendingMode = this.privatePostPendingModes.get(draftKey);
       const existingPendingConfirm = this.privatePostPendingConfirms.get(draftKey);
       const existingDraft = this.privatePostDrafts.get(draftKey);
@@ -2007,7 +2022,7 @@ export class OneBotRuntime {
         return;
       }
 
-      if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostCancelText(plainText)) {
+      if ((activeDraftState && findKeyword("cancel")) || (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostCancelText(plainText))) {
         await this.withPrivatePostLock(draftKey, () => this.cancelPrivatePostDraft({
           bot,
           botQqUin,
@@ -2026,7 +2041,7 @@ export class OneBotRuntime {
           }));
           return;
         }
-        if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText)) {
+        if (findKeyword("undo") || (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText))) {
           await this.withPrivatePostLock(draftKey, () => this.undoPrivatePostDraftEntry({
             bot,
             botQqUin,
@@ -2035,8 +2050,24 @@ export class OneBotRuntime {
           return;
         }
 
+        // 确认阶段改匿名/实名：直接改待确认稿件并重发确认提示，避免用户为了换模式而从头重投。
+        const confirmModeKeyword = findKeyword("anonymous", "realname");
+        if (confirmModeKeyword) {
+          const anonymous = confirmModeKeyword.name === "anonymous";
+          pendingConfirm.anonymous = anonymous;
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(
+            pendingConfirm.text,
+            pendingConfirm.attachments.length,
+            privatePostAiEnabled,
+            anonymous,
+          ));
+          return;
+        }
+
         const semanticConfirm = privatePostAiEnabled ? shouldConfirmPrivatePostSubmissionFromSemantic(semanticForExistingFlow) : null;
-        const keywordConfirm = shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
+        const keywordConfirm = findKeyword("confirm")
+          ? { confirmed: true as const }
+          : shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) ? parsePrivatePostConfirmText(plainText) : null;
         const confirmation = semanticConfirm ?? keywordConfirm;
         // 「确认 / 好的 / 发布」这类裸确认短语，在 AI 模式语义没识别出来时也要按确认处理，
         // 不能写进正文（那会让用户看到自己的「确认」变成稿件内容）。
@@ -2136,7 +2167,7 @@ export class OneBotRuntime {
           }
           return;
         }
-        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, privatePostAiEnabled));
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, privatePostAiEnabled, pendingConfirm.anonymous));
         return;
       }
 
@@ -2149,7 +2180,7 @@ export class OneBotRuntime {
         return;
       }
 
-      if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText)) {
+      if (findKeyword("undo") || (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostUndoText(plainText))) {
         await this.withPrivatePostLock(draftKey, () => this.undoPrivatePostDraftEntry({
           bot,
           botQqUin,
@@ -2177,7 +2208,19 @@ export class OneBotRuntime {
           await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pendingMode.aiIntakeEnabled === true));
           return;
         }
-        if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostFinishText(plainText)) {
+        // 关键词版匿名/实名：不带 # 也能选模式（设置里可改词）。
+        const modeKeyword = findKeyword("anonymous", "realname");
+        if (modeKeyword) {
+          await this.selectPrivatePostMode({
+            bot,
+            botQqUin,
+            userQqUin,
+            anonymous: modeKeyword.name === "anonymous",
+          });
+          return;
+        }
+
+        if (findKeyword("finish") || (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostFinishText(plainText))) {
           await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModePrompt(privateStylishEnabled, pendingMode.aiIntakeEnabled === true));
           return;
         }
@@ -2213,7 +2256,7 @@ export class OneBotRuntime {
         return;
       }
 
-      if (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostFinishText(plainText)) {
+      if (findKeyword("finish", "confirm") || (shouldRunPrivatePostKeywordCommand(privatePostAiEnabled) && isPrivatePostFinishText(plainText))) {
         await this.requestPrivatePostSubmitConfirmation({
           bot,
           botQqUin,
@@ -2225,6 +2268,17 @@ export class OneBotRuntime {
       const draft = existingDraft;
       if (draft) {
         const semantic = semanticForExistingFlow;
+
+        // 关键词版匿名/实名：写入草稿并回执，不打断正在编辑的正文。
+        const draftModeKeyword = findKeyword("anonymous", "realname");
+        if (draftModeKeyword) {
+          const anonymous = draftModeKeyword.name === "anonymous";
+          draft.anonymous = anonymous;
+          draft.updatedAt = Date.now();
+          const modeStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
+          await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostModeSelected(anonymous, modeStylishEnabled));
+          return;
+        }
 
         if (semantic?.intent === "post" && semantic.anonymous !== null) {
           draft.anonymous = semantic.anonymous;
@@ -2688,7 +2742,7 @@ export class OneBotRuntime {
 
     if (!this.isPrivatePostContentTargetCurrent(draftKey, target)) {
       if (stage.staged) await this.clearStagedPrivatePostAttachments(stage.staged.uploadedKeys);
-      await this.sendPrivateMessage(botQqUin, userQqUin, "这条补充没有生效：稿件已经提交或取消，请重新发送，或重新 #投稿。").catch(() => undefined);
+      await this.sendPrivateMessage(botQqUin, userQqUin, "这条补充没有生效：稿件已经提交或取消，请重新发送，或重新发「投稿」。").catch(() => undefined);
       return false;
     }
 
@@ -2797,7 +2851,7 @@ export class OneBotRuntime {
     const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     const draft = this.privatePostDrafts.get(draftKey);
     if (!draft) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发 #投稿 正文 吧。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "还没有进行中的投稿，先发「投稿」再写正文吧。");
       return;
     }
 
@@ -2823,7 +2877,7 @@ export class OneBotRuntime {
       aiIntakeEnabled,
       updatedAt: Date.now(),
     });
-    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(text, currentDraft.attachments.length, aiIntakeEnabled));
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(text, currentDraft.attachments.length, aiIntakeEnabled, currentDraft.anonymous));
   }
 
   private async submitPrivatePostPendingConfirm({
@@ -3487,7 +3541,7 @@ export class OneBotRuntime {
     const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
     const pending = this.privatePostPendingModes.get(draftKey);
     if (!pending) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "请先发送 #投稿 开始对话框投稿。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "请先发「投稿」开始对话框投稿。");
       return;
     }
 
@@ -3540,13 +3594,13 @@ export class OneBotRuntime {
     if (pendingConfirm) {
       const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
       await this.popPrivatePostHistoryEntry(draftKey, pendingConfirm, stylishEnabled);
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, pendingConfirm.aiIntakeEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostConfirmPrompt(pendingConfirm.text, pendingConfirm.attachments.length, pendingConfirm.aiIntakeEnabled, pendingConfirm.anonymous));
       return;
     }
 
     const draft = this.privatePostDrafts.get(draftKey);
     if (!draft) {
-      await this.sendPrivateMessage(botQqUin, userQqUin, "请先发送 #投稿 开始对话框投稿。");
+      await this.sendPrivateMessage(botQqUin, userQqUin, "请先发「投稿」开始对话框投稿。");
       return;
     }
 
@@ -5742,14 +5796,14 @@ export function privatePostSubmitBlockReason(text: string, attachmentCount: numb
   if (trimmed.length > 1_000) {
     return aiIntakeEnabled
       ? "正文太长了，请控制在 1000 字以内，再确认提交。"
-      : "正文太长了，请控制在 1000 字以内，再发送 #结束。";
+      : "正文太长了，请控制在 1000 字以内，再发「结束」。";
   }
   // 私聊投稿必须带正文（图片可选）：没有文字就在进确认前直接拦下，
   // 不要等用户点了确认才报错（那会把人卡在确认态、又没法补正文）。
   if (!trimmed) {
     return aiIntakeEnabled
       ? "私聊投稿必须带正文：先发一段文字，再确认提交。"
-      : "私聊投稿必须带正文：先发一段文字，再发送 #结束。";
+      : "私聊投稿必须带正文：先发一段文字，再发「结束」。";
   }
   return null;
 }

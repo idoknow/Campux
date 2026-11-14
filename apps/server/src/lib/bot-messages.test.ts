@@ -11,6 +11,7 @@ import {
   formatPrivatePostContinuePrompt,
   formatPrivatePostDraftPrompt,
   formatPrivatePostModePrompt,
+  formatPrivatePostModeSelected,
   formatPublishSuccess,
   formatRecallSuccess,
   formatRegisterAlready,
@@ -93,11 +94,12 @@ describe("bot registration messages", () => {
 });
 
 describe("bot private post messages", () => {
-  test("keeps legacy command copy for non-AI intake", () => {
+  test("uses the configurable keyword copy for non-AI intake", () => {
     const message = formatPrivatePostBodyStart(false, false);
 
-    expect(message).toContain("#结束");
-    expect(message).toContain("#撤回");
+    expect(message).toContain("「结束」");
+    expect(message).toContain("「撤回」");
+    expect(message).not.toContain("#");
   });
 
   test("uses semantic edit-state copy for AI intake", () => {
@@ -162,19 +164,19 @@ describe("bot private post messages", () => {
 describe("私聊投稿的 #撤回 提示", () => {
   const originalRandom = Math.random;
 
-  test("选完匿名/实名后的第一句要讲清 #撤回，并保持简短", () => {
+  test("选完匿名/实名后的第一句要讲清怎么撤回，并保持简短", () => {
     try {
       for (const value of [0, 0.2, 0.45, 0.7, 0.95]) {
         Math.random = () => value;
         const message = formatPrivatePostBodyStart(true, false);
-        expect(message).toContain("#撤回");
+        expect(message).toContain("撤回");
         expect(message.length).toBeLessThanOrEqual(50);
       }
     } finally {
       Math.random = originalRandom;
     }
     const plain = formatPrivatePostBodyStart(false, false);
-    expect(plain).toBe("直接发图文添加稿件内容：发 #撤回 删上一条内容，发 #结束 提交稿件，发 #取消 取消投稿。");
+    expect(plain).toBe("直接发图文添加稿件内容：发「撤回」删上一条内容，发「结束」提交稿件，发「取消」取消投稿。");
   });
 });
 
@@ -290,14 +292,44 @@ describe("bot stylish message switch", () => {
 
   test("private post copy follows the same switch as the rest of the bot messages", () => {
     expect(formatPrivatePostModePrompt(false, false))
-      .toBe("现在回复 #匿名 或 #实名 选择投稿方式。（取消本次投稿请发送 #取消）");
+      .toBe("现在回复「匿名」或「实名」选择投稿方式。（取消本次投稿请发「取消」）");
     expect(formatPrivatePostModePrompt(false, true))
       .toBe("请告诉我这次投稿是否匿名，可以直接回复“匿名/实名/是/否”等自然语言。也可以说“取消本次投稿”。");
     expect(formatPrivatePostDraftPrompt(false, false))
-      .toBe("继续发送添加稿件正文及图片，删除上一句话请发送 #撤回 ，结束投稿并发布请发送 #结束 。（取消本次投稿请发送 #取消）");
+      .toBe("继续发送添加稿件正文及图片，删除上一句话请发「撤回」，写完了发「结束」提交。（取消本次投稿请发「取消」）");
     expect(formatPrivatePostDraftPrompt(false, true))
       .toBe("继续发送添加稿件正文及图片；完成后直接说清楚想继续补充、发布、撤回或取消，我会按语义理解你的意思。");
     expect(formatPrivatePostAppendAck(false)).toBe("已添加 ✓");
     expect(formatPrivatePostCancelled(false)).toBe("已取消发布");
+  });
+});
+
+describe("私聊投稿确认提示", () => {
+  test("shows the current anonymity choice so users notice it before submitting", () => {
+    const anonymous = formatPrivatePostConfirmPrompt("今天食堂的番茄炒蛋", 2, false, true);
+    expect(anonymous).toContain("投稿方式：匿名");
+    expect(anonymous).toContain("图片：2 张");
+
+    const realname = formatPrivatePostConfirmPrompt("今天食堂的番茄炒蛋", 0, false, false);
+    expect(realname).toContain("投稿方式：实名");
+    expect(realname).not.toContain("图片：");
+  });
+
+  test("keeps the old shape when the caller does not pass the anonymity flag", () => {
+    expect(formatPrivatePostConfirmPrompt("你好", 0, false)).not.toContain("投稿方式");
+  });
+
+  test("mode switch receipt states the new choice", () => {
+    expect(formatPrivatePostModeSelected(true)).toBe("已切换为匿名投稿，继续发送正文或图片即可。");
+    expect(formatPrivatePostModeSelected(false)).toBe("已切换为实名投稿，继续发送正文或图片即可。");
+    const originalRandom = Math.random;
+    try {
+      for (const value of [0, 0.5, 0.95]) {
+        Math.random = () => value;
+        expect(formatPrivatePostModeSelected(true, true)).toContain("匿名");
+      }
+    } finally {
+      Math.random = originalRandom;
+    }
   });
 });

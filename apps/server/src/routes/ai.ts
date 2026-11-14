@@ -3,7 +3,10 @@ import { PRIVATE_POST_PROMPT_MAX_LENGTH } from "@campux/domain";
 import { z } from "zod";
 import { requireTenantRole } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
-import { readTenantAiSettings, testTenantAiSettings, updateTenantAiSettings } from "../runtime/ai-settings";
+import { readTenantAiSettings, testTenantAiSettings, updateTenantAiSettings, type AiRules } from "../runtime/ai-settings";
+import { normalizePrivatePostKeywords } from "../lib/private-posting";
+
+const privatePostKeywordList = z.array(z.string().trim().min(1).max(12)).max(20);
 
 export const aiSettingsSchema = z.object({
   enabled: z.boolean().optional(),
@@ -25,11 +28,33 @@ export const aiSettingsSchema = z.object({
     postTagMaintenanceEnabled: z.boolean().optional(),
     privatePostAggregateDelaySeconds: z.number().int().min(0).max(120).optional(),
     postTriggerKeywords: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
+    privatePostKeywords: z.object({
+      start: privatePostKeywordList.optional(),
+      anonymous: privatePostKeywordList.optional(),
+      realname: privatePostKeywordList.optional(),
+      cancel: privatePostKeywordList.optional(),
+      finish: privatePostKeywordList.optional(),
+      undo: privatePostKeywordList.optional(),
+      confirm: privatePostKeywordList.optional(),
+    }).optional(),
     privatePostPrompt: z.string().trim().max(PRIVATE_POST_PROMPT_MAX_LENGTH).optional(),
   }).optional(),
 });
 
 export function registerAiRoutes(app: FastifyInstance) {
+  /** 鎶?schema 閲屽彲閫夌殑 7 缁勫叧閿瘝琛ユ垚瀹屾暣缁撴瀯锛氳皟鐢ㄦ柟鍙渶瑕佺粰鎯虫敼鐨勭粍銆?*/
+  function normalizeRules(body: z.infer<typeof aiSettingsSchema>) {
+    const rules: AiRules | undefined = body.rules
+      ? {
+        ...body.rules,
+        privatePostKeywords: body.rules.privatePostKeywords
+          ? normalizePrivatePostKeywords(body.rules.privatePostKeywords)
+          : undefined,
+      }
+      : undefined;
+    return { ...body, rules };
+  }
+
   app.get("/api/admin/ai/settings", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     return {
@@ -39,7 +64,7 @@ export function registerAiRoutes(app: FastifyInstance) {
 
   app.patch("/api/admin/ai/settings", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
-    const body = aiSettingsSchema.parse(request.body ?? {});
+    const body = normalizeRules(aiSettingsSchema.parse(request.body ?? {}));
     const settings = await updateTenantAiSettings(context.selectedTenant.id, body);
 
     await writeAuditLog({
@@ -59,7 +84,7 @@ export function registerAiRoutes(app: FastifyInstance) {
 
   app.post("/api/admin/ai/settings/test", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
-    const body = aiSettingsSchema.parse(request.body ?? {});
+    const body = normalizeRules(aiSettingsSchema.parse(request.body ?? {}));
     const result = await testTenantAiSettings(context.selectedTenant.id, body);
 
     await writeAuditLog({

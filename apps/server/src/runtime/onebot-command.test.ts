@@ -1003,9 +1003,9 @@ describe("等待确认时的裸确认短语", () => {
 
 describe("私聊投稿提交闸门", () => {
   test("只有图片、没有正文：拦下并提示必须带正文", () => {
-    expect(privatePostSubmitBlockReason("", 3)).toBe("私聊投稿必须带正文：先发一段文字，再发送 #结束。");
+    expect(privatePostSubmitBlockReason("", 3)).toBe("私聊投稿必须带正文：先发一段文字，再发「结束」。");
     expect(privatePostSubmitBlockReason("   ", 1, true)).toBe("私聊投稿必须带正文：先发一段文字，再确认提交。");
-    expect(privatePostSubmitBlockReason("", 0)).toBe("私聊投稿必须带正文：先发一段文字，再发送 #结束。");
+    expect(privatePostSubmitBlockReason("", 0)).toBe("私聊投稿必须带正文：先发一段文字，再发「结束」。");
   });
 
   test("只有文字、没有图片：允许提交", () => {
@@ -1015,7 +1015,7 @@ describe("私聊投稿提交闸门", () => {
   });
 
   test("正文超长按模式给不同结尾", () => {
-    expect(privatePostSubmitBlockReason("字".repeat(1001), 0)).toBe("正文太长了，请控制在 1000 字以内，再发送 #结束。");
+    expect(privatePostSubmitBlockReason("字".repeat(1001), 0)).toBe("正文太长了，请控制在 1000 字以内，再发「结束」。");
     expect(privatePostSubmitBlockReason("字".repeat(1001), 2, true)).toBe("正文太长了，请控制在 1000 字以内，再确认提交。");
   });
 });
