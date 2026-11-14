@@ -5,6 +5,7 @@ import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import { buildQZoneVisitorDailySeries, buildQZoneVisitorTargetSeries } from "../lib/qzone-visitor-stats";
 import { buildBotFriendDailySeries, buildBotFriendTargetSeries } from "../lib/bot-friend-stats";
 import { buildCreatedAtRange, buildPostRangeOverview } from "../lib/stats-post-overview";
+import { formatChinaDate } from "../lib/china-date";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const chinaTimezoneOffsetHours = 8;
@@ -50,7 +51,9 @@ export function registerStatsRoutes(app: FastifyInstance) {
       Math.max(1, Math.ceil((now.getTime() - startedAt.getTime()) / dayMs)) * 0.2;
     return {
       name: "下午茶",
-      birthday: now.toISOString().slice(0, 10),
+      // 小狗在墙面开通那天来到，生日固定为建站日；原来是 now 的日期，
+      // 每次请求都显示"今天"，看起来像没保存。
+      birthday: formatChinaDate(startedAt),
       species: "萨摩耶",
       gender: "♀",
       intro: "这只萨摩耶小狗负责陪伴墙面成长，看到你的稿件也会偷偷开心。",
