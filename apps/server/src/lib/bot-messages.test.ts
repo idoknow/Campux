@@ -12,6 +12,7 @@ import {
   formatPrivatePostDraftPrompt,
   formatPrivatePostModePrompt,
   formatPrivatePostModeSelected,
+  formatPrivatePostDraftStarted,
   formatPublishSuccess,
   formatRecallSuccess,
   formatRegisterAlready,
@@ -177,6 +178,42 @@ describe("私聊投稿的 #撤回 提示", () => {
     }
     const plain = formatPrivatePostBodyStart(false, false);
     expect(plain).toBe("直接发图文添加稿件内容：发「撤回」删上一条内容，发「结束」提交稿件，发「取消」取消投稿。");
+  });
+});
+
+describe("对话投稿直接开始", () => {
+  test("默认匿名，并说明怎么改成实名", () => {
+    const message = formatPrivatePostDraftStarted(true);
+
+    expect(message).toContain("匿名");
+    expect(message).toContain("发「实名」可以随时切换");
+    expect(message).toContain("「结束」");
+    expect(message).toContain("「撤回」");
+    expect(message).toContain("「取消」");
+  });
+
+  test("指定实名时反过来提示可以改回匿名", () => {
+    const message = formatPrivatePostDraftStarted(false);
+
+    expect(message).toContain("实名");
+    expect(message).toContain("发「匿名」可以随时切换");
+  });
+
+  test("多彩模式下同样写明当前投稿方式", () => {
+    const originalRandom = Math.random;
+    try {
+      for (const value of [0, 0.3, 0.6, 0.9]) {
+        Math.random = () => value;
+        const anonymous = formatPrivatePostDraftStarted(true, true);
+        const realname = formatPrivatePostDraftStarted(false, true);
+
+        expect(anonymous).toContain("匿名");
+        expect(realname).toContain("实名");
+        expect(anonymous.length).toBeLessThanOrEqual(80);
+      }
+    } finally {
+      Math.random = originalRandom;
+    }
   });
 });
 

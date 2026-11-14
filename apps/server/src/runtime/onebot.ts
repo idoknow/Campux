@@ -108,6 +108,7 @@ import {
   formatPrivatePostDraftPrompt,
   formatPrivatePostContinuePrompt,
   formatPrivatePostBodyStart,
+  formatPrivatePostDraftStarted,
   formatPrivatePostAppendAck,
   formatPrivatePostConfirmAppendAck,
   formatPrivatePostModeSelected,
@@ -2630,40 +2631,26 @@ export class OneBotRuntime {
     if (attachments.length > 0) {
       history.push({ type: "images", attachmentCount: attachments.length, uploadedKeys: staged.uploadedKeys });
     }
-    if (semantic?.intent === "post" && semantic.anonymous !== null) {
-      this.privatePostDrafts.set(draftKey, {
-        tenantId: bot.tenantId,
-        text,
-        anonymous: semantic.anonymous,
-        attachments,
-        uploadedKeys: staged.uploadedKeys,
-        updatedAt: Date.now(),
-        history,
-        aiIntakeEnabled,
-      });
-      if (semantic.shouldSubmit) {
-        await this.requestPrivatePostSubmitConfirmation({ bot, botQqUin, userQqUin });
-        return;
-      }
-      const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-      await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostBodyStart(privateStylishEnabled, aiIntakeEnabled));
-      return;
-    }
 
-    this.privatePostPendingModes.set(draftKey, {
+    // 触发投稿后直接开始收稿，不再先追问「匿名还是实名」：绝大多数人下一句就是正文，
+    // 多一步选择只会把人拦下来。默认匿名，随时发「实名/匿名」都能改，确认提示里也会写明。
+    const anonymous = semantic?.intent === "post" && semantic.anonymous !== null ? semantic.anonymous : true;
+    this.privatePostDrafts.set(draftKey, {
       tenantId: bot.tenantId,
       text,
+      anonymous,
       attachments,
       uploadedKeys: staged.uploadedKeys,
       updatedAt: Date.now(),
       history,
       aiIntakeEnabled,
-      submitAfterModeSelection: shouldSubmitPrivatePostAfterModeSelection(semantic),
     });
-
+    if (semantic?.intent === "post" && semantic.shouldSubmit) {
+      await this.requestPrivatePostSubmitConfirmation({ bot, botQqUin, userQqUin });
+      return;
+    }
     const privateStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-    const summary = this.formatPrivatePostPendingSummary(text, attachments.length, privateStylishEnabled, aiIntakeEnabled);
-    await this.sendPrivateMessage(botQqUin, userQqUin, summary);
+    await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivatePostDraftStarted(anonymous, privateStylishEnabled));
   }
 
   /** 暂存阶段：附件上传等慢操作不持锁，避免卡住 #确认 / #取消 / #撤回。 */

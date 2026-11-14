@@ -332,6 +332,26 @@ export function formatPrivatePostBodyStart(stylishEnabled = false, aiIntakeEnabl
   return pick(privatePostBodyStartStylish);
 }
 
+// ── 对话投稿直接开始（触发后不再追问匿名/实名） ──────
+
+function privatePostModeWord(anonymous: boolean): string {
+  return anonymous ? "匿名" : "实名";
+}
+
+const privatePostDraftStartedPlain = (anonymous: boolean) =>
+  `已开始收集稿件，当前按${privatePostModeWord(anonymous)}发布。直接发文字或图片补充内容：发「结束」提交，发「撤回」删上一条，发「取消」放弃；发「${anonymous ? "实名" : "匿名"}」可以随时切换。`;
+
+const privatePostDraftStartedStylish = (anonymous: boolean) => [
+  `📝 开始啦，当前按${privatePostModeWord(anonymous)}投稿~ 直接发内容，发「结束」提交，发「${anonymous ? "实名" : "匿名"}」可切换。`,
+  `✨ 已经在收稿了（${privatePostModeWord(anonymous)}）。发「结束」提交，发「撤回」删上一条，想换方式就发「${anonymous ? "实名" : "匿名"}」。`,
+  privatePostDraftStartedPlain(anonymous),
+];
+
+export function formatPrivatePostDraftStarted(anonymous: boolean, stylishEnabled = false): string {
+  if (!stylishEnabled) return privatePostDraftStartedPlain(anonymous);
+  return pick(privatePostDraftStartedStylish(anonymous));
+}
+
 // ── 对话投稿追加确认（简短版，不重复完整内容） ────────
 
 const privatePostAppendAckDefault = "已添加 ✓";
