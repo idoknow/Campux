@@ -2129,226 +2129,175 @@ function MetadataPanel({
     <Card className="rounded-md border-slate-200 bg-white shadow-none">
       <CardContent className="p-4">
         <PanelTitle icon={MegaphoneIcon} title="墙面设置" description="校园墙名称、公告、Logo、投稿规则和服务入口" color="product-accent-green" />
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1 text-sm font-medium">
-            校园墙名称
-            <Input value={form.tenantName} onChange={(event) => onFormChange({ ...form, tenantName: event.target.value })} />
-          </label>
-          <label className="grid gap-1 text-sm font-medium">
-            访问标识
-            <Input value={form.slug} readOnly className="bg-slate-50 text-slate-500" />
-            <span className="text-xs font-semibold leading-5 text-slate-500">创建校园墙时确定，用于专属访问域名和内部标识，创建后不可修改。</span>
-          </label>
-          <label className="grid gap-1 text-sm font-medium">
-            主题色
-            <span className="flex items-center gap-2">
-              <span className="h-9 w-9 rounded-md border border-slate-200" style={{ backgroundColor: form.themeColor }} />
-              <Input value={form.themeColor} onChange={(event) => onFormChange({ ...form, themeColor: event.target.value })} />
-            </span>
-          </label>
-          <label className="grid gap-1 text-sm font-medium">
-            前台品牌名
-            <Input value={form.brand} onChange={(event) => onFormChange({ ...form, brand: event.target.value })} />
-          </label>
-          <label className="grid gap-1 text-sm font-medium md:col-span-2">
-            前台公告
-            <Textarea
-              className="min-h-24 resize-y bg-white text-sm leading-6"
-              value={form.banner}
-              placeholder="显示在投稿页顶部的公告，可换行。"
-              onChange={(event) => onFormChange({ ...form, banner: event.target.value })}
-            />
-          </label>
-          <label className="grid gap-1 text-sm font-medium md:col-span-2">
-            校园墙 Logo
-            <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
-              <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                <img src={form.logoUrl.trim() || "/logo.svg"} alt="校园墙 Logo 预览" className="h-full w-full object-contain p-2" />
-              </span>
-              <div className="grid gap-2">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input value={form.logoUrl} placeholder="留空则使用 Campux 默认 Logo" onChange={(event) => onFormChange({ ...form, logoUrl: event.target.value })} />
-                  <Button asChild variant="outline" disabled={busy || logoUploading} className="shrink-0">
-                    <label>
-                      {logoUploading ? "上传中..." : "上传图片"}
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
-                        className="hidden"
-                        disabled={busy || logoUploading}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (file) {
-                            void uploadLogo(file);
-                          }
-                        }}
-                      />
-                    </label>
-                  </Button>
-                </div>
-                <span className="text-xs font-normal text-slate-500">可直接上传 5MB 内的 JPG/PNG/GIF/WebP/HEIC 图片，上传后会自动保存为当前校园墙 Logo；也可以继续手动填写 http(s) 或站内图片地址。</span>
-              </div>
-            </div>
-          </label>
-          <label className="grid gap-1 text-sm font-medium">
-            每个用户同时待审核上限
-            <Input
-              type="number"
-              min={0}
-              max={50}
-              value={form.pendingPostLimit}
-              onChange={(event) => onFormChange({ ...form, pendingPostLimit: Number(event.target.value) })}
-            />
-            <span className="text-xs font-normal text-slate-500">0 表示不限制，默认建议 1 条。</span>
-          </label>
-          <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <p className="text-sm font-semibold text-slate-900">自动发布频率限制</p>
-            <p className="text-xs text-slate-500">按校园墙统计成功发布的独立稿件数；批量发布时每篇稿件各计 1 次，多发布目标不会重复计数。触顶后自动等到下一自然小时或自然日继续；0 表示不设该项上限。</p>
+        <div className="mt-4 grid gap-6">
+          <SettingsSection title="基本信息" description="前台看到的墙名、品牌、公告和 Logo。">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="grid gap-1 text-sm font-medium">
-                每小时上限
-                <Input type="number" min={0} max={10000} value={form.publishRateLimitHourly} disabled={busy} onChange={(event) => onFormChange({ ...form, publishRateLimitHourly: Number(event.target.value) })} />
+                校园墙名称
+                <Input value={form.tenantName} onChange={(event) => onFormChange({ ...form, tenantName: event.target.value })} />
               </label>
               <label className="grid gap-1 text-sm font-medium">
-                每日上限
-                <Input type="number" min={0} max={10000} value={form.publishRateLimitDaily} disabled={busy} onChange={(event) => onFormChange({ ...form, publishRateLimitDaily: Number(event.target.value) })} />
+                前台品牌名
+                <Input value={form.brand} onChange={(event) => onFormChange({ ...form, brand: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium">
+                主题色
+                <span className="flex items-center gap-2">
+                  <span className="h-9 w-9 rounded-md border border-slate-200" style={{ backgroundColor: form.themeColor }} />
+                  <Input value={form.themeColor} onChange={(event) => onFormChange({ ...form, themeColor: event.target.value })} />
+                </span>
               </label>
             </div>
-            {form.publishRateLimitHourly > 0 && form.publishRateLimitDaily > 0 && form.publishRateLimitHourly * 12 > form.publishRateLimitDaily && (
-              <p className="text-xs text-rose-600">每小时上限 × 12 不能超过每日上限。</p>
-            )}
-          </div>
-          <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <label className="grid gap-1 text-sm font-medium md:max-w-xs">
-              单张投稿图片上限 (MB)
-              <Input
-                type="number"
-                step={1}
-                min={MIN_IMAGE_MAX_SIZE_MB}
-                max={MAX_IMAGE_MAX_SIZE_MB}
-                value={imageMaxSizeDraft}
-                disabled={busy}
-                onChange={(event) => onImageMaxSizeDraftChange(event.target.value)}
-                onBlur={onImageMaxSizeDraftCommit}
+            <label className="grid gap-1 text-sm font-medium">
+              前台公告
+              <Textarea
+                className="min-h-20 resize-y bg-white text-sm leading-6"
+                value={form.banner}
+                placeholder="显示在投稿页顶部的公告，可换行。"
+                onChange={(event) => onFormChange({ ...form, banner: event.target.value })}
               />
-              <span className="text-xs font-normal text-slate-500">允许 {MIN_IMAGE_MAX_SIZE_MB}-{MAX_IMAGE_MAX_SIZE_MB}MB；自动压缩后仍须小于该上限，默认 10MB。</span>
             </label>
-            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
-              <div>
-                <p className="text-sm font-medium text-slate-900">自动压缩投稿图片</p>
-                <p className="text-xs text-slate-500">默认开启；上传原图后立即压缩，关闭后按原图存储并直接校验大小。</p>
+            <div className="grid gap-1 text-sm font-medium">
+              校园墙 Logo
+              <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+                <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                  <img src={form.logoUrl.trim() || "/logo.svg"} alt="校园墙 Logo 预览" className="h-full w-full object-contain p-2" />
+                </span>
+                <div className="grid gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input value={form.logoUrl} placeholder="留空则使用 Campux 默认 Logo" onChange={(event) => onFormChange({ ...form, logoUrl: event.target.value })} />
+                    <Button asChild variant="outline" disabled={busy || logoUploading} className="shrink-0">
+                      <label>
+                        {logoUploading ? "上传中..." : "上传图片"}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
+                          className="hidden"
+                          disabled={busy || logoUploading}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (file) {
+                              void uploadLogo(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    </Button>
+                  </div>
+                  <span className="text-xs font-normal text-slate-500">可直接上传 5MB 内的 JPG/PNG/GIF/WebP/HEIC 图片，上传后会自动保存为当前校园墙 Logo；也可以继续手动填写 http(s) 或站内图片地址。</span>
+                </div>
               </div>
-              <Switch
-                checked={form.imageCompressionEnabled}
-                disabled={busy}
-                onCheckedChange={(value) => onFormChange({ ...form, imageCompressionEnabled: value })}
-                aria-label="启用图片压缩"
-              />
             </div>
+            <p className="text-xs leading-5 text-slate-500">
+              访问标识：<span className="font-mono text-slate-600">{form.slug}</span> · 创建时确定，用于专属域名和内部标识，创建后不可修改。
+            </p>
+          </SettingsSection>
+
+          <SettingsSection title="投稿与审核" description="投稿页展示的规则、待审核数量和图片处理方式。">
             <div className="grid gap-3 md:grid-cols-2">
-              <label className="grid gap-1 text-sm font-medium">
-                压缩质量 (40-95)
-                <Input
-                  type="number"
-                  min={40}
-                  max={95}
-                  value={form.imageCompressionQuality}
-                  disabled={!form.imageCompressionEnabled}
-                  onChange={(event) => onFormChange({ ...form, imageCompressionQuality: Number(event.target.value) })}
-                />
-                <span className="text-xs font-normal text-slate-500">JPEG/WebP 质量，默认 80。</span>
+              <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                投稿规则，每行一条
+                <Textarea className="min-h-28" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
               </label>
               <label className="grid gap-1 text-sm font-medium">
-                最大边长 (512-4096)
+                每个用户同时待审核上限
                 <Input
                   type="number"
-                  min={512}
-                  max={4096}
-                  value={form.imageCompressionMaxDimension}
-                  disabled={!form.imageCompressionEnabled}
-                  onChange={(event) => onFormChange({ ...form, imageCompressionMaxDimension: Number(event.target.value) })}
+                  min={0}
+                  max={50}
+                  value={form.pendingPostLimit}
+                  onChange={(event) => onFormChange({ ...form, pendingPostLimit: Number(event.target.value) })}
                 />
-                <span className="text-xs font-normal text-slate-500">宽或高超过该值时按比例缩放，默认 2048。</span>
+                <span className="text-xs font-normal leading-5 text-slate-500">0 表示不限制，默认建议 1 条。</span>
               </label>
             </div>
-          </div>
-          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-slate-900">运营模式</p>
-                <p className="text-xs text-slate-500">
-                  无 Bot 模式不接入墙号机器人：审核通过的稿件停在「稿件 · 待发布」，由管理员渲染、手动发出后点「确认已发布」。
-                </p>
+            <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-sm font-medium">
+                  单张投稿图片上限 (MB)
+                  <Input
+                    type="number"
+                    step={1}
+                    min={MIN_IMAGE_MAX_SIZE_MB}
+                    max={MAX_IMAGE_MAX_SIZE_MB}
+                    value={imageMaxSizeDraft}
+                    disabled={busy}
+                    onChange={(event) => onImageMaxSizeDraftChange(event.target.value)}
+                    onBlur={onImageMaxSizeDraftCommit}
+                  />
+                  <span className="text-xs font-normal text-slate-500">允许 {MIN_IMAGE_MAX_SIZE_MB}-{MAX_IMAGE_MAX_SIZE_MB}MB；自动压缩后仍须小于该上限，默认 10MB。</span>
+                </label>
+              </div>
+              <div className="flex items-start justify-between gap-3 border-t border-slate-200 pt-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">自动压缩投稿图片</p>
+                  <p className="mt-0.5 text-xs leading-5 text-slate-500">默认开启；上传原图后立即压缩，关闭后按原图存储并直接校验大小。</p>
+                </div>
+                <Switch
+                  checked={form.imageCompressionEnabled}
+                  disabled={busy}
+                  onCheckedChange={(value) => onFormChange({ ...form, imageCompressionEnabled: value })}
+                  aria-label="启用图片压缩"
+                  className="mt-0.5 shrink-0"
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-sm font-medium">
+                  压缩质量 (40-95)
+                  <Input
+                    type="number"
+                    min={40}
+                    max={95}
+                    value={form.imageCompressionQuality}
+                    disabled={!form.imageCompressionEnabled}
+                    onChange={(event) => onFormChange({ ...form, imageCompressionQuality: Number(event.target.value) })}
+                  />
+                  <span className="text-xs font-normal text-slate-500">JPEG/WebP 质量，默认 80。</span>
+                </label>
+                <label className="grid gap-1 text-sm font-medium">
+                  最大边长 (512-4096)
+                  <Input
+                    type="number"
+                    min={512}
+                    max={4096}
+                    value={form.imageCompressionMaxDimension}
+                    disabled={!form.imageCompressionEnabled}
+                    onChange={(event) => onFormChange({ ...form, imageCompressionMaxDimension: Number(event.target.value) })}
+                  />
+                  <span className="text-xs font-normal text-slate-500">宽或高超过该值时按比例缩放，默认 2048。</span>
+                </label>
               </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onFormChange({ ...form, operateMode: "bot" })}
-                className={`rounded-md border px-3 py-2 text-left transition ${
-                  form.operateMode === "bot"
-                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <p className="text-sm font-semibold text-slate-900">墙号机器人发布</p>
-                <p className="text-xs text-slate-500">审核通过后由墙号自动发到 QQ 空间。</p>
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onFormChange({ ...form, operateMode: "manual" })}
-                className={`rounded-md border px-3 py-2 text-left transition ${
-                  form.operateMode === "manual"
-                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <p className="text-sm font-semibold text-slate-900">无 Bot 模式运营</p>
-                <p className="text-xs text-slate-500">不接入机器人，由管理员手动发布并在待发布页确认。</p>
-              </button>
-            </div>
-          </div>
-          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-slate-900">发布模式</p>
-                <p className="text-xs text-slate-500">控制审核通过的稿件如何发到 QQ 空间说说。</p>
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onFormChange({ ...form, publishMode: "single" })}
-                className={`rounded-md border px-3 py-2 text-left transition ${
-                  form.publishMode === "single"
-                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <p className="text-sm font-semibold text-slate-900">逐条发布</p>
-                <p className="text-xs text-slate-500">每条稿件单独发一条说说（默认）。</p>
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onFormChange({ ...form, publishMode: "accumulate" })}
-                className={`rounded-md border px-3 py-2 text-left transition ${
-                  form.publishMode === "accumulate"
-                    ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <p className="text-sm font-semibold text-slate-900">批量发布</p>
-                <p className="text-xs text-slate-500">攒够设定的图片数量，把多条稿件合并成一条说说发出。</p>
-              </button>
-            </div>
-            {form.publishMode === "accumulate" ? (
-              <div className="grid gap-3">
-                <div className="grid gap-3 sm:grid-cols-3">
+          </SettingsSection>
+
+          <SettingsSection title="发布与通知" description="审核通过后怎么发到 QQ 空间、自动发布节奏和通知开关。">
+            <div className="grid gap-3">
+              <SettingsField label="运营模式" hint="无 Bot 模式不接入墙号机器人：审核通过的稿件停在「稿件 · 待发布」，由管理员渲染、手动发出后点「确认已发布」。">
+                <ChoiceGroup
+                  value={form.operateMode}
+                  disabled={busy}
+                  onChange={(value) => onFormChange({ ...form, operateMode: value })}
+                  options={[
+                    { value: "bot", label: "墙号机器人发布", hint: "审核通过后由墙号自动发到 QQ 空间。" },
+                    { value: "manual", label: "无 Bot 模式运营", hint: "不接入机器人，由管理员手动发布并在待发布页确认。" },
+                  ]}
+                />
+              </SettingsField>
+              <SettingsField label="发布模式" hint="控制审核通过的稿件如何发到 QQ 空间说说。">
+                <ChoiceGroup
+                  value={form.publishMode}
+                  disabled={busy}
+                  onChange={(value) => onFormChange({ ...form, publishMode: value })}
+                  options={[
+                    { value: "single", label: "逐条发布", hint: "每条稿件单独发一条说说（默认）。" },
+                    { value: "accumulate", label: "批量发布", hint: "攒够设定的图片数量，把多条稿件合并成一条说说发出。" },
+                  ]}
+                />
+              </SettingsField>
+              {form.publishMode === "accumulate" ? (
+                <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                  <div className="grid gap-3 sm:grid-cols-3">
                   <label className="grid gap-1 text-sm font-medium">
                     图片数量下限
                     <Input
@@ -2394,41 +2343,47 @@ function MetadataPanel({
                 </p>
               </div>
             ) : null}
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div>
-              <p className="text-sm font-medium text-slate-900">说说文字 AI 总结</p>
-              <p className="text-xs text-slate-500">开启后，发布说说时在 @原作者 之后追加一句不超过 16 字的 AI 总结（仅说说文字，不影响渲染图）。批量发送时每条子稿件各自生成。需先在下方 LLM 设置中配置并启用，否则不会生成。</p>
-            </div>
-            <Switch
-              checked={form.publishLlmSummaryEnabled}
-              disabled={busy}
-              onCheckedChange={(value) => onFormChange({ ...form, publishLlmSummaryEnabled: value })}
-              aria-label="启用说说文字 AI 总结"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2">
-            <div>
-              <p className="text-sm font-medium text-slate-900">关注稿件评论通知</p>
-              <p className="text-xs text-slate-500">开启后，用户关注的稿件有新评论时，会按计划私信推送评论摘要（每天 10:00 / 22:00）。关闭后停止推送，稿件页的「关注评论」仍可使用。</p>
-            </div>
-            <Switch
-              checked={form.followedPostCommentNotifyEnabled}
-              disabled={busy}
-              onCheckedChange={(value) => onFormChange({ ...form, followedPostCommentNotifyEnabled: value })}
-              aria-label="启用关注稿件评论通知"
-            />
-          </div>
-          <label className="grid gap-1 text-sm font-medium md:col-span-2">
-            投稿规则，每行一条
-            <Textarea className="min-h-32" value={form.postRulesText} onChange={(event) => onFormChange({ ...form, postRulesText: event.target.value })} />
-          </label>
-          <section className="overflow-hidden rounded-md border border-slate-200 bg-slate-50 md:col-span-2">
-            <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">服务入口</h3>
-                <p className="mt-0.5 text-xs leading-5 text-slate-500">维护服务页里的校园入口；修改名称、修改密码和投稿规则等账户入口会自动保留。</p>
+              <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">自动发布频率限制</p>
+                  <p className="text-xs leading-5 text-slate-500">按校园墙统计成功发布的独立稿件数；批量发布时每篇稿件各计 1 次，多发布目标不会重复计数。触顶后自动等到下一自然小时或自然日继续；0 表示不设该项上限。</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-medium">
+                    每小时上限
+                    <Input type="number" min={0} max={10000} value={form.publishRateLimitHourly} disabled={busy} onChange={(event) => onFormChange({ ...form, publishRateLimitHourly: Number(event.target.value) })} />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium">
+                    每日上限
+                    <Input type="number" min={0} max={10000} value={form.publishRateLimitDaily} disabled={busy} onChange={(event) => onFormChange({ ...form, publishRateLimitDaily: Number(event.target.value) })} />
+                  </label>
+                </div>
+                {form.publishRateLimitHourly > 0 && form.publishRateLimitDaily > 0 && form.publishRateLimitHourly * 12 > form.publishRateLimitDaily ? (
+                  <p className="text-xs font-semibold text-rose-600">每小时上限 × 12 不能超过每日上限。</p>
+                ) : null}
               </div>
+              <SettingsSwitchRow
+                title="说说文字 AI 总结"
+                description="开启后，发布说说时在 @原作者 之后追加一句不超过 16 字的 AI 总结（仅说说文字，不影响渲染图）。批量发送时每条子稿件各自生成。需先在下方 LLM 设置中配置并启用，否则不会生成。"
+                checked={form.publishLlmSummaryEnabled}
+                disabled={busy}
+                ariaLabel="启用说说文字 AI 总结"
+                onChange={(value) => onFormChange({ ...form, publishLlmSummaryEnabled: value })}
+              />
+              <SettingsSwitchRow
+                title="关注稿件评论通知"
+                description="开启后，用户关注的稿件有新评论时，会按计划私信推送评论摘要（每天 10:00 / 22:00）。关闭后停止推送，稿件页的「关注评论」仍可使用。"
+                checked={form.followedPostCommentNotifyEnabled}
+                disabled={busy}
+                ariaLabel="启用关注稿件评论通知"
+                onChange={(value) => onFormChange({ ...form, followedPostCommentNotifyEnabled: value })}
+              />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="服务入口" description="维护服务页里的校园入口；修改名称、修改密码和投稿规则等账户入口会自动保留。">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-5 text-slate-500">按顺序显示在服务页，拖动左侧手柄可以调整顺序。</p>
               <Button
                 type="button"
                 size="sm"
@@ -2441,6 +2396,7 @@ function MetadataPanel({
                 添加入口
               </Button>
             </div>
+            <div className="overflow-hidden rounded-md border border-slate-200">
 
             {form.services.length === 0 ? (
               <div className="px-4 py-8 text-center">
@@ -2550,12 +2506,16 @@ function MetadataPanel({
                 ))}
               </div>
             )}
-          </section>
+            </div>
+          </SettingsSection>
         </div>
-        <Button className="mt-4 px-5 font-medium" disabled={busy || logoUploading} onClick={onSave}>
-          <SaveIcon data-icon="inline-start" />
-          保存墙面设置
-        </Button>
+        <div className="mt-5 flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs leading-5 text-slate-500">保存后立即对前台生效；Logo 上传会单独保存。</p>
+          <Button className="px-5 font-medium" disabled={busy || logoUploading} onClick={onSave}>
+            <SaveIcon data-icon="inline-start" />
+            保存墙面设置
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -4540,6 +4500,91 @@ function LogBlock({ title, value }: { title: string; value: unknown }) {
     <div className="mt-2">
       <p className="text-[11px] font-bold text-slate-400">{title}</p>
       <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-[11px] leading-5 text-slate-700">{formatLogValue(value)}</pre>
+    </div>
+  );
+}
+
+/** 设置页的安静分组：标题 + 一句说明 + 字段，用细线分隔而不是嵌套卡片。 */
+function SettingsSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <section className="grid gap-3 border-t border-slate-200 pt-5 first:border-t-0 first:pt-0">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        {description ? <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SettingsField({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-2">
+      <div>
+        <p className="text-sm font-medium text-slate-900">{label}</p>
+        {hint ? <p className="mt-1 text-xs leading-5 text-slate-500">{hint}</p> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ChoiceGroup<T extends string>({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string; hint: string }[];
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          disabled={disabled}
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+          className={`rounded-md border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            value === option.value
+              ? "border-sky-500 bg-sky-50 ring-1 ring-sky-200"
+              : "border-slate-200 bg-white hover:border-slate-300"
+          }`}
+        >
+          <p className="text-sm font-semibold text-slate-900">{option.label}</p>
+          <p className="mt-0.5 text-xs leading-5 text-slate-500">{option.hint}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SettingsSwitchRow({
+  title,
+  description,
+  checked,
+  disabled,
+  ariaLabel,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  ariaLabel: string;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+      <div>
+        <p className="text-sm font-medium text-slate-900">{title}</p>
+        <p className="mt-0.5 text-xs leading-5 text-slate-500">{description}</p>
+      </div>
+      <Switch checked={checked} disabled={disabled} aria-label={ariaLabel} onCheckedChange={onChange} className="mt-0.5 shrink-0" />
     </div>
   );
 }
