@@ -1,11 +1,12 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
 import { supportsAdvisoryLock, supportsSkipDuplicates } from "@campux/db";
-import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
+import { normalizeBaseUrl, readTenantAiSettings } from "./ai-settings";
 import { assignPostTags, maxTagsPerPost, normalizeTagName, tagColorForName } from "../lib/post-tags";
 import { prisma } from "../lib/prisma";
 import { isTenantRuntimeActive, tenantRuntimeRelationFilter } from "../lib/tenant-runtime";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
+import { callTenantLlmChat } from "./llm-chain";
 import { llmFinishReason, llmOutputTokenBudget } from "./post-review";
 
 type ExistingTag = {
@@ -348,10 +349,7 @@ export async function generatePostTagSuggestion(options: {
     return null;
   }
 
-  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
-  if (!apiKey) {
-    return null;
-  }
+  // 通道与密钥的选取交给 llm-chain：这里只关心文案与预算。
   if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
     return null;
   }
@@ -378,85 +376,53 @@ export async function generatePostTagSuggestion(options: {
     text: options.text.trim().slice(0, tagPromptMaxTextChars),
   });
   const reasoningKey = reasoningEffortKey(settings.baseUrl, settings.model);
-  let reasoningOff = !reasoningEffortRejected.has(reasoningKey);
-  const requestBody = (off: boolean) => JSON.stringify(buildLlmJsonRequestBody({
-    model: settings.model,
-    // 关不掉思考时用满 4096，给 reasoning 留空间；否则按文本长度估算即可。
-    maxTokens: off ? maxTokens : 4096,
-    systemPrompt,
-    userPayload,
-    reasoningOff: off,
-  }));
-  let controller = new AbortController();
-  let timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
-  try {
-    const leased = await runWithActiveTenantLease(prisma, options.tenantId, async () => {
-      const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: requestBody(reasoningOff),
+  // 该 baseUrl+model 被证实不接受 reasoning_effort 后，本次调用改用不带参数的请求体。
+  let withoutReasoningParam = false;
+  const callOnce = () => callTenantLlmChat({
+    tenantId: options.tenantId,
+    timeoutMs: Math.min(settings.timeoutSeconds, 20) * 1_000,
+    buildBody: ({ model, baseUrl }) => {
+      const reasoningOff = !withoutReasoningParam && !reasoningEffortRejected.has(reasoningEffortKey(baseUrl, model));
+      return buildLlmJsonRequestBody({
+        model,
+        // 关不掉思考时用满 4096，给 reasoning 留空间；否则按文本长度估算即可。
+        maxTokens: reasoningOff ? maxTokens : 4096,
+        systemPrompt,
+        userPayload,
+        reasoningOff,
       });
-      const bodyText = await response.text().catch(() => "");
-      let data: { choices?: Array<{ message?: { content?: string } }> } | null = null;
-      try {
-        data = JSON.parse(bodyText);
-      } catch {
-        data = null;
-      }
-      return { response, data, bodyText };
-    });
+    },
+  });
+
+  try {
+    const leased = await runWithActiveTenantLease(prisma, options.tenantId, callOnce);
     if (!leased.active) {
       return null;
     }
-    let { response, data, bodyText } = leased.value;
-    let probed = false;
-    if (!response.ok && shouldFallbackReasoning({ status: response.status, alreadyFellBack: !reasoningOff })) {
+    let result = leased.value;
+    if (!result.ok && shouldFallbackReasoning({ status: result.status, alreadyFellBack: reasoningEffortRejected.has(reasoningKey) })) {
       // 可能是后端不认 reasoning_effort：去掉字段重试一次。租户已停用就不再外发正文。
       if (!await isTenantRuntimeActive(prisma, options.tenantId)) return null;
-      probed = true;
-      reasoningOff = false;
-      // 降级请求单独计时：首次请求可能已经用掉大半 20 秒预算，而这次要输出到 4096。
-      clearTimeout(timeout);
-      controller = new AbortController();
-      timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
-      options.logger.info({ tenantId: options.tenantId, status: response.status, error: extractLlmErrorMessage(bodyText, data) }, "post tags: retrying without reasoning_effort");
-      const retry = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: requestBody(false),
-      });
-      bodyText = await retry.text().catch(() => "");
-      try {
-        data = JSON.parse(bodyText);
-      } catch {
-        data = null;
-      }
-      response = retry;
+      options.logger.info({ tenantId: options.tenantId, status: result.status, error: result.message }, "post tags: retrying without reasoning_effort");
+      withoutReasoningParam = true;
+      const retried = await runWithActiveTenantLease(prisma, options.tenantId, callOnce);
+      if (!retried.active) return null;
+      if (retried.value.ok) reasoningEffortRejected.add(reasoningKey);
+      result = retried.value;
     }
-    if (!response.ok) {
-      options.logger.warn({ tenantId: options.tenantId, status: response.status, error: extractLlmErrorMessage(bodyText, data) }, "post tags: LLM request failed");
+    if (!result.ok) {
+      options.logger.warn({ tenantId: options.tenantId, status: result.status, error: result.message }, "post tags: LLM request failed");
       return null;
     }
-    if (probed) reasoningEffortRejected.add(reasoningKey);
+    const data = result.data as { choices?: Array<{ message?: { content?: string } }> } | null;
     if (llmFinishReason(data) === "length") {
       options.logger.warn({ tenantId: options.tenantId, textChars: options.text.length, maxTokens }, "post tag suggestion output truncated by max_tokens");
     }
-    const parsed = parsePostTagSuggestionJson(data?.choices?.[0]?.message?.content ?? "");
-    return parsed;
+    return parsePostTagSuggestionJson(data?.choices?.[0]?.message?.content ?? "");
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
     options.logger.warn({ error, tenantId: options.tenantId, aborted }, "post tags: LLM call errored");
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -570,8 +536,7 @@ export async function maintainTenantPostTags(options: {
   if (!settings.apiKeyConfigured) {
     return { ...emptyResult(), archived: await archiveInactive() };
   }
-  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
-  if (!apiKey || posts.length < minClusterSize) {
+  if (posts.length < minClusterSize) {
     return { ...emptyResult(), archived: await archiveInactive() };
   }
   if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
@@ -681,59 +646,42 @@ export async function maintainTenantPostTags(options: {
       }
       // 同一次 attempt 内最多两次请求；第二次是去掉 reasoning_effort 的降级探测，
       // 不消耗重试名额、也不等 10 秒退避。
-      let probePending = false;
-      for (let variant = 0; variant < 2; variant += 1) {
-      if (variant === 1 && !probePending) break;
-      const requestReasoningOff = variant === 0 ? sendReasoningOff : false;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), tagMaintenanceTimeoutMs);
-      // thinking-only 模型（关不掉思考）只能用满 4096，给推理留空间。
-      const requestMaxTokens = requestReasoningOff ? maxTokens : 4096;
+      const callOnce = (reasoningOff: boolean) => callTenantLlmChat({
+        tenantId: options.tenantId,
+        timeoutMs: tagMaintenanceTimeoutMs,
+        buildBody: ({ model }) => buildLlmJsonRequestBody({
+          model,
+          // thinking-only 模型（关不掉思考）只能用满 4096，给推理留空间。
+          maxTokens: reasoningOff ? maxTokens : 4096,
+          systemPrompt,
+          userPayload,
+          reasoningOff,
+        }),
+      });
+      const requestReasoningOff = sendReasoningOff;
       try {
-        const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(buildLlmJsonRequestBody({
-            model: settings.model,
-            maxTokens: requestMaxTokens,
-            systemPrompt,
-            userPayload,
-            reasoningOff: requestReasoningOff,
-          })),
-        });
-        const responseBody = await response.text().catch(() => "");
-        let data: { choices?: Array<{ message?: { content?: string } }> } | null = null;
-        try {
-          data = JSON.parse(responseBody);
-        } catch {
-          data = null;
+        let probePending = false;
+        let result = await callOnce(requestReasoningOff);
+        if (!result.ok && shouldFallbackReasoning({ status: result.status, alreadyFellBack: !sendReasoningOff })) {
+          probePending = true;
+          // 先不动共享的 sendReasoningOff：等去掉参数的这次真的成功，才认定是参数问题。
+          options.logger.info({ tenantId: options.tenantId, batch: label, status: result.status, error: result.message }, "post tag maintenance: retrying without reasoning_effort");
+          result = await callOnce(false);
         }
-        if (!response.ok) {
-          const errorMessage = extractLlmErrorMessage(responseBody, data);
-          // 4xx 一律按「可能不认识 reasoning_effort」降级一次：FastAPI 的 {detail:[...]}、
-          // 网关返回纯文本或 {error:"..."} 时同样能救回来；5xx 保持原有重试语义。
-          if (variant === 0 && shouldFallbackReasoning({ status: response.status, alreadyFellBack: !sendReasoningOff })) {
-            probePending = true;
-            // 先不动共享的 sendReasoningOff：等去掉参数的这次真的成功，才认定是参数问题。
-            options.logger.info({ tenantId: options.tenantId, batch: label, status: response.status, error: errorMessage }, "post tag maintenance: retrying without reasoning_effort");
-            continue;
-          }
-          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label, status: response.status, error: errorMessage }, "post tag maintenance: LLM request failed");
+        if (!result.ok) {
+          options.logger.warn({ tenantId: options.tenantId, attempt, batch: label, status: result.status, error: result.message }, "post tag maintenance: LLM request failed");
           continue;
         }
         // 去掉参数后这次成功了，才认定该 baseUrl+model 不支持关闭思考，
         // 并对后续批次关闭探测；无关的 4xx（上下文超长、模型不存在）不会污染状态。
-        if (variant === 1) {
+        if (probePending) {
           sendReasoningOff = false;
           reasoningEffortRejected.add(reasoningKey);
         }
+        const data = result.data as { choices?: Array<{ message?: { content?: string } }> } | null;
         if (llmFinishReason(data) === "length") {
           // 原样重试只会再撞同一个上限：直接交给调用方折半。
-          options.logger.warn({ tenantId: options.tenantId, posts: batch.length, maxTokens: requestMaxTokens, batch: label }, "post tag maintenance output truncated by max_tokens");
+          options.logger.warn({ tenantId: options.tenantId, posts: batch.length, maxTokens: requestReasoningOff ? maxTokens : 4096, batch: label }, "post tag maintenance output truncated by max_tokens");
           return { status: "truncated" };
         }
         const plan = parsePostTagMaintenanceJson(data?.choices?.[0]?.message?.content ?? "");
@@ -756,9 +704,6 @@ export async function maintainTenantPostTags(options: {
         const aborted = error instanceof Error && error.name === "AbortError";
         options.logger.warn({ error, tenantId: options.tenantId, aborted, attempt, batch: label }, "post tag maintenance: LLM call errored");
         break;
-      } finally {
-        clearTimeout(timeout);
-      }
       }
     }
     return { status: "failed" };
@@ -1303,8 +1248,7 @@ export async function backfillPostsForTag(options: {
   if (!settings || !settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured) {
     return empty;
   }
-  const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
-  if (!apiKey || !await isTenantRuntimeActive(prisma, options.tenantId)) {
+  if (!await isTenantRuntimeActive(prisma, options.tenantId)) {
     return empty;
   }
 
@@ -1352,7 +1296,6 @@ export async function backfillPostsForTag(options: {
     const { matched, failed } = await classifyPostsIntoTag({
       tenantId: options.tenantId,
       settings,
-      apiKey,
       tag,
       chunk,
       logger: options.logger,
@@ -1405,13 +1348,12 @@ export async function backfillPostsForTag(options: {
 async function classifyPostsIntoTag(context: {
   tenantId: string;
   settings: NonNullable<Awaited<ReturnType<typeof readTenantAiSettings>>>;
-  apiKey: string;
   tag: { id: string; name: string; description: string | null };
   chunk: Array<{ id: string; displayId: number; text: string }>;
   logger: FastifyBaseLogger;
 }): Promise<{ matched: Set<string>; failed: boolean }> {
   const matched = new Set<string>();
-  const { settings, apiKey, tag, chunk } = context;
+  const { settings, tag, chunk } = context;
   const knownIds = new Set(chunk.map((post) => post.id));
   const totalChars = chunk.reduce((sum, post) => sum + post.text.length, 0);
   const maxTokens = llmOutputTokenBudget(totalChars, { floor: 300, ceiling: 1500, multiplier: 0.3, padding: 200 });
@@ -1437,70 +1379,42 @@ async function classifyPostsIntoTag(context: {
     })),
   });
   const reasoningKey = reasoningEffortKey(settings.baseUrl, settings.model);
-  let reasoningOff = !reasoningEffortRejected.has(reasoningKey);
-  const requestBody = (off: boolean) => JSON.stringify(buildLlmJsonRequestBody({
-    model: settings.model,
-    // 关不掉思考时用满 4096，给 reasoning 留空间；否则按文本长度估算即可。
-    maxTokens: off ? maxTokens : 4096,
-    systemPrompt,
-    userPayload,
-    reasoningOff: off,
-  }));
-  let controller = new AbortController();
-  let timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
+  let withoutReasoningParam = false;
+  const callOnce = () => callTenantLlmChat({
+    tenantId: context.tenantId,
+    timeoutMs: Math.min(settings.timeoutSeconds, 60) * 1_000,
+    buildBody: ({ model, baseUrl }) => {
+      const reasoningOff = !withoutReasoningParam && !reasoningEffortRejected.has(reasoningEffortKey(baseUrl, model));
+      return buildLlmJsonRequestBody({
+        model,
+        // 关不掉思考时用满 4096，给 reasoning 留空间；否则按文本长度估算即可。
+        maxTokens: reasoningOff ? maxTokens : 4096,
+        systemPrompt,
+        userPayload,
+        reasoningOff,
+      });
+    },
+  });
   try {
     // LLM 网络调用不进租户租约事务：避免 60 秒级调用长时间持锁；写库在回溯循环内单独取 lease。
-    const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: requestBody(reasoningOff),
-    });
-    let bodyText = await response.text().catch(() => "");
-    let data: { choices?: Array<{ message?: { content?: string } }> } | null = null;
-    try {
-      data = JSON.parse(bodyText);
-    } catch {
-      data = null;
+    let result = await callOnce();
+    if (!result.ok && shouldFallbackReasoning({ status: result.status, alreadyFellBack: reasoningEffortRejected.has(reasoningKey) })) {
+      // 降级请求单独计时：首次请求可能已经耗掉大半 60 秒预算（超时由 llm-chain 逐次计）。
+      context.logger.info({ tag: tag.name, status: result.status, error: result.message }, "post tag backfill: retrying without reasoning_effort");
+      withoutReasoningParam = true;
+      const retried = await callOnce();
+      if (retried.ok) reasoningEffortRejected.add(reasoningKey);
+      result = retried;
     }
-    let finalResponse = response;
-    let probed = false;
-    if (!response.ok && shouldFallbackReasoning({ status: response.status, alreadyFellBack: !reasoningOff })) {
-      probed = true;
-      reasoningOff = false;
-      // 降级请求单独计时：首次请求可能已经耗掉大半 60 秒预算。
-      clearTimeout(timeout);
-      controller = new AbortController();
-      timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 60) * 1_000);
-      context.logger.info({ tag: tag.name, status: response.status, error: extractLlmErrorMessage(bodyText, data) }, "post tag backfill: retrying without reasoning_effort");
-      finalResponse = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: requestBody(false),
-      });
-      bodyText = await finalResponse.text().catch(() => "");
-      try {
-        data = JSON.parse(bodyText);
-      } catch {
-        data = null;
-      }
-    }
-    if (!finalResponse.ok || !data) {
+    if (!result.ok) {
       context.logger.warn(
-        { tag: tag.name, status: finalResponse.status, error: extractLlmErrorMessage(bodyText, data) || null },
+        { tag: tag.name, status: result.status, error: result.message || null },
         "post tag backfill: llm request failed",
       );
       return { matched, failed: true };
     }
-    if (probed) reasoningEffortRejected.add(reasoningKey);
-    const raw = data.choices?.[0]?.message?.content ?? "";
+    const data = result.data as { choices?: Array<{ message?: { content?: string } }> } | null;
+    const raw = data?.choices?.[0]?.message?.content ?? "";
     try {
       const parsed = JSON.parse(raw) as { postIds?: unknown };
       if (Array.isArray(parsed.postIds)) {
@@ -1518,7 +1432,5 @@ async function classifyPostsIntoTag(context: {
   } catch (caught) {
     context.logger.warn({ error: caught, tag: tag.name }, "post tag backfill: llm request threw");
     return { matched, failed: true };
-  } finally {
-    clearTimeout(timeout);
   }
 }

@@ -49,7 +49,7 @@ import {
 } from "../ops/membership-removal-confirmation";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
-import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiRules, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PrivatePostKeywordGroup, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
+import type { AdminBanRecord, AdminBotAccount, AdminBotEvent, AdminMember, AdminMemberDetail, AdminTab, AiProviderEndpoint, AiRules, LlmModelOption, OAuthClientItem, OAuthClientSecretResponse, OAuthClientSettingsResponse, OAuthServerSettings, Pagination, PrivatePostKeywordGroup, PublishAttemptItem, PublishTargetItem, PublishTextTemplate, TenantAiSettings, TenantMetadata, TenantRole } from "@/types/app";
 import { EmptyCard, LoadingBlock, PaginationControls } from "@/components/app/utility";
 import { PluginConfigPage } from "./PluginConfigPage";
 import { PlatformFeedbackBanner } from "./PlatformFeedbackBanner";
@@ -164,16 +164,33 @@ type OAuthClientSecretModal = {
   clientSecret: string;
 };
 
-type AiSettingsForm = {
-  enabled: boolean;
-  mode: "local" | "llm";
+/** 一个服务商通道的表单态：备用模型写成一行一个，提交时再切成数组。 */
+type AiProviderForm = {
+  id: string;
+  label: string;
   provider: string;
   baseUrl: string;
   model: string;
-  apiKey: string;
-  clearApiKey: boolean;
+  fallbackModelsText: string;
+  /** 空数组表示该通道使用全部密钥 */
+  keyIds: string[];
+};
+
+/** 密钥表单态：value 留空表示沿用已保存的密钥。 */
+type AiKeyForm = {
+  id: string;
+  label: string;
+  value: string;
+  masked: string;
+};
+
+type AiSettingsForm = {
+  enabled: boolean;
+  mode: "local" | "llm";
   temperature: number;
   timeoutSeconds: number;
+  providers: AiProviderForm[];
+  apiKeys: AiKeyForm[];
   privatePostAiEnabled: boolean;
   aiReviewRules: { blockedPatterns: string[]; allowedCategories: string[]; tone: string; strictPrivacy: boolean };
   aiReviewMode: "off" | "shadow" | "assist" | "auto";
@@ -357,6 +374,8 @@ export function AdminPage({
   const [aiForm, setAiForm] = useState<AiSettingsForm | null>(null);
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<LlmTestResult | null>(null);
+  const [aiModelOptions, setAiModelOptions] = useState<Record<string, LlmModelOption[]>>({});
+  const [aiFetchingModels, setAiFetchingModels] = useState<string | null>(null);
   const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
   const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
   const [aiSectionOpen, setAiSectionOpen] = useState(false);
@@ -707,14 +726,38 @@ export function AdminPage({
       ),
       privatePostPrompt: aiForm.privatePostPrompt.trim(),
     };
+    // 完全空白的通道行（点了「添加通道」还没填）直接丢掉，避免一条空 url 让整次保存 400。
+    const providers = aiForm.providers
+      .filter((provider) => provider.baseUrl.trim() || provider.model.trim() || provider.label.trim())
+      .map((provider) => ({
+        id: provider.id,
+        label: provider.label.trim(),
+        provider: provider.provider.trim() || "openai_compatible",
+        baseUrl: provider.baseUrl.trim(),
+        model: provider.model.trim(),
+        fallbackModels: provider.fallbackModelsText.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).slice(0, 6),
+        keyIds: provider.keyIds,
+      }));
+    // value 留空表示沿用同 id 的旧密钥；整表提交，删掉的密钥就真的没了。
+    const apiKeys = aiForm.apiKeys.map((key) => ({
+      id: key.id,
+      label: key.label.trim(),
+      ...(key.value.trim() ? { value: key.value.trim() } : {}),
+    }));
+    const primary = providers[0];
     return {
       enabled: aiForm.enabled,
       mode: aiForm.mode,
-      provider: aiForm.provider.trim(),
-      baseUrl: aiForm.baseUrl.trim(),
-      model: aiForm.model.trim(),
-      apiKey: aiForm.apiKey.trim() || undefined,
-      clearApiKey: aiForm.clearApiKey,
+      // 三列镜像仍按主通道写，兼容只认单通道的旧逻辑（测试连接、导出配置）。
+      ...(primary
+        ? {
+          provider: primary.provider,
+          model: primary.model,
+          ...(primary.baseUrl ? { baseUrl: primary.baseUrl } : {}),
+        }
+        : {}),
+      providers,
+      apiKeys,
       temperature: aiForm.temperature,
       timeoutSeconds: aiForm.timeoutSeconds,
       rules,
@@ -762,6 +805,52 @@ export function AdminPage({
     } finally {
       setAiTesting(false);
     }
+  }
+
+  async function fetchAiModels(index: number) {
+    const provider = aiForm?.providers[index];
+    if (!provider) return;
+    if (!provider.baseUrl.trim()) {
+      toast.error("先填接口地址，再拉取模型列表。");
+      return;
+    }
+    const keyId = provider.keyIds[0] ?? "";
+    const keyValue = keyId ? aiForm?.apiKeys.find((key) => key.id === keyId)?.value.trim() : "";
+    setAiFetchingModels(provider.id);
+    try {
+      const response = await api<{ ok: boolean; models: LlmModelOption[]; message: string }>("/api/admin/ai/models", {
+        method: "POST",
+        body: JSON.stringify({
+          baseUrl: provider.baseUrl.trim(),
+          keyId: keyId || undefined,
+          apiKey: keyValue || undefined,
+        }),
+      });
+      setAiModelOptions((current) => ({ ...current, [provider.id]: response.models }));
+      if (response.ok) {
+        toast.success(response.message);
+      } else {
+        toast.error(response.message);
+      }
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "拉取模型列表失败");
+    } finally {
+      setAiFetchingModels(null);
+    }
+  }
+
+  function pickAiModel(index: number, modelId: string, target: "primary" | "fallback") {
+    setAiForm((current) => {
+      if (!current) return current;
+      const providers = current.providers.map((provider, providerIndex) => {
+        if (providerIndex !== index) return provider;
+        if (target === "primary") return { ...provider, model: modelId };
+        const fallbacks = lines(provider.fallbackModelsText);
+        if (fallbacks.includes(modelId) || provider.model === modelId) return provider;
+        return { ...provider, fallbackModelsText: [...fallbacks, modelId].slice(0, 6).join("\n") };
+      });
+      return { ...current, providers };
+    });
   }
 
   async function createOAuthClient(form: OAuthClientForm) {
@@ -1439,7 +1528,11 @@ export function AdminPage({
                           busy={busy}
                           testing={aiTesting}
                           testResult={aiTestResult}
+                          modelOptions={aiModelOptions}
+                          fetchingModels={aiFetchingModels}
                           onFormChange={setAiForm}
+                          onFetchModels={(index) => void fetchAiModels(index)}
+                          onPickModel={pickAiModel}
                           onSave={() => void saveAiSettings()}
                           onTest={() => void testAiSettings()}
                         />
@@ -2474,7 +2567,11 @@ function AdminAiSettingsPanel({
   busy,
   testing,
   testResult,
+  modelOptions,
+  fetchingModels,
   onFormChange,
+  onFetchModels,
+  onPickModel,
   onSave,
   onTest,
 }: {
@@ -2483,7 +2580,11 @@ function AdminAiSettingsPanel({
   busy: boolean;
   testing: boolean;
   testResult: LlmTestResult | null;
+  modelOptions: Record<string, LlmModelOption[]>;
+  fetchingModels: string | null;
   onFormChange: (form: AiSettingsForm) => void;
+  onFetchModels: (index: number) => void;
+  onPickModel: (index: number, modelId: string, target: "primary" | "fallback") => void;
   onSave: () => void;
   onTest: () => void;
 }) {
@@ -2507,48 +2608,224 @@ function AdminAiSettingsPanel({
             <Switch checked={form.enabled} disabled={busy || testing} onCheckedChange={(enabled) => onFormChange({ ...form, enabled })} />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-sm font-medium">
-              模式
-              <Select value={form.mode} disabled={busy || testing} onValueChange={(mode) => onFormChange({ ...form, mode: mode as "local" | "llm" })}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="local">本地规则</SelectItem>
-                  <SelectItem value="llm">LLM</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              服务商
-              <Input value={form.provider} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, provider: event.target.value })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium md:col-span-2">
-              接口地址
-              <Input value={form.baseUrl} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, baseUrl: event.target.value })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              模型
-              <Input value={form.model} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, model: event.target.value })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              API 密钥
-              <Input
-                type="password"
-                name="apiKey"
-                value={form.apiKey}
-                placeholder={settings.apiKeyConfigured ? "保持不变" : "未配置"}
-                disabled={busy || testing}
-                onChange={(event) => onFormChange({ ...form, apiKey: event.target.value, clearApiKey: false })}
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              随机度
-              <Input type="number" step="0.1" min={0} max={1} value={form.temperature} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, temperature: Number(event.target.value) })} />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              超时秒数
-              <Input type="number" min={5} max={120} value={form.timeoutSeconds} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, timeoutSeconds: Number(event.target.value) })} />
-            </label>
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <p className="text-sm font-medium text-slate-900">模式与预算</p>
+            <p className="mt-1 text-xs text-slate-500">LLM 模式下按通道顺序降级：先换备用模型，再换下一把密钥，最后换下一个通道。</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <label className="grid gap-1 text-sm font-medium">
+                模式
+                <Select value={form.mode} disabled={busy || testing} onValueChange={(mode) => onFormChange({ ...form, mode: mode as "local" | "llm" })}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">本地规则</SelectItem>
+                    <SelectItem value="llm">LLM</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="grid gap-1 text-sm font-medium">
+                随机度
+                <Input type="number" step="0.1" min={0} max={1} value={form.temperature} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, temperature: Number(event.target.value) })} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium">
+                超时秒数
+                <Input type="number" min={5} max={120} value={form.timeoutSeconds} disabled={busy || testing} onChange={(event) => onFormChange({ ...form, timeoutSeconds: Number(event.target.value) })} />
+              </label>
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            {form.providers.map((provider, index) => {
+              const models = modelOptions[provider.id] ?? [];
+              return (
+                <div key={provider.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-900">
+                      通道 {index + 1}
+                      {index === 0 ? <span className="ml-2 text-xs font-normal text-slate-500">主通道</span> : null}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || testing || fetchingModels === provider.id || !provider.baseUrl.trim()}
+                        onClick={() => onFetchModels(index)}
+                      >
+                        {fetchingModels === provider.id ? "拉取中…" : "拉取模型"}
+                      </Button>
+                      {form.providers.length > 1 ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy || testing}
+                          onClick={() => onFormChange({ ...form, providers: form.providers.filter((_, removeIndex) => removeIndex !== index) })}
+                        >
+                          删除
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-medium">
+                      备注
+                      <Input
+                        value={provider.label}
+                        placeholder="如 DeepSeek / 校园网关"
+                        disabled={busy || testing}
+                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item) })}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      服务商标识
+                      <Input
+                        value={provider.provider}
+                        placeholder="openai_compatible"
+                        disabled={busy || testing}
+                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, provider: event.target.value } : item) })}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                      接口地址
+                      <Input
+                        value={provider.baseUrl}
+                        placeholder="https://api.openai.com/v1"
+                        disabled={busy || testing}
+                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, baseUrl: event.target.value } : item) })}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      主模型
+                      <Input
+                        value={provider.model}
+                        placeholder="gpt-4.1-mini"
+                        disabled={busy || testing}
+                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, model: event.target.value } : item) })}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      使用密钥
+                      <Select
+                        value={provider.keyIds[0] ?? ""}
+                        disabled={busy || testing}
+                        onValueChange={(value) => onFormChange({
+                          ...form,
+                          providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, keyIds: value ? [value] : [] } : item),
+                        })}
+                      >
+                        <SelectTrigger className="w-full"><SelectValue placeholder="全部密钥" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">全部密钥</SelectItem>
+                          {form.apiKeys.map((key) => (
+                            <SelectItem key={key.id} value={key.id}>{key.label.trim() || key.masked || key.id}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium md:col-span-2">
+                      备用模型（一行一个）
+                      <Textarea
+                        className="min-h-16 font-mono text-xs"
+                        value={provider.fallbackModelsText}
+                        placeholder="主模型失败或限流时按顺序再试"
+                        disabled={busy || testing}
+                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, fallbackModelsText: event.target.value } : item) })}
+                      />
+                    </label>
+                  </div>
+                  {models.length > 0 ? (
+                    <div className="mt-3">
+                      <p className="text-xs text-slate-500">可选模型（点击填主模型，按住 Alt 点击加入备用）：</p>
+                      <div className="mt-2 flex max-h-32 flex-wrap gap-1 overflow-auto">
+                        {models.map((model) => (
+                          <button
+                            key={model.id}
+                            type="button"
+                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-xs text-slate-700 hover:border-slate-300"
+                            onClick={(event) => onPickModel(index, model.id, event.altKey ? "fallback" : "primary")}
+                          >
+                            {model.id}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy || testing || form.providers.length >= 4}
+                onClick={() => onFormChange({ ...form, providers: [...form.providers, emptyAiProviderForm()] })}
+              >
+                添加通道
+              </Button>
+              <span className="ml-2 text-xs text-slate-500">最多 4 个通道，按顺序降级。</span>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-slate-900">API 密钥</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  同一通道可挂多把密钥，失效或限流时自动换下一把。{settings.apiKeyConfigured ? "" : "当前还没有保存任何密钥。"}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy || testing || form.apiKeys.length >= 6}
+                onClick={() => onFormChange({
+                  ...form,
+                  apiKeys: [...form.apiKeys, { id: `key_${Math.random().toString(36).slice(2, 8)}`, label: "", value: "", masked: "" }],
+                })}
+              >
+                添加密钥
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {form.apiKeys.length === 0 ? (
+                <p className="text-xs text-slate-500">至少配置一把密钥才能调用 LLM。</p>
+              ) : null}
+              {form.apiKeys.map((key, index) => (
+                <div key={key.id} className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] md:items-end">
+                  <label className="grid gap-1 text-sm font-medium">
+                    备注
+                    <Input
+                      value={key.label}
+                      placeholder="如 主账号"
+                      disabled={busy || testing}
+                      onChange={(event) => onFormChange({ ...form, apiKeys: form.apiKeys.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item) })}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium">
+                    密钥
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={key.value}
+                      placeholder={key.masked ? `已保存 ${key.masked}，留空保持不变` : "sk-..."}
+                      disabled={busy || testing}
+                      onChange={(event) => onFormChange({ ...form, apiKeys: form.apiKeys.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item) })}
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy || testing}
+                    onClick={() => onFormChange({ ...form, apiKeys: form.apiKeys.filter((_, removeIndex) => removeIndex !== index) })}
+                  >
+                    删除
+                  </Button>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid gap-3">
@@ -2650,9 +2927,9 @@ function AdminAiSettingsPanel({
 
           <div className="flex flex-wrap justify-end gap-2">
             {settings.apiKeyConfigured ? (
-              <Button type="button" variant="outline" disabled={busy || testing} onClick={() => onFormChange({ ...form, apiKey: "", clearApiKey: true })}>
+              <Button type="button" variant="outline" disabled={busy || testing} onClick={() => onFormChange({ ...form, apiKeys: [] })}>
                 <KeyRoundIcon data-icon="inline-start" />
-                清除密钥
+                清除全部密钥
               </Button>
             ) : null}
             <Button type="button" variant="outline" disabled={busy || testing} onClick={onTest}>
@@ -4358,17 +4635,49 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
   };
 }
 
+function aiProviderToForm(provider: AiProviderEndpoint): AiProviderForm {
+  return {
+    id: provider.id,
+    label: provider.label,
+    provider: provider.provider,
+    baseUrl: provider.baseUrl,
+    model: provider.model,
+    fallbackModelsText: provider.fallbackModels.join("\n"),
+    keyIds: provider.keyIds,
+  };
+}
+
+function emptyAiProviderForm(): AiProviderForm {
+  return {
+    id: `ep_${Math.random().toString(36).slice(2, 8)}`,
+    label: "",
+    provider: "openai_compatible",
+    baseUrl: "",
+    model: "",
+    fallbackModelsText: "",
+    keyIds: [],
+  };
+}
+
 function aiSettingsToForm(settings: TenantAiSettings): AiSettingsForm {
+  const providers = settings.providers?.length
+    ? settings.providers
+    : [{
+      id: "default",
+      label: "",
+      provider: settings.provider,
+      baseUrl: settings.baseUrl ?? "",
+      model: settings.model ?? "",
+      fallbackModels: [],
+      keyIds: [],
+    }];
   return {
     enabled: settings.enabled,
     mode: settings.mode,
-    provider: settings.provider,
-    baseUrl: settings.baseUrl ?? "",
-    model: settings.model ?? "",
-    apiKey: "",
-    clearApiKey: false,
     temperature: settings.temperature,
     timeoutSeconds: settings.timeoutSeconds,
+    providers: providers.map(aiProviderToForm),
+    apiKeys: (settings.apiKeys ?? []).map((key) => ({ id: key.id, label: key.label, value: "", masked: key.masked })),
     privatePostAiEnabled: Boolean(settings.rules.privatePostAiEnabled),
     aiReviewRules: {
       blockedPatterns: settings.rules.aiReviewRules?.blockedPatterns ?? [],

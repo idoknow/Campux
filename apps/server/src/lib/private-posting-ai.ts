@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { DEFAULT_PRIVATE_POST_PROMPT } from "@campux/domain";
-import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "../runtime/ai-settings";
+import { readTenantAiSettings } from "../runtime/ai-settings";
+import { callTenantLlmChat } from "../runtime/llm-chain";
 import { prisma } from "./prisma";
 import { runWithActiveTenantLease } from "./tenant-runtime-lease";
 import { llmFinishReason, llmOutputTokenBudget } from "../runtime/post-review";
@@ -107,13 +108,6 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
     return fallback;
   }
 
-  const apiKey = await resolveTenantAiApiKey(input.tenantId, {});
-  if (!apiKey) {
-    return fallback;
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
   const systemPrompt = buildPrivatePostSystemPrompt(settings.rules.privatePostPrompt);
   const maxTokens = llmOutputTokenBudget(messageText.length + (input.currentDraftText?.trim().length ?? 0), { floor: 600, multiplier: 1.8, padding: 300 });
   input.logger.info(
@@ -121,49 +115,40 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
     "llm request",
   );
   try {
-    const leased = await runWithActiveTenantLease(prisma, input.tenantId, async () => {
-      const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          temperature: 0,
-          max_tokens: maxTokens,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            {
-              role: "user",
-              content: JSON.stringify({
-                currentDraftText: input.currentDraftText?.trim() || "",
-                hasCurrentDraft: Boolean(input.hasCurrentDraft),
-                imageCount: input.imageCount ?? 0,
-                messageText,
-              }),
-            },
-          ],
-        }),
-      });
-      const data = (await response.json().catch(() => null)) as
-        | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-        | null;
-      return { response, data };
-    });
+    const leased = await runWithActiveTenantLease(prisma, input.tenantId, async () => callTenantLlmChat({
+      tenantId: input.tenantId,
+      timeoutMs: Math.min(settings.timeoutSeconds, 20) * 1_000,
+      buildBody: ({ model }) => ({
+        model,
+        temperature: 0,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              currentDraftText: input.currentDraftText?.trim() || "",
+              hasCurrentDraft: Boolean(input.hasCurrentDraft),
+              imageCount: input.imageCount ?? 0,
+              messageText,
+            }),
+          },
+        ],
+      }),
+    }));
     if (!leased.active) {
       return fallback;
     }
-    const { response, data } = leased.value;
-    if (!response.ok) {
-      input.logger.warn({ tenantId: input.tenantId, status: response.status, error: data?.error?.message }, "private post semantic: LLM request failed");
+    const result = leased.value;
+    if (!result.ok) {
+      input.logger.warn({ tenantId: input.tenantId, status: result.status, error: result.message }, "private post semantic: LLM request failed");
       return fallback;
     }
+    const data = result.data as { choices?: Array<{ message?: { content?: string } }> } | null;
 
     if (llmFinishReason(data) === "length") {
       input.logger.warn({ tenantId: input.tenantId, textChars: messageText.length, maxTokens }, "private post semantic output truncated by max_tokens");
@@ -178,11 +163,8 @@ export async function analyzePrivatePostSemantics(input: PrivatePostSemanticInpu
     const normalized = normalizePrivatePostSemanticResult(parsed, input);
     return normalized.confidence >= 0.4 ? normalized : fallback;
   } catch (error) {
-    const aborted = error instanceof Error && error.name === "AbortError";
-    input.logger.warn({ error, tenantId: input.tenantId, aborted }, "private post semantic: LLM call errored");
+    input.logger.warn({ error, tenantId: input.tenantId }, "private post semantic: LLM call errored");
     return fallback;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

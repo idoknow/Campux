@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma } from "@campux/db";
-import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
+import { readTenantAiSettings } from "./ai-settings";
+import { callTenantLlmChat } from "./llm-chain";
 import { llmFinishReason, llmOutputTokenBudget } from "./post-review";
 
 // 说说文字里追加的极短总结硬上限：不超过 16 个字。
@@ -68,68 +69,54 @@ export async function generatePublishSummary(options: {
     return null;
   }
 
-  const apiKey = await resolveTenantAiApiKey(options.tenantId, {}, options.transaction);
-  if (!apiKey) {
-    return null;
-  }
-
   // 提要只有十几个字，但推理型模型会先花 token 思考，给 512 的余量并记录下来。
   const maxTokens = llmOutputTokenBudget(text.length, { floor: 512, ceiling: 1024, multiplier: 0.2, padding: 256 });
   options.logger.info(
     { site: "publish-summary", tenantId: options.tenantId, model: settings.model, maxTokens, textChars: text.length },
     "llm request",
   );
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 20) * 1_000);
-  try {
-    const response = await fetch(`${normalizeBaseUrl(settings.baseUrl)}/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        // 提要要求确定性输出（同一稿件多墙复用同一份），温度固定为 0。
-        temperature: 0,
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: "system",
-            content:
-              "你是校园墙稿件的编辑助手。把稿件正文浓缩成一句极短的中文概括，作为说说里的一句话提要。" +
-              `严格要求：不超过 ${publishSummaryMaxChars} 个字；只输出这句话本身，不要引号、标点结尾、表情或任何解释。`,
-          },
-          {
-            role: "user",
-            content: text,
-          },
-        ],
-      }),
-    });
 
-    const data = (await response.json().catch(() => null)) as
-      | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-      | null;
-    if (!response.ok) {
-      options.logger.warn({ tenantId: options.tenantId, status: response.status, error: data?.error?.message }, "publish summary: LLM request failed");
-      return null;
-    }
-    if (llmFinishReason(data) === "length") {
-      options.logger.warn({ tenantId: options.tenantId, textChars: text.length, maxTokens }, "publish summary output truncated by max_tokens");
-    }
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) {
-      return null;
-    }
-    const summary = sanitizePublishSummary(content);
-    return summary || null;
-  } catch (error) {
-    const aborted = error instanceof Error && error.name === "AbortError";
-    options.logger.warn({ error, tenantId: options.tenantId, aborted }, "publish summary: LLM call errored");
+  const result = await callTenantLlmChat({
+    tenantId: options.tenantId,
+    client: options.transaction,
+    timeoutMs: Math.min(settings.timeoutSeconds, 20) * 1_000,
+    buildBody: () => ({
+      // 提要要求确定性输出（同一稿件多墙复用同一份），温度固定为 0。
+      temperature: 0,
+      max_tokens: maxTokens,
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是校园墙稿件的编辑助手。把稿件正文浓缩成一句极短的中文概括，作为说说里的一句话提要。" +
+            `严格要求：不超过 ${publishSummaryMaxChars} 个字；只输出这句话本身，不要引号、标点结尾、表情或任何解释。`,
+        },
+        {
+          role: "user",
+          content: text,
+        },
+      ],
+    }),
+  });
+
+  if (!result.ok) {
+    options.logger.warn(
+      { tenantId: options.tenantId, status: result.status, error: result.message, attempts: result.failures.length },
+      "publish summary: LLM request failed",
+    );
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const data = result.data as
+    | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+    | null;
+  if (llmFinishReason(data) === "length") {
+    options.logger.warn({ tenantId: options.tenantId, textChars: text.length, maxTokens }, "publish summary output truncated by max_tokens");
+  }
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) {
+    return null;
+  }
+  const summary = sanitizePublishSummary(content);
+  return summary || null;
 }

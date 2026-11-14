@@ -2,10 +2,10 @@ import type { FastifyBaseLogger } from "fastify";
 import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
-import { assertSafeLlmUrl } from "./llm-url";
 import { getAutoModerationGate } from "./auto-moderation";
 
-import { normalizeBaseUrl, readTenantAiSettings, resolveTenantAiApiKey } from "./ai-settings";
+import { readTenantAiSettings } from "./ai-settings";
+import { callTenantLlmChat } from "./llm-chain";
 
 export type PostReviewAssessment = {
   schemaVersion?: 1;
@@ -499,9 +499,8 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
     let snapshotId: string | null = null;
     if (!settings.enabled || settings.mode !== "llm" || !settings.apiKeyConfigured) status = "unavailable";
     else {
-      const apiKey = await resolveTenantAiApiKey(options.tenantId, {});
-      if (!apiKey) status = "unavailable";
-      else {
+      // 通道与密钥的选取交给 llm-chain：这里只关心这次分析能不能成功。
+      {
         try {
           const entities = await prisma.schoolEntity.findMany({ where: { tenantId: options.tenantId, source: { not: "ai_candidate" } }, orderBy: [{ sensitivity: "desc" }, { updatedAt: "desc" }], take: 80 });
           const rules = (settings.rules as Record<string, unknown>).aiReviewRules;
@@ -514,39 +513,34 @@ export async function assessPostForReview(options: { tenantId: string; postId: s
             { site: "post-review", tenantId: options.tenantId, postId: post.id, model: settings.model, maxTokens, textChars: post.text.length, entities: entities.length },
             "llm request",
           );
-          const baseUrl = (await assertSafeLlmUrl(normalizeBaseUrl(settings.baseUrl))).toString().replace(/\/$/, "");
           assessment = await retryLlmReviewRequest(async (attempt) => {
             options.logger.info({ tenantId: options.tenantId, postId: post.id, attempt, maxAttempts: MAX_LLM_REVIEW_ATTEMPTS }, "AI review request attempt");
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutSeconds, 30) * 1000);
-            try {
-              const response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", signal: controller.signal, redirect: "error", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({
-                model: settings.model, temperature: 0, max_tokens: maxTokens, response_format: { type: "json_object" },
+            const result = await callTenantLlmChat({
+              tenantId: options.tenantId,
+              timeoutMs: Math.min(settings.timeoutSeconds, 30) * 1000,
+              buildBody: () => ({
+                temperature: 0,
+                max_tokens: maxTokens,
+                response_format: { type: "json_object" },
                 messages: buildPostReviewMessages({ rules, entities, schoolSummary: snapshot?.summary, graphContext, text: post.text }),
-              }) });
-              if (!response.ok) {
-                if (response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500) {
-                  const header = response.headers.get("retry-after");
-                  const retryAfterMs = header ? (/^\d+(?:\.\d+)?$/.test(header) ? Number(header) * 1000 : Math.max(0, Date.parse(header) - Date.now())) : undefined;
-                  throw new RetryableLlmReviewError(`LLM status ${response.status}`, retryAfterMs);
-                }
-                throw new Error(`LLM status ${response.status}`);
+              }),
+            });
+
+            if (!result.ok) {
+              if (result.status === 0 || result.status === 408 || result.status === 425 || result.status === 429 || result.status >= 500) {
+                throw new RetryableLlmReviewError(result.message, result.retryAfterMs);
               }
-              let envelope: unknown;
-              try { envelope = JSON.parse(await readBoundedLlmResponse(response)); }
-              catch (error) { throw new RetryableLlmReviewError(error instanceof Error ? error.message : "LLM response invalid"); }
-              if (!envelope || typeof envelope !== "object" || Array.isArray(envelope) || llmFinishReason(envelope) === "length") throw new RetryableLlmReviewError("LLM response envelope invalid or truncated");
-              const content = (envelope as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
-              if (typeof content !== "string") throw new RetryableLlmReviewError("LLM result missing");
-              const parsed = parsePostReviewAssessment(content);
-              const verified = parsed ? validatePostReviewEvidence(post.text, parsed) : null;
-              if (!verified) throw new RetryableLlmReviewError("LLM assessment schema or evidence invalid");
-              return verified;
-            } catch (error) {
-              if (error instanceof RetryableLlmReviewError) throw error;
-              if (controller.signal.aborted || error instanceof TypeError) throw new RetryableLlmReviewError(error instanceof Error ? error.message : "LLM network error");
-              throw error;
-            } finally { clearTimeout(timeout); }
+              throw new Error(result.message);
+            }
+
+            const envelope: unknown = result.data;
+            if (!envelope || typeof envelope !== "object" || Array.isArray(envelope) || llmFinishReason(envelope) === "length") throw new RetryableLlmReviewError("LLM response envelope invalid or truncated");
+            const content = (envelope as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
+            if (typeof content !== "string") throw new RetryableLlmReviewError("LLM result missing");
+            const parsed = parsePostReviewAssessment(content);
+            const verified = parsed ? validatePostReviewEvidence(post.text, parsed) : null;
+            if (!verified) throw new RetryableLlmReviewError("LLM assessment schema or evidence invalid");
+            return verified;
           });
           status = "completed";
         } catch (error) {

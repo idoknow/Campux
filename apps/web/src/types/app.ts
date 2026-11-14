@@ -717,6 +717,29 @@ export type AssignedPostTag = PostTag & {
   confidence: number | null;
 };
 
+/** 一个 OpenAI 兼容通道：主模型 + 备用模型，keyIds 为空表示该通道使用全部密钥。 */
+export type AiProviderEndpoint = {
+  id: string;
+  label: string;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  fallbackModels: string[];
+  keyIds: string[];
+};
+
+/** 已保存的密钥只回传掩码，明文只在提交时上行。 */
+export type AiApiKeySummary = {
+  id: string;
+  label: string;
+  masked: string;
+};
+
+export type LlmModelOption = {
+  id: string;
+  ownedBy: string | null;
+};
+
 export type TenantAiSettings = {
   enabled: boolean;
   mode: "local" | "llm";
@@ -726,6 +749,9 @@ export type TenantAiSettings = {
   apiKeyConfigured: boolean;
   temperature: number;
   timeoutSeconds: number;
+  /** 服务商通道列表；第一项与 provider/baseUrl/model 三列镜像 */
+  providers: AiProviderEndpoint[];
+  apiKeys: AiApiKeySummary[];
   rules: AiRules;
 };
 
