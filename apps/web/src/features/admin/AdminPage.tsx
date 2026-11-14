@@ -171,7 +171,7 @@ type AiProviderForm = {
   provider: string;
   baseUrl: string;
   model: string;
-  fallbackModelsText: string;
+  fallbackModels: string[];
   /** 空数组表示该通道使用全部密钥 */
   keyIds: string[];
 };
@@ -378,8 +378,6 @@ export function AdminPage({
   const [aiFetchingModels, setAiFetchingModels] = useState<string | null>(null);
   const [oauthSettings, setOAuthSettings] = useState<OAuthServerSettings>(() => defaultOAuthSettings);
   const [oauthClients, setOAuthClients] = useState<OAuthClientItem[]>([]);
-  const [aiSectionOpen, setAiSectionOpen] = useState(false);
-  const [oauthSectionOpen, setOAuthSectionOpen] = useState(false);
   const [members, setMembers] = useState<AdminMember[]>([]);
   const [bots, setBots] = useState<AdminBotAccount[]>([]);
   const [botEvents, setBotEvents] = useState<AdminBotEvent[]>([]);
@@ -735,7 +733,7 @@ export function AdminPage({
         provider: provider.provider.trim() || "openai_compatible",
         baseUrl: provider.baseUrl.trim(),
         model: provider.model.trim(),
-        fallbackModels: provider.fallbackModelsText.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).slice(0, 6),
+        fallbackModels: provider.fallbackModels.slice(0, 6),
         keyIds: provider.keyIds,
       }));
     // value 留空表示沿用同 id 的旧密钥；整表提交，删掉的密钥就真的没了。
@@ -840,14 +838,26 @@ export function AdminPage({
   }
 
   function pickAiModel(index: number, modelId: string, target: "primary" | "fallback") {
+    const picked = modelId.trim();
+    if (!picked) return;
     setAiForm((current) => {
       if (!current) return current;
       const providers = current.providers.map((provider, providerIndex) => {
         if (providerIndex !== index) return provider;
-        if (target === "primary") return { ...provider, model: modelId };
-        const fallbacks = lines(provider.fallbackModelsText);
-        if (fallbacks.includes(modelId) || provider.model === modelId) return provider;
-        return { ...provider, fallbackModelsText: [...fallbacks, modelId].slice(0, 6).join("\n") };
+        if (target === "primary") return { ...provider, model: picked };
+        if (provider.fallbackModels.includes(picked) || provider.model === picked) return provider;
+        return { ...provider, fallbackModels: [...provider.fallbackModels, picked].slice(0, 6) };
+      });
+      return { ...current, providers };
+    });
+  }
+
+  function removeAiFallbackModel(index: number, modelId: string) {
+    setAiForm((current) => {
+      if (!current) return current;
+      const providers = current.providers.map((provider, providerIndex) => {
+        if (providerIndex !== index) return provider;
+        return { ...provider, fallbackModels: provider.fallbackModels.filter((item) => item !== modelId) };
       });
       return { ...current, providers };
     });
@@ -1383,15 +1393,13 @@ export function AdminPage({
                   onSave={() => void saveSettings()}
                   onUploaded={onSaved}
                 />
-                <details className="product-surface overflow-hidden">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
-                    <div>
-                      <p className="text-base font-semibold text-slate-950">AI 审核设置</p>
-                        <p className="text-sm leading-6 text-slate-600">当前审核模式：{aiForm?.aiReviewMode === "auto" ? "自动决策" : aiForm?.aiReviewMode === "assist" ? "仅人工参考" : aiForm?.aiReviewMode === "shadow" ? "仅审计记录" : "关闭"}。自动决策按风险等级、AI 建议动作与置信度门槛处理；中高风险非拒绝建议转人工。运维可随时全局停止。</p>
-                    </div>
-                    <Badge className="rounded-full bg-violet-50 text-violet-700 shadow-none">AI 辅助</Badge>
-                  </summary>
-                  <div className="grid gap-4 border-t border-slate-200 p-4">
+                <ExpandableSection
+                  title="AI 审核设置"
+                  description={`当前审核模式：${aiForm?.aiReviewMode === "auto" ? "自动决策" : aiForm?.aiReviewMode === "assist" ? "仅人工参考" : aiForm?.aiReviewMode === "shadow" ? "仅审计记录" : "关闭"}。自动决策按风险等级、AI 建议动作与置信度门槛处理；中高风险非拒绝建议转人工。运维可随时全局停止。`}
+                  badge="AI 辅助"
+                  tone="violet"
+                >
+                  <div className="grid gap-4">
                     <section className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                     <p className="text-sm font-semibold text-slate-900">审核模式</p>
                     <label className="grid max-w-sm gap-1 text-sm font-medium">
@@ -1459,35 +1467,42 @@ export function AdminPage({
                       保存审核设置
                     </Button>
                   </div>
-                </details>
-                {aiSettings && aiForm ? (
-                  <div className="product-surface overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setAiSectionOpen((open) => !open)}
-                      aria-expanded={aiSectionOpen}
-                      className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
-                    >
-                      <div>
-                        <p className="text-base font-semibold text-slate-950">LLM 设置</p>
-                        <p className="mt-1 text-sm text-slate-600">配置发布短总结和私聊智能收稿使用的大模型。</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className="rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200 shadow-none">按需展开</Badge>
-                        <ChevronDownIcon className={`size-4 shrink-0 text-slate-400 transition-transform ${aiSectionOpen ? "rotate-180" : ""}`} />
-                      </div>
-                    </button>
-                    {aiSectionOpen ? (
-                      <div className="border-t border-slate-200 p-3">
-                <details className="product-surface overflow-hidden">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden">
-                    <div>
-                      <p className="text-base font-semibold text-slate-950">学校实体词典与审核反馈</p>
-                      <p className="mt-1 text-sm text-slate-600">当前租户隔离管理；实体仅用于辅助分析，不会自动成为校园事实或触发审核决定。</p>
-                    </div>
-                    <Badge className="rounded-full bg-sky-50 text-sky-700 shadow-none">AI 数据</Badge>
-                  </summary>
-                  <div className="grid gap-3 border-t border-slate-200 p-4">
+                </ExpandableSection>
+
+                <ExpandableSection
+                  title="LLM 设置"
+                  description="配置发布短总结和私聊智能收稿使用的大模型、备用通道与密钥。"
+                  badge="AI 服务"
+                  tone="amber"
+                >
+                  {aiSettings && aiForm ? (
+                    <AdminAiSettingsPanel
+                      settings={aiSettings}
+                      form={aiForm}
+                      busy={busy}
+                      testing={aiTesting}
+                      testResult={aiTestResult}
+                      modelOptions={aiModelOptions}
+                      fetchingModels={aiFetchingModels}
+                      onFormChange={setAiForm}
+                      onFetchModels={(index) => void fetchAiModels(index)}
+                      onPickModel={pickAiModel}
+                      onRemoveFallbackModel={removeAiFallbackModel}
+                      onSave={() => void saveAiSettings()}
+                      onTest={() => void testAiSettings()}
+                    />
+                  ) : (
+                    <LoadingBlock title="正在加载 LLM 设置" />
+                  )}
+                </ExpandableSection>
+
+                <ExpandableSection
+                  title="学校实体词典与审核反馈"
+                  description="当前租户隔离管理；实体仅用于辅助分析，不会自动成为校园事实或触发审核决定。"
+                  badge="AI 数据"
+                  tone="sky"
+                >
+                  <div className="grid gap-3">
                     <p className="text-sm text-slate-700">分析 {aiReviewMetrics?.total ?? 0} 条；人工判断一致 {aiReviewMetrics?.feedback.matched ?? 0} 条，覆盖 {aiReviewMetrics?.feedback.overridden ?? 0} 条。</p>
                     <Button variant="outline" disabled={aiReviewLoading} onClick={() => void (async () => { try { await api("/api/admin/ai-review/snapshots/refresh", { method: "POST", body: JSON.stringify({}) }); toast.success("学校模型快照已更新"); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "快照更新失败"); } })()}>更新学校模型快照</Button>
                     {aiReviewLoading ? <p className="text-sm text-slate-500">读取中…</p> : null}
@@ -1520,64 +1535,23 @@ export function AdminPage({
                     <div className="flex items-center justify-between gap-2 text-sm"><span>共 {aiEntityTotal} 条{aiEntityScanTruncated ? "（仅扫描前 5000 条，结果可能不完整）" : ""} · 第 {aiEntityPage} / {Math.max(1, Math.ceil(aiEntityTotal / aiEntityPageSize))} 页</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={aiEntityPage <= 1 || aiReviewLoading} onClick={() => setAiEntityPage((page) => page - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={aiEntityPage * aiEntityPageSize >= aiEntityTotal || aiReviewLoading} onClick={() => setAiEntityPage((page) => page + 1)}>下一页</Button></div></div>
                     <div className="grid gap-2">{aiReviewEntities.map((entity) => <div key={entity.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm"><span>{entity.type} · {entity.name}{entity.aliases.length ? `（${entity.aliases.join("、")}）` : ""} · {entity.sensitivity}</span><Button variant="outline" size="sm" onClick={() => void (async () => { try { await api(`/api/admin/ai-review/entities/${entity.id}`, { method: "DELETE" }); if (aiReviewEntities.length === 1 && aiEntityPage > 1) { setAiEntityPage((page) => page - 1); } else { setAiEntityReload((revision) => revision + 1); } } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除实体失败"); } })()}>删除</Button></div>)}</div>
                   </div>
-                </details>
-
-                        <AdminAiSettingsPanel
-                          settings={aiSettings}
-                          form={aiForm}
-                          busy={busy}
-                          testing={aiTesting}
-                          testResult={aiTestResult}
-                          modelOptions={aiModelOptions}
-                          fetchingModels={aiFetchingModels}
-                          onFormChange={setAiForm}
-                          onFetchModels={(index) => void fetchAiModels(index)}
-                          onPickModel={pickAiModel}
-                          onSave={() => void saveAiSettings()}
-                          onTest={() => void testAiSettings()}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <Card className="rounded-md border-slate-200 bg-white shadow-none">
-                    <CardContent className="p-4">
-                      <LoadingBlock title="正在加载 LLM 设置" />
-                    </CardContent>
-                  </Card>
-                )}
-                <div className="product-surface overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setOAuthSectionOpen((open) => !open)}
-                    aria-expanded={oauthSectionOpen}
-                    className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left"
-                  >
-                    <div>
-                      <p className="text-base font-semibold text-slate-950">OAuth 服务</p>
-                      <p className="mt-1 text-sm text-slate-600">第三方应用授权、令牌有效期和应用密钥。</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className="rounded-full bg-slate-100 text-slate-600 shadow-none">按需展开</Badge>
-                      <ChevronDownIcon className={`size-4 shrink-0 text-slate-400 transition-transform ${oauthSectionOpen ? "rotate-180" : ""}`} />
-                    </div>
-                  </button>
-                  {oauthSectionOpen ? (
-                    <div className="border-t border-slate-200 p-3">
-                      <OAuthPanel
-                        settings={oauthSettings}
-                        clients={oauthClients}
-                        busy={busy}
-                        loading={adminLoading}
-                        onSaveSettings={saveOAuthSettings}
-                        onCreateClient={(clientForm) => createOAuthClient(clientForm)}
-                        onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
-                        onRotateSecret={(id) => rotateOAuthClientSecret(id)}
-                        onDeleteClient={(id) => deleteOAuthClient(id)}
-                      />
-                    </div>
-                  ) : null}
-                </div>
+                </ExpandableSection>
+                <ExpandableSection
+                  title="OAuth 服务"
+                  description="第三方应用授权、令牌有效期和应用密钥。"
+                >
+                  <OAuthPanel
+                    settings={oauthSettings}
+                    clients={oauthClients}
+                    busy={busy}
+                    loading={adminLoading}
+                    onSaveSettings={saveOAuthSettings}
+                    onCreateClient={(clientForm) => createOAuthClient(clientForm)}
+                    onUpdateClient={(id, clientForm) => updateOAuthClient(id, clientForm)}
+                    onRotateSecret={(id) => rotateOAuthClientSecret(id)}
+                    onDeleteClient={(id) => deleteOAuthClient(id)}
+                  />
+                </ExpandableSection>
               </div>
             </TabsContent>
 
@@ -2521,6 +2495,43 @@ function MetadataPanel({
   );
 }
 
+function FallbackModelInput({
+  disabled,
+  onAdd,
+}: {
+  disabled?: boolean;
+  onAdd: (modelId: string) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  function submit() {
+    const picked = value.trim();
+    if (!picked) return;
+    onAdd(picked);
+    setValue("");
+  }
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <Input
+        className="font-mono text-xs"
+        value={value}
+        placeholder="填写模型名，例如 gpt-4.1-mini"
+        disabled={disabled}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          submit();
+        }}
+      />
+      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={submit}>
+        添加
+      </Button>
+    </div>
+  );
+}
+
 function AdminAiSettingsPanel({
   settings,
   form,
@@ -2532,6 +2543,7 @@ function AdminAiSettingsPanel({
   onFormChange,
   onFetchModels,
   onPickModel,
+  onRemoveFallbackModel,
   onSave,
   onTest,
 }: {
@@ -2545,6 +2557,7 @@ function AdminAiSettingsPanel({
   onFormChange: (form: AiSettingsForm) => void;
   onFetchModels: (index: number) => void;
   onPickModel: (index: number, modelId: string, target: "primary" | "fallback") => void;
+  onRemoveFallbackModel: (index: number, modelId: string) => void;
   onSave: () => void;
   onTest: () => void;
 }) {
@@ -2654,15 +2667,36 @@ function AdminAiSettingsPanel({
                         onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, baseUrl: event.target.value } : item) })}
                       />
                     </label>
-                    <label className="grid gap-1 text-sm font-medium">
-                      主模型
-                      <Input
-                        value={provider.model}
-                        placeholder="gpt-4.1-mini"
-                        disabled={busy || testing}
-                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, model: event.target.value } : item) })}
-                      />
-                    </label>
+                    <div className="grid gap-1 text-sm font-medium">
+                      <span>主模型</span>
+                      {models.length > 0 ? (
+                        <Select
+                          value={provider.model}
+                          disabled={busy || testing}
+                          onValueChange={(value) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, model: value } : item) })}
+                        >
+                          <SelectTrigger className="w-full font-mono text-xs"><SelectValue placeholder="选择主模型" /></SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            {(models.some((model) => model.id === provider.model) || !provider.model.trim()
+                              ? models
+                              : [{ id: provider.model, ownedBy: null }, ...models]
+                            ).map((model) => (
+                              <SelectItem key={model.id} value={model.id} className="font-mono text-xs">{model.id}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          value={provider.model}
+                          placeholder="gpt-4.1-mini"
+                          disabled={busy || testing}
+                          onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, model: event.target.value } : item) })}
+                        />
+                      )}
+                      <span className="text-xs font-normal text-slate-500">
+                        {models.length > 0 ? "从拉取到的模型列表中选择。" : "先点上方的「拉取模型」获取列表，未拉取时可直接填写模型名。"}
+                      </span>
+                    </div>
                     <label className="grid gap-1 text-sm font-medium">
                       使用密钥
                       <Select
@@ -2682,34 +2716,54 @@ function AdminAiSettingsPanel({
                         </SelectContent>
                       </Select>
                     </label>
-                    <label className="grid gap-1 text-sm font-medium md:col-span-2">
-                      备用模型（一行一个）
-                      <Textarea
-                        className="min-h-16 font-mono text-xs"
-                        value={provider.fallbackModelsText}
-                        placeholder="主模型失败或限流时按顺序再试"
-                        disabled={busy || testing}
-                        onChange={(event) => onFormChange({ ...form, providers: form.providers.map((item, itemIndex) => itemIndex === index ? { ...item, fallbackModelsText: event.target.value } : item) })}
-                      />
-                    </label>
-                  </div>
-                  {models.length > 0 ? (
-                    <div className="mt-3">
-                      <p className="text-xs text-slate-500">可选模型（点击填主模型，按住 Alt 点击加入备用）：</p>
-                      <div className="mt-2 flex max-h-32 flex-wrap gap-1 overflow-auto">
-                        {models.map((model) => (
-                          <button
-                            key={model.id}
-                            type="button"
-                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-xs text-slate-700 hover:border-slate-300"
-                            onClick={(event) => onPickModel(index, model.id, event.altKey ? "fallback" : "primary")}
-                          >
-                            {model.id}
-                          </button>
-                        ))}
+                    <div className="grid gap-2 text-sm font-medium md:col-span-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span>备用模型</span>
+                        <span className="text-xs font-normal text-slate-500">主模型失败或限流时按顺序再试，最多 6 个。</span>
                       </div>
+                      {provider.fallbackModels.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {provider.fallbackModels.map((model) => (
+                            <span key={model} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white py-0.5 pl-2 pr-1 font-mono text-xs text-slate-700">
+                              {model}
+                              <button
+                                type="button"
+                                aria-label={`移除备用模型 ${model}`}
+                                disabled={busy || testing}
+                                className="rounded-full px-1 text-slate-400 transition hover:text-slate-700 disabled:opacity-50"
+                                onClick={() => onRemoveFallbackModel(index, model)}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs font-normal text-slate-500">还没有备用模型。</span>
+                      )}
+                      {models.length > 0 ? (
+                        <Select
+                          value=""
+                          disabled={busy || testing || provider.fallbackModels.length >= 6}
+                          onValueChange={(value) => onPickModel(index, value, "fallback")}
+                        >
+                          <SelectTrigger className="w-full sm:max-w-sm"><SelectValue placeholder="选择备用模型…" /></SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            {models
+                              .filter((model) => model.id !== provider.model && !provider.fallbackModels.includes(model.id))
+                              .map((model) => (
+                                <SelectItem key={model.id} value={model.id} className="font-mono text-xs">{model.id}</SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <FallbackModelInput
+                          disabled={busy || testing || provider.fallbackModels.length >= 6}
+                          onAdd={(modelId) => onPickModel(index, modelId, "fallback")}
+                        />
+                      )}
                     </div>
-                  ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -4504,6 +4558,51 @@ function LogBlock({ title, value }: { title: string; value: unknown }) {
   );
 }
 
+/** 管理页里统一的折叠分区：标题 + 说明 + 可选角标 + 右侧箭头。 */
+function ExpandableSection({
+  title,
+  description,
+  badge,
+  tone = "slate",
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  description?: string;
+  badge?: string;
+  tone?: "slate" | "violet" | "sky" | "amber";
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const toneClass = {
+    slate: "bg-slate-100 text-slate-600",
+    violet: "bg-violet-50 text-violet-700",
+    sky: "bg-sky-50 text-sky-700",
+    amber: "bg-amber-50 text-amber-700",
+  }[tone];
+  return (
+    <section className="rounded-md border border-slate-200 bg-white">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-start justify-between gap-3 px-3 py-3 text-left"
+      >
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          {description ? <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {badge ? <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${toneClass}`}>{badge}</span> : null}
+          <ChevronDownIcon className={`size-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+      {open ? <div className="border-t border-slate-200 px-3 py-3">{children}</div> : null}
+    </section>
+  );
+}
+
 /** 设置页的安静分组：标题 + 一句说明 + 字段，用细线分隔而不是嵌套卡片。 */
 function SettingsSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -4687,7 +4786,7 @@ function aiProviderToForm(provider: AiProviderEndpoint): AiProviderForm {
     provider: provider.provider,
     baseUrl: provider.baseUrl,
     model: provider.model,
-    fallbackModelsText: provider.fallbackModels.join("\n"),
+    fallbackModels: provider.fallbackModels,
     keyIds: provider.keyIds,
   };
 }
@@ -4699,7 +4798,7 @@ function emptyAiProviderForm(): AiProviderForm {
     provider: "openai_compatible",
     baseUrl: "",
     model: "",
-    fallbackModelsText: "",
+    fallbackModels: [],
     keyIds: [],
   };
 }
