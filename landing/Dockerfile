@@ -7,6 +7,7 @@ FROM nginx:1.27-alpine
 
 # Static landing assets (compiled output, not source).
 COPY landing/index.html /usr/share/nginx/html/
+COPY landing/favicon.svg /usr/share/nginx/html/
 COPY landing/assets/ /usr/share/nginx/html/assets/
 COPY landing/robots.txt /usr/share/nginx/html/
 COPY landing/sitemap.xml /usr/share/nginx/html/

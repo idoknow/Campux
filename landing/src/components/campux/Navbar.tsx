@@ -91,19 +91,22 @@ export function Navbar({ theme, resolvedTheme, onToggleTheme, onHomeClick }: Nav
             className="mx-auto hidden items-center gap-1 lg:flex"
           >
             {NAV_LINKS.map((link, index) => {
-              const hiddenWhenCollapsed = index >= 4;
+              const collapsible = index >= 4;
+              const collapsed = collapsible && scrolled;
               return (
                 <a
                   key={link.label}
                   href={link.href}
                   {...(link.external ? { target: '_blank', rel: 'noreferrer' } : {})}
+                  aria-hidden={collapsed || undefined}
+                  tabIndex={collapsed ? -1 : undefined}
                   className={cn(
-                    'flex items-center rounded-full font-medium text-muted-foreground transition-all duration-300 hover:bg-secondary hover:text-primary',
-                    scrolled ? 'px-3 py-1.5 text-[13px]' : 'px-3.5 py-2 text-sm',
-                    hiddenWhenCollapsed &&
-                      (scrolled
-                        ? 'pointer-events-none w-0 overflow-hidden px-0 opacity-0'
-                        : 'pointer-events-auto w-auto opacity-100')
+                    // 收起时用 max-width 过渡（auto 无法参与过渡），并抵消 gap 留白
+                    'flex items-center overflow-hidden whitespace-nowrap rounded-full font-medium text-muted-foreground transition-all duration-300 hover:bg-secondary hover:text-primary',
+                    scrolled ? 'py-1.5 text-[13px]' : 'py-2 text-sm',
+                    collapsed
+                      ? 'pointer-events-none -mr-1 max-w-0 px-0 opacity-0'
+                      : cn('max-w-[7rem] opacity-100', scrolled ? 'px-3' : 'px-3.5')
                   )}
                 >
                   {link.label}
