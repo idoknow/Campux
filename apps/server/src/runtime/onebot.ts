@@ -459,6 +459,7 @@ export function buildReviewHelp(
 ): string {
   return [
     "审核命令：",
+    "#帮助 （查看这份说明，直接发「帮助」或 help 也行）",
     "#通过 <稿件id>",
     "#全部通过",
     "#审核队列",
@@ -1957,6 +1958,14 @@ export class OneBotRuntime {
       const keywordMatches = matchPrivatePostKeywords(plainText, privatePostKeywords);
       const findKeyword = (...names: PrivatePostKeywordName[]) => findPrivatePostKeywordMatch(keywordMatches, ...names);
 
+      // 帮助：发「帮助」「help」「指令」「菜单」或「？」都能看指令清单，带不带 # 都行。
+      // 放在草稿/命令分发之前，保证收稿中发「帮助」不会被当成正文吞掉，也不受自动回复冷却限制。
+      if (isHelpCommandText(plainText)) {
+        const helpStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
+        await this.sendPrivateMessage(botQqUin, userQqUin, formatPrivateHelp(helpStylishEnabled, privatePostKeywords));
+        return;
+      }
+
       // 进行中的投稿状态：取消/撤回/结束/匿名等关键词只有在这个上下文里才有意义，
       // 否则普通闲聊里的「算了」「可以」会被当成投稿指令。
       const draftKey = this.getPrivatePostDraftKey(botQqUin, userQqUin);
@@ -2393,7 +2402,7 @@ export class OneBotRuntime {
         // 保留原有自动回复
         if (!registrationGuidanceHandled && this.shouldSendPrivateAutoReply(bot.id, userQqUin, bot.userMessageReplyCooldownSeconds)) {
           const stylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-          await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(stylishEnabled)).catch(() => undefined);
+          await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(stylishEnabled, privatePostKeywords)).catch(() => undefined);
         }
         return;
       }
@@ -2426,7 +2435,7 @@ export class OneBotRuntime {
         return;
       }
       const generalStylishEnabled = await this.resolveStylishEnabled(bot.tenantId);
-      await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled));
+      await this.sendPrivateMessage(botQqUin, userQqUin, bot.userMessageReply || formatPrivateHelp(generalStylishEnabled, privatePostKeywords));
     } catch (error) {
       this.logger.warn({ error }, "private message handler failed");
       await this.sendPrivateMessage(botQqUin, userQqUin, toErrorMessage(error)).catch(() => undefined);
@@ -3962,6 +3971,16 @@ export class OneBotRuntime {
 
 
     if (!command) {
+      // 审核群里直接发「帮助」/help（不带 # 也行）就回指令清单；仍交给首选 Bot，避免多墙号各回一遍。
+      if (isReviewGroup && isHelpCommandText(plainText)) {
+        if (await this.shouldHandleReviewGroupCommandHere(event, bot, botQqUin, quotedBotSenderQqUin)) {
+          await this.sendGroupMessage(botQqUin, groupId, await this.resolveReviewGroupHelpText(bot, isPrivateReplyGroup)).catch((error) => {
+            this.logger.warn({ error, botQqUin, groupId }, "failed to send review group help");
+          });
+        }
+        return;
+      }
+
       const publishModeSelectionKey = this.getReviewPublishModeSelectionKey(botQqUin, operatorQqUin);
       const pendingPublishModeSelection = this.reviewPublishModeSelections.get(publishModeSelectionKey);
       const normalizedReply = plainText.trim();
@@ -4015,13 +4034,7 @@ export class OneBotRuntime {
 
     // 如果消息 @ 了其他 bot 但不是当前 bot，跳过（对应 bot 会处理）。未 @ 的审核群命令只由租户首选审核通知 Bot 响应，避免多 Bot 重复回复。
     // 私聊转发群不做这层去重：同一群里可能有多个墙号，由 privateForwardMsgIdMap 判定该条转发属于哪个墙号。
-    if (isReviewGroup && !shouldHandleReviewGroupCommandForBot({
-      currentBotId: bot.id,
-      currentBotQqUin: botQqUin,
-      mentionedBotQqUins: readMentionedQqUins(event),
-      preferredBotId: await this.findTenantReviewNotificationBot(bot.tenantId).then((candidate) => candidate?.id ?? null),
-      quotedBotSenderQqUin,
-    })) {
+    if (isReviewGroup && !(await this.shouldHandleReviewGroupCommandHere(event, bot, botQqUin, quotedBotSenderQqUin))) {
       return;
     }
 
@@ -4037,6 +4050,12 @@ export class OneBotRuntime {
       const reviewHelp = buildReviewHelp(reviewPluginFlags, { includePrivateReply: isPrivateReplyGroup });
       // 审核群消息只用开关本身；配置读取失败按关闭处理。
       const stylishEnabled = pluginConfig ? readBotStylishSection(pluginConfig).enabled : false;
+
+      // #帮助 / help：私聊里也能发，群里直接给指令清单，不需要 @ 机器人。
+      if (isHelpCommandText(command.name) || isHelpCommandText(plainText)) {
+        await this.sendGroupMessage(botQqUin, groupId, await this.resolveReviewGroupHelpText(bot, isPrivateReplyGroup));
+        return;
+      }
 
       if (command.name === "全部通过") {
         const result = await approveAllPendingPostsViaBot({
@@ -4768,13 +4787,40 @@ export class OneBotRuntime {
     const savedReply = bot.reviewGroupMessageReply?.trim();
     const forwardTarget = resolvePrivateForwardGroupId(bot);
     const includePrivateReply = forwardTarget !== null && normalizeId(forwardTarget) === normalizeId(bot.reviewGroupId ?? undefined);
-    // 管理员自定义过就照旧用自定义文本；仍是数据库默认文本时改用按插件开关生成的帮助，
-    // 避免默认提示里既缺已启用插件的指令、又宣传已关闭的指令。
-    const reviewHelp = savedReply && savedReply !== defaultReviewGroupMessageReply
-      ? (includePrivateReply ? savedReply : stripPrivateReplyHelpLines(savedReply))
-      : buildReviewHelp(await this.resolveReviewPluginFlags(bot.tenantId), { includePrivateReply });
+    const reviewHelp = await this.resolveReviewGroupHelpText(bot, includePrivateReply);
     await this.sendGroupMessage(botQqUin, groupId, reviewHelp).catch((error) => {
       this.logger.warn({ error, botQqUin, groupId }, "failed to send review group auto reply");
+    });
+  }
+
+  /**
+   * 审核群的指令清单：管理员自定义过就照旧用自定义文本；仍是数据库默认文本时改用按插件开关生成的帮助，
+   * 避免默认提示里既缺已启用插件的指令、又宣传已关闭的指令。
+   */
+  private async resolveReviewGroupHelpText(
+    bot: { tenantId: string; reviewGroupId?: string | null; reviewGroupMessageReply?: string | null },
+    includePrivateReply: boolean,
+  ) {
+    const savedReply = bot.reviewGroupMessageReply?.trim();
+    if (savedReply && savedReply !== defaultReviewGroupMessageReply) {
+      return includePrivateReply ? savedReply : stripPrivateReplyHelpLines(savedReply);
+    }
+    return buildReviewHelp(await this.resolveReviewPluginFlags(bot.tenantId), { includePrivateReply });
+  }
+
+  /** 未 @ 的审核群指令只由租户首选审核通知 Bot 响应，避免多墙号重复回复。 */
+  private async shouldHandleReviewGroupCommandHere(
+    event: OneBotMessageEvent,
+    bot: { id: string; tenantId: string },
+    botQqUin: string,
+    quotedBotSenderQqUin: string | null,
+  ) {
+    return shouldHandleReviewGroupCommandForBot({
+      currentBotId: bot.id,
+      currentBotQqUin: botQqUin,
+      mentionedBotQqUins: readMentionedQqUins(event),
+      preferredBotId: await this.findTenantReviewNotificationBot(bot.tenantId).then((candidate) => candidate?.id ?? null),
+      quotedBotSenderQqUin,
     });
   }
 
@@ -6063,6 +6109,28 @@ function parsePrivateCommand(input: string) {
     name: match[1],
     args: match[2]?.trim() ?? "",
   };
+}
+
+/**
+ * 帮助指令：`帮助`/`help`/`指令`/`命令`/`菜单`/`说明`，带 `#`、`＃`、`/` 前缀也行，
+ * 单独一个 `?`/`？` 也算。用于私聊随时查看指令清单，不依赖自动回复的冷却与关键词配置。
+ */
+const HELP_COMMAND_WORDS = ["帮助", "help", "指令", "命令", "菜单", "说明"];
+
+export function isHelpCommandText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed === "?" || trimmed === "？") {
+    return true;
+  }
+  const normalized = trimmed
+    .toLowerCase()
+    .replace(/^[#＃/]+\s*/, "")
+    .replace(/[\s，。！？!?,、~～…]+$/g, "")
+    .trim();
+  return HELP_COMMAND_WORDS.includes(normalized);
 }
 
 export function parseDisplayId(args: string) {

@@ -8,6 +8,8 @@
  * 风格倾向：简洁、优美、幽默、温暖、活泼。
  */
 
+import { DEFAULT_PRIVATE_POST_KEYWORDS, type PrivatePostKeywords } from "./private-posting";
+
 function pick<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)]!;
 }
@@ -805,39 +807,108 @@ export function formatPrivatePostCancelled(stylishEnabled = false): string {
 
 // ── 对话投稿帮助 ──────────────────────────────────────
 
-const privateHelpDefault = [
-  "首次给墙号发送私聊消息时，系统会自动注册本校园墙的 Campux 账号。",
-  "忘记密码时，请发送 #重置密码 获取新密码。",
-  "想投稿时直接发「投稿」「墙墙」「表白」等关键词即可（带 # 也行），下一句发正文或图片就开始收稿。",
-  "收稿时发「撤回」删掉上一条，发「结束」提交，发「取消」放弃；默认按匿名收录，发「实名」或「匿名」可以随时切换。",
-  "已经发布过的稿件想撤回，发送 #撤回 <稿件编号> 提交撤回申请，审核通过后会自动设为仅自己可见。",
-  "上面这些关键词可以在管理端的对话投稿设置里改成你们墙习惯的说法。",
-].join("\n");
+/** 关键词太长时只列前几个，避免一条私信长得没法读。 */
+function describeKeywords(keywords: string[] | undefined, fallback: string[], limit = 4): string {
+  const cleaned = (keywords && keywords.length > 0 ? keywords : fallback)
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
+  if (cleaned.length === 0) return "";
+  const shown = cleaned.slice(0, limit).join(" / ");
+  return cleaned.length > limit ? `${shown} 等` : shown;
+}
+
+function privateHelpLines(keywords: PrivatePostKeywords): string[] {
+  const start = describeKeywords(keywords.start, DEFAULT_PRIVATE_POST_KEYWORDS.start);
+  const anonymous = describeKeywords(keywords.anonymous, DEFAULT_PRIVATE_POST_KEYWORDS.anonymous, 3);
+  const realname = describeKeywords(keywords.realname, DEFAULT_PRIVATE_POST_KEYWORDS.realname, 3);
+  const undo = describeKeywords(keywords.undo, DEFAULT_PRIVATE_POST_KEYWORDS.undo, 3);
+  const finish = describeKeywords(keywords.finish, DEFAULT_PRIVATE_POST_KEYWORDS.finish, 3);
+  const cancel = describeKeywords(keywords.cancel, DEFAULT_PRIVATE_POST_KEYWORDS.cancel, 3);
+  const confirm = describeKeywords(keywords.confirm, DEFAULT_PRIVATE_POST_KEYWORDS.confirm, 4);
+
+  const lines: string[] = ["可用指令", ""];
+  lines.push("【投稿】");
+  if (start) lines.push(`· ${start} —— 开始投稿，下一句发正文或图片`);
+  const modeWords = [anonymous && `匿名（${anonymous}）`, realname && `实名（${realname}）`].filter(Boolean).join(" / ");
+  if (modeWords) lines.push(`· ${modeWords} —— 选择投稿方式，默认匿名`);
+  if (undo) lines.push(`· ${undo} —— 删掉上一条内容`);
+  if (finish) lines.push(`· ${finish} —— 提交稿件，发出前会先请你确认`);
+  if (cancel) lines.push(`· ${cancel} —— 放弃这次投稿`);
+  if (confirm) lines.push(`· ${confirm} —— 确认发布`);
+
+  lines.push("", "【自己的稿件】");
+  lines.push("· #取消 <稿件编号> —— 取消还在审核中的稿件");
+  lines.push("· #撤回 <稿件编号> —— 申请撤回已发布的稿件，审核通过后设为仅自己可见");
+  lines.push("· #撤回 <理由> <稿件编号> —— 连同理由一起申请，例如「#撤回 发错图了 42」");
+
+  lines.push("", "【账号】");
+  lines.push("· 首次给墙号发私聊消息时，系统会自动注册本校园墙的 Campux 账号");
+  lines.push("· 忘记密码时，请发送 #重置密码 获取新密码");
+
+  lines.push("", "【提示】");
+  lines.push("· 不带 # 的关键词可以在管理端的对话投稿设置里改成你们墙习惯的说法");
+  lines.push("· 稿件编号就是稿件列表里显示的编号；想再看这份说明，发送「帮助」或 help");
+  return lines;
+}
+
+function privateHelpText(keywords: PrivatePostKeywords): string {
+  return privateHelpLines(keywords).join("\n");
+}
+
+const privateHelpDefault = privateHelpText(DEFAULT_PRIVATE_POST_KEYWORDS);
 
 const privateHelpStylish = [
   [
-    "📋 我可以帮你做这些事：",
+    "📋 墙号可用指令",
     "",
-    "首次私聊 — 自动注册本墙 Campux 账号",
-    "忘记密码时发送 #重置密码 — 获取新密码",
-    "投稿 / 墙墙 / 表白 — 开始对话投稿（不带 # 也行）",
-    "匿名 / 实名 — 选投稿方式",
-    "撤回 / 结束 / 取消 — 改稿、提交、放弃",
+    "【投稿】",
+    "· 投稿 / 墙墙 / 表白 —— 开始投稿，下一句发正文或图片",
+    "· 匿名 / 实名 —— 选择投稿方式，默认匿名",
+    "· 撤回 / 结束 / 取消 —— 改稿、提交、放弃",
+    "· 确认 —— 确认发布",
+    "",
+    "【自己的稿件】",
+    "· #取消 <稿件编号> —— 取消还在审核中的稿件",
+    "· #撤回 <稿件编号> —— 申请撤回已发布的稿件",
+    "· #撤回 <理由> <稿件编号> —— 带上理由一起申请",
+    "",
+    "【账号】",
+    "· 首次私聊会自动注册本墙 Campux 账号",
+    "· 忘记密码时发送 #重置密码 获取新密码",
+    "",
+    "【提示】",
+    "· 想再看这份说明，发送「帮助」或 help",
   ].join("\n"),
   [
-    "✨ 试试这些功能吧：",
+    "✨ 需要帮忙？这是我的指令清单",
     "",
-    "• 首次私聊会自动注册本墙 Campux 账号",
-    "• 忘记密码时发送 #重置密码 获取新密码",
-    "• 直接发「投稿」或「表白」+ 正文/图片 — 开始投稿",
-    "• 说「匿名」/「实名」— 切换投稿方式",
-    "• 说「撤回」/「结束」/「取消」— 改稿、提交、放弃",
+    "投稿「投稿」「墙墙」「表白」等关键词，下一句发正文就开始收稿；收稿时发「撤回」删上一条，发「结束」提交，发「取消」放弃。",
+    "默认按匿名收录，发「实名」或「匿名」可以随时切换。",
+    "",
+    "已经发布过的稿件：发「#撤回 <稿件编号>」提交撤回申请，审核通过后会自动设为仅自己可见。",
+    "还在审核中的稿件：发「#取消 <稿件编号>」取消。",
+    "",
+    "账号：首次私聊会自动注册本墙 Campux 账号；忘记密码时请发送 #重置密码。",
+    "这些关键词可以在管理端的对话投稿设置里改成你们墙习惯的说法。",
   ].join("\n"),
   privateHelpDefault,
 ];
 
-export function formatPrivateHelp(stylishEnabled = false): string {
-  if (!stylishEnabled) return privateHelpDefault;
+const PRIVATE_HELP_KEYWORD_GROUPS = ["start", "anonymous", "realname", "cancel", "finish", "undo", "confirm"] as const;
+
+/** 多彩帮助模板里写死了默认关键词的写法，只有配置仍是默认值时才能用。 */
+function usesDefaultKeywords(keywords: PrivatePostKeywords): boolean {
+  return PRIVATE_HELP_KEYWORD_GROUPS.every((group) => {
+    const current = keywords[group] ?? [];
+    const fallback = DEFAULT_PRIVATE_POST_KEYWORDS[group];
+    return current.length === fallback.length && current.every((keyword, index) => keyword === fallback[index]);
+  });
+}
+
+export function formatPrivateHelp(stylishEnabled = false, keywords: PrivatePostKeywords = DEFAULT_PRIVATE_POST_KEYWORDS): string {
+  if (!stylishEnabled) return privateHelpText(keywords);
+  // 自定义过关键词时退化成按配置生成的版本，免得提示里说的词和实际能用的词不一致。
+  if (!usesDefaultKeywords(keywords)) return privateHelpText(keywords);
   return pick(privateHelpStylish);
 }
 

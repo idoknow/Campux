@@ -85,6 +85,38 @@ describe("bot registration messages", () => {
     }
   });
 
+  test("help lists commands with usage, including how to ask for help again", () => {
+    const message = formatPrivateHelp(false);
+
+    expect(message).toContain("help");
+    expect(message).toContain("墙墙投稿 / 投稿 / 墙墙 / 墙 等");
+    expect(message).toContain("#取消 <稿件编号>");
+    expect(message).toContain("#撤回 <稿件编号>");
+    expect(message).toContain("#撤回 <理由> <稿件编号>");
+    expect(message).toContain("确认发布");
+  });
+
+  test("help follows the keywords configured on the admin side", () => {
+    const message = formatPrivateHelp(false, {
+      start: ["开个稿", "投个稿"],
+      anonymous: ["别写我"],
+      realname: ["写我"],
+      cancel: ["不投了"],
+      finish: ["就这样"],
+      undo: ["上一句删掉"],
+      confirm: ["发出去"],
+    });
+
+    expect(message).toContain("开个稿 / 投个稿");
+    expect(message).toContain("匿名（别写我）");
+    expect(message).toContain("实名（写我）");
+    expect(message).toContain("不投了");
+    expect(message).toContain("就这样");
+    expect(message).toContain("上一句删掉");
+    expect(message).toContain("发出去");
+    expect(message).not.toContain("墙墙投稿");
+  });
+
   test("first private message only announces registration when access was created", () => {
     expect(formatFirstPrivateMessageRegistrationNotice({ password: "InitPass9", alreadyHadTenantAccess: false }, loginUrl, false))
       .toContain("InitPass9");

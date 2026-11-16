@@ -8,6 +8,7 @@ import {
   isPrivatePostAiIntakeActive,
   isPrivatePostBareConfirmPhrase,
   isPrivatePostCommandText,
+  isHelpCommandText,
   privatePostSubmitBlockReason,
   shouldAppendPrivatePostContentForSemantic,
   shouldAppendPrivatePostContentWhileAwaitingConfirmation,
@@ -208,6 +209,19 @@ describe("review group ban command parsing", () => {
   test("解析撤回申请处理命令", () => {
     expect(parseReviewGroupCommand("#撤回通过 12")).toEqual({ name: "撤回通过", args: "12" });
     expect(parseReviewGroupCommand("＃撤回拒绝 图片重复 12")).toEqual({ name: "撤回拒绝", args: "图片重复 12" });
+  });
+
+  test("帮助指令可以不带前缀", () => {
+    for (const text of ["帮助", "help", "HELP", "指令", "菜单", "？", "?", "#帮助", "＃help", "/菜单", "  帮助  "]) {
+      expect(isHelpCommandText(text)).toBe(true);
+    }
+    for (const text of ["投稿", "投稿帮助", "帮帮我", "#通过 12", "#回复 帮助", "帮助我看看这条", ""]) {
+      expect(isHelpCommandText(text)).toBe(false);
+    }
+  });
+
+  test("审核群帮助里给出查看帮助的写法", () => {
+    expect(buildReviewHelp({ graduation: false, campaigns: false })).toContain("#帮助");
   });
 
   test("裸 ban/unban 不在通用解析中识别", () => {
