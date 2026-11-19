@@ -1991,7 +1991,8 @@ function findScrollContainer(start: HTMLElement): HTMLElement | null {
   let node: HTMLElement | null = start.parentElement;
   while (node && node !== document.body) {
     const overflowY = getComputedStyle(node).overflowY;
-    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
+    // 只按 overflow 判定，不看当前是否溢出：内容还在加载时高度可能不足，之后变高也不会重新触发。
+    if (overflowY === "auto" || overflowY === "scroll") {
       return node;
     }
     node = node.parentElement;
