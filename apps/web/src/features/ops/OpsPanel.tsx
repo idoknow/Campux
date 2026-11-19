@@ -180,6 +180,7 @@ export function OpsPanel({
   const overviewRequestGate = useRef(createLatestRequestGate());
   const platformFeedbackRequestGate = useRef(createLatestRequestGate());
   const auditRequestGate = useRef(createLatestRequestGate());
+  const auditTenantFilterRef = useRef("");
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -404,7 +405,7 @@ export function OpsPanel({
     }
   }
 
-  async function refreshAudit(page = auditPage, tenantId = auditTenantFilterId) {
+  async function refreshAudit(page = auditPage, tenantId = auditTenantFilterRef.current) {
     const generation = auditRequestGate.current.begin();
     setLoadingAudit(true);
     try {
@@ -562,6 +563,7 @@ export function OpsPanel({
     if (!auditTenantFilterId || visibleTenants.some((tenant) => tenant.id === auditTenantFilterId)) {
       return;
     }
+    auditTenantFilterRef.current = "";
     setAuditTenantFilterId("");
     setAuditPage(1);
   }, [auditTenantFilterId, visibleTenants]);
@@ -819,6 +821,8 @@ ${impact}`)) {
     if (nextTenantId === auditTenantFilterId) {
       return;
     }
+    // 立即同步 ref：之后延迟触发的 refreshAudit 必须按最新的筛选条件查询。
+    auditTenantFilterRef.current = nextTenantId;
     setAuditTenantFilterId(nextTenantId);
     setAuditPage(1);
   }
