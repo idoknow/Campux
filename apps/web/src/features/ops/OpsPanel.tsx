@@ -1348,7 +1348,7 @@ ${impact}`)) {
                       position="popper"
                       align="start"
                       sideOffset={4}
-                      className="max-h-64 w-[var(--radix-select-trigger-width)] overscroll-contain touch-pan-y"
+                      className="max-h-[min(16rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] overscroll-contain touch-pan-y"
                     >
                       <SelectItem value="all">{isSystemMode ? "全部校园墙（含平台操作）" : "全部可管理校园墙"}</SelectItem>
                       {visibleTenants.map((tenant) => (
