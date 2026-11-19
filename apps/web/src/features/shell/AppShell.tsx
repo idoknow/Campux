@@ -120,7 +120,7 @@ export function AppShell({
           onSelectTenant={onSelectTenant}
         />
 
-        <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:mx-auto md:max-w-[980px] md:border-x md:border-slate-200">
+        <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:mx-auto md:max-w-[980px] md:border-x md:border-border">
           <Header me={me} selectedTenant={me.currentTenant} showPet={metadata.enableLingling} onLogout={onLogout} onOpenOps={onOpenOps} onSelectTenant={onSelectTenant} />
 
           <main className="min-h-0 flex-1 overflow-hidden">

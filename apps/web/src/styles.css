@@ -85,6 +85,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-solid: var(--primary-solid);
+  --color-primary-solid-foreground: var(--primary-solid-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -130,6 +132,10 @@
   --popover-foreground: oklch(0.205 0.015 255);
   --primary: oklch(0.58 0.18 250);
   --primary-foreground: oklch(0.99 0 0);
+  /* 实心主色块（按钮、徽标、气泡）专用：白字对比度 ≥ 4.5:1，浅色与暗色各一份。
+     注意 --primary 仍用于链接等文字场景，不要直接改成更深的蓝，否则暗色页面上的链接会变糊。 */
+  --primary-solid: oklch(0.54 0.17 250);
+  --primary-solid-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.93 0.006 255);
   --secondary-foreground: oklch(0.27 0.015 255);
   --muted: oklch(0.925 0.006 255);
@@ -295,6 +301,7 @@
   display: inline-flex;
   width: max-content;
   max-width: 100%;
+  min-width: 0;
   height: 36px;
   align-items: center;
   justify-content: flex-start;
@@ -364,6 +371,9 @@
   --popover-foreground: oklch(0.94 0.01 255);
   --primary: oklch(0.67 0.17 250);
   --primary-foreground: oklch(0.99 0 0);
+  /* 暗色下 0.67 的蓝配白字只有 2.9:1，实心按钮/徽标改用更深的蓝（≈4.8:1）。 */
+  --primary-solid: oklch(0.55 0.16 250);
+  --primary-solid-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.28 0.018 255);
   --secondary-foreground: oklch(0.92 0.012 255);
   --muted: oklch(0.28 0.018 255);
@@ -638,6 +648,12 @@
 
 .dark .fill-slate-400 {
   fill: oklch(0.68 0.018 255) !important;
+}
+
+/* 外观切换器里的「跟随系统」圆钮在亮暗两种主题下都是浅色表面，
+   里面的图标必须固定在它自己的表面上取色，不能跟着页面暗色一起变浅。 */
+.campux-theme-knob-icon {
+  color: oklch(0.446 0.043 257.281);
 }
 
 .dark .shadow-sm,

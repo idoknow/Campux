@@ -70,7 +70,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
           <SunIcon className="size-4 text-amber-600" />
         </span>
         <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${mode === "system" ? "opacity-100" : "opacity-0"}`}>
-          <MonitorIcon className="size-4 text-slate-600" />
+          <MonitorIcon className="size-4 campux-theme-knob-icon" />
         </span>
         <span aria-hidden className={`absolute transition-opacity duration-700 ease-[cubic-bezier(0.65,0,0.35,1)] ${mode === "dark" ? "opacity-100" : "opacity-0"}`}>
           <MoonIcon className="size-4 text-indigo-900/70" />

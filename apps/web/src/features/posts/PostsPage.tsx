@@ -1649,8 +1649,8 @@ export function PostsPage({
               </TabsTrigger>
             ) : null}
           </TabsList>
-          <div className="flex items-center gap-3">
-            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-500" title="开启后，你的每条稿件发布成功时会自动关注其评论，新评论每 12 小时私信提醒你">
+          <div className="flex shrink-0 items-center gap-3">
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap text-xs font-bold text-slate-500" title="开启后，你的每条稿件发布成功时会自动关注其评论，新评论每 12 小时私信提醒你">
               <Switch checked={autoFollowOwnPosts} disabled={autoFollowBusy} onCheckedChange={(value) => void setAutoFollowOwnPosts(value)} />
               <span className="hidden sm:inline">自动关注对我的稿件评论</span>
               <span className="sm:hidden">自动关注</span>
