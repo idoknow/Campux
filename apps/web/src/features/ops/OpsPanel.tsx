@@ -198,6 +198,7 @@ export function OpsPanel({
   const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
   const [auditPage, setAuditPage] = useState(1);
   const [auditTenantFilterId, setAuditTenantFilterId] = useState("");
+  const [auditFilterOpen, setAuditFilterOpen] = useState(false);
   const [platformFeedbackItems, setPlatformFeedbackItems] = useState<PlatformFeedbackItem[]>([]);
   const [platformFeedbackPagination, setPlatformFeedbackPagination] = useState<Pagination>(() => defaultPagination());
   const [platformFeedbackPage, setPlatformFeedbackPage] = useState(1);
@@ -567,6 +568,24 @@ export function OpsPanel({
     setAuditTenantFilterId("");
     setAuditPage(1);
   }, [auditTenantFilterId, visibleTenants]);
+
+  // QQ/微信等 WebView 不一定支持 overscroll-behavior：下拉打开时锁住外层滚动容器，
+  // 让列表内的滑动只滚动列表本身，不会把整页带着一起动。
+  useEffect(() => {
+    if (!auditFilterOpen) {
+      return;
+    }
+    const trigger = document.querySelector<HTMLElement>('[data-slot="select-trigger"][data-state="open"]');
+    const scroller = trigger ? findScrollContainer(trigger) : null;
+    if (!scroller) {
+      return;
+    }
+    const previousOverflow = scroller.style.overflow;
+    scroller.style.overflow = "hidden";
+    return () => {
+      scroller.style.overflow = previousOverflow;
+    };
+  }, [auditFilterOpen]);
 
   useEffect(() => {
     setHostDraft(selectedTenant?.host ?? "");
@@ -1340,7 +1359,7 @@ ${impact}`)) {
                     <FilterIcon className="size-4" />
                     按校园墙筛选
                   </div>
-                  <Select value={auditTenantFilterId || "all"} onValueChange={changeAuditTenantFilter}>
+                  <Select value={auditTenantFilterId || "all"} onValueChange={changeAuditTenantFilter} onOpenChange={setAuditFilterOpen}>
                     <SelectTrigger className="w-full bg-white sm:w-72">
                       <SelectValue placeholder="全部校园墙" />
                     </SelectTrigger>
@@ -1966,6 +1985,18 @@ function GlobalUsersTable({
       <PaginationControls pagination={pagination} busy={loading} onPageChange={onPageChange} />
     </div>
   );
+}
+
+function findScrollContainer(start: HTMLElement): HTMLElement | null {
+  let node: HTMLElement | null = start.parentElement;
+  while (node && node !== document.body) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
 }
 
 function AuditLogTable({
