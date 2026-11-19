@@ -179,6 +179,8 @@ export function OpsPanel({
   const tenantRequestGate = useRef(createLatestRequestGate());
   const overviewRequestGate = useRef(createLatestRequestGate());
   const platformFeedbackRequestGate = useRef(createLatestRequestGate());
+  const auditRequestGate = useRef(createLatestRequestGate());
+  const auditTenantFilterRef = useRef("");
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -195,6 +197,7 @@ export function OpsPanel({
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [auditPagination, setAuditPagination] = useState<Pagination>(() => defaultPagination());
   const [auditPage, setAuditPage] = useState(1);
+  const [auditTenantFilterId, setAuditTenantFilterId] = useState("");
   const [platformFeedbackItems, setPlatformFeedbackItems] = useState<PlatformFeedbackItem[]>([]);
   const [platformFeedbackPagination, setPlatformFeedbackPagination] = useState<Pagination>(() => defaultPagination());
   const [platformFeedbackPage, setPlatformFeedbackPage] = useState(1);
@@ -402,15 +405,32 @@ export function OpsPanel({
     }
   }
 
-  async function refreshAudit(page = auditPage) {
+  async function refreshAudit(page = auditPage, tenantId = auditTenantFilterRef.current) {
+    const generation = auditRequestGate.current.begin();
     setLoadingAudit(true);
     try {
-      const data = await api<{ logs: AuditLogItem[]; pagination: Pagination }>(`/api/system/audit-logs?page=${page}&limit=${auditPagination.limit}`);
+      const params = new URLSearchParams({ page: String(page), limit: String(auditPagination.limit) });
+      if (tenantId) {
+        params.set("tenantId", tenantId);
+      }
+      const data = await api<{ logs: AuditLogItem[]; pagination: Pagination }>(`/api/system/audit-logs?${params.toString()}`);
+      // 切换筛选/翻页时旧请求可能后返回：只接受最后一次请求的结果。
+      if (!auditRequestGate.current.isCurrent(generation)) {
+        return;
+      }
       setAuditLogs(data.logs);
       setAuditPagination(data.pagination);
       setAuditPage(data.pagination.page);
+    } catch (caught) {
+      // 请求失败时清空列表，避免继续显示与当前筛选条件不符的旧记录。
+      if (auditRequestGate.current.isCurrent(generation)) {
+        setAuditLogs([]);
+      }
+      throw caught;
     } finally {
-      setLoadingAudit(false);
+      if (auditRequestGate.current.isCurrent(generation)) {
+        setLoadingAudit(false);
+      }
     }
   }
 
@@ -537,7 +557,16 @@ export function OpsPanel({
     void refreshAudit(auditPage).catch((caught) => {
       toast.error(caught instanceof Error ? caught.message : "无法读取审计日志");
     });
-  }, [auditPage]);
+  }, [auditPage, auditTenantFilterId]);
+
+  useEffect(() => {
+    if (!auditTenantFilterId || visibleTenants.some((tenant) => tenant.id === auditTenantFilterId)) {
+      return;
+    }
+    auditTenantFilterRef.current = "";
+    setAuditTenantFilterId("");
+    setAuditPage(1);
+  }, [auditTenantFilterId, visibleTenants]);
 
   useEffect(() => {
     setHostDraft(selectedTenant?.host ?? "");
@@ -785,6 +814,17 @@ ${impact}`)) {
     setSelectedUserRoleFilters([]);
     writeOpsUserListPreferences(mode, { keyword: userKeyword, tenantFilterId: nextTenantId, roleFilters: [] });
     setUserPage(1);
+  }
+
+  function changeAuditTenantFilter(tenantId: string) {
+    const nextTenantId = tenantId === "all" ? "" : tenantId;
+    if (nextTenantId === auditTenantFilterId) {
+      return;
+    }
+    // 立即同步 ref：之后延迟触发的 refreshAudit 必须按最新的筛选条件查询。
+    auditTenantFilterRef.current = nextTenantId;
+    setAuditTenantFilterId(nextTenantId);
+    setAuditPage(1);
   }
 
   function openMembershipDialog(user: SystemUser) {
@@ -1295,6 +1335,25 @@ ${impact}`)) {
           {activeSection === "audit" ? (
             <Card className="rounded-lg">
               <CardContent className="p-4">
+                <div className="mb-3 flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                    <FilterIcon className="size-4" />
+                    按校园墙筛选
+                  </div>
+                  <Select value={auditTenantFilterId || "all"} onValueChange={changeAuditTenantFilter}>
+                    <SelectTrigger className="w-full bg-white sm:w-72">
+                      <SelectValue placeholder="全部校园墙" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{isSystemMode ? "全部校园墙（含平台操作）" : "全部可管理校园墙"}</SelectItem>
+                      {visibleTenants.map((tenant) => (
+                        <SelectItem key={tenant.id} value={tenant.id}>
+                          {tenant.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <AuditLogTable logs={auditLogs} loading={loadingAudit} pagination={auditPagination} onPageChange={setAuditPage} />
               </CardContent>
             </Card>
