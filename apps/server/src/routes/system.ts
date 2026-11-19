@@ -76,6 +76,10 @@ const systemUsersQuerySchema = paginationQuerySchema.extend({
   tenantId: z.string().optional(),
 });
 
+const auditLogsQuerySchema = paginationQuerySchema.extend({
+  tenantId: z.string().optional(),
+});
+
 const defaultPostRules = [
   "不发布隐私信息、辱骂、人身攻击和未经确认的指控。",
   "寻物招领请写清地点、时间和联系方式。",
@@ -1118,9 +1122,12 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
   app.get("/api/system/audit-logs", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
-    const query = paginationQuerySchema.parse(request.query);
+    const query = auditLogsQuerySchema.parse(request.query);
     const tenantIds = manageableTenantIds(context);
-    const where: Prisma.AuditLogWhereInput = tenantIds === null ? {} : { tenantId: { in: tenantIds } };
+    if (!canReadAuditLogTenant({ manageableTenantIds: tenantIds, tenantId: query.tenantId })) {
+      return reply.code(403).send({ message: "无权查看该校园墙的审计日志" });
+    }
+    const where = buildAuditLogWhere({ manageableTenantIds: tenantIds, tenantId: query.tenantId });
     const [total, logs] = await Promise.all([
       prisma.auditLog.count({ where }),
       prisma.auditLog.findMany({
@@ -1163,6 +1170,21 @@ export function registerSystemRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       })),
     };
   });
+}
+
+export function canReadAuditLogTenant({ manageableTenantIds, tenantId }: { manageableTenantIds: string[] | null; tenantId?: string | null | undefined }) {
+  if (!tenantId) {
+    return true;
+  }
+  return manageableTenantIds === null || manageableTenantIds.includes(tenantId);
+}
+
+export function buildAuditLogWhere({ manageableTenantIds, tenantId }: { manageableTenantIds: string[] | null; tenantId?: string | null | undefined }): Prisma.AuditLogWhereInput {
+  const scope: Prisma.AuditLogWhereInput = manageableTenantIds === null ? {} : { tenantId: { in: manageableTenantIds } };
+  if (!tenantId) {
+    return scope;
+  }
+  return { ...scope, tenantId };
 }
 
 function toPagination(page: number, limit: number, total: number) {
