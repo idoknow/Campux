@@ -1344,7 +1344,12 @@ ${impact}`)) {
                     <SelectTrigger className="w-full bg-white sm:w-72">
                       <SelectValue placeholder="全部校园墙" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent
+                      position="popper"
+                      align="start"
+                      sideOffset={4}
+                      className="max-h-[min(16rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] overscroll-contain touch-pan-y"
+                    >
                       <SelectItem value="all">{isSystemMode ? "全部校园墙（含平台操作）" : "全部可管理校园墙"}</SelectItem>
                       {visibleTenants.map((tenant) => (
                         <SelectItem key={tenant.id} value={tenant.id}>
