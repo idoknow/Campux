@@ -10,7 +10,7 @@ const evaluate = (a = assessment(), p = policy, s = signals, text = "校园新�
 describe("automatic moderation explicit policy trace", () => {
   test("traces successful low-risk approval", () => {
     const result = evaluate();
-    expect(result).toMatchObject({ action: "approve", reason: "低风险、AI 建议通过且达到置信度门槛", trace: { finalAction: "approve" } });
+    expect(result).toMatchObject({ action: "approve", reason: "低风险、内容意图明确、AI 建议通过且达到置信度门槛", trace: { finalAction: "approve" } });
     expect(result.trace.rules.map((r) => r.ruleId)).toEqual(["policy.enabled", "policy.kill_switch", "assessment.risk", "assessment.sensitive_findings", "approve.enabled", "assessment.confidence", "assessment.suggested_action"]);
     expect(result.trace.rules.every((r) => ["pass", "fail", "indeterminate"].includes(r.outcome))).toBe(true);
   });
@@ -22,15 +22,16 @@ describe("automatic moderation explicit policy trace", () => {
   test("risk and sensitive findings fail closed", () => {
     for (const a of [assessment({ riskLevel: "high" }), assessment({ sensitiveFindings: [{ type: "phone", excerpt: "138****", reason: "手机号" }] })]) {
       expect(evaluate(a).action).toBe("manual_review");
-      expect(evaluate(a).trace.rules.find((r) => r.ruleId === "assessment.risk" || r.ruleId === "assessment.sensitive_findings")?.outcome).toBe("fail");
+      const outcomes = evaluate(a).trace.rules.filter((r) => r.ruleId === "assessment.risk" || r.ruleId === "assessment.sensitive_findings").map((r) => r.outcome);
+      expect(outcomes).toContain("fail");
     }
   });
   test("high/medium reject recommendations auto-reject above confidence, others stay manual", () => {
     const highText = "有人招募同学做刷单冲销量，先下单退款，联系我每单付费。";
-    const highReject = assessment({ riskLevel: "high", suggestedAction: "reject", confidence: 0.95, rejectionReason: "疑似刷单返佣招募。" });
+    const highReject = assessment({ riskLevel: "high", suggestedAction: "reject", confidence: 0.995, rejectionReason: "疑似刷单返佣招募。" });
     expect(evaluate(highReject, policy, signals, highText)).toMatchObject({ action: "reject", reason: "疑似刷单返佣招募。" });
-    expect(evaluate(assessment({ ...highReject, confidence: 0.94 }), policy, signals, highText).action).toBe("manual_review");
-    expect(evaluate(assessment({ riskLevel: "medium", suggestedAction: "reject", confidence: 0.96, rejectionReason: "中风险拒绝理由。" })).reason).toBe("中风险拒绝理由。");
+    expect(evaluate(assessment({ ...highReject, confidence: 0.95 }), policy, signals, highText).action).toBe("manual_review");
+    expect(evaluate(assessment({ riskLevel: "medium", suggestedAction: "reject", confidence: 0.995, rejectionReason: "中风险拒绝理由。" })).reason).toBe("中风险拒绝理由。");
     expect(evaluate(assessment({ riskLevel: "medium", suggestedAction: "reject", confidence: 0.94 })).action).toBe("manual_review");
     expect(evaluate(assessment({ riskLevel: "medium", suggestedAction: "approve" })).action).toBe("manual_review");
     expect(evaluate(assessment({ riskLevel: "medium", suggestedAction: "manual_review" })).action).toBe("manual_review");

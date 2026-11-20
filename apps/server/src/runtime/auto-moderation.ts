@@ -105,9 +105,12 @@ export function evaluateAutoModerationDecision(input: {
   if (!policy.autoApproveEnabled) return finish("manual_review", "未启用自动通过");
   if (assessment.suggestedAction !== "approve") return finish("manual_review", "AI 未建议通过");
   if (assessment.confidence < approveThreshold) return finish("manual_review", "AI 通过建议置信度不足");
-    const lowRiskMeaningful = /(?:仅为|只是|属于|内容仅是|表达了|写出了|分享了|通知|寻物|求助|祝福|观点|经历|感受|邀约|表白|告白|新闻|通知|活动|时间|地点|物品|失物|寻人|致谢|感谢)/u.test(assessment.reasons.join(" "));
-    if (!lowRiskMeaningful) return finish("manual_review", "低风险内容信息不足或意图不明确，转人工复审");
-    return finish("approve", "低风险、内容意图明确、AI 建议通过且达到置信度门槛");
+  // 只在 AI 确实给出了理由时判断"理由是否含糊"：没有理由的低风险通过建议不应被当成含糊，
+  // 否则只要 reasons 里没出现白名单词就永远无法自动通过（这正是自动审核全部转人工的原因）。
+  const reasonText = assessment.reasons.join(" ").trim();
+  const ambiguousReason = reasonText.length > 0 && /(?:无法判断|无法确定|不确定|不明确|意图不明|信息不足|内容空洞|难以判断|未说明|无法认定|拿不准)/u.test(reasonText);
+  if (ambiguousReason) return finish("manual_review", "低风险内容信息不足或意图不明确，转人工复审");
+  return finish("approve", "低风险、内容意图明确、AI 建议通过且达到置信度门槛");
 }
 
 export function beijingDayKey(date: Date): string {
