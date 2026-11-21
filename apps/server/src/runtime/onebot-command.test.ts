@@ -9,6 +9,7 @@ import {
   isPrivatePostBareConfirmPhrase,
   isPrivatePostCommandText,
   isHelpCommandText,
+  isReviewGroupHelpCommandText,
   privatePostSubmitBlockReason,
   shouldAppendPrivatePostContentForSemantic,
   shouldAppendPrivatePostContentWhileAwaitingConfirmation,
@@ -217,6 +218,15 @@ describe("review group ban command parsing", () => {
     }
     for (const text of ["投稿", "投稿帮助", "帮帮我", "#通过 12", "#回复 帮助", "帮助我看看这条", ""]) {
       expect(isHelpCommandText(text)).toBe(false);
+    }
+  });
+
+  test("审核群帮助不吃单个问号，其他写法照旧", () => {
+    for (const text of ["帮助", "help", "HELP", "指令", "菜单", "#帮助", "＃help", "/菜单", "  帮助  "]) {
+      expect(isReviewGroupHelpCommandText(text)).toBe(true);
+    }
+    for (const text of ["?", "？", " ？ ", "？ 12号怎么还没过", "投稿", "帮帮我", ""]) {
+      expect(isReviewGroupHelpCommandText(text)).toBe(false);
     }
   });
 
