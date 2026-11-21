@@ -3972,7 +3972,8 @@ export class OneBotRuntime {
 
     if (!command) {
       // 审核群里直接发「帮助」/help（不带 # 也行）就回指令清单；仍交给首选 Bot，避免多墙号各回一遍。
-      if (isReviewGroup && isHelpCommandText(plainText)) {
+      // 单独的「？」不触发：群里问号多是追问稿件，刷清单会打断审核对话。
+      if (isReviewGroup && isReviewGroupHelpCommandText(plainText)) {
         if (await this.shouldHandleReviewGroupCommandHere(event, bot, botQqUin, quotedBotSenderQqUin)) {
           await this.sendGroupMessage(botQqUin, groupId, await this.resolveReviewGroupHelpText(bot, isPrivateReplyGroup)).catch((error) => {
             this.logger.warn({ error, botQqUin, groupId }, "failed to send review group help");
@@ -4051,8 +4052,8 @@ export class OneBotRuntime {
       // 审核群消息只用开关本身；配置读取失败按关闭处理。
       const stylishEnabled = pluginConfig ? readBotStylishSection(pluginConfig).enabled : false;
 
-      // #帮助 / help：私聊里也能发，群里直接给指令清单，不需要 @ 机器人。
-      if (isHelpCommandText(command.name) || isHelpCommandText(plainText)) {
+      // #帮助 / help：私聊里也能发，群里直接给指令清单，不需要 @ 机器人（群里不吃「？」）。
+      if (isReviewGroupHelpCommandText(command.name) || isReviewGroupHelpCommandText(plainText)) {
         await this.sendGroupMessage(botQqUin, groupId, await this.resolveReviewGroupHelpText(bot, isPrivateReplyGroup));
         return;
       }
@@ -6112,18 +6113,20 @@ function parsePrivateCommand(input: string) {
 }
 
 /**
- * 帮助指令：`帮助`/`help`/`指令`/`命令`/`菜单`/`说明`，带 `#`、`＃`、`/` 前缀也行，
- * 单独一个 `?`/`？` 也算。用于私聊随时查看指令清单，不依赖自动回复的冷却与关键词配置。
+ * 帮助指令：`帮助`/`help`/`指令`/`命令`/`菜单`/`说明`，带 `#`、`＃`、`/` 前缀也行。
+ * 私聊里单独一个 `?`/`？` 也算，用于随时查看指令清单，不依赖自动回复的冷却与关键词配置。
+ * 审核群不走问号：群里「？」多是在追问稿件编号/结果，一问就刷一份清单属于误触发，
+ * 所以审核群一侧改为 `allowQuestionMark: false`（见 isReviewGroupHelpCommandText）。
  */
 const HELP_COMMAND_WORDS = ["帮助", "help", "指令", "命令", "菜单", "说明"];
 
-export function isHelpCommandText(text: string) {
+export function isHelpCommandText(text: string, options: { allowQuestionMark?: boolean } = {}) {
   const trimmed = text.trim();
   if (!trimmed) {
     return false;
   }
   if (trimmed === "?" || trimmed === "？") {
-    return true;
+    return options.allowQuestionMark !== false;
   }
   const normalized = trimmed
     .toLowerCase()
@@ -6131,6 +6134,15 @@ export function isHelpCommandText(text: string) {
     .replace(/[\s，。！？!?,、~～…]+$/g, "")
     .trim();
   return HELP_COMMAND_WORDS.includes(normalized);
+}
+
+/**
+ * 审核群的帮助触发词：同私聊，但**不吃单独的「？」「?」**。
+ * 审核群里一个问号通常是在追问某条稿件的处理结果，直接把整份指令清单刷进群会淹没对话。
+ * 想查清单请发「帮助」「help」「#帮助」。
+ */
+export function isReviewGroupHelpCommandText(text: string) {
+  return isHelpCommandText(text, { allowQuestionMark: false });
 }
 
 export function parseDisplayId(args: string) {
