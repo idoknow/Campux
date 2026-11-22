@@ -91,6 +91,7 @@ export default defineConfig({
         items: [
           { text: "运营工作台", link: "/operator/overview" },
           { text: "审核与发布", link: "/operator/review-and-publish" },
+          { text: "无 Bot 模式运营", link: "/operator/no-bot-mode" },
           { text: "机器人管理", link: "/operator/bots" },
           { text: "发布目标与 QZone", link: "/operator/publishing" },
           { text: "成员、封禁与配置", link: "/operator/members-and-settings" },

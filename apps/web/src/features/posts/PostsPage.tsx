@@ -10,6 +10,7 @@ import {
   CopyIcon,
   EyeIcon,
   EyeOffIcon,
+  ExternalLinkIcon,
   FileTextIcon,
   HashIcon,
   HeartIcon,
@@ -36,7 +37,7 @@ import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { statusBadge } from "@/features/services/campaign-types";
 import type { Campaign } from "@/features/services/campaign-types";
-import type { AssignedPostTag, AutoModerationTrace, FeedbackItem, FeedbackMessageItem, Pagination, PendingPublishItem, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
+import type { AssignedPostTag, AutoModerationTrace, FeedbackItem, FeedbackMessageItem, Pagination, PendingPublishContext, PendingPublishItem, PostItem, PostTag, PostsTab, PostTimelineEntry, PublishedFeedItem, ReviewPostItem, TenantRole } from "@/types/app";
 import { canAccess, statusLabels } from "@/lib/app-model";
 import { readListPreferences, writeListPreferences } from "@/lib/list-preferences";
 import { hasAnyQueryParam, readQueryInt, readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -343,17 +344,33 @@ export function PostsPage({
   const [pendingPublishItems, setPendingPublishItems] = useState<PendingPublishItem[]>([]);
   const [pendingPublishPagination, setPendingPublishPagination] = useState<Pagination>(() => defaultPagination());
   const [pendingPublishPage, setPendingPublishPage] = useState(1);
+  const [pendingPublishLimit, setPendingPublishLimit] = useState(10);
+  const [pendingPublishKeyword, setPendingPublishKeyword] = useState("");
+  // 关键词搜索按「回车/点搜索」提交，用 applied 值参与请求，避免逐字打接口。
+  const [pendingPublishKeywordApplied, setPendingPublishKeywordApplied] = useState("");
+  const [pendingPublishAnonymous, setPendingPublishAnonymous] = useState<"all" | "anonymous" | "named">("all");
+  const [pendingPublishWithImages, setPendingPublishWithImages] = useState<"all" | "images" | "text">("all");
+  const [pendingPublishSort, setPendingPublishSort] = useState<"oldest" | "newest" | "images">("oldest");
   const [pendingPublishSelected, setPendingPublishSelected] = useState<Set<string>>(() => new Set());
   const [pendingPublishBatchBusy, setPendingPublishBatchBusy] = useState(false);
   const [pendingPublishFailures, setPendingPublishFailures] = useState<Array<{ id: string; displayId: number | null; reason: string }>>([]);
-  const [pendingResidual, setPendingResidual] = useState<{ operateMode: "bot" | "manual"; residual: number } | null>(null);
+  const [pendingResidual, setPendingResidual] = useState<{ operateMode: "bot" | "manual"; residual: number; inFlight?: number } | null>(null);
+  const [pendingPublishContext, setPendingPublishContext] = useState<PendingPublishContext | null>(null);
+  const [pendingPublishCaptionBusyId, setPendingPublishCaptionBusyId] = useState("");
   const [pendingRequeueBusy, setPendingRequeueBusy] = useState(false);
+  const [pendingHaltBusy, setPendingHaltBusy] = useState(false);
   const [pendingPublishLoading, setPendingPublishLoading] = useState(false);
   const [pendingPublishBusyId, setPendingPublishBusyId] = useState("");
+  // 确认发布后记一笔说说链接：批量场景复用同一个输入框，避免每张卡片各填一次。
+  const [pendingPublishUrl, setPendingPublishUrl] = useState("");
+  const [pendingConfirmAllOpen, setPendingConfirmAllOpen] = useState(false);
+  const [pendingRevertBusyId, setPendingRevertBusyId] = useState("");
   // bot 模式下「待发布」不再是独立页签，并入审核板块的「待发布」筛选；
   // manual 模式保留独立页签作为主工作队列。
   const showPendingPublishTab = isAdmin && pendingResidual?.operateMode !== "bot";
   const reviewPendingPublishActive = isAdmin && pendingResidual?.operateMode === "bot";
+  // 角标在没进过「待发布」页时也要有值（滞留量从 context 预取，列表加载后再用更精确的 total）。
+  const pendingPublishBadgeCount = pendingResidual?.residual ?? pendingPublishPagination.total;
   const [tagMaintenanceDays, setTagMaintenanceDays] = useState("14");
   const [tagMaintenanceBusy, setTagMaintenanceBusy] = useState(false);
   const [tagCreateOpen, setTagCreateOpen] = useState(false);
@@ -372,6 +389,10 @@ export function PostsPage({
   const [busyFollowPostId, setBusyFollowPostId] = useState("");
   const [busyCommentKey, setBusyCommentKey] = useState("");
   const [busyMetricRefreshKey, setBusyMetricRefreshKey] = useState("");
+  // 无 Bot 模式：「已在空间手动删除」确认中的稿件 id，避免重复点。
+  const [busyManualRecallKey, setBusyManualRecallKey] = useState("");
+  // 无 Bot 模式：「退回待发布」处理中的稿件 id。
+  const [busyManualRevertKey, setBusyManualRevertKey] = useState("");
   // 「那年今日」面板在挂载时拉取数据：评论删除 / 指标刷新后递增此 key 强制重挂载重拉。
   const [historyPanelReloadKey, setHistoryPanelReloadKey] = useState(0);
   const [autoFollowBusy, setAutoFollowBusy] = useState(false);
@@ -435,7 +456,20 @@ export function PostsPage({
       return;
     }
     void refreshPendingPublish();
-  }, [showPendingPublishTab, reviewPendingPublishActive, activeTab, reviewStatus, pendingPublishPage, tenantId]);
+  }, [
+    showPendingPublishTab,
+    reviewPendingPublishActive,
+    activeTab,
+    reviewStatus,
+    pendingPublishPage,
+    pendingPublishLimit,
+    pendingPublishAnonymous,
+    pendingPublishWithImages,
+    pendingPublishSort,
+    // 关键词通过 pendingPublishKeywordApplied 触发（回车/点搜索），避免逐字打请求。
+    pendingPublishKeywordApplied,
+    tenantId,
+  ]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -443,13 +477,10 @@ export function PostsPage({
     }
     // 独立读取运营模式：决定「待发布」是独立页签还是审核筛选，不能等面板刷新才拿到。
     let cancelled = false;
-    api<{ operateMode: "bot" | "manual"; residual: number }>("/api/admin/pending-publish/residual")
-      .then((data) => {
-        if (!cancelled) setPendingResidual(data);
-      })
-      .catch(() => {
-        if (!cancelled) setPendingResidual(null);
-      });
+    void loadPendingPublishContext().then((context) => {
+      if (cancelled || !context) return;
+      setPendingResidual({ operateMode: context.operateMode, residual: context.residual });
+    });
     return () => { cancelled = true; };
   }, [isAdmin, tenantId]);
 
@@ -461,18 +492,76 @@ export function PostsPage({
     }
   }, [reviewStatus, isAdmin, pendingResidual]);
 
+  async function loadPendingPublishContext() {
+    try {
+      const context = await api<PendingPublishContext>("/api/admin/pending-publish/context");
+      setPendingPublishContext(context);
+      setPendingResidual({ operateMode: context.operateMode, residual: context.residual });
+      return context;
+    } catch {
+      setPendingPublishContext(null);
+      return null;
+    }
+  }
+
+  async function confirmManualRecallDone(displayId: number, postId: string) {
+    setBusyManualRecallKey(postId);
+    try {
+      await api(`/api/review/posts/${postId}/recall/manual-complete`, { method: "POST" });
+      toast.success(`稿件 #${displayId} 已标记为撤回`);
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "标记撤回失败");
+    } finally {
+      setBusyManualRecallKey("");
+    }
+  }
+
+  /** 无 Bot 模式：管理员手动确认发布的稿件，发现发错时可退回待发布重来。 */
+  async function revertManualPublishByPostId(postId: string, displayId: number) {
+    setBusyManualRevertKey(postId);
+    try {
+      const result = await api<{ ok: boolean; reverted: number; failures: Array<{ reason: string }> }>(
+        "/api/admin/pending-publish/revert",
+        { method: "POST", body: JSON.stringify({ ids: [postId] }) },
+      );
+      if (result.reverted > 0) {
+        toast.success(`稿件 #${displayId} 已退回待发布`);
+      } else {
+        toast.error(result.failures[0]?.reason ?? "退回失败");
+      }
+      await refreshAll();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "退回失败");
+    } finally {
+      setBusyManualRevertKey("");
+    }
+  }
+
   async function refreshPendingPublish() {
     setPendingPublishLoading(true);
     try {
+      const params = new URLSearchParams({
+        page: String(pendingPublishPage),
+        limit: String(pendingPublishLimit),
+        anonymous: pendingPublishAnonymous,
+        withImages: pendingPublishWithImages,
+        sort: pendingPublishSort,
+      });
+      if (pendingPublishKeywordApplied.trim()) {
+        params.set("q", pendingPublishKeywordApplied.trim());
+      }
       const data = await api<{ posts: PendingPublishItem[]; pagination: Pagination }>(
-        `/api/admin/pending-publish?page=${pendingPublishPage}&limit=10`,
+        `/api/admin/pending-publish?${params.toString()}`,
       );
       setPendingPublishItems(data.posts);
       setPendingPublishPagination(data.pagination);
       setPendingPublishSelected(new Set());
-      // 滞留量只在机器人模式下有意义（manual 时所有 approved 本来就在待发布页）。
-      const residual = await api<{ operateMode: "bot" | "manual"; residual: number }>("/api/admin/pending-publish/residual");
-      setPendingResidual(residual);
+      // 滞留量与在途发布量、进站通道一起刷新：切回 bot 模式后要提示补队列。
+      const context = await loadPendingPublishContext();
+      if (context) {
+        setPendingResidual({ operateMode: context.operateMode, residual: context.residual });
+      }
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "无法读取待发布稿件");
     } finally {
@@ -487,10 +576,73 @@ export function PostsPage({
       toast.success(`已补入自动发布队列 ${result.enqueued} 条`);
       setPendingPublishPage(1);
       await refreshPendingPublish();
+      void onRefresh();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "补入发布队列失败");
     } finally {
       setPendingRequeueBusy(false);
+    }
+  }
+
+  /** 切到无 Bot 模式后停止仍在自动队列里的稿件，避免和手动发布重复发说说。 */
+  async function haltInFlightPublishes() {
+    setPendingHaltBusy(true);
+    try {
+      const result = await api<{ ok: boolean; halted: number; total: number }>("/api/admin/pending-publish/halt-in-flight", { method: "POST" });
+      if (result.halted > 0) {
+        toast.success(`已停止 ${result.halted} 条在途自动发布，稿件回到待发布`);
+      } else {
+        toast.info("没有可停止的在途发布（可能已在发送中，需等它结束后再处理）");
+      }
+      setPendingPublishPage(1);
+      await refreshPendingPublish();
+      void onRefresh();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "停止在途发布失败");
+    } finally {
+      setPendingHaltBusy(false);
+    }
+  }
+
+  /** 一键确认全部：先弹二次确认（误点会让整批稿件直接变已发布）。 */
+  async function confirmAllPendingPublish() {
+    setPendingConfirmAllOpen(false);
+    await confirmPendingPublishBulk([]);
+  }
+
+  /** 误点「确认已发布」后的回退：把管理员手动确认的稿件退回待发布。 */
+  async function revertManualPublish(item: PendingPublishItem) {
+    setPendingRevertBusyId(item.id);
+    try {
+      const result = await api<{ ok: boolean; reverted: number; failures: Array<{ reason: string }> }>(
+        "/api/admin/pending-publish/revert",
+        { method: "POST", body: JSON.stringify({ ids: [item.id] }) },
+      );
+      if (result.reverted > 0) {
+        toast.success(`稿件 #${item.displayId} 已退回待发布`);
+        await refreshPendingPublish();
+        void onRefresh();
+      } else {
+        toast.error(result.failures[0]?.reason ?? "退回失败");
+      }
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "退回失败");
+    } finally {
+      setPendingRevertBusyId("");
+    }
+  }
+
+  /** 复制这条稿件的说说文案（模板由墙面设置里的「无 Bot 发布文案」决定）。 */
+  async function copyPendingPublishCaption(item: PendingPublishItem) {
+    setPendingPublishCaptionBusyId(item.id);
+    try {
+      const data = await api<{ caption: string }>(`/api/admin/pending-publish/${item.id}/caption`);
+      await navigator.clipboard.writeText(data.caption);
+      toast.success("说说文案已复制");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "复制文案失败");
+    } finally {
+      setPendingPublishCaptionBusyId("");
     }
   }
 
@@ -505,13 +657,22 @@ export function PostsPage({
         confirmedDisplayIds: number[];
         failed: number;
         failures: Array<{ id: string; displayId: number | null; reason: string; code: string }>;
+        publishUrlIgnored?: boolean;
       }>("/api/admin/pending-publish/confirm", {
         method: "POST",
-        body: JSON.stringify(ids.length > 0 ? { ids } : {}),
+        body: JSON.stringify({
+          ...(ids.length > 0 ? { ids } : {}),
+          ...(pendingPublishUrl.trim() ? { publishUrl: pendingPublishUrl.trim() } : {}),
+        }),
       });
       setPendingPublishFailures(result.failures ?? []);
       if (result.confirmed > 0) {
         toast.success(`已确认 ${result.confirmed} 条稿件`);
+        setPendingPublishUrl("");
+      }
+      // 填了但不是 http(s) 链接：状态已推进，只是链接没记上，如实说明。
+      if (result.publishUrlIgnored) {
+        toast.warning("稿件已确认发布，但说说链接格式不合法（需以 http:// 或 https:// 开头），未记录。");
       }
       if (result.failed > 0) {
         toast.warning(`${result.failed} 条未能确认，详见下方失败列表`);
@@ -544,8 +705,18 @@ export function PostsPage({
   async function confirmManualPublish(item: PendingPublishItem) {
     setPendingPublishBusyId(item.id);
     try {
-      await api(`/api/admin/pending-publish/${item.id}/confirm`, { method: "POST" });
+      const result = await api<{ ok: boolean; manualPublishUrl?: string | null; publishUrlIgnored?: boolean }>(
+        `/api/admin/pending-publish/${item.id}/confirm`,
+        {
+          method: "POST",
+          body: JSON.stringify(pendingPublishUrl.trim() ? { publishUrl: pendingPublishUrl.trim() } : {}),
+        },
+      );
       toast.success(`稿件 #${item.displayId} 已归入已发布`);
+      // 填了但不是 http(s) 链接：状态已推进，只是链接没记上，如实说明。
+      if (result.publishUrlIgnored) {
+        toast.warning("稿件已确认发布，但说说链接格式不合法（需以 http:// 或 https:// 开头），未记录。");
+      }
       setPendingPublishItems((items) => items.filter((entry) => entry.id !== item.id));
       setPendingPublishPagination((pagination) => ({ ...pagination, total: Math.max(0, pagination.total - 1) }));
       if (pendingPublishItems.length === 1 && pendingPublishPage > 1) {
@@ -567,6 +738,8 @@ export function PostsPage({
    */
   function renderPendingPublishPanel() {
     const botMode = pendingResidual?.operateMode === "bot";
+    const ingressMissing = pendingPublishContext?.operateMode === "manual" && pendingPublishContext.ingress.available === false;
+    const inFlight = pendingResidual?.inFlight ?? 0;
     return (
       <>
         <div className="mb-3 flex items-center justify-between gap-2">
@@ -580,6 +753,12 @@ export function PostsPage({
             刷新
           </Button>
         </div>
+        {ingressMissing ? (
+          <div className="mb-3 rounded-md border border-sky-300 bg-sky-50 p-3 text-xs font-semibold text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100">
+            <p className="font-black">这个墙还没有开放任何进站通道，普通同学注册不进来。</p>
+            <p className="mt-1 leading-5">无 Bot 模式没有「私聊墙号自动建号」这条路，请到「管理 · 插件配置」开启「游客投稿」，或开启「聚合登录」并勾选首次扫码自动建号。</p>
+          </div>
+        ) : null}
         {botMode && pendingResidual && pendingResidual.residual > 0 ? (
           <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
             <p>
@@ -594,6 +773,104 @@ export function PostsPage({
               {pendingRequeueBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
               一键补入自动发布队列
             </Button>
+          </div>
+        ) : null}
+        {!botMode && inFlight > 0 ? (
+          <div className="mb-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-xs font-semibold text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+            <p>
+              还有 {inFlight} 条稿件在自动发布队列里。无 Bot 模式下它们不应该继续自动发出，否则可能和你手动发布重复。
+            </p>
+            <Button
+              className="mt-2"
+              size="sm"
+              variant="outline"
+              disabled={pendingHaltBusy}
+              onClick={() => void haltInFlightPublishes()}
+            >
+              {pendingHaltBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+              停止在途自动发布
+            </Button>
+          </div>
+        ) : null}
+        {/* 筛选栏：关键词 / 匿名 / 配图 / 排序 / 每页条数 */}
+        <div className="mb-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-800 dark:bg-slate-950/40 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto]">
+          <input
+            value={pendingPublishKeyword}
+            className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-slate-400"
+            placeholder="按内容、编号或作者搜索"
+            onChange={(event) => setPendingPublishKeyword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              setPendingPublishPage(1);
+              setPendingPublishKeywordApplied(pendingPublishKeyword);
+            }}
+          />
+          <Select value={pendingPublishAnonymous} onValueChange={(value) => { setPendingPublishPage(1); setPendingPublishAnonymous(value as typeof pendingPublishAnonymous); }}>
+            <SelectTrigger className="h-9 w-full bg-white text-xs font-bold"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部稿件</SelectItem>
+              <SelectItem value="anonymous">只看匿名</SelectItem>
+              <SelectItem value="named">只看实名</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={pendingPublishWithImages} onValueChange={(value) => { setPendingPublishPage(1); setPendingPublishWithImages(value as typeof pendingPublishWithImages); }}>
+            <SelectTrigger className="h-9 w-full bg-white text-xs font-bold"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">不限配图</SelectItem>
+              <SelectItem value="images">只看有配图</SelectItem>
+              <SelectItem value="text">只看纯文字</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={pendingPublishSort} onValueChange={(value) => { setPendingPublishPage(1); setPendingPublishSort(value as typeof pendingPublishSort); }}>
+            <SelectTrigger className="h-9 w-full bg-white text-xs font-bold"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="oldest">最早投稿优先</SelectItem>
+              <SelectItem value="newest">最新投稿优先</SelectItem>
+              <SelectItem value="images">优先多图稿件</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <Select value={String(pendingPublishLimit)} onValueChange={(value) => { setPendingPublishPage(1); setPendingPublishLimit(Number(value)); }}>
+              <SelectTrigger className="h-9 w-24 bg-white text-xs font-bold"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {[10, 20, 30, 50].map((size) => (
+                  <SelectItem key={size} value={String(size)}>{size} 条/页</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 shrink-0 font-bold"
+              onClick={() => {
+                setPendingPublishPage(1);
+                setPendingPublishKeywordApplied(pendingPublishKeyword);
+              }}
+            >
+              搜索
+            </Button>
+          </div>
+        </div>
+        {!botMode ? (
+          <div className="mb-3 grid gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900">
+            <p className="font-bold text-slate-600 dark:text-slate-300">
+              说说链接（可不填）：填了会记在这批稿件上，之后可在「已发布」里点开对照；留空直接确认也不影响状态推进。
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={pendingPublishUrl}
+                className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium outline-none focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950"
+                placeholder="可不填。要记录请粘贴完整链接，需以 http:// 或 https:// 开头"
+                onChange={(event) => setPendingPublishUrl(event.target.value)}
+              />
+              {pendingPublishContext?.template ? (
+                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                  文案模板：{pendingPublishContext.template.includePostId ? "#编号" : "无编号"}
+                  {pendingPublishContext.template.customText ? " · 有前缀" : ""}
+                  {pendingPublishContext.template.suffixText ? " · 有后缀" : ""}
+                </span>
+              ) : null}
+            </div>
           </div>
         ) : null}
         {pendingPublishItems.length > 0 && !botMode ? (
@@ -624,7 +901,7 @@ export function PostsPage({
               <Button
                 size="sm"
                 disabled={pendingPublishBatchBusy || pendingPublishPagination.total === 0}
-                onClick={() => void confirmPendingPublishBulk([])}
+                onClick={() => setPendingConfirmAllOpen(true)}
               >
                 {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
                 一键确认全部已发布（{pendingPublishPagination.total}）
@@ -708,7 +985,31 @@ export function PostsPage({
                       loading="lazy"
                     />
                   </a>
-                  <p className="text-xs text-slate-500">附件 {item.attachmentCount} 个</p>
+                  {/* 原图：手动发说说时要连同配图一起发，之前只能看到「附件 N 个」文字。 */}
+                  {item.attachments.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {item.attachments.map((attachment, index) => (
+                        <a
+                          key={`${item.id}-${index}`}
+                          href={attachment.url ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          download={attachment.fileName ?? undefined}
+                          className="block size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950"
+                          title={attachment.fileName ? `查看/保存原图：${attachment.fileName}` : "查看原图"}
+                        >
+                          <img
+                            src={attachment.url ?? ""}
+                            alt={attachment.fileName ?? `配图 ${index + 1}`}
+                            className="size-full object-cover"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-slate-500">附件 {item.attachmentCount} 个（点上方缩略图可查看原图并另存）</p>
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button variant="outline" size="sm" asChild>
                       <a href={`/api/posts/${item.id}/render-preview`} target="_blank" rel="noreferrer">
@@ -723,14 +1024,25 @@ export function PostsPage({
                       </a>
                     </Button>
                     {!botMode ? (
-                      <Button
-                        size="sm"
-                        disabled={pendingPublishBusyId === item.id}
-                        onClick={() => void confirmManualPublish(item)}
-                      >
-                        {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-                        确认已发布
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pendingPublishCaptionBusyId === item.id}
+                          onClick={() => void copyPendingPublishCaption(item)}
+                        >
+                          {pendingPublishCaptionBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CopyIcon className="mr-1 size-4" />}
+                          复制文案
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={pendingPublishBusyId === item.id}
+                          onClick={() => void confirmManualPublish(item)}
+                        >
+                          {pendingPublishBusyId === item.id ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+                          确认已发布
+                        </Button>
+                      </>
                     ) : null}
                   </div>
                 </CardContent>
@@ -1144,11 +1456,17 @@ export function PostsPage({
     setBusyPostId(id);
     const reviewed = detailPostId === id ? detailPost : reviewPosts.find((post) => post.id === id);
     try {
-      await api(`/api/review/posts/${id}/${action}`, {
+      const result = await api<{ ok: boolean; operateMode?: "bot" | "manual" }>(`/api/review/posts/${id}/${action}`, {
         method: "POST",
         body: JSON.stringify(comment ? { comment } : {}),
       });
-      toast.success(action === "approve" ? "已通过，正在生成发布任务。" : "已拒绝。");
+      toast.success(
+        action === "approve"
+          ? (result.operateMode === "manual"
+            ? "已通过，稿件已进入「待发布」，请到待发布页手动发到 QQ 空间。"
+            : "已通过，正在生成发布任务。")
+          : "已拒绝。",
+      );
       if (reviewed?.aiReview?.analysisId) {
         const wantsFeedback = window.confirm("是否记录本次 AI 审核反馈？取消表示暂不反馈，不影响已完成的人工审核。");
         if (wantsFeedback) {
@@ -1171,11 +1489,17 @@ export function PostsPage({
   async function approveAllPosts() {
     setApproveAllBusy(true);
     try {
-      const data = await api<{ ok: boolean; approved: number }>("/api/review/posts/approve-all", {
+      const data = await api<{ ok: boolean; approved: number; operateMode?: "bot" | "manual" }>("/api/review/posts/approve-all", {
         method: "POST",
         body: JSON.stringify({}),
       });
-      toast.success(data.approved > 0 ? `已通过 ${data.approved} 条稿件，正在生成发布任务。` : "当前没有待审核稿件。");
+      toast.success(
+        data.approved > 0
+          ? (data.operateMode === "manual"
+            ? `已通过 ${data.approved} 条稿件，它们已进入「待发布」，请手动发到 QQ 空间。`
+            : `已通过 ${data.approved} 条稿件，正在生成发布任务。`)
+          : "当前没有待审核稿件。",
+      );
       setApproveAllOpen(false);
       await refreshAll();
     } catch (caught) {
@@ -1349,7 +1673,12 @@ export function PostsPage({
       toast.success("已执行撤回。");
       await refreshAll();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "撤回失败");
+      // 无 Bot 模式没有发帖记录：引导去已发布页点「已在空间手动删除」。
+      if (caught instanceof Error && caught.message.includes("没有可撤回的发布记录")) {
+        toast.warning(`${caught.message}。请到 QQ 空间手动删除说说，再在「已发布」里点「已在空间手动删除」完成撤回。`, { duration: 10000 });
+      } else {
+        toast.error(caught instanceof Error ? caught.message : "撤回失败");
+      }
       await refreshAll();
     } finally {
       setBusyPostId("");
@@ -1397,7 +1726,11 @@ export function PostsPage({
       toast.success(options.silent ? "已静默撤回稿件，未通知作者。" : "已撤回稿件。");
       await refreshAll();
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "撤回失败");
+      if (caught instanceof Error && caught.message.includes("没有可撤回的发布记录")) {
+        toast.warning(`${caught.message}。请到 QQ 空间手动删除说说，再在「已发布」里点「已在空间手动删除」完成撤回。`, { duration: 10000 });
+      } else {
+        toast.error(caught instanceof Error ? caught.message : "撤回失败");
+      }
       await refreshAll();
     } finally {
       setBusyPostId("");
@@ -1631,9 +1964,9 @@ export function PostsPage({
             {showPendingPublishTab ? (
               <TabsTrigger value="pendingPublish" className={postTabsTriggerClassName}>
                 待发布
-                {pendingPublishPagination.total > 0 ? (
+                {pendingPublishBadgeCount > 0 ? (
                   <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                    {pendingPublishPagination.total}
+                    {pendingPublishBadgeCount}
                   </span>
                 ) : null}
               </TabsTrigger>
@@ -1799,6 +2132,14 @@ export function PostsPage({
                     metricRefresh={isAdmin && item.posts.length > 0 ? {
                       busy: busyMetricRefreshKey === item.key,
                       onRefresh: () => void refreshPostQzoneMetrics(item.key, item.posts.map((post) => post.id)),
+                    } : null}
+                    recallAction={isAdmin && item.kind === "single" && item.posts[0] && (item.manualPublishUrl || (item.qzoneStats?.targets.length ?? 0) === 0) ? {
+                      busy: busyManualRecallKey === item.posts[0]!.id,
+                      onConfirmDeleted: () => void confirmManualRecallDone(item.posts[0]!.displayId, item.posts[0]!.id),
+                    } : null}
+                    revertAction={isAdmin && item.manualPublishUrl && item.kind === "single" && item.posts[0] ? {
+                      busy: busyManualRevertKey === item.posts[0]!.id,
+                      onRevert: () => void revertManualPublishByPostId(item.posts[0]!.id, item.posts[0]!.displayId),
                     } : null}
                   />
                 ))}
@@ -2436,6 +2777,31 @@ export function PostsPage({
                     : recallConfirm.open && recallConfirm.mode === "admin-silent"
                       ? "确认静默撤回"
                       : "提交申请"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={pendingConfirmAllOpen} onOpenChange={(open) => { if (!pendingPublishBatchBusy) setPendingConfirmAllOpen(open); }}>
+        <DialogContent className="w-[min(460px,calc(100vw-32px))]">
+          <DialogHeader>
+            <DialogTitle>一键确认全部已发布？</DialogTitle>
+            <DialogDescription>
+              当前待发布共 {pendingPublishPagination.total} 条稿件，确认后它们会立刻变成「已发布」并出现在已发布列表里。
+              请确认你已经在 QQ 空间把它们都发出去过——这里只是确认状态，系统不会再自动发一次。
+              误点也没关系：确认后仍可在稿件详情里把「手动确认」的稿件退回待发布。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={pendingPublishBatchBusy} onClick={() => setPendingConfirmAllOpen(false)}>
+              取消
+            </Button>
+            <Button
+              className="font-bold"
+              disabled={pendingPublishBatchBusy}
+              onClick={() => void confirmAllPendingPublish()}
+            >
+              {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
+              确认全部 {pendingPublishPagination.total} 条已发布
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3247,6 +3613,27 @@ function PostCard({
 
         {post.status === "pending_recall" ? <RecallReasonBlock reason={post.recallReason} /> : null}
 
+        {/* 拒绝理由回显：无 Bot 模式没有私聊通道，用户只能在这里看到为什么被拒。 */}
+        {post.status === "rejected" && post.rejectReason ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 dark:border-red-900 dark:bg-red-950/40">
+            <p className="text-xs font-black text-red-800 dark:text-red-200">审核未通过</p>
+            <p className="mt-1 whitespace-pre-wrap break-words text-xs font-semibold leading-5 text-red-700 dark:text-red-300">{post.rejectReason}</p>
+          </div>
+        ) : null}
+
+        {/* 无 Bot 模式：管理员确认发布时记录的说说链接 */}
+        {post.manualPublishUrl ? (
+          <a
+            href={post.manualPublishUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-semibold text-sky-700 underline-offset-4 hover:underline dark:text-sky-300"
+          >
+            <ExternalLinkIcon className="size-3.5 shrink-0" />
+            查看这条说说
+          </a>
+        ) : null}
+
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs font-bold text-slate-500">
           <span className="inline-flex items-center gap-1">
             <ClockIcon className="size-3.5" />
@@ -3540,6 +3927,8 @@ function PublishedFeedCard({
   onImagePreview,
   commentModeration,
   metricRefresh,
+  recallAction,
+  revertAction,
 }: {
   item: PublishedFeedItem;
   canViewIdentity: boolean;
@@ -3547,6 +3936,10 @@ function PublishedFeedCard({
   onImagePreview: (images: PostImage[], index: number, title: string) => void;
   commentModeration: CommentModeration | null;
   metricRefresh: { busy: boolean; onRefresh: () => void } | null;
+  /** 无 Bot 模式：管理员手动发出去的稿件，只能到空间删完后回来确认。 */
+  recallAction?: { busy: boolean; onConfirmDeleted: () => void } | null;
+  /** 无 Bot 模式：管理员手动确认的稿件可以退回待发布（发错了重来）。 */
+  revertAction?: { busy: boolean; onRevert: () => void } | null;
 }) {
   const isBatch = item.kind === "batch";
   // 管理员可删任意稿件评论：取首条稿件 id 当接口参数（服务端按角色放行）。
@@ -3589,6 +3982,74 @@ function PublishedFeedCard({
             <span className="text-xs font-semibold text-slate-400">发布于 {formatFullDateTime(item.publishedAt)}</span>
           </span>
         </div>
+
+        {/* 无 Bot 模式：管理员手动发布时记录的说说链接 */}
+        {item.manualPublishUrl ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs dark:border-sky-900 dark:bg-sky-950/40">
+            <span className="font-bold text-sky-800 dark:text-sky-200">手动发布记录</span>
+            <a
+              href={item.manualPublishUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-w-0 items-center gap-1 truncate font-semibold text-sky-700 underline-offset-4 hover:underline dark:text-sky-300"
+            >
+              <ExternalLinkIcon className="size-3.5 shrink-0" />
+              打开这条说说
+            </a>
+            {recallAction ? (
+              <Button
+                className="ml-auto"
+                variant="outline"
+                size="sm"
+                disabled={recallAction.busy}
+                onClick={() => recallAction.onConfirmDeleted()}
+              >
+                {recallAction.busy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+                已在空间手动删除
+              </Button>
+            ) : null}
+            {revertAction ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={revertAction.busy}
+                title="发错了？退回「待发布」重新发一遍"
+                onClick={() => revertAction.onRevert()}
+              >
+                {revertAction.busy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+                退回待发布
+              </Button>
+            ) : null}
+          </div>
+        ) : recallAction ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+            <span className="min-w-0 font-semibold text-slate-600 dark:text-slate-300">
+              这条稿件是手动发到 QQ 空间的，系统没有发帖记录、无法自动删除。请到空间删除说说后点右侧确认。
+            </span>
+            <Button
+              className="ml-auto"
+              variant="outline"
+              size="sm"
+              disabled={recallAction.busy}
+              onClick={() => recallAction.onConfirmDeleted()}
+            >
+              {recallAction.busy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+              已在空间手动删除
+            </Button>
+            {revertAction ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={revertAction.busy}
+                title="发错了？退回「待发布」重新发一遍"
+                onClick={() => revertAction.onRevert()}
+              >
+                {revertAction.busy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
+                退回待发布
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
         {isBatch ? (
           <div className="grid gap-3 divide-y divide-slate-100">

@@ -58,6 +58,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RegistrationSettingsPanel } from "./RegistrationSettingsPanel";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -88,6 +89,9 @@ type TenantSettingsForm = {
   followedPostCommentNotifyEnabled: boolean;
   // manual = 无 Bot 模式：审核通过的稿件进待发布列表，不再自动入队。
   operateMode: "bot" | "manual";
+  // 无 Bot 模式手动发说说用的文案模板与渲染图角落墙号 QQ。
+  manualPublishTemplate: { customText: string; suffixText: string; includePostId: boolean; includeAuthorQq: boolean };
+  manualWallQq: string;
 };
 
 type BanForm = {
@@ -654,6 +658,7 @@ export function AdminPage({
     }
     const imageMaxSizeMb = normalizeImageMaxSizeDraft(imageMaxSizeDraft, form.imageMaxSizeMb);
     setImageMaxSizeDraft(String(imageMaxSizeMb));
+    const operateModeChanged = (metadata.operateMode ?? "bot") !== form.operateMode;
     setBusy(true);
     try {
       await api("/api/admin/tenant/metadata", {
@@ -680,15 +685,87 @@ export function AdminPage({
           publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
           followedPostCommentNotifyEnabled: form.followedPostCommentNotifyEnabled,
           operateMode: form.operateMode,
+          manualPublishTemplate: form.manualPublishTemplate,
+          manualWallQq: form.manualWallQq,
         }),
       });
       await onSaved();
       toast.success("墙面设置已保存。");
+      // 切模式后立刻把待发布/在途发布的状态拉一次，提示「滞留」或「仍在自动发」。
+      if (operateModeChanged) {
+        notifyAccountMergePrompt();
+        await reportOperateModeSideEffects(form.operateMode);
+      }
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "保存失败");
+      // 进站通道未开时服务端返回 409 + NO_USER_INGRESS：引导运营者先开插件，或确认照常切换。
+      if (caught instanceof Error && caught.message.includes("无 Bot 模式需要至少一条用户自助进站通道")) {
+        await confirmOperateModeWithoutIngress();
+      } else {
+        toast.error(caught instanceof Error ? caught.message : "保存失败");
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  /** 没有游客投稿/聚合登录建号时，切换 manual 需要运营者明确确认。 */
+  async function confirmOperateModeWithoutIngress() {
+    const confirmed = window.confirm(
+      "这个校园墙还没有开启任何用户自助进站通道（游客投稿 / 聚合登录自动建号）。\n"
+      + "无 Bot 模式没有「私聊墙号自动建号」，普通同学将无法注册进入本墙，管理员也无法代为创建账号。\n\n"
+      + "仍然切换到无 Bot 模式吗？（建议先去「插件配置」开启游客投稿）",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/admin/tenant/metadata", {
+        method: "PATCH",
+        body: JSON.stringify({
+          operateMode: "manual",
+          confirmNoIngress: true,
+        }),
+      });
+      await onSaved();
+      toast.success("已切换到无 Bot 模式（未开启进站通道，请尽快补齐游客投稿）");
+      await reportOperateModeSideEffects("manual");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "切换运营模式失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** 切换运营模式后的提醒：manual 提示在途自动发布，bot 提示滞留稿件。 */
+  async function reportOperateModeSideEffects(nextMode: "bot" | "manual") {
+    try {
+      const residual = await api<{ operateMode: "bot" | "manual"; residual: number; inFlight: number }>("/api/admin/pending-publish/residual");
+      if (nextMode === "manual" && residual.inFlight > 0) {
+        toast.warning(`还有 ${residual.inFlight} 条稿件在自动发布队列里，请到「稿件 · 待发布」点「停止在途自动发布」，避免和手动发布重复。`, { duration: 10000 });
+      }
+      if (nextMode === "bot" && residual.residual > 0) {
+        toast.warning(`有 ${residual.residual} 条待发布稿件没有进入自动队列，请到「稿件 · 待发布」一键补投。`, { duration: 10000 });
+      }
+    } catch {
+      // 提示失败不影响保存结果。
+    }
+  }
+
+  /**
+   * 切换运营模式时告诉运营者：普通用户下次登录会被询问是否绑定旧账号。
+   * 这是有意的产品行为（模式切换往往伴随账号重复），运营者需要知情。
+   */
+  function notifyAccountMergePrompt() {
+    void api<{ enabled: boolean }>("/api/admin/registration-settings")
+      .then(() => {
+        toast.info(
+          "提醒：切换运营模式后，还没绑定邮箱的普通用户下次登录时会被询问是否绑定「之前的账号」。"
+          + "已绑邮箱或已合并过的账号不会再被询问。",
+          { duration: 12000 },
+        );
+      })
+      .catch(() => undefined);
   }
 
   async function saveOAuthSettings(nextSettings: OAuthServerSettings) {
@@ -1380,9 +1457,11 @@ export function AdminPage({
             <TabsContent value="metadata" className="relative mt-4 min-h-0 flex-1 overflow-y-auto pb-24 pr-1 md:pb-6">
               <div className="flex flex-col gap-4">
                 <MetadataPanel
+                  tenantId={selectedTenant.id}
                   form={form}
                   imageMaxSizeDraft={imageMaxSizeDraft}
                   busy={busy}
+                  hasIngress={Boolean(metadata.enableGuestSubmission || metadata.enableAggregateLogin)}
                   onFormChange={setForm}
                   onImageMaxSizeDraftChange={setImageMaxSizeDraft}
                   onImageMaxSizeDraftCommit={() => {
@@ -2046,18 +2125,23 @@ function BansPanel({
 }
 
 function MetadataPanel({
+  tenantId,
   form,
   imageMaxSizeDraft,
   busy,
+  hasIngress,
   onFormChange,
   onImageMaxSizeDraftChange,
   onImageMaxSizeDraftCommit,
   onSave,
   onUploaded,
 }: {
+  tenantId: string;
   form: TenantSettingsForm;
   imageMaxSizeDraft: string;
   busy: boolean;
+  /** 是否已开启任一自助进站通道（游客投稿 / 聚合登录自动建号）。 */
+  hasIngress: boolean;
   onFormChange: (form: TenantSettingsForm) => void;
   onImageMaxSizeDraftChange: (value: string) => void;
   onImageMaxSizeDraftCommit: () => void;
@@ -2245,6 +2329,13 @@ function MetadataPanel({
             </div>
           </SettingsSection>
 
+          <SettingsSection
+            title="注册与邮箱验证"
+            description="控制同学怎么注册进墙：是否需要邮箱验证码、接受哪些邮箱后缀、用哪套发件服务。"
+          >
+            <RegistrationSettingsPanel tenantId={tenantId} busy={busy} />
+          </SettingsSection>
+
           <SettingsSection title="发布与通知" description="审核通过后怎么发到 QQ 空间、自动发布节奏和通知开关。">
             <div className="grid gap-3">
               <SettingsField label="运营模式" hint="无 Bot 模式不接入墙号机器人：审核通过的稿件停在「稿件 · 待发布」，由管理员渲染、手动发出后点「确认已发布」。">
@@ -2258,6 +2349,84 @@ function MetadataPanel({
                   ]}
                 />
               </SettingsField>
+              {form.operateMode === "manual" ? (
+                <div className="grid gap-3 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-3 dark:border-sky-900 dark:bg-sky-950/30">
+                  <p className="text-xs font-bold leading-5 text-sky-900 dark:text-sky-100">
+                    无 Bot 模式补充设置。普通同学靠「游客投稿」或「聚合登录自动建号」进站，
+                    审核通过后管理员在「稿件 · 待发布」渲染图片、复制文案、手动发到 QQ 空间再回来确认。
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-medium">
+                      墙号 QQ（渲染图角落）
+                      <Input
+                        value={form.manualWallQq}
+                        disabled={busy}
+                        inputMode="numeric"
+                        placeholder="例如 123456789"
+                        onChange={(event) => onFormChange({ ...form, manualWallQq: event.target.value.replace(/\D/g, "") })}
+                      />
+                      <span className="text-xs font-normal text-slate-500">留空则渲染图角落使用默认头像。</span>
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      说说文案前缀（可选）
+                      <Input
+                        value={form.manualPublishTemplate.customText}
+                        disabled={busy}
+                        maxLength={200}
+                        placeholder="例如：#校园墙投稿"
+                        onChange={(event) => onFormChange({
+                          ...form,
+                          manualPublishTemplate: { ...form.manualPublishTemplate, customText: event.target.value },
+                        })}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      说说文案后缀（可选）
+                      <Input
+                        value={form.manualPublishTemplate.suffixText}
+                        disabled={busy}
+                        maxLength={200}
+                        placeholder="例如：欢迎私信投稿"
+                        onChange={(event) => onFormChange({
+                          ...form,
+                          manualPublishTemplate: { ...form.manualPublishTemplate, suffixText: event.target.value },
+                        })}
+                      />
+                    </label>
+                    <div className="grid content-start gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={form.manualPublishTemplate.includePostId}
+                          disabled={busy}
+                          onChange={(event) => onFormChange({
+                            ...form,
+                            manualPublishTemplate: { ...form.manualPublishTemplate, includePostId: event.target.checked },
+                          })}
+                        />
+                        文案里带「#稿件编号」
+                      </label>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={form.manualPublishTemplate.includeAuthorQq}
+                          disabled={busy}
+                          onChange={(event) => onFormChange({
+                            ...form,
+                            manualPublishTemplate: { ...form.manualPublishTemplate, includeAuthorQq: event.target.checked },
+                          })}
+                        />
+                        实名稿件文案里带「@作者QQ」（匿名稿件不会带）
+                      </label>
+                    </div>
+                  </div>
+                  {!hasIngress ? (
+                    <p className="rounded-md bg-amber-100 px-2 py-1.5 text-xs font-bold text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+                      当前没有开启任何自助进站通道：请到「插件配置」开启「游客投稿」，否则普通同学无法注册进入本墙。
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <SettingsField label="发布模式" hint="控制审核通过的稿件如何发到 QQ 空间说说。">
                 <ChoiceGroup
                   value={form.publishMode}
@@ -4776,6 +4945,8 @@ function toForm(selectedTenant: TenantSummary, metadata: TenantMetadata): Tenant
     publishLlmSummaryEnabled: metadata.publishLlmSummaryEnabled,
     followedPostCommentNotifyEnabled: metadata.followedPostCommentNotifyEnabled,
     operateMode: metadata.operateMode ?? "bot",
+    manualPublishTemplate: metadata.manualPublishTemplate ?? { customText: "", suffixText: "", includePostId: true, includeAuthorQq: false },
+    manualWallQq: metadata.manualWallQq ?? "",
   };
 }
 

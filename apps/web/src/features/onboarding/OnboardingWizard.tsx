@@ -286,6 +286,8 @@ export function OnboardingWizard({
   }
 
   const visibleSteps = operateMode === "manual" ? STEP_ORDER.filter((item) => item !== "publish") : STEP_ORDER;
+  // 步骤号按可见步骤算：无 Bot 模式跳过「配置发布到空间」，完成步应是第 3 步而不是第 4 步。
+  const stepNumber = (key: WizardStep) => visibleSteps.indexOf(key) + 1;
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
@@ -436,7 +438,7 @@ export function OnboardingWizard({
 
           {step === "publish" ? (
             <section className="grid gap-4">
-              <StepTitle index={3} title="配置发布到 QQ 空间" hint="扫码登录墙号 QQ 空间，稿件审核通过后才能自动发布。可以稍后再配置。" />
+              <StepTitle index={stepNumber("publish")} title="配置发布到 QQ 空间" hint="扫码登录墙号 QQ 空间，稿件审核通过后才能自动发布。可以稍后再配置。" />
               <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -510,11 +512,15 @@ export function OnboardingWizard({
               <div className="mx-auto grid size-12 place-items-center rounded-full bg-green-50 text-green-600 ring-1 ring-green-200">
                 <CheckIcon className="size-6" />
               </div>
-              <StepTitle index={4} title="开通完成" hint={operateMode === "manual" ? "已选择无 Bot 模式：审核通过的稿件会进入「待发布」，由管理员手动发布并确认。" : "墙号已接入，校园墙可以开始收稿了。"} center />
+              <StepTitle index={stepNumber("done")} title="开通完成" hint={operateMode === "manual" ? "已选择无 Bot 模式：审核通过的稿件会进入「待发布」，由管理员手动发布并确认。" : "墙号已接入，校园墙可以开始收稿了。"} center />
               {operateMode === "manual" ? (
-                <p className="text-xs font-semibold text-sky-700 dark:text-sky-300">
-                  别忘了在「管理 · 插件配置」里按需开启「游客投稿」，让普通同学用 QQ 号、用户名和密码自行注册登录投稿。
-                </p>
+                <div className="grid gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-left dark:border-sky-900 dark:bg-sky-950/40">
+                  <p className="text-xs font-black text-sky-900 dark:text-sky-100">下一步：让普通同学能注册进来</p>
+                  <p className="text-xs font-semibold leading-5 text-sky-800 dark:text-sky-200">
+                    无 Bot 模式没有「私聊墙号自动建号」。请到「管理 · 插件配置」开启「游客投稿」，让同学用 QQ 号 + 用户名 + 密码自助注册；
+                    或开启「聚合登录」并勾选「首次扫码自动建号」。
+                  </p>
+                </div>
               ) : null}
               {!publishReady && operateMode !== "manual" ? (
                 <p className="text-xs font-semibold text-amber-600">提示：还没有配置 QQ 空间登录态，审核通过的稿件暂时无法自动发布。进入后可在「发布管理」补上。</p>

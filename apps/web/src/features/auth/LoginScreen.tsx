@@ -74,7 +74,12 @@ export function LoginScreen({
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<"login" | "register" | "tenantRegister" | "forgot">("login");
   const [loginError, setLoginError] = useState("");
-  const [tenantRegistration, setTenantRegistration] = useState<{ enabled: boolean; operateMode: "bot" | "manual" } | null>(null);
+  const [tenantRegistration, setTenantRegistration] = useState<{
+    enabled: boolean;
+    operateMode: "bot" | "manual";
+    emailRequired?: boolean;
+    allowedEmailSuffixes?: string[];
+  } | null>(null);
   const displayError = loginError || error;
 
   // 游客投稿开关由本墙管理员控制；未登录时只读查询一次，用于决定是否展示注册入口。
@@ -82,7 +87,7 @@ export function LoginScreen({
   // 多租户管理域名下服务端解析不到单墙租户，会返回 enabled=false。
   useEffect(() => {
     let cancelled = false;
-    void api<{ enabled: boolean; operateMode: "bot" | "manual" }>("/api/auth/tenant-registration")
+    void api<{ enabled: boolean; operateMode: "bot" | "manual"; emailRequired?: boolean; allowedEmailSuffixes?: string[] }>("/api/auth/tenant-registration")
       .then((data) => {
         if (!cancelled) setTenantRegistration(data);
       })
@@ -175,14 +180,20 @@ export function LoginScreen({
               <div>
                 <p className="text-lg font-semibold text-slate-950">注册 {title} 账号</p>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  用 QQ 号作为账号，设置用户名和密码后即可登录投稿。如果已经通过墙号机器人建过号，请直接登录。
+                  用 QQ 号、用户名和密码注册
+                  {tenantRegistration?.emailRequired ? "，并通过邮箱验证码验证邮箱归属" : ""}。
+                  如果已经通过墙号机器人建过号，请直接登录。
                 </p>
               </div>
               <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("login")}>
                 返回登录
               </button>
             </div>
-            <TenantRegisterPanel onRegistered={onRegistered} />
+            <TenantRegisterPanel
+              onRegistered={onRegistered}
+              emailRequired={Boolean(tenantRegistration?.emailRequired)}
+              allowedSuffixes={tenantRegistration?.allowedEmailSuffixes ?? []}
+            />
           </div>
         ) : managementHost && view === "register" ? (
           <div className="product-surface px-4 py-5">
@@ -203,7 +214,7 @@ export function LoginScreen({
           <>
             <form className="product-surface px-4 py-5" onSubmit={handleSubmit}>
               <p className="text-lg font-semibold text-slate-950">登录到 {title}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">输入 QQ 号或邮箱，以及你的账号密码。</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">用 QQ 号或邮箱，加上你的密码登录。</p>
               <div className="mt-5 grid gap-3">
                 <Input value={account} name="username" autoComplete="username" placeholder="QQ 号 / 邮箱" onChange={(event) => handleAccountChange(event.target.value)} />
                 <Input value={password} name="password" autoComplete="current-password" type="password" placeholder="密码" onChange={(event) => handlePasswordChange(event.target.value)} />
@@ -260,7 +271,8 @@ export function LoginScreen({
                   <div>
                     <p className="text-sm font-bold text-slate-950">还没有账号？</p>
                     <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
-                      本墙已开放游客注册：用 QQ 号设置用户名和密码，注册后即可登录投稿。
+                      本墙已开放注册：用 QQ 号、用户名和密码注册，注册后即可登录投稿
+                      {tenantRegistration?.emailRequired ? "（需要邮箱验证码）" : ""}。
                     </p>
                   </div>
                   <button type="button" className="shrink-0 text-sm font-semibold text-blue-700" onClick={() => setView("tenantRegister")}>
@@ -392,12 +404,45 @@ function ForgotPasswordPanel() {
   );
 }
 
-function TenantRegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse) => void }) {
+function TenantRegisterPanel({
+  onRegistered,
+  emailRequired,
+  allowedSuffixes,
+}: {
+  onRegistered: (data: MeResponse) => void;
+  emailRequired: boolean;
+  allowedSuffixes: string[];
+}) {
   const [qqUin, setQqUin] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // 填的是 <QQ号>@qq.com 时必须与登记的 QQ 号一致，这里提前给出提示。
+  const qqEmailPrefix = /^([1-9]\d{4,11})@qq\.com$/i.exec(email.trim())?.[1] ?? null;
+  const qqEmailMismatch = qqEmailPrefix !== null && qqUin.length > 0 && qqEmailPrefix !== qqUin;
+
+  async function requestCode() {
+    setSendingCode(true);
+    setMessage("");
+    try {
+      const data = await api<{ ok: boolean; email: string; expiresInSeconds: number }>(
+        "/api/auth/tenant-register/request-code",
+        { method: "POST", body: JSON.stringify({ email: email.trim(), qqUin: qqUin || undefined }) },
+      );
+      setCodeSent(true);
+      setMessage(`验证码已发送到 ${data.email}，${Math.round(data.expiresInSeconds / 60)} 分钟内有效。`);
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "验证码发送失败");
+    } finally {
+      setSendingCode(false);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -406,7 +451,12 @@ function TenantRegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse
     try {
       const data = await api<MeResponse>("/api/auth/tenant-register", {
         method: "POST",
-        body: JSON.stringify({ qqUin, displayName, password }),
+        body: JSON.stringify({
+          qqUin,
+          displayName,
+          password,
+          ...(emailRequired ? { email: email.trim(), code: code.trim() } : {}),
+        }),
       });
       onRegistered(data);
     } catch (caught) {
@@ -416,17 +466,63 @@ function TenantRegisterPanel({ onRegistered }: { onRegistered: (data: MeResponse
     }
   }
 
+  const emailOk = !emailRequired || (email.trim().length > 0 && code.trim().length === 6);
+  const canSubmit = !busy
+    && qqUin.length >= 5
+    && displayName.trim().length > 0
+    && password.length >= 6
+    && emailOk
+    && !qqEmailMismatch;
+
   return (
     <form className="mt-4 grid gap-3" onSubmit={submit}>
       <Input value={qqUin} inputMode="numeric" placeholder="QQ 号" onChange={(event) => setQqUin(event.target.value.replace(/\D/g, ""))} />
       <Input value={displayName} placeholder="用户名（对外展示的名称）" maxLength={80} onChange={(event) => setDisplayName(event.target.value)} />
       <Input value={password} type="password" placeholder="密码，至少 6 位" onChange={(event) => setPassword(event.target.value)} />
-      {message ? <p className="text-sm font-medium text-red-600">{message}</p> : null}
-      <Button
-        className="font-medium"
-        disabled={busy || qqUin.length < 5 || displayName.trim().length === 0 || password.length < 6}
-        type="submit"
-      >
+      {emailRequired ? (
+        <>
+          <div className="grid gap-1">
+            <Input
+              value={email}
+              type="email"
+              placeholder="邮箱"
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setCodeSent(false);
+              }}
+            />
+            <p className="text-xs font-semibold leading-5 text-slate-500">
+              {allowedSuffixes.length === 0
+                ? "本墙不限制邮箱后缀，任意合法邮箱都可以。"
+                : `本墙只接受这些后缀：${allowedSuffixes.map((s) => `@${s}`).join("、")}`}
+            </p>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+            <Input
+              value={code}
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="邮箱验证码"
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={sendingCode || email.trim().length === 0 || qqEmailMismatch}
+              onClick={() => void requestCode()}
+            >
+              {sendingCode ? "发送中" : codeSent ? "重新发送" : "获取验证码"}
+            </Button>
+          </div>
+          {qqEmailMismatch ? (
+            <p className="rounded-md bg-amber-50 px-2.5 py-2 text-xs font-bold leading-5 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+              这个邮箱是 QQ 邮箱，前缀 {qqEmailPrefix} 与填写的 QQ 号 {qqUin} 不一致。请改成与 QQ 号一致的邮箱，或换一个非 QQ 邮箱。
+            </p>
+          ) : null}
+        </>
+      ) : null}
+      {message ? <p className="text-sm font-medium text-slate-600">{message}</p> : null}
+      <Button className="font-medium" disabled={!canSubmit} type="submit">
         {busy ? "注册中" : "注册并登录"}
       </Button>
     </form>
