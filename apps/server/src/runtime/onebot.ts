@@ -65,7 +65,7 @@ import { detectPostInjection, createAutoBan } from "../lib/sanitize";
 import { readTenantAiSettings } from "./ai-settings";
 import type { RuntimeQueue } from "./queue";
 import { checkAndUpdateQZoneSession } from "../lib/qzone-cookies";
-import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
+import { executePostRecall, PostRecallExecutionError, PostRecallNoRecordError, PostRecallNotSupportedError } from "../lib/post-recall";
 import { isQZoneProtocolAutoRefreshTransientError, QZoneProtocolAutoRefreshCooldownError, QZoneProtocolAutoRefreshTransientError, qzoneProtocolAutoRefreshFailureCooldownMs } from "../lib/qzone-auto-refresh";
 import { pollQZoneQrLogin, startQZoneQrLogin } from "../lib/qzone-login";
 import { enqueuePublishFanout, requeuePublishFanout, resumePublishAttemptsWaitingForCookies } from "./publishing";
@@ -4601,6 +4601,7 @@ export class OneBotRuntime {
               );
             }
             if (
+              error instanceof PostRecallNoRecordError ||
               error instanceof PostRecallNotSupportedError ||
               error instanceof BotWorkflowError ||
               error instanceof QZoneRecallError
@@ -4711,7 +4712,7 @@ export class OneBotRuntime {
                     .join("；") || "撤回失败"
                 );
               }
-              if (error instanceof PostRecallNotSupportedError || error instanceof BotWorkflowError) {
+              if (error instanceof PostRecallNoRecordError || error instanceof PostRecallNotSupportedError || error instanceof BotWorkflowError) {
                 return error.message;
               }
               return "撤回失败，请稍后重试或到后台处理";

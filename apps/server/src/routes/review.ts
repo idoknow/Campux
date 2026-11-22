@@ -6,7 +6,7 @@ import { requireReadyTenant, requireTenantRole } from "../lib/auth";
 import { toPostListItem, toPostTimeline } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
-import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
+import { executePostRecall, PostRecallExecutionError, PostRecallNoRecordError, PostRecallNotSupportedError } from "../lib/post-recall";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
@@ -418,6 +418,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     return {
       ok: true,
+      operateMode,
     };
   });
 
@@ -485,7 +486,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     for (const postId of approvedIds) {
       events?.emit({ type: "review:approved", tenantId: context.selectedTenant.id, postId, reviewerId: context.user.id });
     }
-    return { ok: true, approved: approvedIds.length };
+    return { ok: true, approved: approvedIds.length, operateMode };
   });
 
   app.post("/api/review/posts/:id/reject", async (request, reply) => {
@@ -593,6 +594,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (error instanceof PostRecallNotSupportedError) {
         return reply.code(409).send({ message: error.message });
       }
+      if (error instanceof PostRecallNoRecordError) {
+        // 无 Bot 模式：没有 tid，系统删不了说说，不能假装撤回成功。
+        return reply.code(409).send({
+          message: error.message,
+          code: "RECALL_MANUAL_REQUIRED",
+          manualRequired: true,
+        });
+      }
       if (error instanceof PostRecallExecutionError) {
         oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {
           app.log.warn({ error: caught, postId: post.id }, "failed to notify post recall failure");
@@ -671,8 +680,65 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     };
   });
 
-  app.post("/api/review/posts/:id/recall/ignore", async (request, reply) => {
+  /**
+   * 无 Bot 模式的手动撤回闭环：稿件是管理员手动发到 QQ 空间的，系统没有 tid，
+   * 只能由运营者到空间删除说说后，回来点「已手动删除」把状态推到 recalled。
+   * 只允许处理 `published` / `pending_recall` 的稿件。
+   */
+  app.post("/api/review/posts/:id/recall/manual-complete", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: { id: params.id, tenantId: context.selectedTenant.id },
+      select: { id: true, displayId: true, status: true },
+    });
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "published" && post.status !== "pending_recall") {
+      return reply.code(409).send({ message: "只有已发表或待撤回稿件可以标记为已手动删除" });
+    }
+
+    const completed = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      const changed = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: { in: ["published", "pending_recall"] } },
+        data: { status: "recalled", recallIgnored: false, recallIgnoredAt: null },
+      });
+      if (changed.count === 0) return false;
+      await transaction.postLog.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          postId: post.id,
+          actorId: context.user.id,
+          oldStatus: post.status,
+          newStatus: "recalled",
+          comment: "管理员已到 QQ 空间手动删除说说并确认撤回",
+        },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.recall.manual_complete",
+        targetType: "post",
+        targetId: post.id,
+        detail: { displayId: post.displayId, previousStatus: post.status },
+      }, transaction);
+      return true;
+    });
+    if (!completed.active) {
+      return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
+    if (!completed.value) {
+      return reply.code(409).send({ message: "稿件状态已变化，请刷新后重试" });
+    }
+
+    oneBot?.notifyPostRecalled(post.id, 0).catch((error) => {
+      app.log.warn({ error, postId: post.id }, "failed to notify manual recall completion");
+    });
+    return { ok: true };
+  });
+
+  app.post("/api/review/posts/:id/recall/ignore", async (request, reply) => {    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
@@ -769,6 +835,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     } catch (error) {
       if (error instanceof PostRecallNotSupportedError) {
         return reply.code(409).send({ message: error.message });
+      }
+      if (error instanceof PostRecallNoRecordError) {
+        // 无 Bot 模式：没有 tid，系统删不了说说，不能假装撤回成功。
+        return reply.code(409).send({
+          message: error.message,
+          code: "RECALL_MANUAL_REQUIRED",
+          manualRequired: true,
+        });
       }
       if (error instanceof PostRecallExecutionError) {
         oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {

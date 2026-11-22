@@ -41,7 +41,13 @@ import {
   normalizeFollowedPostCommentNotifyEnabled,
   operateModeKey,
   normalizeOperateMode,
+  manualPublishTemplateKey,
+  manualWallQqKey,
+  normalizeManualPublishTemplate,
+  normalizeManualWallQq,
+  type ManualPublishTemplate,
 } from "../lib/tenant-metadata";
+import { ingressRequiredMessage, readTenantIngressAvailabilityFromDb } from "../lib/tenant-ingress";
 import { maxImageMaxSizeMb, minImageMaxSizeMb, normalizeImageMaxSizeMb } from "../lib/image-upload-policy";
 
 const publicMetadataKeys = [
@@ -62,6 +68,8 @@ const publicMetadataKeys = [
   publishLlmSummaryEnabledKey,
   followedPostCommentNotifyEnabledKey,
   operateModeKey,
+  manualPublishTemplateKey,
+  manualWallQqKey,
 ] as const;
 
 const patchMetadataSchema = z.object({
@@ -93,6 +101,16 @@ const patchMetadataSchema = z.object({
   publishLlmSummaryEnabled: z.boolean().optional(),
   followedPostCommentNotifyEnabled: z.boolean().optional(),
   operateMode: z.enum(["bot", "manual"]).optional(),
+  // 无 Bot 模式：手动发说说用的文案模板与渲染图角落墙号 QQ。
+  manualPublishTemplate: z.object({
+    customText: z.string().max(200).optional(),
+    suffixText: z.string().max(200).optional(),
+    includePostId: z.boolean().optional(),
+    includeAuthorQq: z.boolean().optional(),
+  }).optional(),
+  manualWallQq: z.string().trim().max(20).optional(),
+  // 明确切到无 Bot 模式时，若本墙没有任何自助进站通道，必须显式确认要照常开启。
+  confirmNoIngress: z.boolean().optional(),
 });
 
 function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
@@ -136,6 +154,8 @@ function normalizeMetadata(entries: Array<{ key: string; value: unknown }>) {
     enableAnonymousAvatarSelection: false,
     followedPostCommentNotifyEnabled: normalizeFollowedPostCommentNotifyEnabled(record[followedPostCommentNotifyEnabledKey]),
     operateMode: normalizeOperateMode(record[operateModeKey]),
+    manualPublishTemplate: normalizeManualPublishTemplate(record[manualPublishTemplateKey]),
+    manualWallQq: normalizeManualWallQq(record[manualWallQqKey]),
     availableFonts: [] as string[],
     availableBgColors: [] as Array<{ value: string; label: string; hex: string }>,
     availableTextColors: [] as Array<{ value: string; label: string; hex: string }>,
@@ -404,7 +424,7 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     const tenantUpdate: { name?: string; themeColor?: string } = {};
     if (body.tenantName !== undefined) tenantUpdate.name = body.tenantName;
     if (body.themeColor !== undefined) tenantUpdate.themeColor = body.themeColor;
-    const updates: Array<{ key: string; value: string | number | string[] | boolean | { hourly: number; daily: number } | Array<{ title: string; description?: string | undefined; url?: string | undefined }> }> = [];
+    const updates: Array<{ key: string; value: string | number | string[] | boolean | { hourly: number; daily: number } | Array<{ title: string; description?: string | undefined; url?: string | undefined }> | ManualPublishTemplate }> = [];
     if (body.brand !== undefined) {
       updates.push({ key: "brand", value: body.brand });
     }
@@ -461,6 +481,29 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
     }
     if (body.operateMode !== undefined) {
       updates.push({ key: operateModeKey, value: body.operateMode });
+      // 切到无 Bot 模式时校验进站通道：没有游客投稿 / 聚合登录自动建号，
+      // 普通用户就无法注册进墙，管理员也无法代为创建账号。
+      if (body.operateMode === "manual") {
+        const ingress = await readTenantIngressAvailabilityFromDb(prisma, context.selectedTenant.id);
+        if (!ingress.available && body.confirmNoIngress !== true) {
+          return reply.code(409).send({
+            message: ingressRequiredMessage,
+            code: "NO_USER_INGRESS",
+            ingress,
+          });
+        }
+      }
+    }
+    if (body.manualPublishTemplate !== undefined) {
+      const current = normalizeManualPublishTemplate((await prisma.tenantMetadata.findUnique({
+        where: { tenantId_key: { tenantId: context.selectedTenant.id, key: manualPublishTemplateKey } },
+        select: { value: true },
+      }))?.value);
+      const next: ManualPublishTemplate = normalizeManualPublishTemplate({ ...current, ...body.manualPublishTemplate });
+      updates.push({ key: manualPublishTemplateKey, value: next });
+    }
+    if (body.manualWallQq !== undefined) {
+      updates.push({ key: manualWallQqKey, value: normalizeManualWallQq(body.manualWallQq) });
     }
 
     const valid = await prisma.$transaction(async (transaction) => {
@@ -500,6 +543,17 @@ export function registerMetadataRoutes(app: FastifyInstance, config: CampuxConfi
       targetId: context.selectedTenant.id,
       detail: { fields: Object.keys(body) },
     });
+    // 运营模式切换单独留一条审计：事后追「什么时候切成无 Bot 的」比翻整包字段更直接。
+    if (body.operateMode !== undefined) {
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "tenant.operate_mode.update",
+        targetType: "tenant",
+        targetId: context.selectedTenant.id,
+        detail: { operateMode: body.operateMode },
+      });
+    }
     // 无 Bot 模式不需要墙号上线：选定后立即把墙标记为已开通，
     if (body.operateMode === "manual" && context.selectedTenant.readyAt === null) {
       const now = new Date();

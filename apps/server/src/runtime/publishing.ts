@@ -23,6 +23,7 @@ import {
   publishRateLimitWindowStart,
   nextPublishRateLimitWindowEnd,
   readTenantPublishLlmSummaryEnabled,
+  readTenantOperateMode,
 } from "../lib/tenant-metadata";
 import { imageStorageHardMaxBytes } from "../lib/image-upload-policy";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
@@ -279,6 +280,56 @@ async function markPublishAttemptSkipped(attemptId: string, attempt: { postId: s
     },
   });
   await refreshAttemptPostStatuses(attempt);
+}
+
+/**
+ * 墙已切到无 Bot 模式时，把队列里残留的自动发布任务作废：
+ * attempt → skipped，稿件退回 approved（待发布），并在稿件日志里说明原因。
+ *
+ * 注意：批量稿件的 attempt 挂在 batch 上，无法只跳过单条，这里按「单稿」处理；
+ * 批量批次里的稿件由 `halt-in-flight` 管理接口统一清理批次条目。
+ */
+async function haltAttemptForManualMode(
+  logger: FastifyBaseLogger,
+  attemptId: string,
+  tenantId: string,
+  postId: string,
+  batchId: string | null,
+) {
+  try {
+    await prisma.$transaction(async (transaction) => {
+      // 只有还没真正发出去的任务才能被作废；running/succeeded 保持原状，避免状态错乱。
+      const updated = await transaction.publishAttempt.updateMany({
+        where: { id: attemptId, status: { in: ["queued", "failed", "waiting_cookies"] } },
+        data: { status: "skipped", lastError: "校园墙已切换到无 Bot 模式，自动发布已停止", nextRunAt: null },
+      });
+      if (updated.count === 0) {
+        return;
+      }
+      if (batchId) {
+        return;
+      }
+      await transaction.post.updateMany({
+        where: { id: postId, tenantId, status: { in: ["publishing", "partially_failed", "failed"] } },
+        data: {
+          status: "approved",
+          logs: {
+            create: {
+              tenantId,
+              postId,
+              oldStatus: "publishing",
+              newStatus: "approved",
+              comment: "校园墙已切换到无 Bot 模式，自动发布已停止，稿件退回待发布",
+            },
+          },
+        },
+      });
+    });
+    logger.info({ attemptId, tenantId, postId }, "publish attempt halted because tenant switched to manual mode");
+  } catch (error) {
+    // 作废失败不能把任务留在队列里反复重试，记录后由 halted 接口/重试兜底。
+    logger.warn({ error, attemptId, tenantId }, "failed to halt publish attempt for manual mode");
+  }
 }
 
 export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, notifier?: PublishingNotifier) {
@@ -1571,6 +1622,14 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   if (!isTenantRuntimeActiveStatus(dispatchTarget.post.tenant.status)) {
     queue.rescheduleCurrent(job, new Date(Date.now() + 60_000));
     logger.info({ attemptId, tenantId: dispatchTarget.tenantId }, "publish attempt dormant for inactive tenant");
+    return;
+  }
+
+  // 运营模式守卫：墙已切到无 Bot 模式（operate_mode=manual）后，队列里残留的自动发布任务
+  // 不能再发出去，否则管理员会在不知情的情况下和手动发布重复发说说。这里把它们标成 skipped，
+  // 稿件退回「待发布」交给管理员处理。
+  if ((await readTenantOperateMode(prisma, dispatchTarget.tenantId)) === "manual") {
+    await haltAttemptForManualMode(logger, attemptId, dispatchTarget.tenantId, dispatchTarget.postId, dispatchTarget.batchId);
     return;
   }
 

@@ -63,6 +63,8 @@ export type PublishedFeedItem = {
   publishedAt: string;
   posts: PublishedFeedPost[];
   qzoneStats: ReturnType<typeof toQZonePostStats>;
+  /** 无 Bot 模式下管理员手动确认发布时填写的说说链接（自动发布为 null）。 */
+  manualPublishUrl?: string | null;
 };
 
 /**
@@ -105,6 +107,8 @@ export type SingleFeedInput = {
   post: RawFeedPost;
   publishedAt: Date | null;
   metrics: PostQZoneMetric[];
+  /** 无 Bot 模式手动发布留痕：说说链接与确认时间。 */
+  manualPublishUrl?: string | null;
 };
 
 export type BatchFeedInput = {
@@ -131,6 +135,7 @@ export function buildPublishedFeed(input: {
       publishedAt: publishedAt.toISOString(),
       posts: [toFeedPost(single.post, viewerIsReviewer, viewerUserId)],
       qzoneStats: toQZonePostStats(single.metrics, { keepDeletedComments: viewerIsReviewer }),
+      manualPublishUrl: single.manualPublishUrl ?? null,
     };
   });
 
