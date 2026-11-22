@@ -55,6 +55,7 @@ import { registerPluginRoutes } from "./routes/plugins";
 import { registerFeedbackRoutes } from "./routes/feedback";
 import { registerPlatformFeedbackRoutes } from "./routes/platform-feedback";
 import { registerManualPublishRoutes } from "./routes/manual-publish";
+import { registerRegistrationSettingsRoutes } from "./routes/registration-settings";
 import { registerBotAlertTestRoutes } from "./routes/bot-alert-test";
 import { runDatabaseMigrations } from "./lib/migrations";
 import { registerQZoneCookieHeartbeat } from "./lib/qzone-cookies";
@@ -189,6 +190,7 @@ registerPluginRoutes(app, pluginRegistry);
 registerFeedbackRoutes(app, oneBot);
 registerPlatformFeedbackRoutes(app, config);
 registerManualPublishRoutes(app, queue);
+registerRegistrationSettingsRoutes(app, config);
 registerBotAlertTestRoutes(app);
 
 // 通知所有插件路由已注册完毕
