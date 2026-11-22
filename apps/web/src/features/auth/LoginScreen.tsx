@@ -311,9 +311,23 @@ function ForgotPasswordPanel() {
   const [maskedEmail, setMaskedEmail] = useState("");
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "error">("info");
+  // 机器人模式下网页不提供邮箱重置，改为引导私聊墙号。
+  const [useBotReset, setUseBotReset] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
+
+  /** 识别后端的渠道错误码：api() 只透出 message，所以这里单独发一次原始请求。 */
+  async function postForgot(path: string, body: unknown) {
+    const res = await fetch(path, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { message?: string; code?: string };
+    return { ok: res.ok, data };
+  }
 
   // 发送后的倒计时：与后端 60 秒冷却保持一致，避免用户反复点击。
   useEffect(() => {
@@ -326,36 +340,40 @@ function ForgotPasswordPanel() {
     setSending(true);
     setMessage("");
     setMessageKind("info");
+    setUseBotReset(false);
     try {
-      const data = await api<{
-        ok: true;
-        channel?: "email" | "identity";
-        email?: string;
-        providers?: string[];
-        devCode?: string;
-        expiresInSeconds?: number;
-      }>("/api/auth/password/forgot", {
-        method: "POST",
-        body: JSON.stringify({ account }),
-      });
-      setCooldown(60);
-      const ttl = Math.round((data.expiresInSeconds ?? 600) / 60);
-      if (data.channel === "identity") {
+      const { ok, data } = await postForgot("/api/auth/password/forgot", { account });
+      if (!ok) {
+        if (data.code === "USE_BOT_RESET") {
+          setUseBotReset(true);
+          setMessageKind("info");
+          setMessage(typeof data.message === "string" ? data.message : "本墙请通过墙号机器人重置密码。");
+          return;
+        }
+        throw new Error(typeof data.message === "string" ? data.message : "发送失败");
+      }
+      const ttl = Math.round(((data.expiresInSeconds as number | undefined) ?? 600) / 60);
+      const devCode = data.devCode as string | undefined;
+      const channel = data.channel as string | undefined;
+      const providers = (data.providers as string[] | undefined) ?? [];
+      if (channel === "identity") {
         setMaskedEmail("");
         setMessage(
-          data.devCode
-            ? `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${(data.providers ?? []).join("、")}）验证。本次验证码：${data.devCode}，${ttl} 分钟内有效。`
-            : `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${(data.providers ?? []).join("、")}）验证，${ttl} 分钟内有效。`,
+          devCode
+            ? `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${providers.join("、")}）验证。本次验证码：${devCode}，${ttl} 分钟内有效。`
+            : `该账号未绑定 QQ 邮箱，已改用已绑定的第三方账号（${providers.join("、")}）验证，${ttl} 分钟内有效。`,
         );
-        if (data.devCode) setCode(data.devCode);
+        if (devCode) setCode(devCode);
+        setCooldown(60);
         return;
       }
-      setMaskedEmail(data.email ?? "");
-      if (data.devCode) {
-        setCode(data.devCode);
-        setMessage(`站点未配置邮件服务，验证码：${data.devCode}，${ttl} 分钟内有效。`);
+      setMaskedEmail((data.email as string | undefined) ?? "");
+      setCooldown(60);
+      if (devCode) {
+        setCode(devCode);
+        setMessage(`站点未配置邮件服务，验证码：${devCode}，${ttl} 分钟内有效。`);
       } else {
-        setMessage(`验证码已发送到 ${data.email}，${ttl} 分钟内有效。`);
+        setMessage(`验证码已发送到 ${data.email as string}，${ttl} 分钟内有效。`);
       }
     } catch (caught) {
       setMessageKind("error");
@@ -370,18 +388,41 @@ function ForgotPasswordPanel() {
     setBusy(true);
     setMessage("");
     try {
-      await api("/api/auth/password/reset", {
-        method: "POST",
-        body: JSON.stringify({ account, code, newPassword }),
-      });
+      const { ok, data } = await postForgot("/api/auth/password/reset", { account, code, newPassword });
+      if (!ok) {
+        if (data.code === "USE_BOT_RESET") {
+          setUseBotReset(true);
+          setMessageKind("info");
+          setMessage(typeof data.message === "string" ? data.message : "本墙请通过墙号机器人重置密码。");
+          return;
+        }
+        throw new Error(typeof data.message === "string" ? data.message : "重置失败");
+      }
       setMessage("密码已重置，可以用新密码登录了");
       setCode("");
       setNewPassword("");
     } catch (caught) {
+      setMessageKind("error");
       setMessage(caught instanceof Error ? caught.message : "重置失败");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (useBotReset) {
+    return (
+      <div className="mt-4 grid gap-3">
+        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-900 dark:bg-sky-950/40">
+          <p className="text-sm font-bold text-sky-900 dark:text-sky-100">本墙通过墙号机器人重置密码</p>
+          <p className="mt-1 text-xs font-semibold leading-5 text-sky-800 dark:text-sky-200">
+            打开 QQ，私聊本墙的墙号，发送「#重置密码」。机器人会立即把新密码私信发给你，旧密码同时失效。
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => { setUseBotReset(false); setMessage(""); }}>
+          返回
+        </Button>
+      </div>
+    );
   }
 
   return (

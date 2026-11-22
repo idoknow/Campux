@@ -161,6 +161,17 @@ export function normalizeOperateMode(value: unknown): OperateMode {
   return value === "manual" || (typeof value === "string" && value.toLowerCase() === "manual") ? "manual" : "bot";
 }
 
+/**
+ * 重置密码的渠道由当前运营模式决定（与是否切换过模式无关）：
+ * - bot 模式：私聊墙号 `#重置密码`
+ * - manual 模式：网页「忘记密码」+ 邮箱验证码
+ */
+export type PasswordResetChannel = "bot-private-message" | "web-email";
+
+export function resolvePasswordResetChannel(mode: OperateMode): PasswordResetChannel {
+  return mode === "manual" ? "web-email" : "bot-private-message";
+}
+
 export async function readTenantOperateMode(client: MetadataClient, tenantId: string): Promise<OperateMode> {
   const entry = await client.tenantMetadata.findUnique({
     where: {

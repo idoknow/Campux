@@ -5,7 +5,7 @@ import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { clearSessionCookie, createSession, findActiveBan, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
 import { generateEmailCode, hashEmailCode, normalizeEmail, sendEmail, sendVerificationEmail } from "../lib/email";
-import { readTenantOperateMode } from "../lib/tenant-metadata";
+import { readTenantOperateMode, resolvePasswordResetChannel } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
 import {
   checkQqEmailMatchesQqUin,
@@ -96,6 +96,22 @@ const resetPasswordSchema = z.object({
   code: z.string().trim().regex(/^\d{6}$/, "验证码格式不正确"),
   newPassword: z.string().min(6).max(128),
 });
+
+/**
+ * 决定「重置密码走哪条渠道」时应该看哪个校园墙的运营模式。
+ *
+ * 优先用账号当前选择的墙（会话里通常没有）；否则退回该账号最早的成员身份——
+ * 一个账号可能同时在多个墙里，取最早加入的那个足以决定默认渠道，
+ * 且与登录时「单墙直接进入」的行为一致。
+ */
+async function resolveResetChannelTenantId(userId: string): Promise<string | null> {
+  const membership = await prisma.tenantMembership.findFirst({
+    where: { userId },
+    select: { tenantId: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return membership?.tenantId ?? null;
+}
 
 const RESET_PASSWORD_PURPOSE = "password_reset";
 const TENANT_REGISTER_PURPOSE = "tenant_register";
@@ -847,6 +863,18 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
     }
 
+    // 按运营模式决定重置渠道：
+    // - 墙号机器人模式：用户应私聊墙号发「#重置密码」（Bot 会私信新密码）；
+    // - 无 Bot 模式：没有墙号可私聊，走这里的邮箱验证码。
+    // 合并账号已在上面解析到主账号，因此这里判断的是主账号所属墙的模式。
+    const modeTenantId = await resolveResetChannelTenantId(user.id);
+    if (modeTenantId && resolvePasswordResetChannel(await readTenantOperateMode(prisma, modeTenantId)) === "bot-private-message") {
+      return reply.code(409).send({
+        code: "USE_BOT_RESET",
+        message: "本墙当前通过墙号机器人重置密码：请私聊墙号发送「#重置密码」，机器人会把新密码私信给你。",
+      });
+    }
+
     // 没绑定邮箱的账号（例如游客注册或扫码建号）：给账号名下的第三方身份生成验证码，
     // 由本人持有的第三方账号完成所有权验证，而不依赖邮箱。
     if (!user.email) {
@@ -948,6 +976,16 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     if (!user) {
       return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
     }
+
+    // 与第一步一致：机器人模式下网页不提供邮箱重置，避免绕过渠道限制。
+    const resetModeTenantId = await resolveResetChannelTenantId(user.id);
+    if (resetModeTenantId && resolvePasswordResetChannel(await readTenantOperateMode(prisma, resetModeTenantId)) === "bot-private-message") {
+      return reply.code(409).send({
+        code: "USE_BOT_RESET",
+        message: "本墙当前通过墙号机器人重置密码：请私聊墙号发送「#重置密码」。",
+      });
+    }
+
     const resetEmailKey = user.email ?? `identity:${user.id}`;
 
     const latestRecord = await prisma.emailVerificationCode.findFirst({

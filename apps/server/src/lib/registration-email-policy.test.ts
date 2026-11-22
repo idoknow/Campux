@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { resolvePasswordResetChannel } from "./tenant-metadata";
 import {
   checkQqEmailMatchesQqUin,
   emailDomain,
@@ -83,6 +84,16 @@ describe("qqUinFromQqEmail", () => {
     // foxmail 虽然也属腾讯，但前缀不保证是 QQ 号。
     expect(qqUinFromQqEmail("123456@foxmail.com")).toBeNull();
     expect(qqUinFromQqEmail("123456@163.com")).toBeNull();
+  });
+});
+
+describe("resolvePasswordResetChannel", () => {
+  it("uses bot private message in bot mode", () => {
+    expect(resolvePasswordResetChannel("bot")).toBe("bot-private-message");
+  });
+
+  it("uses web email in manual mode", () => {
+    expect(resolvePasswordResetChannel("manual")).toBe("web-email");
   });
 });
 
