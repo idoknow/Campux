@@ -33,7 +33,7 @@ import {
   WifiOffIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { normalizeImageMaxSizeDraft } from "@/lib/image-upload-policy";
 import { roleLabels, statusLabels } from "@/lib/app-model";
 import {
@@ -698,7 +698,7 @@ export function AdminPage({
       }
     } catch (caught) {
       // 进站通道未开时服务端返回 409 + NO_USER_INGRESS：引导运营者先开插件，或确认照常切换。
-      if (caught instanceof Error && caught.message.includes("无 Bot 模式需要至少一条用户自助进站通道")) {
+      if (caught instanceof ApiError && caught.code === "NO_USER_INGRESS") {
         await confirmOperateModeWithoutIngress();
       } else {
         toast.error(caught instanceof Error ? caught.message : "保存失败");
@@ -1484,7 +1484,7 @@ export function AdminPage({
                   form={form}
                   imageMaxSizeDraft={imageMaxSizeDraft}
                   busy={busy}
-                  hasIngress={Boolean(metadata.enableGuestSubmission || metadata.enableAggregateLogin)}
+                  hasIngress={Boolean(metadata.enableGuestSubmission)}
                   onFormChange={setForm}
                   onImageMaxSizeDraftChange={setImageMaxSizeDraft}
                   onImageMaxSizeDraftCommit={() => {

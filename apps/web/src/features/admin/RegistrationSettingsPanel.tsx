@@ -222,7 +222,9 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
     settings.mailSender.fromName,
   ].join("|") : "";
   const senderChanged = senderFingerprint !== loadedSenderFingerprint;
-  const needsRetest = required && senderChanged && verifiedFingerprint !== fingerprint;
+  // 服务端对“发件配置变化”一律要求先测试通过（即使暂时关闭邮箱验证），
+  // 因为这份配置还用于游客注册与账号绑定，保存半残配置会让它们静默失败。
+  const needsRetest = senderChanged && verifiedFingerprint !== fingerprint;
 
   return (
     <div className="grid gap-4">
@@ -484,17 +486,19 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
             发送测试邮件
           </Button>
         </div>
-        {required ? (
+        {required || needsRetest ? (
           <p className={`text-xs font-bold ${needsRetest ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
             {needsRetest
-              ? "开启邮箱验证需要先发送测试邮件并确认收到，之后才能保存。"
+              ? required
+                ? "开启邮箱验证需要先发送测试邮件并确认收到，之后才能保存。"
+                : "修改发件配置后需要先发送测试邮件并确认收到，之后才能保存。"
               : "发件配置已验证，可以保存。"}
           </p>
         ) : null}
       </div>
 
       <div className="flex justify-end">
-        <Button disabled={busy || saving || (required && needsRetest)} onClick={() => void save()}>
+        <Button disabled={busy || saving || needsRetest} onClick={() => void save()}>
           {saving ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : null}
           保存注册设置
         </Button>

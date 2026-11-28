@@ -355,12 +355,16 @@ export function PostsPage({
   const [pendingPublishBatchBusy, setPendingPublishBatchBusy] = useState(false);
   const [pendingPublishFailures, setPendingPublishFailures] = useState<Array<{ id: string; displayId: number | null; reason: string }>>([]);
   const [pendingResidual, setPendingResidual] = useState<{ operateMode: "bot" | "manual"; residual: number; inFlight?: number } | null>(null);
+  // 审核员不是管理员，拿不到 /api/admin/pending-publish/context；单独从公开 metadata 读取运营模式。
+  const [tenantOperateMode, setTenantOperateMode] = useState<"bot" | "manual">("bot");
   const [pendingPublishContext, setPendingPublishContext] = useState<PendingPublishContext | null>(null);
   const [pendingPublishCaptionBusyId, setPendingPublishCaptionBusyId] = useState("");
   const [pendingRequeueBusy, setPendingRequeueBusy] = useState(false);
   const [pendingHaltBusy, setPendingHaltBusy] = useState(false);
   const [pendingPublishLoading, setPendingPublishLoading] = useState(false);
   const [pendingPublishBusyId, setPendingPublishBusyId] = useState("");
+  /** 待发布列表的请求序号：只有最新一次刷新允许写状态。 */
+  const pendingPublishRequestRef = useRef(0);
   // 确认发布后记一笔说说链接：批量场景复用同一个输入框，避免每张卡片各填一次。
   const [pendingPublishUrl, setPendingPublishUrl] = useState("");
   const [pendingConfirmAllOpen, setPendingConfirmAllOpen] = useState(false);
@@ -371,7 +375,8 @@ export function PostsPage({
   // manual 模式保留独立页签作为主工作队列。
   const showPendingPublishTab = isAdmin && pendingResidual?.operateMode !== "bot";
   // 当前运营模式：无 Bot 模式下拒绝必须写理由（用户没有私聊通道可解释）。
-  const operateMode = pendingResidual?.operateMode ?? "bot";
+  // 管理员优先用工作台 context 的最新值，审核员回退到公开 metadata。
+  const operateMode = pendingResidual?.operateMode ?? tenantOperateMode;
   // 是否处于任何筛选状态：确认弹窗据此说明「只作用于当前筛选」。
   const hasPendingFilter = pendingPublishKeywordApplied.trim().length > 0
     || pendingPublishAnonymous !== "all"
@@ -480,6 +485,23 @@ export function PostsPage({
   ]);
 
   useEffect(() => {
+    // 审核员（非管理员）也要知道运营模式：手动模式下拒绝理由必填，否则可提交默认文案绕过校验。
+    // 管理员由下面的 pending-publish context 提供，无需重复请求。
+    if (isAdmin) {
+      return;
+    }
+    let cancelled = false;
+    void api<{ operateMode?: "bot" | "manual" }>("/api/tenant/metadata")
+      .then((data) => {
+        if (!cancelled && data.operateMode) {
+          setTenantOperateMode(data.operateMode);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isAdmin, tenantId]);
+
+  useEffect(() => {
     if (!isAdmin) {
       return;
     }
@@ -554,6 +576,8 @@ export function PostsPage({
   }
 
   async function refreshPendingPublish() {
+    // 请求序号：筛选变化后旧响应可能后到，若不丢弃会用旧条件的结果覆盖新列表。
+    const requestId = ++pendingPublishRequestRef.current;
     setPendingPublishLoading(true);
     try {
       const params = new URLSearchParams({
@@ -569,18 +593,25 @@ export function PostsPage({
       const data = await api<{ posts: PendingPublishItem[]; pagination: Pagination }>(
         `/api/admin/pending-publish?${params.toString()}`,
       );
+      if (requestId !== pendingPublishRequestRef.current) {
+        return;
+      }
       setPendingPublishItems(data.posts);
       setPendingPublishPagination(data.pagination);
       setPendingPublishSelected(new Set());
       // 滞留量与在途发布量、进站通道一起刷新：切回 bot 模式后要提示补队列。
       const context = await loadPendingPublishContext();
-      if (context) {
+      if (context && requestId === pendingPublishRequestRef.current) {
         setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
       }
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "无法读取待发布稿件");
+      if (requestId === pendingPublishRequestRef.current) {
+        toast.error(caught instanceof Error ? caught.message : "无法读取待发布稿件");
+      }
     } finally {
-      setPendingPublishLoading(false);
+      if (requestId === pendingPublishRequestRef.current) {
+        setPendingPublishLoading(false);
+      }
     }
   }
 
@@ -641,6 +672,8 @@ export function PostsPage({
   /** 一键确认全部：先弹二次确认（误点会让整批稿件直接变已发布）。 */
   async function confirmAllPendingPublish() {
     setPendingConfirmAllOpen(false);
+    // 与取消路径一致地清空“已阅读”勾选，避免下一批打开时默认勾选直接可提交。
+    setConfirmAllAck(false);
     await confirmPendingPublishBulk([]);
   }
 
@@ -2178,7 +2211,7 @@ export function PostsPage({
                       busy: busyManualRecallKey === item.posts[0]!.id,
                       onConfirmDeleted: () => void confirmManualRecallDone(item.posts[0]!.displayId, item.posts[0]!.id),
                     } : null}
-                    revertAction={isAdmin && item.manualPublishUrl && item.kind === "single" && item.posts[0] ? {
+                    revertAction={isAdmin && item.manualPublishedAt && item.kind === "single" && item.posts[0] ? {
                       busy: busyManualRevertKey === item.posts[0]!.id,
                       onRevert: () => void revertManualPublishByPostId(item.posts[0]!.id, item.posts[0]!.displayId),
                     } : null}

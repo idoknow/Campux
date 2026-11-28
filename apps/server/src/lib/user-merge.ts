@@ -90,13 +90,23 @@ export async function isMergeScopeSingleTenant(
 export type MergePreview = {
   oldUserId: string;
   oldQqUin: string;
-  oldEmail: string | null;
+  /** 掩码后的旧账号邮箱（如 `ab***@qq.com`）：足够机主辨认，又不泄露完整地址。 */
+  oldEmailMasked: string | null;
   oldDisplayName: string | null;
   oldPostCount: number;
   newUserId: string;
   newQqUin: string;
   newEmail: string | null;
 };
+
+/** 只回显邮箱首两字符与域名，避免用完整邮箱做账号枚举。 */
+function maskEmailForPreview(email: string | null): string | null {
+  if (!email) return null;
+  const [name = "", domain = ""] = email.split("@");
+  if (!domain) return null;
+  const head = name.slice(0, Math.min(2, name.length));
+  return `${head}${name.length > 2 ? "***" : ""}@${domain}`;
+}
 
 /**
  * 生成合并预览。
@@ -136,7 +146,7 @@ export async function buildMergePreview(input: {
     preview: {
       oldUserId: old.id,
       oldQqUin: old.qqUin.toString(),
-      oldEmail: old.email,
+      oldEmailMasked: maskEmailForPreview(old.email),
       oldDisplayName: old.displayName,
       oldPostCount,
       newUserId: target.id,

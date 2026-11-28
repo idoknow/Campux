@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 
 type MergePreview = {
   oldQqUin: string;
-  oldEmail: string | null;
+  oldEmailMasked: string | null;
   oldDisplayName: string | null;
   oldPostCount: number;
   newQqUin: string;
@@ -69,7 +69,9 @@ export function AccountMergeDialog({
         body: JSON.stringify({ oldQqUin }),
       });
       setPreview(data.preview);
-      setEmail(data.preview.oldEmail ?? "");
+      // 掩码邮箱不能直接填进输入框（会提交错地址），让机主自己填完整地址；
+      // 掩码只用于确认「这个旧号绑的是我认识的那个邮箱」。
+      setEmail("");
       // 注意措辞：合并后保留的是**当前**账号（QQ 不变），旧账号被停用。
       if (data.preview.oldQqUin !== currentQqUin) {
         setMessage(
@@ -161,6 +163,7 @@ export function AccountMergeDialog({
             <>
               <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold leading-5 text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
                 <p>旧账号：QQ {preview.oldQqUin}{preview.oldDisplayName ? ` · ${preview.oldDisplayName}` : ""}</p>
+                {preview.oldEmailMasked ? <p>绑定邮箱：{preview.oldEmailMasked}</p> : null}
                 <p>可迁移稿件：{preview.oldPostCount} 条</p>
               </div>
               <label className="grid gap-1 text-xs font-bold text-slate-600 dark:text-slate-300">

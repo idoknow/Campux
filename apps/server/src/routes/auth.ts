@@ -1134,7 +1134,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     // 与第一步一致：机器人模式下网页不提供邮箱重置，避免绕过渠道限制。
-    const resetModeTenantId = await resolveResetChannelTenantId(user.id);
+    // 选墙规则也必须一致（优先请求所在墙），否则第一步放行、第二步拦截（或相反）。
+    const resetRequestTenant = await resolvePublicTenantByRequest(request).catch(() => null);
+    const resetModeTenantId = await resolveResetChannelTenantId(user.id, resetRequestTenant?.id ?? null);
     if (resetModeTenantId && resolvePasswordResetChannel(await readTenantOperateMode(prisma, resetModeTenantId)) === "bot-private-message") {
       return reply.code(409).send({
         code: "USE_BOT_RESET",

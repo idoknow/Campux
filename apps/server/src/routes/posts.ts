@@ -1641,6 +1641,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       publishedAt: post.updatedAt,
       metrics: post.qzonePostMetrics,
       manualPublishUrl: post.manualPublishUrl ?? null,
+      manualPublishedAt: post.manualPublishedAt,
     }));
 
     const batchInputs: BatchFeedInput[] = batches.map((batch) => {

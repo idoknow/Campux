@@ -42,6 +42,9 @@ import {
 
 const TEST_TTL_MS = 10 * 60 * 1000;
 
+/** 保存时发现策略已被其他管理员并发修改：中止本次写入，让运营者刷新后重试。 */
+class RegistrationSettingsConflictError extends Error {}
+
 type VerifiedMailSender = { fingerprint: string; verifiedAt: number };
 const verifiedMailSenderByTenant = new Map<string, VerifiedMailSender>();
 
@@ -159,7 +162,12 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     const tenantId = context.selectedTenant.id;
 
     const stored = await readTenantMailSenderConfig(prisma, tenantId);
-    const storedPolicy = await readRegistrationEmailPolicy(prisma, tenantId);
+    // 同时取出 updatedAt：未提交后缀时要靠它做条件更新，避免覆盖其他管理员的并发修改。
+    const storedPolicyRow = await prisma.tenantMetadata.findUnique({
+      where: { tenantId_key: { tenantId, key: registrationEmailPolicyKey } },
+      select: { value: true, updatedAt: true },
+    });
+    const storedPolicy = normalizeRegistrationEmailPolicy(storedPolicyRow?.value);
     const submittedSender = normalizeMailSenderConfig({
       ...body.mailSender,
       smtpHost: body.mailSender.smtpHost ?? stored.smtpHost,
@@ -230,34 +238,62 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
       });
     }
 
-    await prisma.$transaction(async (transaction) => {
-      await transaction.tenantMetadata.upsert({
-        where: { tenantId_key: { tenantId, key: registrationEmailPolicyKey } },
-        update: { value: nextPolicy },
-        create: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
+    try {
+      await prisma.$transaction(async (transaction) => {
+        if (submittedSuffixes === undefined) {
+          // 未提交后缀 = 沿用落库值。用读取时的 updatedAt 做条件更新：
+          // 若期间其他管理员改过后缀，本次保存拒绝而不是悄悄覆盖对方的新值。
+          if (storedPolicyRow) {
+            const policyUpdated = await transaction.tenantMetadata.updateMany({
+              where: { tenantId, key: registrationEmailPolicyKey, updatedAt: storedPolicyRow.updatedAt },
+              data: { value: nextPolicy },
+            });
+            if (policyUpdated.count === 0) {
+              throw new RegistrationSettingsConflictError();
+            }
+          } else {
+            await transaction.tenantMetadata.create({
+              data: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
+            });
+          }
+        } else {
+          await transaction.tenantMetadata.upsert({
+            where: { tenantId_key: { tenantId, key: registrationEmailPolicyKey } },
+            update: { value: nextPolicy },
+            create: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
+          });
+        }
+        await transaction.tenantMetadata.upsert({
+          where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
+          update: { value: sender },
+          create: { tenantId, key: tenantMailSenderKey, value: sender },
+        });
+        // 审计与配置同事务：避免「配置已改、审计没记」。
+        await writeAuditLog({
+          tenantId,
+          actorId: context.user.id,
+          action: "tenant.registration_settings.update",
+          targetType: "tenant",
+          targetId: tenantId,
+          detail: {
+            emailVerificationRequired: nextPolicy.required,
+            allowedSuffixes: nextPolicy.allowedSuffixes,
+            mailMode: sender.mode,
+            // 不记录授权码明文。
+            smtpHost: sender.smtpHost,
+            fromEmail: sender.fromEmail,
+          },
+        }, transaction);
       });
-      await transaction.tenantMetadata.upsert({
-        where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
-        update: { value: sender },
-        create: { tenantId, key: tenantMailSenderKey, value: sender },
-      });
-      // 审计与配置同事务：避免「配置已改、审计没记」。
-      await writeAuditLog({
-        tenantId,
-        actorId: context.user.id,
-        action: "tenant.registration_settings.update",
-        targetType: "tenant",
-        targetId: tenantId,
-        detail: {
-          emailVerificationRequired: nextPolicy.required,
-          allowedSuffixes: nextPolicy.allowedSuffixes,
-          mailMode: sender.mode,
-          // 不记录授权码明文。
-          smtpHost: sender.smtpHost,
-          fromEmail: sender.fromEmail,
-        },
-      }, transaction);
-    });
+    } catch (error) {
+      if (error instanceof RegistrationSettingsConflictError) {
+        return reply.code(409).send({
+          message: "注册配置已被其他管理员修改，请刷新后重试",
+          code: "SETTINGS_CONFLICT",
+        });
+      }
+      throw error;
+    }
 
     // 配置变了，之前那次测试不再代表当前配置。
     verifiedMailSenderByTenant.delete(tenantId);

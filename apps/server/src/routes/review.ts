@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PostStatus, Prisma } from "@campux/db";
 import { insensitiveContains } from "@campux/db";
 import { z } from "zod";
-import { requireReadyTenant, requireTenantRole } from "../lib/auth";
+import { hasTenantRole, requireReadyTenant, requireTenantRole } from "../lib/auth";
 import { toPostListItem, toPostTimeline } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
@@ -708,6 +708,11 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
     if (post.status !== "published" && post.status !== "pending_recall") {
       return reply.code(409).send({ message: "只有已发表或待撤回稿件可以标记为已手动删除" });
+    }
+    // 待撤回请求由审核员处理；但“已发表”稿件没有任何作者/系统撤回请求，
+    // 直接标记删除等于绕过管理员直撤边界，必须要求管理员权限。
+    if (post.status === "published" && !hasTenantRole(context.selectedMembership.role, "admin")) {
+      return reply.code(403).send({ message: "直接完成已发表稿件需要管理员权限" });
     }
 
     const completed = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {

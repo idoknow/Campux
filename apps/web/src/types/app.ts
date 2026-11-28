@@ -492,6 +492,8 @@ export type PublishedFeedItem = {
   qzoneStats: PostItem["qzoneStats"];
   /** 无 Bot 模式下管理员手动确认发布时填写的说说链接（自动发布为 null） */
   manualPublishUrl?: string | null;
+  /** 无 Bot 模式下管理员手动确认发布的时间（自动发布为 null） */
+  manualPublishedAt?: string | null;
 };
 
 /** 网页注册的邮箱验证策略（租户级）。allowedSuffixes 为空数组 = 不限制后缀。 */

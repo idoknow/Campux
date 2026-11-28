@@ -304,7 +304,7 @@ async function haltAttemptForManualMode(
   tenantId: string,
   postId: string,
   batchId: string | null,
-) {
+): Promise<boolean> {
   try {
     await prisma.$transaction(async (transaction) => {
       // 条件更新：只有仍未被认领的任务才作废。
@@ -349,8 +349,61 @@ async function haltAttemptForManualMode(
       });
     });
     logger.info({ attemptId, tenantId, postId }, "publish attempt halted because tenant switched to manual mode");
+    return true;
   } catch (error) {
     logger.warn({ error, attemptId, tenantId }, "failed to halt publish attempt for manual mode");
+    // 交给调用方重新入队：纯日志会丢掉当前 job，attempt 永远停在 queued。
+    return false;
+  }
+}
+
+/**
+ * 租约内发现已切到无 Bot 模式时，attempt 已在同一事务里标成 skipped。
+ * 这里负责把稿件从“发布中”退回“待发布”，否则调用方直接 return 会绕过状态回收，
+ * 稿件会永远停在发布中，管理员在工作台也看不到它。
+ */
+async function revertHaltedAttemptPosts(
+  logger: FastifyBaseLogger,
+  attemptId: string,
+  tenantId: string,
+  postId: string,
+  batchId: string | null,
+) {
+  try {
+    await prisma.$transaction(async (transaction) => {
+      const posts = batchId
+        ? await transaction.publishBatchItem.findMany({ where: { batchId }, select: { postId: true } })
+        : [{ postId }];
+      for (const item of posts) {
+        // 同一稿件还有其他目标成功或正在发送时，不能把稿件退回待发布。
+        const siblings = await transaction.publishAttempt.findMany({
+          where: { postId: item.postId, id: { not: attemptId } },
+          select: { status: true },
+        });
+        if (siblings.some((sibling) => sibling.status === "running" || sibling.status === "succeeded")) {
+          continue;
+        }
+        const updated = await transaction.post.updateMany({
+          where: { id: item.postId, tenantId, status: { in: ["publishing", "partially_failed", "failed"] } },
+          data: { status: "approved" },
+        });
+        if (updated.count === 0) {
+          continue;
+        }
+        await transaction.postLog.create({
+          data: {
+            tenantId,
+            postId: item.postId,
+            oldStatus: "publishing",
+            newStatus: "approved",
+            comment: "校园墙已切换到无 Bot 模式，自动发布已停止，稿件退回待发布",
+          },
+        });
+      }
+    });
+    logger.info({ attemptId, tenantId, postId }, "publish attempt halted inside lease; posts returned to approved");
+  } catch (error) {
+    logger.warn({ error, attemptId, tenantId, postId }, "failed to revert posts after publish halt for manual mode");
   }
 }
 
@@ -1651,7 +1704,11 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
   // 不能再发出去，否则管理员会在不知情的情况下和手动发布重复发说说。这里把它们标成 skipped，
   // 稿件退回「待发布」交给管理员处理。
   if ((await readTenantOperateMode(prisma, dispatchTarget.tenantId)) === "manual") {
-    await haltAttemptForManualMode(logger, attemptId, dispatchTarget.tenantId, dispatchTarget.postId, dispatchTarget.batchId);
+    const halted = await haltAttemptForManualMode(logger, attemptId, dispatchTarget.tenantId, dispatchTarget.postId, dispatchTarget.batchId);
+    if (!halted) {
+      // 作废事务失败时重新入队，避免当前 job 直接丢失、attempt 永远停在 queued。
+      queue.rescheduleCurrent(job, new Date(Date.now() + 60_000));
+    }
     return;
   }
 
@@ -2061,8 +2118,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       }
       const result = publication.value;
       if (result === null) {
-        // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功。
+        // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功；
+        // 但必须把稿件退回待发布，不能让它停在“发布中”。
         logger.info(attemptLogContext, "personal QQ publish halted inside lease: tenant switched to manual mode");
+        await revertHaltedAttemptPosts(logger, attempt.id, attempt.tenantId, attempt.postId, attempt.batchId);
         return;
       }
 
@@ -2225,8 +2284,10 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     }
     const result = publication.value;
     if (result === null) {
-      // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功。
+      // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功；
+      // 但必须把稿件退回待发布，不能让它停在“发布中”。
       logger.info(attemptLogContext, "publish attempt halted inside lease: tenant switched to manual mode");
+      await revertHaltedAttemptPosts(logger, attempt.id, attempt.tenantId, attempt.postId, attempt.batchId);
       return;
     }
 

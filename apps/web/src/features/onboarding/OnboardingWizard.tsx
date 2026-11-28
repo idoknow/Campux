@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { TenantSummary } from "@campux/domain";
 import { toast } from "sonner";
 import { CheckIcon, CopyIcon, Loader2Icon, PowerIcon, QrCodeIcon, RotateCcwIcon } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { AdminBotAccount } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -153,9 +153,9 @@ export function OnboardingWizard({
       }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "切换运营模式失败";
-      // 没有任何自助进站通道时服务端会拒绝（409）。这里给出明确选择：
+      // 没有任何自助进站通道时服务端会拒绝（409 NO_USER_INGRESS）。这里给出明确选择：
       // 先去开游客投稿，或者确认「先开通、之后再补」，否则向导会卡死在这一步。
-      if (next === "manual" && message.includes("无 Bot 模式需要至少一条用户自助进站通道")) {
+      if (next === "manual" && caught instanceof ApiError && caught.code === "NO_USER_INGRESS") {
         const confirmed = window.confirm(
           `${message}
 
