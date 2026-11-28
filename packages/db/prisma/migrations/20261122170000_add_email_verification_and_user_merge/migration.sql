@@ -1,4 +1,4 @@
-﻿-- AlterTable
+-- AlterTable
 ALTER TABLE "User" ADD COLUMN "mergedAt" TIMESTAMP(3),
 ADD COLUMN "mergedIntoUserId" TEXT;
 
