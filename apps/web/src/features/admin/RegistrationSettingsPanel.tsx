@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2Icon, LoaderIcon, MailIcon, SendIcon } from "lucide-react";
 import { api } from "@/lib/api";
@@ -34,13 +34,25 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
   const [testTo, setTestTo] = useState("");
   // 测试通过后记录当时的配置指纹；任何字段再变化就要求重测。
   const [verifiedFingerprint, setVerifiedFingerprint] = useState<string | null>(null);
+  // 加载失败或尚未加载成功时禁止编辑/保存，避免把上一个墙的残留值存到这个墙。
+  const [loadFailed, setLoadFailed] = useState(false);
+  /** 请求序号：丢弃切墙后到达的旧响应。 */
+  const requestSeqRef = useRef(0);
 
   const fingerprint = [mode, smtpHost, smtpPort, smtpUser, smtpPass, fromEmail, fromName].join("\u0001");
 
   const load = useCallback(async () => {
+    // 每次加载领一个序号：切墙后旧请求的响应必须丢弃，
+    // 否则 A 墙的数据会覆盖 B 墙的表单，保存时把 A 的配置写到 B。
+    requestSeqRef.current += 1;
+    const seq = requestSeqRef.current;
     setLoading(true);
+    setLoadFailed(false);
+    // 先清空当前展示，避免在加载期间仍能编辑上一个墙的值。
+    setSettings(null);
     try {
       const data = await api<RegistrationSettings>("/api/admin/registration-settings");
+      if (seq !== requestSeqRef.current) return;
       setSettings(data);
       setRequired(data.emailPolicy.required);
       setSuffixes(data.emailPolicy.allowedSuffixes);
@@ -51,18 +63,31 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
       setSmtpPass(data.mailSender.smtpPass);
       setFromEmail(data.mailSender.fromEmail);
       setFromName(data.mailSender.fromName);
-      setTestTo(data.effectiveFromEmail || "");
+      // 测试收件人预填「裸邮箱」，不要带 "名字 <addr>" 形式的显示名。
+      setTestTo(bareEmail(data.effectiveFromEmail));
       setVerifiedFingerprint(null);
     } catch (caught) {
+      if (seq !== requestSeqRef.current) return;
+      // 清空表单并标记失败：否则切墙后会把上一条墙的数据当成这个墙的。
+      setSettings(null);
+      setLoadFailed(true);
       toast.error(caught instanceof Error ? caught.message : "无法读取注册配置");
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [tenantId]);
 
   useEffect(() => {
     void load();
-  }, [load, tenantId]);
+  }, [load]);
+
+  /** "Campux <a@b.com>" → "a@b.com"；取不到就原样返回。 */
+  function bareEmail(value: string): string {
+    const match = /<([^>]+)>/.exec(value ?? "");
+    return (match?.[1] ?? value ?? "").trim();
+  }
 
   const senderPayload = {
     mode,
@@ -115,7 +140,17 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
   }
 
   function toggleSuffix(suffix: string) {
-    setSuffixes((current) => (current.includes(suffix) ? current.filter((s) => s !== suffix) : [...current, suffix]));
+    setSuffixes((current) => {
+      if (current.includes(suffix)) {
+        return current.filter((s) => s !== suffix);
+      }
+      // 预设按钮也要受上限约束，否则点满后请求会被服务端拒绝。
+      if (settings && current.length >= settings.maxAllowedSuffixes) {
+        toast.error(`最多只能配置 ${settings.maxAllowedSuffixes} 个后缀`);
+        return current;
+      }
+      return [...current, suffix];
+    });
   }
 
   function addCustomSuffix() {
@@ -146,7 +181,18 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
     );
   }
   if (!settings) {
-    return <p className="text-sm font-semibold text-red-600">读取注册配置失败，请刷新重试。</p>;
+    return (
+      <div className="grid gap-2">
+        <p className="text-sm font-semibold text-red-600">
+          {loadFailed ? "读取注册配置失败，当前不可编辑，请刷新重试。" : "注册配置不可用。"}
+        </p>
+        <div>
+          <Button variant="outline" size="sm" disabled={loading} onClick={() => void load()}>
+            重新读取
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const officialUnavailable = mode === "official" && !settings.officialMailerAvailable;

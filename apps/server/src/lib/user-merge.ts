@@ -61,12 +61,41 @@ export async function findMergeCandidate(
   }
   const old = await client.user.findUnique({
     where: { qqUin: oldQqUin },
-    select: { id: true, qqUin: true, email: true, displayName: true, mergedAt: true },
+    select: {
+      id: true,
+      qqUin: true,
+      email: true,
+      displayName: true,
+      mergedAt: true,
+    },
   });
   if (!old || old.id === input.targetUserId || old.mergedAt !== null) {
     return null;
   }
   return { id: old.id, qqUin: old.qqUin, email: old.email, displayName: old.displayName };
+}
+
+/**
+ * 旧账号是否只属于当前这一个墙。
+ *
+ * 合并只迁当前墙的稿件与身份，却会做**全局**重定向（mergedIntoUserId），
+ * 所以旧号若还属于别的墙，那些墙里再解析就会落到一个没有该墙身份的主账号上（404）。
+ * 这种跨境合并必须由管理员按墙处理，不能自助完成。
+ */
+export async function isMergeScopeSingleTenant(
+  client: typeof prisma | Prisma.TransactionClient,
+  input: { oldQqUin: string; tenantId: string },
+): Promise<boolean> {
+  let oldQqUin: bigint;
+  try {
+    oldQqUin = BigInt(input.oldQqUin);
+  } catch {
+    return false;
+  }
+  const otherMemberships = await client.tenantMembership.count({
+    where: { user: { qqUin: oldQqUin }, tenantId: { not: input.tenantId } },
+  });
+  return otherMemberships === 0;
 }
 
 /** 生成合并预览，供前端弹窗确认。 */
@@ -136,17 +165,22 @@ export async function mergeUserAccounts(input: {
       );
     }
 
-    // 邮箱是 unique：两个账号各自绑不同邮箱是允许的——验证码发到「旧账号的邮箱」即可证明归属，
-    // 这正是「邮箱绑定的 QQ 与当前登录账号不一致时，提示并确认是否绑定」的场景。
-    // 只有一种情况不能继续：旧号没有邮箱，无法验证归属。
-    if (!old.email && !target.email) {
+    // 合并凭证必须来自「旧账号绑定的邮箱」：调用方负责校验验证码，但这里也要拒绝无邮箱的旧号，
+    // 否则直接调用本函数就能绕过归属验证。
+    if (!old.email) {
       throw new UserMergeError(
         "旧账号没有绑定邮箱，无法验证归属，请联系管理员处理",
         "EMAIL_MISMATCH",
       );
     }
-    // 两边邮箱相同的极端情况：合并后旧号会释放该邮箱（旧号停用但保留记录），
-    // 这里不改动新号邮箱，因此不会撞 unique。
+
+    // 旧账号必须只属于当前墙：合并只迁本墙数据，却会做全局重定向。
+    if (!await isMergeScopeSingleTenant(tx, { oldQqUin: input.oldQqUin, tenantId: input.tenantId })) {
+      throw new UserMergeError(
+        "这个旧账号还属于其他校园墙，无法自助合并，请联系系统运维处理",
+        "EMAIL_MISMATCH",
+      );
+    }
 
     // ── 稿件：只迁当前墙 ──
     const postResult = await tx.post.updateMany({
@@ -220,17 +254,23 @@ export async function mergeUserAccounts(input: {
         await tx.campaignVote.updateMany({ where: { voterId: old.id, campaignId: { in: movableVotes } }, data: { voterId: target.id } });
       }
     }
-    // 第三方身份有 (provider, providerUserId) unique：只迁不冲突的。
-    const oldIdentities = await tx.oAuthIdentity.findMany({ where: { userId: old.id }, select: { id: true, provider: true } });
+    // 第三方身份的唯一键是 (provider, providerUserId)：同 provider 下不同账号可以共存，
+    // 所以只能删「两个字段都相同」的重复行，其余照常迁移。
+    const oldIdentities = await tx.oAuthIdentity.findMany({
+      where: { userId: old.id },
+      select: { id: true, provider: true, providerUserId: true },
+    });
     if (oldIdentities.length > 0) {
       const targetIdentities = await tx.oAuthIdentity.findMany({
         where: { userId: target.id },
-        select: { provider: true },
+        select: { provider: true, providerUserId: true },
       });
-      const dupProviders = new Set(targetIdentities.map((i) => i.provider));
-      const movableIdentities = oldIdentities.filter((i) => !dupProviders.has(i.provider)).map((i) => i.id);
-      if (dupProviders.size > 0) {
-        await tx.oAuthIdentity.deleteMany({ where: { userId: old.id, provider: { in: [...dupProviders] } } });
+      const identityKey = (i: { provider: string; providerUserId: string }) => `${i.provider}\u0001${i.providerUserId}`;
+      const dupKeys = new Set(targetIdentities.map(identityKey));
+      const duplicateIds = oldIdentities.filter((i) => dupKeys.has(identityKey(i))).map((i) => i.id);
+      const movableIdentities = oldIdentities.filter((i) => !dupKeys.has(identityKey(i))).map((i) => i.id);
+      if (duplicateIds.length > 0) {
+        await tx.oAuthIdentity.deleteMany({ where: { id: { in: duplicateIds } } });
       }
       if (movableIdentities.length > 0) {
         await tx.oAuthIdentity.updateMany({ where: { id: { in: movableIdentities } }, data: { userId: target.id } });
@@ -238,16 +278,22 @@ export async function mergeUserAccounts(input: {
     }
 
     // 旧号停用：清空登录会话并打标记。
+    // 用条件更新声明「这个旧号归我合并」：并发下只有一个事务能成功，
+    // 否则两个请求都能通过前置检查，后提交的会覆盖先前的 mergedIntoUserId。
     // 邮箱是 unique：旧号若占用着与新号相同的邮箱，停用后必须释放，否则新号将来改绑会撞约束。
     await tx.accountSession.deleteMany({ where: { userId: old.id } });
-    await tx.user.update({
-      where: { id: old.id },
+    const claimed = await tx.user.updateMany({
+      where: { id: old.id, mergedAt: null },
       data: {
         mergedAt: new Date(),
         mergedIntoUserId: target.id,
         ...(old.email !== null && old.email === target.email ? { email: null } : {}),
       },
     });
+    if (claimed.count !== 1) {
+      // 声明失败 → 抛错让整个事务回滚（包括已迁移的稿件/身份）。
+      throw new UserMergeError("这个旧账号刚刚已被合并，请刷新后重试", "ALREADY_MERGED");
+    }
 
     const merge = await tx.userMerge.create({
       data: {
@@ -322,7 +368,9 @@ export async function resolveActiveAccount(
     }
     currentId = next.mergedIntoUserId;
   }
-  return { userId: currentId, redirectedFrom: firstOldId };
+  // 超过追溯上限通常是数据异常（长链或环）。不要返回一个未经校验的中间账号——
+  // 那会把用户登进一个可能已被停用/不属于他的号；退回旧号本身并让上层按未合并处理。
+  return { userId: firstOldId, redirectedFrom: null };
 }
 
 /**

@@ -32,11 +32,40 @@ const pendingListQuerySchema = z.object({
 });
 
 const batchConfirmSchema = z.object({
-  // 为空表示确认当前过滤条件下的全部待发布稿件。
+  // 为空表示确认「当前筛选条件下」的全部待发布稿件。
   ids: z.array(z.string().min(1)).max(200).optional(),
   // 无 Bot 模式下管理员把稿件发到 QQ 空间后，可以顺手记下说说链接，便于事后追溯。
   publishUrl: z.string().trim().max(1000).optional(),
+  // 与列表页相同的筛选条件：一键确认必须只作用于屏幕上这批稿件。
+  q: z.string().trim().max(80).optional(),
+  anonymous: z.enum(["all", "anonymous", "named"]).default("all"),
+  withImages: z.enum(["all", "images", "text"]).default("all"),
 });
+
+/**
+ * 把列表页的筛选条件转成 Prisma where。
+ * 列表与批量确认共用，避免「界面上筛了、后台却按全量确认」这种不一致。
+ */
+function pendingFilterWhere(tenantId: string, filter: {
+  q?: string | undefined;
+  anonymous: "all" | "anonymous" | "named";
+  withImages: "all" | "images" | "text";
+}) {
+  const keyword = filter.q?.trim();
+  const base: Record<string, unknown> = pendingPublishWhere(tenantId);
+  if (filter.anonymous === "anonymous") base.anonymous = true;
+  else if (filter.anonymous === "named") base.anonymous = false;
+  if (keyword) {
+    base.OR = [
+      { text: { contains: keyword } },
+      ...(/^\d+$/.test(keyword) && Number(keyword) <= 2_147_483_647 ? [{ displayId: Number(keyword) }] : []),
+      ...(/^\d{5,}$/.test(keyword) ? [{ author: { qqUin: BigInt(keyword) } }] : []),
+      { author: { displayName: { contains: keyword } } },
+    ];
+  }
+  // 配图筛选无法用 Prisma 表达（attachments 是 JSON），由调用方在取数后处理。
+  return base;
+}
 
 const revertBodySchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(200),
@@ -85,68 +114,88 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
   app.get("/api/admin/pending-publish", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const query = pendingListQuerySchema.parse(request.query);
-    const baseWhere = pendingPublishWhere(context.selectedTenant.id);
-    const keyword = query.q?.trim();
-    const where = {
-      ...baseWhere,
-      ...(query.anonymous === "anonymous" ? { anonymous: true } : query.anonymous === "named" ? { anonymous: false } : {}),
-      ...(keyword
-        ? {
-          OR: [
-            { text: { contains: keyword } },
-            ...(/^\d+$/.test(keyword) && Number(keyword) <= 2_147_483_647 ? [{ displayId: Number(keyword) }] : []),
-            ...(/^\d{5,}$/.test(keyword) ? [{ author: { qqUin: BigInt(keyword) } }] : []),
-            { author: { displayName: { contains: keyword } } },
-          ],
-        }
-        : {}),
-    };
-    const [total, posts] = await Promise.all([
-      prisma.post.count({ where }),
-      prisma.post.findMany({
-        where,
-        select: {
-          id: true,
-          displayId: true,
-          text: true,
-          anonymous: true,
-          attachments: true,
-          createdAt: true,
-          author: {
-            select: {
-              id: true,
-              qqUin: true,
-              displayName: true,
-            },
-          },
-        },
-        orderBy: pendingPublishOrderBy(query.sort),
-        skip: (query.page - 1) * query.limit,
-        take: query.limit,
-      }),
-    ]);
+    const where = pendingFilterWhere(context.selectedTenant.id, query);
 
-    const items = posts
-      .map((post) => ({
-        id: post.id,
-        displayId: post.displayId,
-        text: post.text,
-        anonymous: post.anonymous,
-        attachmentCount: Array.isArray(post.attachments) ? post.attachments.length : 0,
-        attachments: Array.isArray(post.attachments) ? post.attachments : [],
-        createdAt: post.createdAt.toISOString(),
-        author: {
-          id: post.author.id,
-          qqUin: post.author.qqUin.toString(),
-          displayName: post.author.displayName,
+    const selectFields = {
+      id: true,
+      displayId: true,
+      text: true,
+      anonymous: true,
+      attachments: true,
+      createdAt: true,
+      author: { select: { id: true, qqUin: true, displayName: true } },
+    } as const;
+
+    const toItem = (post: {
+      id: string;
+      displayId: number;
+      text: string;
+      anonymous: boolean;
+      attachments: unknown;
+      createdAt: Date;
+      author: { id: string; qqUin: bigint; displayName: string | null };
+    }) => ({
+      id: post.id,
+      displayId: post.displayId,
+      text: post.text,
+      anonymous: post.anonymous,
+      attachmentCount: Array.isArray(post.attachments) ? post.attachments.length : 0,
+      attachments: Array.isArray(post.attachments) ? post.attachments : [],
+      createdAt: post.createdAt.toISOString(),
+      author: {
+        id: post.author.id,
+        qqUin: post.author.qqUin.toString(),
+        displayName: post.author.displayName,
+      },
+    });
+
+    const withImagesAll = query.withImages === "all";
+    if (withImagesAll) {
+      const [total, posts] = await Promise.all([
+        prisma.post.count({ where }),
+        prisma.post.findMany({
+          where,
+          select: selectFields,
+          orderBy: pendingPublishOrderBy(query.sort),
+          skip: (query.page - 1) * query.limit,
+          take: query.limit,
+        }),
+      ]);
+      return {
+        posts: posts.map(toItem),
+        pagination: {
+          page: query.page,
+          limit: query.limit,
+          total,
+          pageCount: Math.max(1, Math.ceil(total / query.limit)),
         },
-      }))
-      // 「只看配图 / 只看纯文字」在服务端过滤会让分页 total 失真，因此放在本页内过滤，
-      // 并在响应里标注本页过滤后条数，避免前端误以为漏稿件。
-      .filter((item) => (query.withImages === "images" ? item.attachmentCount > 0 : query.withImages === "text" ? item.attachmentCount === 0 : true));
+      };
+    }
+
+    // 配图筛选无法在 Prisma 里表达（attachments 是 JSON 列）：先取出全量命中的 id 与附件数，
+    // 在内存里过滤后再分页，否则会出现「第一页空、目标在第 N 页」以及 total 与实际不符。
+    const candidates = await prisma.post.findMany({
+      where,
+      select: { id: true, attachments: true },
+      orderBy: pendingPublishOrderBy(query.sort),
+    });
+    const matchedIds = candidates
+      .filter((post) => {
+        const count = Array.isArray(post.attachments) ? post.attachments.length : 0;
+        return query.withImages === "images" ? count > 0 : count === 0;
+      })
+      .map((post) => post.id);
+
+    const total = matchedIds.length;
+    const pageIds = matchedIds.slice((query.page - 1) * query.limit, (query.page - 1) * query.limit + query.limit);
+    const posts = pageIds.length === 0
+      ? []
+      : await prisma.post.findMany({ where: { id: { in: pageIds } }, select: selectFields });
+    // findMany 不保证顺序，按上面算好的页内顺序重排。
+    const byId = new Map(posts.map((post) => [post.id, post]));
 
     return {
-      posts: items,
+      posts: pageIds.map((id) => byId.get(id)).filter(Boolean).map((post) => toItem(post!)),
       pagination: {
         page: query.page,
         limit: query.limit,
@@ -162,12 +211,21 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
     const context = await requireTenantRole(request, reply, "admin");
     const operateMode = await readTenantOperateMode(prisma, context.selectedTenant.id);
     const settings = await readTenantManualPublishSettings(prisma, context.selectedTenant.id);
-    const [residual, ingress] = await Promise.all([
+    const [residual, inFlight, ingress] = await Promise.all([
       prisma.post.count({ where: pendingPublishWhere(context.selectedTenant.id) }),
-      readTenantIngressAvailabilityFromDb(prisma, context.selectedTenant.id),    ]);
+      // 仍在自动发布队列里的稿件数：bot → manual 后前端据此显示「停止在途自动发布」。
+      prisma.post.count({
+        where: {
+          tenantId: context.selectedTenant.id,
+          status: { in: ["publishing", "partially_failed"] },
+        },
+      }),
+      readTenantIngressAvailabilityFromDb(prisma, context.selectedTenant.id),
+    ]);
     return {
       operateMode,
       residual,
+      inFlight,
       template: settings.template,
       wallQq: settings.wallQq,
       ingress,
@@ -245,22 +303,32 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
     return { ok: true, manualPublishUrl: publishUrl, publishUrlIgnored };
   });
 
-  // 多选 / 一键确认：把选中的（或当前全部）待发布稿件批量推进到 published。
+  // 多选 / 一键确认：把选中的（或「当前筛选条件下」的全部）待发布稿件批量推进到 published。
   // 逐条独立处理：单条不在 approved / 已被自动队列接手 / 被并发推进时只记录到 failures，
   // 不影响其余稿件，前端据此列出失败的稿件号与原因。
   app.post("/api/admin/pending-publish/confirm", async (request, reply) => {
     const context = await requireTenantRole(request, reply, "admin");
     const body = batchConfirmSchema.parse(request.body ?? {});
-    const where = body.ids && body.ids.length > 0
-      ? { ...pendingPublishWhere(context.selectedTenant.id), id: { in: body.ids } }
-      : pendingPublishWhere(context.selectedTenant.id);
+    // 界面上的筛选必须带过来：否则「一键确认全部」会把不在屏幕上的稿件也改掉。
+    const filteredWhere = pendingFilterWhere(context.selectedTenant.id, body);
     const { url: publishUrl, normalized: publishUrlIgnored } = normalizePublishUrl(body.publishUrl);
 
-    const targets = await prisma.post.findMany({
-      where,
-      select: { id: true, displayId: true },
+    // 先按筛选（含配图）算出真正命中集合，再与显式 ids 取交集。
+    const candidates = await prisma.post.findMany({
+      where: filteredWhere,
+      select: { id: true, displayId: true, attachments: true },
       orderBy: { createdAt: "asc" },
     });
+    const matchedCandidates = body.withImages === "all"
+      ? candidates
+      : candidates.filter((post) => {
+        const count = Array.isArray(post.attachments) ? post.attachments.length : 0;
+        return body.withImages === "images" ? count > 0 : count === 0;
+      });
+    const allowedIds = new Set(matchedCandidates.map((post) => post.id));
+    const targets = body.ids && body.ids.length > 0
+      ? matchedCandidates.filter((post) => body.ids!.includes(post.id))
+      : matchedCandidates;
 
     // 显式点名但已不在待发布队列的稿件也要告诉调用方，而不是静默丢弃。
     const foundIds = new Set(targets.map((target) => target.id));
@@ -375,7 +443,13 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
     const body = revertBodySchema.parse(request.body ?? {});
     const posts = await prisma.post.findMany({
       where: { tenantId: context.selectedTenant.id, id: { in: body.ids } },
-      select: { id: true, displayId: true, status: true, manualPublishedAt: true, publishAttempts: { select: { id: true }, take: 1 } },
+      select: {
+        id: true,
+        displayId: true,
+        status: true,
+        manualPublishedAt: true,
+        publishAttempts: { select: { id: true, status: true } },
+      },
     });
     const byId = new Map(posts.map((post) => [post.id, post]));
 
@@ -387,42 +461,53 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
         failures.push({ id, displayId: null, reason: "稿件不存在或不属于当前校园墙" });
         continue;
       }
-      if (post.status !== "published" || post.publishAttempts.length > 0 || post.manualPublishedAt === null) {
+      // 资格只看「是不是管理员手动确认的」：被 halt 停下的稿件会留下 skipped/failed 终态尝试，
+      // 它们并没有真正发出去，应该允许回退。真正自动发布成功的稿件没有 manualPublishedAt。
+      const hasPublishedAttempt = post.publishAttempts.some((attempt) =>
+        attempt.status === "succeeded" || attempt.status === "running");
+      if (post.status !== "published" || post.manualPublishedAt === null || hasPublishedAttempt) {
         failures.push({ id, displayId: post.displayId, reason: "只有管理员手动确认发布的稿件可以退回待发布" });
         continue;
       }
       try {
-        const updated = await prisma.post.updateMany({
-          where: { id, tenantId: context.selectedTenant.id, status: "published", manualPublishedAt: { not: null } },
-          data: {
-            status: "approved",
-            manualPublishedAt: null,
-            manualPublishUrl: null,
-            publishSummary: null,
-          },
+        // 状态推进、日志、审计同事务：任何一步失败都回滚，稿件仍可重试。
+        const done = await prisma.$transaction(async (transaction) => {
+          const updated = await transaction.post.updateMany({
+            where: { id, tenantId: context.selectedTenant.id, status: "published", manualPublishedAt: { not: null } },
+            data: {
+              status: "approved",
+              manualPublishedAt: null,
+              manualPublishUrl: null,
+              publishSummary: null,
+            },
+          });
+          if (updated.count === 0) {
+            return false;
+          }
+          await transaction.postLog.create({
+            data: {
+              tenantId: context.selectedTenant.id,
+              postId: id,
+              actorId: context.user.id,
+              oldStatus: "published",
+              newStatus: "approved",
+              comment: "管理员撤销「确认已发布」，稿件退回待发布",
+            },
+          });
+          await writeAuditLog({
+            tenantId: context.selectedTenant.id,
+            actorId: context.user.id,
+            action: "post.manual_publish.revert",
+            targetType: "post",
+            targetId: id,
+            detail: { displayId: post.displayId },
+          }, transaction);
+          return true;
         });
-        if (updated.count === 0) {
+        if (!done) {
           failures.push({ id, displayId: post.displayId, reason: "状态已变化，请刷新后重试" });
           continue;
         }
-        await prisma.postLog.create({
-          data: {
-            tenantId: context.selectedTenant.id,
-            postId: id,
-            actorId: context.user.id,
-            oldStatus: "published",
-            newStatus: "approved",
-            comment: "管理员撤销「确认已发布」，稿件退回待发布",
-          },
-        });
-        await writeAuditLog({
-          tenantId: context.selectedTenant.id,
-          actorId: context.user.id,
-          action: "post.manual_publish.revert",
-          targetType: "post",
-          targetId: id,
-          detail: { displayId: post.displayId },
-        });
         revertedDisplayIds.push(post.displayId);
       } catch (error) {
         request.log.error({ err: error, postId: id }, "manual publish revert failed");

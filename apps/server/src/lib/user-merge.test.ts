@@ -57,7 +57,8 @@ describe("resolveActiveAccount", () => {
       { id: "b", mergedAt: new Date(), mergedIntoUserId: "a" },
     ]);
     const result = await resolveActiveAccount(client as never, { id: "a", mergedAt: new Date(), mergedIntoUserId: "b" });
-    expect(result.redirectedFrom).toBe("a");
+    // 超过追溯上限时退回旧号本身，而不是返回一个未经校验的中间账号。
+    expect(result).toEqual({ userId: "a", redirectedFrom: null });
     expect(calls.length).toBeLessThanOrEqual(5);
   });
 });

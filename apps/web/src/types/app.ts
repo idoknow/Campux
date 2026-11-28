@@ -1111,10 +1111,12 @@ export type ManualPublishTemplate = {
   includeAuthorQq: boolean;
 };
 
-/** 待发布工作台上下文：模式、滞留量、文案模板、墙号 QQ、进站通道可用性。 */
+/** 待发布工作台上下文：模式、滞留量、在途发布量、文案模板、墙号 QQ、进站通道可用性。 */
 export type PendingPublishContext = {
   operateMode: "bot" | "manual";
   residual: number;
+  /** 仍在自动发布队列里的稿件数（bot → manual 后用于提示停止在途发布）。 */
+  inFlight: number;
   template: ManualPublishTemplate;
   wallQq: string;
   ingress: {

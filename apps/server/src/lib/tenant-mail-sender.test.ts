@@ -8,6 +8,7 @@ import {
   restoreMaskedSmtpPass,
   tenantMailSenderDefaults,
   validateMailSenderConfig,
+  validateSmtpHostTarget,
 } from "./tenant-mail-sender";
 
 const configWithOfficial = { resend: { apiKey: "re_test", fromEmail: "Campux <noreply@campux.top>" } } as unknown as CampuxConfig;
@@ -35,6 +36,29 @@ describe("normalizeMailSenderConfig", () => {
 
   it("falls back to official for unknown modes", () => {
     expect(normalizeMailSenderConfig({ mode: "weird" }).mode).toBe("official");
+  });
+});
+
+describe("validateSmtpHostTarget", () => {
+  it("rejects loopback and link-local targets", () => {
+    expect(validateSmtpHostTarget("127.0.0.1").ok).toBe(false);
+    expect(validateSmtpHostTarget("127.1.2.3").ok).toBe(false);
+    expect(validateSmtpHostTarget("169.254.169.254").ok).toBe(false);
+    expect(validateSmtpHostTarget("localhost").ok).toBe(false);
+    expect(validateSmtpHostTarget("::1").ok).toBe(false);
+    expect(validateSmtpHostTarget("fe80::1").ok).toBe(false);
+    expect(validateSmtpHostTarget("0.0.0.0").ok).toBe(false);
+  });
+
+  it("allows public hosts and private LAN relays used by self-hosters", () => {
+    expect(validateSmtpHostTarget("smtp.qq.com").ok).toBe(true);
+    expect(validateSmtpHostTarget("192.168.1.10").ok).toBe(true);
+    expect(validateSmtpHostTarget("10.0.0.5").ok).toBe(true);
+    expect(validateSmtpHostTarget("172.16.3.4").ok).toBe(true);
+  });
+
+  it("rejects an empty host", () => {
+    expect(validateSmtpHostTarget("   ").ok).toBe(false);
   });
 });
 

@@ -45,16 +45,20 @@ type VerifiedMailSender = { fingerprint: string; verifiedAt: number };
 const verifiedMailSenderByTenant = new Map<string, VerifiedMailSender>();
 
 /** 用发件配置的关键字段算摘要：任一字段变了就必须重新测试。 */
+/**
+ * 发件配置指纹：用长度前缀编码，避免字段内容里的分隔符造成「不同配置同指纹」。
+ */
 function mailSenderFingerprint(sender: TenantMailSenderConfig): string {
-  return [
+  const fields = [
     sender.mode,
     sender.smtpHost,
-    sender.smtpPort,
+    String(sender.smtpPort),
     sender.smtpUser,
     sender.smtpPass,
     sender.fromEmail,
     sender.fromName,
-  ].join("\u0001");
+  ];
+  return fields.map((f) => `${f.length}:${f}`).join("|");
 }
 
 export function __resetMailSenderVerificationForTests() {
@@ -168,21 +172,38 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     }
     const sender = restored.config;
 
+    const submittedSuffixes = body.emailPolicy.allowedSuffixes ?? [];
+    // 显式提交了后缀但全部非法时，规范化会得到空数组（= 不限制），
+    // 那等于把「配错」悄悄变成「放开所有域名」。这里拒绝并指出具体条目。
+    const normalizedSuffixes = normalizeAllowedSuffixes(submittedSuffixes);
+    if (submittedSuffixes.length > 0 && normalizedSuffixes.length === 0) {
+      return reply.code(400).send({
+        message: `邮箱后缀格式不正确：${submittedSuffixes.join("、")}。请填写形如 qq.com 的后缀，或清空列表表示不限制。`,
+        code: "INVALID_EMAIL_SUFFIX",
+      });
+    }
     const nextPolicy: RegistrationEmailPolicy = normalizeRegistrationEmailPolicy({
       required: body.emailPolicy.required,
-      allowedSuffixes: normalizeAllowedSuffixes(body.emailPolicy.allowedSuffixes ?? []),
+      allowedSuffixes: normalizedSuffixes,
     });
 
     // 规则 1：开启邮箱验证必须有可用的发件配置。
-    if (nextPolicy.required) {
-      const staticCheck = validateMailSenderConfig(sender, config);
-      if (!staticCheck.ok) {
-        return reply.code(400).send({
-          message: `开启邮箱验证前请先配置好发件服务：${staticCheck.problems.join("；")}`,
-          code: "MAIL_SENDER_INCOMPLETE",
-        });
-      }
-      // 规则 2：发件配置改动后必须先测试通过。
+    // 规则 2：**发件配置变化**时必须先测试通过——即使邮箱验证是关的。
+    // 因为该配置还会被「游客注册」「账号绑定」使用，存进一份没验证过的配置，
+    // 等于让这些流程在无人察觉时全部发不出信。
+    // 仅调整注册策略（后缀等）而发件配置没动时不必重测，否则每改一次后缀都要再发一封信。
+    const senderChanged = mailSenderFingerprint(sender) !== mailSenderFingerprint(stored);
+    const staticCheck = validateMailSenderConfig(sender, config);
+    // 「已配置好」的判定：官方可用，或 SMTP 字段齐全。
+    const senderUsable = sender.mode === "official" ? officialMailerAvailable(config) : staticCheck.ok;
+
+    if (nextPolicy.required && !staticCheck.ok) {
+      return reply.code(400).send({
+        message: `开启邮箱验证前请先配置好发件服务：${staticCheck.problems.join("；")}`,
+        code: "MAIL_SENDER_INCOMPLETE",
+      });
+    }
+    if (senderChanged && senderUsable) {
       const verified = verifiedMailSenderByTenant.get(tenantId);
       const fingerprint = mailSenderFingerprint(sender);
       const stillValid = verified
@@ -196,33 +217,33 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
       }
     }
 
-    await prisma.$transaction([
-      prisma.tenantMetadata.upsert({
+    await prisma.$transaction(async (transaction) => {
+      await transaction.tenantMetadata.upsert({
         where: { tenantId_key: { tenantId, key: registrationEmailPolicyKey } },
         update: { value: nextPolicy },
         create: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
-      }),
-      prisma.tenantMetadata.upsert({
+      });
+      await transaction.tenantMetadata.upsert({
         where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
         update: { value: sender },
         create: { tenantId, key: tenantMailSenderKey, value: sender },
-      }),
-    ]);
-
-    await writeAuditLog({
-      tenantId,
-      actorId: context.user.id,
-      action: "tenant.registration_settings.update",
-      targetType: "tenant",
-      targetId: tenantId,
-      detail: {
-        emailVerificationRequired: nextPolicy.required,
-        allowedSuffixes: nextPolicy.allowedSuffixes,
-        mailMode: sender.mode,
-        // 不记录授权码明文。
-        smtpHost: sender.smtpHost,
-        fromEmail: sender.fromEmail,
-      },
+      });
+      // 审计与配置同事务：避免「配置已改、审计没记」。
+      await writeAuditLog({
+        tenantId,
+        actorId: context.user.id,
+        action: "tenant.registration_settings.update",
+        targetType: "tenant",
+        targetId: tenantId,
+        detail: {
+          emailVerificationRequired: nextPolicy.required,
+          allowedSuffixes: nextPolicy.allowedSuffixes,
+          mailMode: sender.mode,
+          // 不记录授权码明文。
+          smtpHost: sender.smtpHost,
+          fromEmail: sender.fromEmail,
+        },
+      }, transaction);
     });
 
     // 配置变了，之前那次测试不再代表当前配置。

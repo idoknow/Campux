@@ -876,7 +876,11 @@ export function App() {
         open={accountMergeOpen}
         currentQqUin={me.user.qqUin}
         onClose={() => dismissAccountMerge()}
-        onMerged={() => refreshMe()}
+        onMerged={async () => {
+          // 合并会把旧号稿件迁到当前账号，因此「我的稿件」列表必须一起刷新。
+          await refreshMe();
+          await refreshTenantData(postsPage);
+        }}
       />
     </>
   );

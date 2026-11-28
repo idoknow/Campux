@@ -99,11 +99,65 @@ export function restoreMaskedSmtpPass(
   return { ok: true, config: { ...submitted, smtpPass: stored.smtpPass } };
 }
 
-/** 官方发件是否可用（平台层配了 Resend）。 */
+/**
+ * SMTP 目标地址的静态安全检查。
+ *
+ * 运营者可以自行填写 SMTP 主机，这等于让服务端向任意地址发起连接（SSRF 面）。
+ * 但自托管场景下运营者**本来就需要**连自己的内网邮件中继，所以不能一刀切禁私网。
+ *
+ * 采取的折中：
+ * - 拒绝 loopback（127/8、::1）与 link-local（169.254/16、fe80::/10）——这两类在正常
+ *   部署里没有任何理由被当作邮件服务器，却是云元数据与本地服务的典型入口；
+ * - 允许私网（10/8、172.16/12、192.168/16）——自建 SMTP 的常见位置。
+ */
+export function validateSmtpHostTarget(host: string): { ok: boolean; reason?: string } {
+  const trimmed = host.trim();
+  if (!trimmed) {
+    return { ok: false, reason: "请填写 SMTP 服务器地址" };
+  }
+
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed);
+  if (isIpv4) {
+    const parts = trimmed.split(".").map(Number);
+    if (parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+      return { ok: false, reason: "SMTP 服务器地址格式不正确" };
+    }
+    const [a, b] = parts as [number, number, number, number];
+    // loopback 127.0.0.0/8
+    if (a === 127) {
+      return { ok: false, reason: "不允许把 SMTP 指向本机回环地址（127.0.0.0/8）" };
+    }
+    // link-local 169.254.0.0/16（含云厂商元数据 169.254.169.254）
+    if (a === 169 && b === 254) {
+      return { ok: false, reason: "不允许把 SMTP 指向链路本地地址（169.254.0.0/16）" };
+    }
+    // 0.0.0.0/8
+    if (a === 0) {
+      return { ok: false, reason: "不允许把 SMTP 指向 0.0.0.0" };
+    }
+    return { ok: true };
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "localhost" || lower.endsWith(".localhost")) {
+    return { ok: false, reason: "不允许把 SMTP 指向 localhost，请填写实际的中继服务器地址" };
+  }
+  // IPv6 字面量：拒绝 ::1 与 fe80::/10；其余（含私网 ULA）放行。
+  const ipv6 = /^\[?([0-9a-f:]+)\]?$/i.exec(lower);
+  if (ipv6 && lower.includes(":")) {
+    const addr = ipv6[1]!;
+    if (addr === "::1" || addr === "0:0:0:0:0:0:0:1") {
+      return { ok: false, reason: "不允许把 SMTP 指向本机回环地址（::1）" };
+    }
+    if (/^fe[89ab][0-9a-f]:/i.test(addr)) {
+      return { ok: false, reason: "不允许把 SMTP 指向链路本地地址（fe80::/10）" };
+    }
+  }
+  return { ok: true };
+}
 export function officialMailerAvailable(config: CampuxConfig): boolean {
   return Boolean(config.resend.apiKey);
 }
-
 /** 当前生效的发件人地址（用于界面展示与预校验）。 */
 export function resolveEffectiveFromEmail(sender: TenantMailSenderConfig, config: CampuxConfig): string {
   return sender.mode === "official" ? config.resend.fromEmail : sender.fromEmail;
@@ -126,6 +180,10 @@ export function validateMailSenderConfig(
     }
   } else {
     if (!sender.smtpHost) problems.push("请填写 SMTP 服务器地址");
+    else {
+      const target = validateSmtpHostTarget(sender.smtpHost);
+      if (!target.ok) problems.push(target.reason ?? "SMTP 服务器地址不可用");
+    }
     if (!sender.smtpUser) problems.push("请填写 SMTP 账号");
     if (!sender.smtpPass) problems.push("请填写 SMTP 密码/授权码");
     if (!sender.fromEmail) problems.push("请填写发件人邮箱");
@@ -181,9 +239,10 @@ export async function sendTenantMail(
       host: sender.smtpHost,
       port: sender.smtpPort,
       secure,
-      // 465 走隐式 TLS；587/25 等端口在服务器公告 STARTTLS 时自动升级。
-      // 不设 `requireTLS: true`：对端不公告 STARTTLS 的自建 MTA 会一直等到超时。
-      requireTLS: false,
+      // 465 走隐式 TLS；其余端口要求服务器升级到 STARTTLS 后才发送认证信息，
+      // 否则账号密码会以明文经过网络（评审指出的问题）。
+      // 确实不支持 STARTTLS 的内部中继，请改用 465（隐式 TLS）或免认证中继。
+      requireTLS: !secure,
       auth: { user: sender.smtpUser, pass: sender.smtpPass },
       greetingTimeout: 10_000,
       connectionTimeout: 15_000,

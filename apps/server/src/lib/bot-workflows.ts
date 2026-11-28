@@ -248,12 +248,12 @@ export async function resetPasswordViaBot({
     },
   });
 
-  const foundMembership = found?.memberships.find((item) => item.tenantId === bot.tenantId);
-  if (!found || !foundMembership) {
+  if (!found) {
     throw new BotWorkflowError("账号还没有注册这个校园墙，请先发送 #注册账号", 404);
   }
 
-  // 被合并过的旧号：重置应作用在合并后的主账号上。
+  // 被合并过的旧号：先解析到主账号，再校验它在「当前墙」的成员身份。
+  // 顺序不能反——合并会把旧号的 membership 迁到主账号，先校验旧号必然 404。
   const resolved = await resolveActiveAccount(prisma, found);
   const user = resolved.redirectedFrom === null
     ? found

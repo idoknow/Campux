@@ -720,9 +720,32 @@ export function AdminPage({
     }
     setBusy(true);
     try {
+      // 重试必须带上完整表单：只发 operateMode 会把本次其它改动（名称、模板、墙号 QQ…）丢掉。
       await api("/api/admin/tenant/metadata", {
         method: "PATCH",
         body: JSON.stringify({
+          tenantName: form.tenantName,
+          themeColor: form.themeColor,
+          brand: form.brand,
+          banner: form.banner,
+          logoUrl: form.logoUrl.trim(),
+          pendingPostLimit: form.pendingPostLimit,
+          publishRateLimitHourly: form.publishRateLimitHourly,
+          publishRateLimitDaily: form.publishRateLimitDaily,
+          postRules: form.postRulesText.split(/\r?\n/).map((rule) => rule.trim()).filter(Boolean),
+          services: prepareServiceEntriesForSave(form.services),
+          imageCompressionEnabled: form.imageCompressionEnabled,
+          imageCompressionQuality: form.imageCompressionQuality,
+          imageCompressionMaxDimension: form.imageCompressionMaxDimension,
+          imageMaxSizeMb: normalizeImageMaxSizeDraft(imageMaxSizeDraft, form.imageMaxSizeMb),
+          publishMode: form.publishMode,
+          publishAccumulateMinImages: form.publishAccumulateMinImages,
+          publishAccumulateMaxImages: form.publishAccumulateMaxImages,
+          publishAccumulateStaleMinutes: form.publishAccumulateStaleMinutes,
+          publishLlmSummaryEnabled: form.publishLlmSummaryEnabled,
+          followedPostCommentNotifyEnabled: form.followedPostCommentNotifyEnabled,
+          manualPublishTemplate: form.manualPublishTemplate,
+          manualWallQq: form.manualWallQq,
           operateMode: "manual",
           confirmNoIngress: true,
         }),

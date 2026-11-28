@@ -152,7 +152,35 @@ export function OnboardingWizard({
         toast.success("已切换回接入墙号机器人");
       }
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "切换运营模式失败");
+      const message = caught instanceof Error ? caught.message : "切换运营模式失败";
+      // 没有任何自助进站通道时服务端会拒绝（409）。这里给出明确选择：
+      // 先去开游客投稿，或者确认「先开通、之后再补」，否则向导会卡死在这一步。
+      if (next === "manual" && message.includes("无 Bot 模式需要至少一条用户自助进站通道")) {
+        const confirmed = window.confirm(
+          `${message}
+
+仍然切换到无 Bot 模式吗？
+（切换后普通同学暂时无法注册，请尽快到「管理 · 插件配置」开启「游客投稿」。）`,
+        );
+        if (!confirmed) {
+          toast.info("已取消切换。请先在「管理 · 插件配置」开启「游客投稿」或「聚合登录自动建号」。");
+          return;
+        }
+        try {
+          await api("/api/admin/tenant/metadata", {
+            method: "PATCH",
+            body: JSON.stringify({ operateMode: "manual", confirmNoIngress: true }),
+          });
+          setOperateMode("manual");
+          toast.success("已切换为无 Bot 模式运营（请尽快开启游客投稿）", { duration: 10000 });
+          setStep("done");
+          return;
+        } catch (retryError) {
+          toast.error(retryError instanceof Error ? retryError.message : "切换运营模式失败");
+          return;
+        }
+      }
+      toast.error(message);
     } finally {
       setSwitchingOperateMode(false);
     }

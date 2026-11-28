@@ -479,7 +479,7 @@ export function PostsPage({
     let cancelled = false;
     void loadPendingPublishContext().then((context) => {
       if (cancelled || !context) return;
-      setPendingResidual({ operateMode: context.operateMode, residual: context.residual });
+      setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
     });
     return () => { cancelled = true; };
   }, [isAdmin, tenantId]);
@@ -496,7 +496,7 @@ export function PostsPage({
     try {
       const context = await api<PendingPublishContext>("/api/admin/pending-publish/context");
       setPendingPublishContext(context);
-      setPendingResidual({ operateMode: context.operateMode, residual: context.residual });
+      setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
       return context;
     } catch {
       setPendingPublishContext(null);
@@ -560,7 +560,7 @@ export function PostsPage({
       // 滞留量与在途发布量、进站通道一起刷新：切回 bot 模式后要提示补队列。
       const context = await loadPendingPublishContext();
       if (context) {
-        setPendingResidual({ operateMode: context.operateMode, residual: context.residual });
+        setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
       }
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "无法读取待发布稿件");
@@ -646,7 +646,7 @@ export function PostsPage({
     }
   }
 
-  /** 批量确认：ids 为空时确认当前全部待发布稿件；部分失败时保留成功结果并列出失败明细。 */
+  /** 批量确认：ids 为空时确认「当前筛选条件下」的全部待发布稿件；部分失败时保留成功结果并列出失败明细。 */
   async function confirmPendingPublishBulk(ids: string[]) {
     setPendingPublishBatchBusy(true);
     setPendingPublishFailures([]);
@@ -663,6 +663,10 @@ export function PostsPage({
         body: JSON.stringify({
           ...(ids.length > 0 ? { ids } : {}),
           ...(pendingPublishUrl.trim() ? { publishUrl: pendingPublishUrl.trim() } : {}),
+          // 带上筛选，避免「一键确认全部」改到屏幕外的稿件。
+          ...(pendingPublishKeywordApplied.trim() ? { q: pendingPublishKeywordApplied.trim() } : {}),
+          anonymous: pendingPublishAnonymous,
+          withImages: pendingPublishWithImages,
         }),
       });
       setPendingPublishFailures(result.failures ?? []);
@@ -2419,6 +2423,7 @@ export function PostsPage({
                     onRecallApprove={(post) => setRecallConfirm({ open: true, mode: "approve", post })}
                     onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
                     onRecallIgnore={(post) => void ignoreRecallPost(post)}
+                    onRecallManualComplete={(post) => void confirmManualRecallDone(post.displayId, post.id)}
                     onDetail={(post) => openPostDetail(post.id)}
                   />
                   {reviewLoading ? (
@@ -3255,6 +3260,7 @@ function ReviewList({
   onRecallReject,
   onRecallDirect,
   onRecallDirectSilent,
+  onRecallManualComplete,
   onDetail,
   onCancelAutoDecision,
 }: {
@@ -3270,6 +3276,7 @@ function ReviewList({
   onRecallReject: (post: ReviewPostItem) => void;
   onRecallDirect: (post: ReviewPostItem) => void;
   onRecallDirectSilent: (post: ReviewPostItem) => void;
+  onRecallManualComplete?: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
   onCancelAutoDecision: (post: ReviewPostItem) => void;
 }) {
@@ -3311,6 +3318,7 @@ function PendingRecallQueue({
   onRecallApprove,
   onRecallReject,
   onRecallIgnore,
+  onRecallManualComplete,
   onDetail,
 }: {
   posts: ReviewPostItem[];
@@ -3321,6 +3329,8 @@ function PendingRecallQueue({
   onRecallApprove: (post: ReviewPostItem) => void;
   onRecallReject: (post: ReviewPostItem) => void;
   onRecallIgnore: (post: ReviewPostItem) => void;
+  /** 无 Bot 模式：没有发帖记录，只能让管理员删完说说后回来确认。 */
+  onRecallManualComplete?: (post: ReviewPostItem) => void;
   onDetail: (post: ReviewPostItem) => void;
 }) {
   if (loading && posts.length === 0) {
@@ -3358,6 +3368,7 @@ function PendingRecallQueue({
             onRecallApprove={() => onRecallApprove(post)}
             onRecallReject={() => onRecallReject(post)}
             onRecallIgnore={() => onRecallIgnore(post)}
+            {...(onRecallManualComplete ? { onRecallManualComplete: () => onRecallManualComplete(post) } : {})}
             onDetail={() => onDetail(post)}
           />
         ))}
@@ -3380,6 +3391,7 @@ function ReviewCard({
   onRecallIgnore,
   onRecallDirect,
   onRecallDirectSilent,
+  onRecallManualComplete,
   onDetail,
   onCancelAutoDecision,
 }: {
@@ -3396,6 +3408,8 @@ function ReviewCard({
   onRecallIgnore?: () => void;
   onRecallDirect?: () => void;
   onRecallDirectSilent?: () => void;
+  /** 无 Bot 模式：管理员到 QQ 空间删完说说后回来确认撤回。 */
+  onRecallManualComplete?: () => void;
   onDetail: () => void;
   onCancelAutoDecision?: () => void;
 }) {
@@ -3478,6 +3492,13 @@ function ReviewCard({
               {!post.recallIgnored && onRecallIgnore ? (
                 <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallIgnore}>
                   忽略
+                </Button>
+              ) : null}
+              {/* 无 Bot 模式：没有发帖记录，同意撤回会失败。这里直接提供「删完后确认」，
+                  否则该状态既进不了已发布列表、也没有可操作按钮。 */}
+              {onRecallManualComplete ? (
+                <Button size="sm" variant="outline" className="font-medium" disabled={busy} onClick={onRecallManualComplete}>
+                  已在空间手动删除
                 </Button>
               ) : null}
               <Button size="sm" className="font-medium" disabled={busy} onClick={onRecallApprove}>

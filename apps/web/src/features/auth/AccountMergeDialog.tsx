@@ -70,11 +70,11 @@ export function AccountMergeDialog({
       });
       setPreview(data.preview);
       setEmail(data.preview.oldEmail ?? "");
-      // QQ 不一致时明确提示：绑定后当前账号的 QQ 会改成旧账号的。
+      // 注意措辞：合并后保留的是**当前**账号（QQ 不变），旧账号被停用。
       if (data.preview.oldQqUin !== currentQqUin) {
         setMessage(
-          `邮箱绑定的 QQ（${data.preview.oldQqUin}）与当前登录账号（${currentQqUin}）不一致。`
-          + "确认绑定后，当前账号的 QQ 会改为 " + data.preview.oldQqUin + "。",
+          `旧账号的 QQ（${data.preview.oldQqUin}）与当前登录账号（${currentQqUin}）不一致。`
+          + `确认绑定后，旧账号的稿件会并入当前账号，当前账号的 QQ 仍是 ${currentQqUin}，旧账号停用。`,
         );
       }
     } catch (caught) {
@@ -112,8 +112,13 @@ export function AccountMergeDialog({
         body: JSON.stringify({ oldQqUin, email: email || undefined, code: code.trim() }),
       });
       toast.success(`已绑定之前的账号，迁移了 ${result.migratedPosts} 条稿件。`);
-      await onMerged();
       onClose();
+      // 合并已完成，刷新失败不该让用户以为合并没成功。
+      try {
+        await onMerged();
+      } catch {
+        toast.warning("合并已完成，但页面数据刷新失败，请手动刷新一次。");
+      }
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : "绑定失败");
     } finally {
