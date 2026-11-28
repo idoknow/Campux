@@ -4563,12 +4563,22 @@ export class OneBotRuntime {
               await this.sendGroupMessage(botQqUin, groupId, `没有找到稿件 #${displayIdArg}，请确认编号`);
               return;
             }
-            const publishedCount = await prisma.publishAttempt.count({
-              where: { tenantId: bot.tenantId, postId: post.id, status: "succeeded" },
+            const postRecord = await prisma.post.findFirst({
+              where: { tenantId: bot.tenantId, id: post.id },
+              select: { status: true, manualPublishedAt: true },
             });
-            if (publishedCount === 0) {
-              await this.sendGroupMessage(botQqUin, groupId, `稿件 #${displayIdArg} 还没有发布成功，无法撤回`);
-              return;
+            // 手动发布的稿件（manual 模式下管理员确认的那批）没有成功的 publishAttempt，
+            // 但它们确实已经发到空间——必须放行到 executePostRecall，
+            // 由 PostRecallNoRecordError 引导「手动删除后回来确认」，而不是误报「还没有发布成功」。
+            const manuallyPublished = postRecord?.status === "published" && postRecord.manualPublishedAt !== null;
+            if (!manuallyPublished) {
+              const publishedCount = await prisma.publishAttempt.count({
+                where: { tenantId: bot.tenantId, postId: post.id, status: "succeeded" },
+              });
+              if (publishedCount === 0) {
+                await this.sendGroupMessage(botQqUin, groupId, `稿件 #${displayIdArg} 还没有发布成功，无法撤回`);
+                return;
+              }
             }
             const recalled = await executePostRecall({
               tenantId: bot.tenantId,
