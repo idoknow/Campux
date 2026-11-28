@@ -645,23 +645,27 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     const rejected = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
-      await transaction.post.update({
-        where: {
-          id: post.id,
-        },
+      // 条件更新：校验与写入之间稿件可能已被处理（例如被并发确认撤回），
+      // 状态不再是 pending_recall 时放弃，不能把它强行改回 published。
+      const updated = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_recall" },
         data: {
           status: "published",
           recallIgnored: false,
           recallIgnoredAt: null,
-          logs: {
-            create: {
-              tenantId: context.selectedTenant.id,
-              actorId: context.user.id,
-              oldStatus: post.status,
-              newStatus: "published",
-              comment: body.comment?.trim() || "拒绝撤回申请",
-            },
-          },
+        },
+      });
+      if (updated.count === 0) {
+        return false;
+      }
+      await transaction.postLog.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          postId: post.id,
+          actorId: context.user.id,
+          oldStatus: "pending_recall",
+          newStatus: "published",
+          comment: body.comment?.trim() || "拒绝撤回申请",
         },
       });
 
@@ -680,6 +684,9 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     });
     if (!rejected.active) {
       return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
+    if (!rejected.value) {
+      return reply.code(409).send({ message: "稿件状态已变化，请刷新后重试" });
     }
 
     oneBot?.notifyPostRecallRejected(post.id, body.comment?.trim() || "撤回申请未通过").catch((error) => {

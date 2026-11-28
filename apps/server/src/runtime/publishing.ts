@@ -307,6 +307,70 @@ function isManualModeHaltSkip(attempt: { status: string; lastError?: string | nu
 }
 
 /**
+ * halt 守卫发现「已有兄弟目标成功」时调用：
+ * 这次 halt 让最后一个待发目标退出后，可能再没有任何 attempt 会去刷新聚合状态
+ * （成功的那次早已刷新过、把稿件留在 publishing/partially_failed）。
+ * 这里在 halt 事务内补一次对账：把“已结算且含成功”的稿件推进到它的终态；
+ * 有成功目标时稿件保持 published/partially_failed，绝不退回待发布。
+ */
+async function reconcilePostsWithSuccessfulSibling(
+  transaction: Prisma.TransactionClient,
+  input: { tenantId: string; batchId: string | null; postId: string },
+) {
+  const { tenantId, batchId, postId } = input;
+  const postIds = batchId
+    ? (await transaction.publishBatchItem.findMany({ where: { batchId }, select: { postId: true } })).map((item) => item.postId)
+    : [postId];
+  if (postIds.length === 0) {
+    return;
+  }
+  const attempts = await transaction.publishAttempt.findMany({
+    where: batchId ? { batchId } : { postId },
+    select: { postId: true, status: true, nextRunAt: true, lastError: true, publishTarget: { select: { required: true } } },
+  });
+  for (const id of postIds) {
+    // 该稿件相关的 attempts（批量 attempt 挂在锚点 postId 上，覆盖整批成员）。
+    const related = attempts.filter((attempt) => attempt.postId === postIds[0] || batchId);
+    const aggregate = deriveAggregateStatus(related);
+    if (!aggregate) {
+      continue;
+    }
+    // 只推进“已结算且成功”的终态；never 把稿件退回待发布。
+    if (aggregate.status !== "published" && aggregate.status !== "partially_failed") {
+      continue;
+    }
+    const post = await transaction.post.findUnique({ where: { id }, select: { status: true } });
+    if (!post || (post.status !== "publishing" && post.status !== "partially_failed")) {
+      continue;
+    }
+    await transaction.post.update({
+      where: { id },
+      data: {
+        status: aggregate.status,
+        logs: {
+          create: {
+            tenantId,
+            postId: id,
+            oldStatus: post.status,
+            newStatus: aggregate.status,
+            comment: "切到无 Bot 模式，其余发布目标已停止；按已完成的目标对账稿件状态",
+          },
+        },
+      },
+    });
+    if (batchId) {
+      const batchStatus = batchStatusFromPostStatus[aggregate.status];
+      if (batchStatus) {
+        await transaction.publishBatch.updateMany({
+          where: { id: batchId, status: { in: ["publishing", "partially_failed", "failed"] } },
+          data: { status: batchStatus },
+        });
+      }
+    }
+  }
+}
+
+/**
  * 在“作废 attempt”的同一事务里完成切到无 Bot 模式的收尾，避免第二步失败后稿件永远停在发布中：
  * - 已有目标成功或在跑：保留现状，交给它刷新聚合状态；
  * - 还有目标待发：等它自己收尾，避免抢先退回后又被改回；
@@ -322,9 +386,13 @@ async function finalizeManualModeHalt(
   // 否则非 anchor 稿件会漏掉“已有目标成功/在跑”的保护，被退回后重复发布。
   const siblings = await transaction.publishAttempt.findMany({
     where: batchId ? { batchId, id: { not: attemptId } } : { postId, id: { not: attemptId } },
-    select: { status: true, nextRunAt: true },
+    select: { status: true, nextRunAt: true, lastError: true },
   });
-  if (siblings.some((sibling) => sibling.status === "running" || sibling.status === "succeeded")) {
+  const hasLiveOrDoneSibling = siblings.some((sibling) => sibling.status === "running" || sibling.status === "succeeded");
+  if (hasLiveOrDoneSibling) {
+    // 有目标成功或在跑：稿件不能退回待发布（可能已发出去了）。
+    // 但聚合状态也要同步对账——见下方“已结算集合含成功”的说明，避免稿件永久卡在发布中。
+    await reconcilePostsWithSuccessfulSibling(transaction, { tenantId, batchId, postId });
     return;
   }
   const stillPending = siblings.some((sibling) =>
@@ -333,6 +401,14 @@ async function finalizeManualModeHalt(
     || sibling.status === "waiting_cookies"
     || (sibling.status === "failed" && sibling.nextRunAt !== null));
   if (stillPending) {
+    return;
+  }
+  // 模糊失败（远端可能已接收但结果未知）不能当成普通失败：
+  // 把稿件退回 approved 会让运营者手动重发，造成重复的公开说说。
+  // 保留 publishing/partially_failed，由运营者在管理页按详情决定。
+  const hasAmbiguousSibling = siblings.some((sibling) =>
+    sibling.status === "failed" && (sibling.lastError ?? "").includes(ambiguousPublishNoRetryMarker));
+  if (hasAmbiguousSibling) {
     return;
   }
 
@@ -347,6 +423,9 @@ async function finalizeManualModeHalt(
     if (updated.count === 0) {
       continue;
     }
+    // 待发布队列按 batchItem: {is: null} 过滤：退回稿件时必须把批次条目一起摘除，
+    // 否则这条稿件在待发布面板里找不到，滞留计数也不含它。
+    await transaction.publishBatchItem.deleteMany({ where: { postId: id } });
     // 日志单独写：updateMany 不支持嵌套关系写入。
     await transaction.postLog.create({
       data: {
@@ -2133,6 +2212,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       attemptId: attempt.id,
       tenantId: attempt.tenantId,
       postId: attempt.postId,
+      batchId: attempt.batchId,
       publishTargetId: attempt.publishTargetId,
       publishTargetName: attempt.publishTarget.displayName,
       botAccountId: attempt.publishTarget.botAccountId,
@@ -2454,6 +2534,7 @@ async function resolveCookiesForPublish({
   attemptId,
   tenantId,
   postId,
+  batchId,
   publishTargetId,
   publishTargetName,
   botAccountId,
@@ -2466,6 +2547,7 @@ async function resolveCookiesForPublish({
   attemptId: string;
   tenantId: string;
   postId: string;
+  batchId: string | null;
   publishTargetId: string;
   publishTargetName: string;
   botAccountId: string;
@@ -2546,6 +2628,7 @@ async function resolveCookiesForPublish({
     attemptId,
     tenantId,
     postId,
+    batchId,
     publishTargetId,
     publishTargetName,
     message,
@@ -2613,6 +2696,7 @@ async function markAttemptWaitingForCookies({
   attemptId,
   tenantId,
   postId,
+  batchId,
   publishTargetId,
   publishTargetName,
   message,
@@ -2623,6 +2707,7 @@ async function markAttemptWaitingForCookies({
   attemptId: string;
   tenantId: string;
   postId: string;
+  batchId: string | null;
   publishTargetId: string;
   publishTargetName: string;
   message: string;
@@ -2630,6 +2715,20 @@ async function markAttemptWaitingForCookies({
   notifier: PublishingNotifier | undefined;
   logger: FastifyBaseLogger;
 }) {
+  // 墙已切到无 Bot 模式时不再进入等待态：waiting_cookies 会把稿件挡在待发布队列外，
+  // 而 halt 守卫只处理 queued/failed/waiting_cookies 的 attempt——
+  // 留在等待态的稿件要等 cookies 恢复才有机会被作废。这里先按当前模式拦下。
+  if ((await readTenantOperateMode(prisma, tenantId)) === "manual") {
+    await prisma.$transaction(async (transaction) => {
+      await finalizeManualModeHalt(transaction, {
+        attemptId,
+        tenantId,
+        postId,
+        batchId,
+      });
+    });
+    return;
+  }
   await prisma.publishAttempt.update({
     where: {
       id: attemptId,
@@ -2692,6 +2791,8 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
     return null;
   }
 
+  // 原始集合里的必需目标数（含被 halt 的）：用于识别「必需目标全被 halt」的空集场景。
+  const rawRequiredCount = rawAttempts.filter((attempt) => attempt.publishTarget.required).length;
   const requiredAttempts = attempts.filter((attempt) => attempt.publishTarget.required);
   const optionalAttempts = attempts.filter((attempt) => !attempt.publishTarget.required);
   const completedRequiredAttempts = requiredAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
@@ -2700,6 +2801,12 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
   const allRequiredAttemptsCompleted = completedRequiredAttempts.length === requiredAttempts.length;
   const allAttemptsCompleted = completedAttempts.length === attempts.length;
   if (allRequiredAttemptsCompleted && (allAttemptsCompleted || completedRequiredAttempts.length > 0)) {
+    // 关键防护：必需目标全部被本次 halt 拦下时，`requiredAttempts` 会是空列表，
+    // 上面的完成校验会“空集恒真”地通过——只要还剩一个成功的可选目标就误判 published。
+    // 必需目标一个都没参与发布时，不允许把稿件/批次判成已发布。
+    if (requiredAttempts.length === 0 && rawRequiredCount > 0) {
+      return null;
+    }
     return { status: "published", comment: allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成" };
   }
 
@@ -2719,6 +2826,8 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
     };
   }
 
+  // 剩余只有可选目标（必需目标全被 halt）：既不能判 published，也不能判 publishing；
+  // 返回 null 让上层保留现状，等待运营者手动处理。
   return null;
 }
 

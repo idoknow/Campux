@@ -401,6 +401,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         activeBan: hostMembership ? toActiveBan(await findActiveBan(hostTenant.id, user.id)) : null,
         needsTenantSelection: false,
         hostLocked: true,
+        // 靠私聊 Bot 建号、还没绑邮箱的同学：墙域名登录也要提示绑定旧账号（与通用分支一致）。
+        shouldPromptAccountMerge: shouldPromptAccountMerge(user),
         ...(mergedNotice ? { mergedAccount: mergedNotice } : {}),
       };
     }

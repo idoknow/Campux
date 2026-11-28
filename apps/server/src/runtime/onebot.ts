@@ -4570,7 +4570,8 @@ export class OneBotRuntime {
             // 手动发布的稿件（manual 模式下管理员确认的那批）没有成功的 publishAttempt，
             // 但它们确实已经发到空间——必须放行到 executePostRecall，
             // 由 PostRecallNoRecordError 引导「手动删除后回来确认」，而不是误报「还没有发布成功」。
-            const manuallyPublished = postRecord?.status === "published" && postRecord.manualPublishedAt !== null;
+            const manuallyPublished = (postRecord?.status === "published" || postRecord?.status === "pending_recall")
+              && postRecord.manualPublishedAt !== null;
             if (!manuallyPublished) {
               const publishedCount = await prisma.publishAttempt.count({
                 where: { tenantId: bot.tenantId, postId: post.id, status: "succeeded" },
@@ -4792,21 +4793,26 @@ export class OneBotRuntime {
 
         const rejectReason = comment.trim() || "拒绝撤回申请";
         const rejected = await runWithActiveTenantLease(prisma, bot.tenantId, async (transaction) => {
-          const updated = await transaction.post.update({
-            where: { id: recallPost.id },
+          // 条件更新：校验与写入之间稿件可能已被网页端处理，状态不再是待撤回时放弃。
+          const updated = await transaction.post.updateMany({
+            where: { id: recallPost.id, tenantId: bot.tenantId, status: "pending_recall" },
             data: {
               status: "published",
               recallIgnored: false,
               recallIgnoredAt: null,
-              logs: {
-                create: {
-                  tenantId: bot.tenantId,
-                  actorId: operator.id,
-                  oldStatus: recallPost.status,
-                  newStatus: "published",
-                  comment: rejectReason,
-                },
-              },
+            },
+          });
+          if (updated.count === 0) {
+            return null;
+          }
+          await transaction.postLog.create({
+            data: {
+              tenantId: bot.tenantId,
+              postId: recallPost.id,
+              actorId: operator.id,
+              oldStatus: "pending_recall",
+              newStatus: "published",
+              comment: rejectReason,
             },
           });
           await writeAuditLog({
@@ -4817,10 +4823,14 @@ export class OneBotRuntime {
             targetId: recallPost.id,
             detail: { displayId: recallPost.displayId, groupId, comment: rejectReason },
           }, transaction);
-          return updated;
+          return recallPost;
         });
         if (!rejected.active) {
           throw new BotWorkflowError("校园墙当前不可用", 409);
+        }
+        if (!rejected.value) {
+          await this.sendGroupMessage(botQqUin, groupId, `稿件 #${recallPost.displayId} 的撤回申请刚被处理过，请刷新后确认`);
+          return;
         }
         // 这条通知同时发审核群与作者，不再额外补群消息
         await this.notifyPostRecallRejected(recallPost.id, rejectReason).catch((error) => {
