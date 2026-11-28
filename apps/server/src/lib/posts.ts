@@ -74,8 +74,6 @@ export function toPostListItem(post: {
   status: string;
   recallIgnored?: boolean;
   recallIgnoredAt?: Date | null;
-  manualPublishedAt?: Date | null;
-  manualPublishUrl?: string | null;
   createdAt: Date;
   updatedAt: Date;
   logs?: Array<{
@@ -98,11 +96,6 @@ export function toPostListItem(post: {
     ?.filter((log) => log.oldStatus === "published" && log.newStatus === "pending_recall")
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
   const recallReason = recallLog?.comment.startsWith("用户申请撤回：") ? recallLog.comment.slice("用户申请撤回：".length).trim() : null;
-  // 拒绝理由：无 Bot 模式下没有私聊通道，用户只能靠这里回显看到为什么被拒。
-  const rejectLog = post.logs
-    ?.filter((log) => log.newStatus === "rejected" && log.comment.trim().length > 0)
-    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
-  const rejectReason = post.status === "rejected" ? (rejectLog?.comment.trim() ?? null) : null;
 
   return {
     id: post.id,
@@ -118,9 +111,6 @@ export function toPostListItem(post: {
     status: post.status,
     recallIgnored: Boolean(post.recallIgnored),
     recallIgnoredAt: post.recallIgnoredAt?.toISOString() ?? null,
-    rejectReason,
-    manualPublishedAt: post.manualPublishedAt?.toISOString() ?? null,
-    manualPublishUrl: post.manualPublishUrl ?? null,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     recallReason,

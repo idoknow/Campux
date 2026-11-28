@@ -23,7 +23,6 @@ import {
   publishRateLimitWindowStart,
   nextPublishRateLimitWindowEnd,
   readTenantPublishLlmSummaryEnabled,
-  readTenantOperateMode,
 } from "../lib/tenant-metadata";
 import { imageStorageHardMaxBytes } from "../lib/image-upload-policy";
 import { readSvgAvatarDataUrl } from "../lib/svg-avatars";
@@ -39,11 +38,6 @@ export const republishFailureRetryDelayMs = 12 * 60 * 60 * 1000;
 export const republishFailureSweepIntervalMs = 15 * 60 * 1000;
 export const orphanPublishingPostRecoveryAgeMs = 10 * 60 * 1000;
 export const interruptedPublishAttemptMessage = "发布进程中断，远端结果不确定；为避免重复发布，系统未自动重试";
-/**
- * cookies 距上次协议刷新超过这个时长时，发布前主动刷新一次。
- * 心跳只验证访客接口，长时间不发稿后图片上传接口可能先失效，靠这个兜底避免第一单必踩 -100。
- */
-export const qzoneCookiePreflightRefreshAgeMs = 6 * 60 * 60 * 1000;
 const ambiguousPublishNoRetryMarker = "远端可能已接收，为避免重复发布未自动重试";
 const batchFanoutAuditPrefix = "批量发布：已生成 ";
 const incompleteBatchFanoutAuditComment = "历史批量发布任务落库不完整，系统已安全终止剩余任务；请人工核对后再决定是否重发";
@@ -134,10 +128,9 @@ export function assignedQuotaAt(reservations: Array<{ periodType: string; period
 type PublishingNotifier = {
   notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
   notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }): Promise<void>;
-  notifyPublishRetryScheduled?(postId: string, targetId: string, message: string, options?: { nextRunAt?: Date | null }): Promise<void>;
   notifyPublishWaitingForCookies?(postId: string, targetId: string, message: string): Promise<void>;
   notifyQZoneCookiesInvalid?(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }): Promise<void>;
-  refreshQZoneCookiesByProtocol?(botAccountId: string, reason: "publish_login_required" | "publish_preflight_invalid" | "publish_preflight_stale"): Promise<{ cookieNames: string[] }>;
+  refreshQZoneCookiesByProtocol?(botAccountId: string, reason: "publish_login_required" | "publish_preflight_invalid"): Promise<{ cookieNames: string[] }>;
 };
 
 type ImagePayload = {
@@ -286,192 +279,6 @@ async function markPublishAttemptSkipped(attemptId: string, attempt: { postId: s
     },
   });
   await refreshAttemptPostStatuses(attempt);
-}
-
-/**
- * 墙已切到无 Bot 模式时，把队列里残留的自动发布任务作废。
- *
- * 安全要点（评审指出过）：
- * 1. Prisma 的 `updateMany` **不支持**嵌套 `logs.create`，所以日志必须单独写；
- * 2. attempt 的更新必须带状态条件——快照到写入之间 worker 可能已把 `queued` 认领成 `running`，
- *    无条件覆盖会把正在发出的任务标成 skipped，随后照样发出去，运营者再手动发就重复了；
- * 3. 只有在「所有目标都确实没发出去」时才能把稿件退回 `approved`。若已有目标成功或在跑，
- *    保留原状态，否则稿件会从「已发布」和「待发布」里同时消失。
- */
-/** 无 Bot 模式切换导致的中止标记：聚合状态推导不能把它当成“发布完成”。 */
-export const manualModeHaltSkipPrefix = "manual_mode_halt:";
-export const manualModeHaltSkipReason = `${manualModeHaltSkipPrefix} 校园墙已切换到无 Bot 模式，自动发布已停止`;
-
-function isManualModeHaltSkip(attempt: { status: string; lastError?: string | null }) {
-  return attempt.status === "skipped" && (attempt.lastError ?? "").startsWith(manualModeHaltSkipPrefix);
-}
-
-/**
- * halt 守卫发现「已有兄弟目标成功」时调用：
- * 这次 halt 让最后一个待发目标退出后，可能再没有任何 attempt 会去刷新聚合状态
- * （成功的那次早已刷新过、把稿件留在 publishing/partially_failed）。
- * 这里在 halt 事务内补一次对账：把“已结算且含成功”的稿件推进到它的终态；
- * 有成功目标时稿件保持 published/partially_failed，绝不退回待发布。
- */
-async function reconcilePostsWithSuccessfulSibling(
-  transaction: Prisma.TransactionClient,
-  input: { tenantId: string; batchId: string | null; postId: string },
-) {
-  const { tenantId, batchId, postId } = input;
-  const postIds = batchId
-    ? (await transaction.publishBatchItem.findMany({ where: { batchId }, select: { postId: true } })).map((item) => item.postId)
-    : [postId];
-  if (postIds.length === 0) {
-    return;
-  }
-  const attempts = await transaction.publishAttempt.findMany({
-    where: batchId ? { batchId } : { postId },
-    select: { postId: true, status: true, nextRunAt: true, lastError: true, publishTarget: { select: { required: true } } },
-  });
-  for (const id of postIds) {
-    // 批量 attempt 都挂在锚点 postId 上、覆盖整批成员，直接用整批结果推导；
-    // 单稿模式的查询已按 postId 过滤，无需再筛。
-    const aggregate = deriveAggregateStatus(attempts);
-    if (!aggregate) {
-      continue;
-    }
-    // 只推进“已结算且成功”的终态；never 把稿件退回待发布。
-    if (aggregate.status !== "published" && aggregate.status !== "partially_failed") {
-      continue;
-    }
-    const post = await transaction.post.findUnique({ where: { id }, select: { status: true } });
-    if (!post || (post.status !== "publishing" && post.status !== "partially_failed")) {
-      continue;
-    }
-    await transaction.post.update({
-      where: { id },
-      data: {
-        status: aggregate.status,
-        logs: {
-          create: {
-            tenantId,
-            // 嵌套 create 由父级 post.update 提供 postId，不能再显式传入（Prisma 类型不允许）。
-            oldStatus: post.status,
-            newStatus: aggregate.status,
-            comment: "切到无 Bot 模式，其余发布目标已停止；按已完成的目标对账稿件状态",
-          },
-        },
-      },
-    });
-    if (batchId) {
-      const batchStatus = batchStatusFromPostStatus[aggregate.status];
-      if (batchStatus) {
-        await transaction.publishBatch.updateMany({
-          where: { id: batchId, status: { in: ["publishing", "partially_failed", "failed"] } },
-          data: { status: batchStatus },
-        });
-      }
-    }
-  }
-}
-
-/**
- * 在“作废 attempt”的同一事务里完成切到无 Bot 模式的收尾，避免第二步失败后稿件永远停在发布中：
- * - 已有目标成功或在跑：保留现状，交给它刷新聚合状态；
- * - 还有目标待发：等它自己收尾，避免抢先退回后又被改回；
- * - 全部结束且没有成功：稿件退回待发布；批次置失败终态，
- *   避免重启恢复时把全部 skipped 的批次误判成已发布。
- */
-async function finalizeManualModeHalt(
-  transaction: Prisma.TransactionClient,
-  input: { attemptId: string; tenantId: string; postId: string; batchId: string | null },
-) {
-  const { attemptId, tenantId, postId, batchId } = input;
-  // 批量发布的所有目标 attempt 共用 anchor postId，必须按 batchId 查兄弟目标，
-  // 否则非 anchor 稿件会漏掉“已有目标成功/在跑”的保护，被退回后重复发布。
-  const siblings = await transaction.publishAttempt.findMany({
-    where: batchId ? { batchId, id: { not: attemptId } } : { postId, id: { not: attemptId } },
-    select: { status: true, nextRunAt: true, lastError: true },
-  });
-  const hasLiveOrDoneSibling = siblings.some((sibling) => sibling.status === "running" || sibling.status === "succeeded");
-  if (hasLiveOrDoneSibling) {
-    // 有目标成功或在跑：稿件不能退回待发布（可能已发出去了）。
-    // 但聚合状态也要同步对账——见下方“已结算集合含成功”的说明，避免稿件永久卡在发布中。
-    await reconcilePostsWithSuccessfulSibling(transaction, { tenantId, batchId, postId });
-    return;
-  }
-  const stillPending = siblings.some((sibling) =>
-    sibling.status === "queued"
-    || sibling.status === "running"
-    || sibling.status === "waiting_cookies"
-    || (sibling.status === "failed" && sibling.nextRunAt !== null));
-  if (stillPending) {
-    return;
-  }
-  // 模糊失败（远端可能已接收但结果未知）不能当成普通失败：
-  // 把稿件退回 approved 会让运营者手动重发，造成重复的公开说说。
-  // 保留 publishing/partially_failed，由运营者在管理页按详情决定。
-  const hasAmbiguousSibling = siblings.some((sibling) =>
-    sibling.status === "failed" && (sibling.lastError ?? "").includes(ambiguousPublishNoRetryMarker));
-  if (hasAmbiguousSibling) {
-    return;
-  }
-
-  const postIds = batchId
-    ? (await transaction.publishBatchItem.findMany({ where: { batchId }, select: { postId: true } })).map((item) => item.postId)
-    : [postId];
-  for (const id of postIds) {
-    const updated = await transaction.post.updateMany({
-      where: { id, tenantId, status: { in: ["publishing", "partially_failed", "failed"] } },
-      data: { status: "approved" },
-    });
-    if (updated.count === 0) {
-      continue;
-    }
-    // 待发布队列按 batchItem: {is: null} 过滤：退回稿件时必须把批次条目一起摘除，
-    // 否则这条稿件在待发布面板里找不到，滞留计数也不含它。
-    await transaction.publishBatchItem.deleteMany({ where: { postId: id } });
-    // 日志单独写：updateMany 不支持嵌套关系写入。
-    await transaction.postLog.create({
-      data: {
-        tenantId,
-        postId: id,
-        oldStatus: "publishing",
-        newStatus: "approved",
-        comment: "校园墙已切换到无 Bot 模式，自动发布已停止，稿件退回待发布",
-      },
-    });
-  }
-  if (batchId) {
-    await transaction.publishBatch.updateMany({
-      where: { id: batchId, status: { in: ["publishing", "partially_failed", "failed"] } },
-      data: { status: "failed" },
-    });
-  }
-}
-
-async function haltAttemptForManualMode(
-  logger: FastifyBaseLogger,
-  attemptId: string,
-  tenantId: string,
-  postId: string,
-  batchId: string | null,
-): Promise<boolean> {
-  try {
-    await prisma.$transaction(async (transaction) => {
-      // 条件更新：只有仍未被认领的任务才作废。
-      const updated = await transaction.publishAttempt.updateMany({
-        where: { id: attemptId, status: { in: ["queued", "failed", "waiting_cookies"] } },
-        data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
-      });
-      if (updated.count === 0) {
-        // 已被 worker 认领或已结束：不改任何状态，交给它自己按新模式复查。
-        return;
-      }
-      await finalizeManualModeHalt(transaction, { attemptId, tenantId, postId, batchId });
-    });
-    logger.info({ attemptId, tenantId, postId }, "publish attempt halted because tenant switched to manual mode");
-    return true;
-  } catch (error) {
-    logger.warn({ error, attemptId, tenantId }, "failed to halt publish attempt for manual mode");
-    // 交给调用方重新入队：纯日志会丢掉当前 job，attempt 永远停在 queued。
-    return false;
-  }
 }
 
 export function registerPublishingWorker(queue: RuntimeQueue, logger: FastifyBaseLogger, config: CampuxConfig, notifier?: PublishingNotifier) {
@@ -1767,18 +1574,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     return;
   }
 
-  // 运营模式守卫：墙已切到无 Bot 模式（operate_mode=manual）后，队列里残留的自动发布任务
-  // 不能再发出去，否则管理员会在不知情的情况下和手动发布重复发说说。这里把它们标成 skipped，
-  // 稿件退回「待发布」交给管理员处理。
-  if ((await readTenantOperateMode(prisma, dispatchTarget.tenantId)) === "manual") {
-    const halted = await haltAttemptForManualMode(logger, attemptId, dispatchTarget.tenantId, dispatchTarget.postId, dispatchTarget.batchId);
-    if (!halted) {
-      // 作废事务失败时重新入队，避免当前 job 直接丢失、attempt 永远停在 queued。
-      queue.rescheduleCurrent(job, new Date(Date.now() + 60_000));
-    }
-    return;
-  }
-
   const now = new Date();
   let claimResult:
     | { lockBusy: true }
@@ -2132,21 +1927,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         attempt.tenantId,
         logger,
         async (transaction) => {
-          // 同 QZone 分支：对外发帖前在租约内再确认一次运营模式。
-          if ((await readTenantOperateMode(transaction, attempt.tenantId)) === "manual") {
-            await transaction.publishAttempt.updateMany({
-              where: { id: attempt.id, status: "running" },
-              data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
-            });
-            // 与作废 attempt 同事务收尾，避免第二步失败后稿件永远停在“发布中”。
-            await finalizeManualModeHalt(transaction, {
-              attemptId: attempt.id,
-              tenantId: attempt.tenantId,
-              postId: attempt.postId,
-              batchId: attempt.batchId,
-            });
-            return null;
-          }
           const result = await createPersonalQqForumThread(
             config,
             {
@@ -2191,12 +1971,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         return;
       }
       const result = publication.value;
-      if (result === null) {
-        // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功；
-        // 稿件已在同一事务里退回待发布。
-        logger.info(attemptLogContext, "personal QQ publish halted inside lease: tenant switched to manual mode");
-        return;
-      }
 
       for (const target of postsToPublish) {
         await notifier?.notifyPublishSucceeded(target.id, attempt.publishTargetId, result.externalId).catch((error) => {
@@ -2212,7 +1986,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       attemptId: attempt.id,
       tenantId: attempt.tenantId,
       postId: attempt.postId,
-      batchId: attempt.batchId,
       publishTargetId: attempt.publishTargetId,
       publishTargetName: attempt.publishTarget.displayName,
       botAccountId: attempt.publishTarget.botAccountId,
@@ -2309,22 +2082,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       attempt.tenantId,
       logger,
       async (transaction) => {
-        // 渲染 / 取图 / 拼配文可能耗时很久，期间运营者可能已切到无 Bot 模式。
-        // 这里在真正对外发帖前、且已持有租约的情况下再确认一次，避免"已经停了却还在发"。
-        if ((await readTenantOperateMode(transaction, attempt.tenantId)) === "manual") {
-          await transaction.publishAttempt.updateMany({
-            where: { id: attempt.id, status: "running" },
-            data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
-          });
-          // 与作废 attempt 同事务收尾，避免第二步失败后稿件永远停在“发布中”。
-          await finalizeManualModeHalt(transaction, {
-            attemptId: attempt.id,
-            tenantId: attempt.tenantId,
-            postId: attempt.postId,
-            batchId: attempt.batchId,
-          });
-          return null;
-        }
         const result = await publishToQZone({
           tenantId: attempt.tenantId,
           postId: attempt.postId,
@@ -2364,12 +2121,6 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       return;
     }
     const result = publication.value;
-    if (result === null) {
-      // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功；
-      // 稿件已在同一事务里退回待发布。
-      logger.info(attemptLogContext, "publish attempt halted inside lease: tenant switched to manual mode");
-      return;
-    }
 
     for (const target of postsToPublish) {
       await notifier?.notifyPublishSucceeded(target.id, attempt.publishTargetId, result.externalId).catch((error) => {
@@ -2446,12 +2197,7 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           },
         });
         enqueueAttempt(queue, attempt.tenantId, attempt.id, nextRunAt);
-        // 这里是“已自动刷新、稍后重试”，不是终态失败：用重试通知而不是失败通知，
-        // 否则群里会先看到“后台一切正常”，紧接着又看到“稿件发表失败”。
-        const retryNotification = notifier.notifyPublishRetryScheduled
-          ? notifier.notifyPublishRetryScheduled(attempt.postId, attempt.publishTargetId, message, { nextRunAt })
-          : notifier.notifyPublishFailed(attempt.postId, attempt.publishTargetId, `QZone cookies 已通过协议自动刷新，将自动重试发布。原始错误：${message}`, { nextRunAt });
-        await retryNotification.catch((error) => {
+        await notifier.notifyPublishFailed(attempt.postId, attempt.publishTargetId, `QZone cookies 已通过协议自动刷新，将自动重试发布。原始错误：${message}`, { nextRunAt }).catch((error) => {
           logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish auto refresh retry");
         });
         await refreshAttemptPostStatuses(attempt);
@@ -2534,7 +2280,6 @@ async function resolveCookiesForPublish({
   attemptId,
   tenantId,
   postId,
-  batchId,
   publishTargetId,
   publishTargetName,
   botAccountId,
@@ -2547,7 +2292,6 @@ async function resolveCookiesForPublish({
   attemptId: string;
   tenantId: string;
   postId: string;
-  batchId: string | null;
   publishTargetId: string;
   publishTargetName: string;
   botAccountId: string;
@@ -2558,42 +2302,24 @@ async function resolveCookiesForPublish({
     cookies: Prisma.JsonValue;
     healthStatus: string;
     healthMessage: string | null;
-    refreshedAt: Date;
   } | null;
   logger: FastifyBaseLogger;
   notifier: PublishingNotifier | undefined;
 }) {
   const checkedSession = await ensureSessionChecked(session);
   const checkedCookies = getAvailableCookies(checkedSession);
-  // 心跳依赖的访客接口会把“图片上传已失效”的 cookies 仍判为可用。发布前若 cookies
-  // 距上次刷新过久，主动刷新一次，避免长时间不发稿后第一单必然踩到上传 -100。
-  const shouldRefreshStaleCookies = Boolean(
-    checkedCookies
-    && qzoneRefreshMode === "protocol"
-    && notifier?.refreshQZoneCookiesByProtocol
-    && shouldRefreshQZoneCookiesBeforePublish(checkedSession),
-  );
-  if (checkedCookies && !shouldRefreshStaleCookies) {
+  if (checkedCookies) {
     return checkedCookies;
   }
 
   let autoRefreshError: string | null = null;
   if (qzoneRefreshMode === "protocol" && notifier?.refreshQZoneCookiesByProtocol) {
     try {
-      await notifier.refreshQZoneCookiesByProtocol(
-        botAccountId,
-        shouldRefreshStaleCookies ? "publish_preflight_stale" : "publish_preflight_invalid",
-      );
+      await notifier.refreshQZoneCookiesByProtocol(botAccountId, "publish_preflight_invalid");
       const refreshedSession = await findLatestQZoneSession(botAccountId);
       const refreshedCookies = getAvailableCookies(refreshedSession);
       if (refreshedCookies) {
         return refreshedCookies;
-      }
-      if (checkedCookies) {
-        // 主动刷新拿到的 cookies 没通过检测，但旧 cookies 仍被判定可用：继续用它发布，
-        // 不要把本来可发的任务挂起；真实失效会在发布结果里再暴露一次。
-        logger.warn({ botAccountId, postId, publishTargetId }, "qzone cookies refresh produced unusable session before publish; falling back to existing available cookies");
-        return checkedCookies;
       }
       autoRefreshError = refreshedSession?.healthMessage ? `协议自动刷新后 cookies 仍不可用：${refreshedSession.healthMessage}` : "协议自动刷新后没有拿到可用 cookies";
     } catch (error) {
@@ -2607,18 +2333,9 @@ async function resolveCookiesForPublish({
         logger.info({ botAccountId, postId, publishTargetId, error: error instanceof Error ? error.message : String(error) }, "qzone cookies protocol auto refresh skipped before publish: onebot connection transiently unavailable");
       } else {
         autoRefreshError = error instanceof Error ? error.message : "协议自动刷新失败";
-        // 只有“确实没有可用 cookies、发布被阻断”才发失效告警；
-        // 预防性刷新失败但旧 cookies 仍可用时，最多记日志，不制造告警。
-        if (!checkedCookies) {
-          await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
-            logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
-          });
-        }
-      }
-      if (checkedCookies) {
-        // 只是“预防性刷新”失败，旧 cookies 仍判定可用：照常发布，不把任务挂起。
-        logger.warn({ botAccountId, postId, publishTargetId }, "qzone cookies refresh failed before publish; falling back to existing available cookies");
-        return checkedCookies;
+        await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
+          logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
+        });
       }
     }
   }
@@ -2628,7 +2345,6 @@ async function resolveCookiesForPublish({
     attemptId,
     tenantId,
     postId,
-    batchId,
     publishTargetId,
     publishTargetName,
     message,
@@ -2645,7 +2361,6 @@ async function ensureSessionChecked(
     cookies: Prisma.JsonValue;
     healthStatus: string;
     healthMessage: string | null;
-    refreshedAt: Date;
   } | null,
 ) {
   if (!session) {
@@ -2655,17 +2370,6 @@ async function ensureSessionChecked(
     return session;
   }
   return checkAndUpdateQZoneSession(session.id);
-}
-
-/** 发布前是否需要为一个“看起来可用但很久没刷新”的 cookies 做预防性刷新。 */
-export function shouldRefreshQZoneCookiesBeforePublish(
-  session: { healthStatus: string; refreshedAt: Date } | null,
-  now = Date.now(),
-) {
-  if (!session || session.healthStatus !== "available") {
-    return false;
-  }
-  return now - session.refreshedAt.getTime() >= qzoneCookiePreflightRefreshAgeMs;
 }
 
 function getAvailableCookies(session: { cookies: Prisma.JsonValue; healthStatus: string } | null) {
@@ -2696,7 +2400,6 @@ async function markAttemptWaitingForCookies({
   attemptId,
   tenantId,
   postId,
-  batchId,
   publishTargetId,
   publishTargetName,
   message,
@@ -2707,7 +2410,6 @@ async function markAttemptWaitingForCookies({
   attemptId: string;
   tenantId: string;
   postId: string;
-  batchId: string | null;
   publishTargetId: string;
   publishTargetName: string;
   message: string;
@@ -2715,32 +2417,6 @@ async function markAttemptWaitingForCookies({
   notifier: PublishingNotifier | undefined;
   logger: FastifyBaseLogger;
 }) {
-  // 墙已切到无 Bot 模式时不再进入等待态：waiting_cookies 会把稿件挡在待发布队列外，
-  // 而 halt 守卫只处理 queued/failed/waiting_cookies 的 attempt——
-  // 留在等待态的稿件要等 cookies 恢复才有机会被作废。这里先按当前模式拦下。
-  if ((await readTenantOperateMode(prisma, tenantId)) === "manual") {
-    await prisma.$transaction(async (transaction) => {
-      // 先把当前 attempt 置为终态再收尾：finalize 统计兄弟时排除 attemptId，
-      // 若 attempt 仍是 running，稿件会被退回 approved，但调用方随后的
-      // refreshAttemptPostStatuses 仍看到 running，推导出 publishing 写回——
-      // 稿件从此卡死（队列排除 running、孤儿回收只管零尝试、halt-in-flight 又拒绝 running）。
-      const skipped = await transaction.publishAttempt.updateMany({
-        where: { id: attemptId, status: { in: ["queued", "running", "waiting_cookies"] } },
-        data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
-      });
-      if (skipped.count === 0) {
-        // 已被并发处理（完成/已作废）：不改任何状态，交给既有流程。
-        return;
-      }
-      await finalizeManualModeHalt(transaction, {
-        attemptId,
-        tenantId,
-        postId,
-        batchId,
-      });
-    });
-    return;
-  }
   await prisma.publishAttempt.update({
     where: {
       id: attemptId,
@@ -2786,7 +2462,6 @@ function isQZoneLoginRequiredError(message: string) {
 
 type AggregateAttempt = {
   status: string;
-  lastError?: string | null;
   nextRunAt: Date | null;
   publishTarget: { required: boolean };
 };
@@ -2795,20 +2470,11 @@ type AggregateAttempt = {
  * 纯逻辑：根据一组发布 attempt 推导稿件/批次的聚合状态。
  * 单稿模式 attempts = 该 post 的 attempts；批量模式 attempts = 该 batch 的 attempts。
  */
-export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status: PostStatus; comment: string } | null {
-  // “切到无 Bot 模式”造成的中止不算发布完成：
-  // 否则重启恢复/后续刷新会把没发出去的稿件或批次标记成已发布。
-  const attempts = rawAttempts.filter((attempt) => !isManualModeHaltSkip(attempt));
+export function deriveAggregateStatus(attempts: AggregateAttempt[]): { status: PostStatus; comment: string } | null {
   if (attempts.length === 0) {
     return null;
   }
 
-  // 原始集合里的必需目标数（含被 halt 的）：用于识别「必需目标全被 halt」的空集场景。
-  const rawRequiredCount = rawAttempts.filter((attempt) => attempt.publishTarget.required).length;
-  // 被本次 halt 中止的必需目标：它从未发布成功，不能让其余目标把它抵消成“完成”。
-  const haltedRequiredCount = rawAttempts.filter(
-    (attempt) => isManualModeHaltSkip(attempt) && attempt.publishTarget.required,
-  ).length;
   const requiredAttempts = attempts.filter((attempt) => attempt.publishTarget.required);
   const optionalAttempts = attempts.filter((attempt) => !attempt.publishTarget.required);
   const completedRequiredAttempts = requiredAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
@@ -2817,16 +2483,7 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
   const allRequiredAttemptsCompleted = completedRequiredAttempts.length === requiredAttempts.length;
   const allAttemptsCompleted = completedAttempts.length === attempts.length;
   if (allRequiredAttemptsCompleted && (allAttemptsCompleted || completedRequiredAttempts.length > 0)) {
-    // 关键防护：必需目标全部被本次 halt 拦下时，`requiredAttempts` 会是空列表，
-    // 上面的完成校验会“空集恒真”地通过——只要还剩一个成功的可选目标就误判 published。
-    // 必需目标一个都没参与发布时，不允许把稿件/批次判成已发布。
-    if (requiredAttempts.length === 0 && rawRequiredCount > 0) {
-      return null;
-    }
-    // 仍有必需目标被 halt 时不能判完成：该目标没有发布过，其余必需目标成功也不等于全部完成。
-    if (haltedRequiredCount === 0) {
-      return { status: "published", comment: allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成" };
-    }
+    return { status: "published", comment: allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成" };
   }
 
   const hasPendingAttempt = requiredAttempts.some(
@@ -2845,16 +2502,6 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
     };
   }
 
-  if (haltedRequiredCount > 0) {
-    // 必需目标被 halt、其余目标都已结束：有成功发布就不能退回待发布（会重复发布），
-    // 判 partially_failed 留在管理页，避免误算成 published。
-    return completedAttempts.length > 0
-      ? { status: "partially_failed", comment: "部分必需发布目标因切换到无 Bot 模式中止，请在管理页查看详情" }
-      : null;
-  }
-
-  // 剩余只有可选目标（必需目标全被 halt）：既不能判 published，也不能判 publishing；
-  // 返回 null 让上层保留现状，等待运营者手动处理。
   return null;
 }
 

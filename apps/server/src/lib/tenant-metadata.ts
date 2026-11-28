@@ -161,17 +161,6 @@ export function normalizeOperateMode(value: unknown): OperateMode {
   return value === "manual" || (typeof value === "string" && value.toLowerCase() === "manual") ? "manual" : "bot";
 }
 
-/**
- * 重置密码的渠道由当前运营模式决定（与是否切换过模式无关）：
- * - bot 模式：私聊墙号 `#重置密码`
- * - manual 模式：网页「忘记密码」+ 邮箱验证码
- */
-export type PasswordResetChannel = "bot-private-message" | "web-email";
-
-export function resolvePasswordResetChannel(mode: OperateMode): PasswordResetChannel {
-  return mode === "manual" ? "web-email" : "bot-private-message";
-}
-
 export async function readTenantOperateMode(client: MetadataClient, tenantId: string): Promise<OperateMode> {
   const entry = await client.tenantMetadata.findUnique({
     where: {
@@ -186,59 +175,6 @@ export async function readTenantOperateMode(client: MetadataClient, tenantId: st
   });
 
   return normalizeOperateMode(entry?.value);
-}
-
-// 无 Bot 模式专属：管理员手动发说说时用来拼配文的模板，以及配置进站/渲染用的墙号 QQ。
-// 机器人模式沿用 BotAccount.publishTextTemplate，这里只在 system_operator/无 bot 场景生效。
-export const manualPublishTemplateKey = "manual_publish_template";
-export const manualWallQqKey = "manual_wall_qq";
-
-export type ManualPublishTemplate = {
-  customText: string;
-  suffixText: string;
-  includePostId: boolean;
-  includeAuthorQq: boolean;
-};
-
-export const manualPublishTemplateDefaults: ManualPublishTemplate = {
-  customText: "",
-  suffixText: "",
-  includePostId: true,
-  includeAuthorQq: false,
-};
-
-export function normalizeManualPublishTemplate(value: unknown): ManualPublishTemplate {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ...manualPublishTemplateDefaults };
-  }
-  const record = value as Record<string, unknown>;
-  return {
-    customText: typeof record.customText === "string" ? record.customText.slice(0, 200) : "",
-    suffixText: typeof record.suffixText === "string" ? record.suffixText.slice(0, 200) : "",
-    includePostId: typeof record.includePostId === "boolean" ? record.includePostId : manualPublishTemplateDefaults.includePostId,
-    includeAuthorQq: typeof record.includeAuthorQq === "boolean" ? record.includeAuthorQq : manualPublishTemplateDefaults.includeAuthorQq,
-  };
-}
-
-/** 墙号 QQ：只接受 5 位以上数字，其余情况返回空串（表示未配置）。 */
-export function normalizeManualWallQq(value: unknown): string {
-  const raw = typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
-  return /^\d{5,}$/.test(raw) ? raw : "";
-}
-
-export async function readTenantManualPublishSettings(client: MetadataClient, tenantId: string) {
-  const entries = await client.tenantMetadata.findMany({
-    where: {
-      tenantId,
-      key: { in: [manualPublishTemplateKey, manualWallQqKey] },
-    },
-    select: { key: true, value: true },
-  });
-  const record = Object.fromEntries(entries.map((entry) => [entry.key, entry.value]));
-  return {
-    template: normalizeManualPublishTemplate(record[manualPublishTemplateKey]),
-    wallQq: normalizeManualWallQq(record[manualWallQqKey]),
-  };
 }
 
 export type PublishMode = "single" | "accumulate";

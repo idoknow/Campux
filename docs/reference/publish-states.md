@@ -2,8 +2,6 @@
 
 发布状态分为稿件状态和发布尝试状态。
 
-> 无 Bot 模式下没有发布尝试，稿件从 `approved` 直接由管理员确认进入 `published`，见 [无 Bot 模式运营](/operator/no-bot-mode)。
-
 ![发布管理](/screenshots/publishing.png)
 
 ## 稿件状态
@@ -11,14 +9,14 @@
 | 状态 | 说明 |
 | --- | --- |
 | `pending_approval` | 等待审核 |
-| `approved` | 已审核通过：机器人模式会进发布队列；无 Bot 模式停在待发布 |
+| `approved` | 已审核通过，准备发布 |
 | `rejected` | 已拒绝 |
 | `cancelled` | 用户已取消 |
-| `publishing` | 发布任务执行中（无 Bot 模式也可能表示正在批量收集） |
+| `publishing` | 发布任务执行中 |
 | `partially_failed` | 非必需目标失败或部分失败 |
 | `failed` | 必需目标失败 |
-| `published` | 必需目标已完成；无 Bot 模式下表示管理员已确认手动发布 |
-| `pending_recall` | 待召回（作者申请撤回，等待处理） |
+| `published` | 必需目标已完成 |
+| `pending_recall` | 待召回 |
 | `recalled` | 已召回 |
 
 ## 发布尝试状态

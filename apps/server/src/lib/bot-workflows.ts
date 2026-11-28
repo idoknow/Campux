@@ -6,11 +6,10 @@ import { prisma } from "./prisma";
 import { decryptJson, encryptJson } from "./secret-json";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
-import { readTenantOperateMode, readTenantPublishMode, resolvePasswordResetChannel } from "./tenant-metadata";
+import { readTenantOperateMode, readTenantPublishMode } from "./tenant-metadata";
 import { readTenantPluginConfig } from "./tenant-plugin-config";
 import { tenantRuntimeRelationFilter } from "./tenant-runtime";
 import { runWithActiveTenantLease } from "./tenant-runtime-lease";
-import { resolveActiveAccount } from "./user-merge";
 import type { RuntimeQueue } from "../runtime/queue";
 import { publishToQZone, QZonePublishError } from "@campux/integrations";
 import { prisma as dbPrisma } from "../lib/prisma";
@@ -211,15 +210,6 @@ export async function registerUserViaBot({
   };
 }
 
-/**
- * Bot 私聊 `#重置密码`。
- *
- * 只在**墙号机器人模式**（operate_mode=bot）下可用：无 Bot 模式没有墙号可私聊，
- * 用户应到网页用邮箱验证码重置，这里给出明确指引而不是静默失败。
- *
- * 合并账号始终重置到主账号：私聊用的是用户自己的 QQ 号，若该号已被并入别的账号，
- * 重置主账号密码才能让用户真正登进去。
- */
 export async function resetPasswordViaBot({
   botQqUin,
   userQqUin,
@@ -230,16 +220,7 @@ export async function resetPasswordViaBot({
   password?: string;
 }) {
   const bot = await findEnabledBot(botQqUin);
-
-  // 无 Bot 模式：私聊重置不生效，引导到网页邮箱重置。
-  if (resolvePasswordResetChannel(await readTenantOperateMode(prisma, bot.tenantId)) === "web-email") {
-    throw new BotWorkflowError(
-      "本墙当前为无 Bot 模式，请在网页登录页点「忘记密码」，用邮箱验证码重置。",
-      409,
-    );
-  }
-
-  const found = await prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: {
       qqUin: BigInt(userQqUin),
     },
@@ -248,24 +229,8 @@ export async function resetPasswordViaBot({
     },
   });
 
-  if (!found) {
-    throw new BotWorkflowError("账号还没有注册这个校园墙，请先发送 #注册账号", 404);
-  }
-
-  // 被合并过的旧号：先解析到主账号，再校验它在「当前墙」的成员身份。
-  // 顺序不能反——合并会把旧号的 membership 迁到主账号，先校验旧号必然 404。
-  const resolved = await resolveActiveAccount(prisma, found);
-  const user = resolved.redirectedFrom === null
-    ? found
-    : await prisma.user.findUnique({
-        where: { id: resolved.userId },
-        include: { memberships: true },
-      });
-  if (!user) {
-    throw new BotWorkflowError("账号还没有注册这个校园墙，请先发送 #注册账号", 404);
-  }
-  const membership = user.memberships.find((item) => item.tenantId === bot.tenantId);
-  if (!membership) {
+  const membership = user?.memberships.find((item) => item.tenantId === bot.tenantId);
+  if (!user || !membership) {
     throw new BotWorkflowError("账号还没有注册这个校园墙，请先发送 #注册账号", 404);
   }
 
@@ -280,8 +245,6 @@ export async function resetPasswordViaBot({
         passwordChangeRequired: true,
       },
     });
-    // 重置后清掉其他会话，避免旧登录态继续可用。
-    await tx.accountSession.deleteMany({ where: { userId: user.id } });
     await tx.botAccount.update({ where: { id: bot.id }, data: { lastSeenAt: new Date() } });
     await writeAuditLog({
       tenantId: bot.tenantId,
@@ -289,11 +252,7 @@ export async function resetPasswordViaBot({
       action: "bot.password.reset",
       targetType: "user",
       targetId: user.id,
-      detail: {
-        botQqUin,
-        userQqUin,
-        ...(resolved.redirectedFrom ? { mergedFromUserId: resolved.redirectedFrom } : {}),
-      },
+      detail: { botQqUin, userQqUin },
     }, tx);
   });
   if (!reset.active) {

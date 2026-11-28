@@ -95,10 +95,6 @@ export type MeResponse =
       activeBan: ActiveBan | null;
       needsTenantSelection: boolean;
       hostLocked: boolean;
-      /** 靠私聊 Bot 建号、尚未绑邮箱的账号：提示把之前的网页账号绑过来 */
-      shouldPromptAccountMerge?: boolean;
-      /** 用已合并旧号的凭据登录时返回：说明已登录到合并后的账号 */
-      mergedAccount?: { mergedFromQqUin: string; message: string };
     };
 
 export type AuthenticatedMe = Extract<MeResponse, { authenticated: true }>;
@@ -174,9 +170,6 @@ export type TenantMetadata = {
   enableGuestSubmission?: boolean;
   /** 运营模式：manual 为无 Bot 模式，审核通过的稿件进入待发布列表 */
   operateMode?: "bot" | "manual";
-  /** 无 Bot 模式手动发说说用的文案模板与渲染图角落墙号 QQ */
-  manualPublishTemplate?: { customText: string; suffixText: string; includePostId: boolean; includeAuthorQq: boolean };
-  manualWallQq?: string;
 };
 
 export type BotMessageTypeConfig = {
@@ -378,11 +371,6 @@ export type PostItem = {
   createdAt: string;
   updatedAt: string;
   recallReason: string | null;
-  /** 被拒绝时给投稿人看的原因（无 Bot 模式没有私聊通道，只能靠这里回显） */
-  rejectReason?: string | null;
-  /** 无 Bot 模式：管理员手动确认发布的时间与说说链接 */
-  manualPublishedAt?: string | null;
-  manualPublishUrl?: string | null;
   following?: boolean;
   submissionChannel: "web" | "private";
   qzoneStats: {
@@ -490,41 +478,6 @@ export type PublishedFeedItem = {
   publishedAt: string;
   posts: PublishedFeedPost[];
   qzoneStats: PostItem["qzoneStats"];
-  /** 无 Bot 模式下管理员手动确认发布时填写的说说链接（自动发布为 null） */
-  manualPublishUrl?: string | null;
-  /** 无 Bot 模式下管理员手动确认发布的时间（自动发布为 null） */
-  manualPublishedAt?: string | null;
-};
-
-/** 网页注册的邮箱验证策略（租户级）。allowedSuffixes 为空数组 = 不限制后缀。 */
-export type RegistrationEmailPolicy = {
-  required: boolean;
-  allowedSuffixes: string[];
-};
-
-/** 租户发件配置。official = 平台官方发件；smtp = 运营者自备。 */
-export type RegistrationMailSender = {
-  mode: "official" | "smtp";
-  smtpHost: string;
-  smtpPort: number;
-  smtpUser: string;
-  /** 读取方向为掩码占位符；提交时回传掩码表示「不修改」。 */
-  smtpPass: string;
-  fromEmail: string;
-  fromName: string;
-};
-
-export type RegistrationSettings = {
-  emailPolicy: RegistrationEmailPolicy;
-  mailSender: RegistrationMailSender;
-  /** 常用精确域名（如 qq.com）。 */
-  commonSuffixes: string[];
-  /** 常用通配域树（如 edu.cn，放开其下所有子域）。 */
-  commonWildcardDomains?: string[];
-  officialMailerAvailable: boolean;
-  officialFromEmail: string;
-  effectiveFromEmail: string;
-  maxAllowedSuffixes: number;
 };
 
 export type AdminMember = {
@@ -1098,36 +1051,11 @@ export type PendingPublishItem = {
   text: string;
   anonymous: boolean;
   attachmentCount: number;
-  /** 稿件原始配图（.url 可直接预览/下载，手动发说说时要连同配图一起发） */
-  attachments: Array<{ url?: string; fileName?: string; kind?: string }>;
   createdAt: string;
   author: {
     id: string;
     qqUin: string;
     displayName: string | null;
-  };
-};
-
-/** 无 Bot 模式手动发说说用的文案模板。 */
-export type ManualPublishTemplate = {
-  customText: string;
-  suffixText: string;
-  includePostId: boolean;
-  includeAuthorQq: boolean;
-};
-
-/** 待发布工作台上下文：模式、滞留量、在途发布量、文案模板、墙号 QQ、进站通道可用性。 */
-export type PendingPublishContext = {
-  operateMode: "bot" | "manual";
-  residual: number;
-  /** 仍在自动发布队列里的稿件数（bot → manual 后用于提示停止在途发布）。 */
-  inFlight: number;
-  template: ManualPublishTemplate;
-  wallQq: string;
-  ingress: {
-    guestSubmission: boolean;
-    aggregateLogin: boolean;
-    available: boolean;
   };
 };
 

@@ -31,20 +31,6 @@ export class PostRecallNotSupportedError extends Error {
   }
 }
 
-/**
- * 没有可撤回的发布记录（无 Bot 模式下稿件是管理员手动发到 QQ 空间的，
- * 系统里没有 tid 可用来删说说）。
- *
- * 这种情况**不能**直接标记为「已撤回」：说说还在空间里，用户会以为已经删掉了。
- * 必须由管理员手动到 QQ 空间删除，再回到页面确认。
- */
-export class PostRecallNoRecordError extends Error {
-  constructor(message = "这条稿件没有可撤回的发布记录：内容是管理员手动发到 QQ 空间的，系统无法自动删除") {
-    super(message);
-    this.name = "PostRecallNoRecordError";
-  }
-}
-
 export async function executePostRecall({
   tenantId,
   postId,
@@ -108,10 +94,41 @@ export async function executePostRecall({
 
     const attempts = post.publishAttempts.filter((attempt) => attempt.qzoneTid || attempt.externalId);
     if (attempts.length === 0) {
-      // 无 Bot 模式（或历史迁移稿件）没有 QZone 发表记录：不能假装撤回成功。
-      // 之前的实现直接把稿件置为 recalled 并写「没有可撤回记录」，说说其实还在空间里，
-      // 用户界面却显示已撤回 —— 这里改为抛出可识别的错误，由上层引导人工删除后确认。
-      throw new PostRecallNoRecordError();
+      const updated = await transaction.post.update({
+        where: {
+          id: post.id,
+        },
+        data: {
+          status: "recalled",
+          recallIgnored: false,
+          recallIgnoredAt: null,
+          logs: {
+            create: {
+              tenantId,
+              actorId,
+              oldStatus: post.status,
+              newStatus: "recalled",
+              comment: "没有可撤回的 QZone 发表记录，直接标记为已撤回",
+            },
+          },
+        },
+      });
+      await writeAuditLog({
+        tenantId,
+        actorId,
+        action: "post.recall.complete",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          targetCount: 0,
+        },
+      }, transaction);
+      return {
+        ok: true as const,
+        post: updated,
+        results: [] satisfies RecallTargetResult[],
+      };
     }
 
     const results: RecallTargetResult[] = [];

@@ -20,7 +20,6 @@ import { TenantSelectionScreen } from "@/features/auth/TenantSelectionScreen";
 import { OAuthAuthorizeScreen } from "@/features/oauth/OAuthAuthorizeScreen";
 import { OpsStandaloneScreen } from "@/features/ops/OpsStandaloneScreen";
 import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
-import { AccountMergeDialog } from "@/features/auth/AccountMergeDialog";
 import { SetupWizard } from "@/features/onboarding/SetupWizard";
 import { WallStatusScreen } from "@/features/onboarding/WallStatusScreen";
 import { AppShell } from "@/features/shell/AppShell";
@@ -132,9 +131,6 @@ export function App() {
   const [topicQuery, setTopicQuery] = useState("");
   const [topicSuggestions, setTopicSuggestions] = useState<Array<{ id: string; name: string; color: string; postCount: number }>>([]);
   const [adminUserDetailTarget, setAdminUserDetailTarget] = useState<{ userId: string; nonce: number } | null>(null);
-  // 账号合并引导：登录/刷新后按 /api/me 的标记弹出一次；关闭后本会话不再打扰。
-  const [accountMergeOpen, setAccountMergeOpen] = useState(false);
-  const [accountMergeDismissed, setAccountMergeDismissed] = useState(false);
   const [locationKey, setLocationKey] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -167,21 +163,6 @@ export function App() {
   async function refreshMe() {
     const data = await api<MeResponse>("/api/me");
     setMe(data);
-  }
-
-  // 登录/刷新后：服务端标记了「该提示绑定旧账号」就弹一次。
-  // 依赖 me 的存在与标记；用户关掉后本会话不再弹（accountMergeDismissed）。
-  useEffect(() => {
-    if (!me?.authenticated) return;
-    if (accountMergeDismissed) return;
-    if (!me.shouldPromptAccountMerge) return;
-    if (!me.currentTenant || !me.currentMembership) return;
-    setAccountMergeOpen(true);
-  }, [me, accountMergeDismissed]);
-
-  function dismissAccountMerge() {
-    setAccountMergeOpen(false);
-    setAccountMergeDismissed(true);
   }
 
   function navigate(nextRoute: AppRoute, mode: "push" | "replace" = "push") {
@@ -493,10 +474,6 @@ export function App() {
     });
     setMe(data);
     if (data.authenticated) {
-      // 用已合并旧号的凭据登录：已解析到主账号，明确告知用户。
-      if (data.mergedAccount) {
-        toast.info(data.mergedAccount.message, { duration: 8000 });
-      }
       if (data.user.passwordChangeRequired) {
         if (route.kind !== "login") {
           navigate({ kind: "login" }, "replace");
@@ -822,9 +799,8 @@ export function App() {
   }
 
   return (
-    <>
-      <AppShell
-        activeTab={activeTab}
+    <AppShell
+      activeTab={activeTab}
       adminTab={route.kind === "tenant" && route.tab === "admin" ? (route.subTab as AdminTab | undefined) ?? "users" : "users"}
       me={me as AuthenticatedMe & { currentTenant: NonNullable<AuthenticatedMe["currentTenant"]>; currentMembership: NonNullable<AuthenticatedMe["currentMembership"]> }}
       navItems={availableNavItems}
@@ -870,19 +846,7 @@ export function App() {
       onRefreshTenantData={() => refreshTenantData(postsPage)}
       onRemoveAttachment={handleRemoveAttachment}
       onSubmitPost={submitPost}
-      />
-      {/* 切换运营模式后首次登录：提示把之前的网页账号绑过来（可跳过，服务页仍可操作）。 */}
-      <AccountMergeDialog
-        open={accountMergeOpen}
-        currentQqUin={me.user.qqUin}
-        onClose={() => dismissAccountMerge()}
-        onMerged={async () => {
-          // 合并会把旧号稿件迁到当前账号，因此「我的稿件」列表必须一起刷新。
-          await refreshMe();
-          await refreshTenantData(postsPage);
-        }}
-      />
-    </>
+    />
   );
 }
 

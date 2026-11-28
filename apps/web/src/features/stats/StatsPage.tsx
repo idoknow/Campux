@@ -41,12 +41,6 @@ const auditActionLabels: Record<string, string> = {
   "publish_target.create": "创建发布目标",
   "publish_target.update": "更新发布目标",
   "publish_attempt.retry": "重试发布",
-  "post.manual_publish": "手动确认发布",
-  "post.manual_publish.revert": "撤销手动发布",
-  "post.manual_publish.halt_in_flight": "停止在途自动发布",
-  "post.manual_requeue": "滞留稿件补投自动队列",
-  "post.recall.manual_complete": "手动删除说说并撤回",
-  "tenant.operate_mode.update": "切换运营模式",
   "member.update_role": "修改成员身份",
   "ban.create": "封禁用户",
 };

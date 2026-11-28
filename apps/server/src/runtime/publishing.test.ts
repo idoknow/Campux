@@ -6,7 +6,6 @@ import {
   isRecoverableOrphanPublishingPost,
   interruptedPublishAttemptRecoveryData,
   isIncompleteBatchFanout,
-  manualModeHaltSkipReason,
   publishTargetIntervalSeconds,
   readExpectedBatchFanoutCount,
   resolveEarliestPublishDispatchAt,
@@ -26,7 +25,6 @@ import {
   shouldReleasePublishQuotaReservation,
   releaseTenantPublishQuota,
   queuedAttemptDeferral,
-  shouldRefreshQZoneCookiesBeforePublish,
 } from "./publishing";
 
 describe("tenant publish rate limit deferral", () => {
@@ -39,7 +37,7 @@ describe("tenant publish rate limit deferral", () => {
       { postId: "other-period", periodType: "daily", periodStart: start, status: "reserved" },
     ];
     expect(countDistinctQuotaManuscripts(["overlap", "log-only", "log-only"], rows, "hourly", start)).toBe(3);
-    expect(countDistinctQuotaManuscripts(["overlap", "log-only"], rows, "hourly", start, ["overlap"])).toBe(2);
+    expect(countDistinctQuotaManuscripts(["overlap", "log-only"], rows, "hourly", start, ["overlap"])).toBe(1);
     expect(countDistinctQuotaManuscripts([], [rows[1]!], "hourly", start)).toBe(1);
     expect(countDistinctQuotaManuscripts([], [rows[1]!], "hourly", start, ["consumed-only"])).toBe(0);
     expect(countDistinctQuotaManuscripts([], [rows[1]!, { postId: "another", periodType: "hourly", periodStart: start, status: "reserved" }], "hourly", start)).toBe(2);
@@ -70,7 +68,6 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
-      tenantPublishQuotaReservation: { findMany: async () => [] },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
   });
@@ -80,7 +77,6 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 0, daily: 1 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
-      tenantPublishQuotaReservation: { findMany: async () => [] },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T16:00:00.000Z"));
   });
@@ -90,12 +86,10 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
-      tenantPublishQuotaReservation: { findMany: async (args: any) => { calls.push(args); return [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z"), status: "reserved" }]; } },
+      tenantPublishQuotaReservation: { findMany: async (args: any) => { calls.push(args); return [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }]; } },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T05:42:00.000Z"), client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
-    // 小时额度与天额度各查一次，避免把两种周期混在一次查询里。
-    expect(calls).toHaveLength(2);
-    expect(calls.map((call) => call.where.periodType)).toEqual(["hourly", "daily"]);
+    expect(calls).toHaveLength(1);
     expect(calls[0].where.status.in).toEqual(["reserved", "consumed"]);
   });
 
@@ -103,7 +97,7 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [] },
-      tenantPublishQuotaReservation: { findMany: async () => [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z"), status: "reserved" }] },
+      tenantPublishQuotaReservation: { findMany: async () => [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }] },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T05:42:00.000Z"), client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
   });
@@ -168,7 +162,7 @@ describe("tenant publish rate limit deferral", () => {
     const queries: any[] = [];
     const now = new Date("2026-07-24T05:42:00.000Z");
     const client = {
-      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
       postLog: { findMany: async () => [] },
       tenantPublishQuotaReservation: { findMany: async (args: any) => { queries.push(args); return []; } },
     } as never;
@@ -177,7 +171,7 @@ describe("tenant publish rate limit deferral", () => {
 
     const unrelatedReservationQueries: any[] = [];
     const cappedElsewhere = {
-      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
       postLog: { findMany: async () => [] },
       tenantPublishQuotaReservation: { findMany: async (args: any) => {
         unrelatedReservationQueries.push(args);
@@ -388,113 +382,6 @@ describe("deriveAggregateStatus", () => {
       comment: "发布目标失败，请在管理页查看详情",
     });
   });
-
-  it("returns null when every required attempt was halted by manual mode", () => {
-    // 必需目标全被 halt 拦下时 requiredAttempts 为空集，完成校验会“空集恒真”通过；
-    // 只要还剩一个成功的可选目标就会误判 published。这里必须返回 null，
-    // 让 refreshAggregatePostStatus 保留稿件现状（不会写回 publishing）。
-    const result = deriveAggregateStatus([
-      {
-        status: "skipped",
-        lastError: manualModeHaltSkipReason,
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-      {
-        status: "succeeded",
-        nextRunAt: null,
-        publishTarget: { required: false },
-      },
-    ]);
-
-    expect(result).toBeNull();
-  });
-
-  it("does not let a halted attempt mask an otherwise complete publication", () => {
-    // 对照组：必需目标成功、可选目标被 halt —— 稿件确实发过了，仍是 published。
-    const result = deriveAggregateStatus([
-      {
-        status: "succeeded",
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-      {
-        status: "skipped",
-        lastError: manualModeHaltSkipReason,
-        nextRunAt: null,
-        publishTarget: { required: false },
-      },
-    ]);
-
-    expect(result).toEqual({
-      status: "published",
-      comment: "所有发布目标已完成",
-    });
-  });
-
-  it("does not mark published when another required target was halted", () => {
-    // 两个必需目标：一个成功、另一个被切换到无 Bot 模式中止。
-    // 被中止的目标从未发布，不能因为剩余目标都“完成”就判 published。
-    const result = deriveAggregateStatus([
-      {
-        status: "succeeded",
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-      {
-        status: "skipped",
-        lastError: manualModeHaltSkipReason,
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-    ]);
-
-    expect(result).toEqual({
-      status: "partially_failed",
-      comment: "部分必需发布目标因切换到无 Bot 模式中止，请在管理页查看详情",
-    });
-  });
-
-  it("keeps the post out of published when a halted required target sits beside an ordinary skip", () => {
-    const result = deriveAggregateStatus([
-      {
-        status: "skipped",
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-      {
-        status: "skipped",
-        lastError: manualModeHaltSkipReason,
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-    ]);
-
-    expect(result).toEqual({
-      status: "partially_failed",
-      comment: "部分必需发布目标因切换到无 Bot 模式中止，请在管理页查看详情",
-    });
-  });
-
-  it("returns null for an all-skipped batch halted by manual mode", () => {
-    // 恢复路径的安全网：全部 skipped 且带 halt 标记的批次不能被重启恢复判成已发布。
-    const result = deriveAggregateStatus([
-      {
-        status: "skipped",
-        lastError: manualModeHaltSkipReason,
-        nextRunAt: null,
-        publishTarget: { required: true },
-      },
-      {
-        status: "skipped",
-        lastError: manualModeHaltSkipReason,
-        nextRunAt: null,
-        publishTarget: { required: false },
-      },
-    ]);
-
-    expect(result).toBeNull();
-  });
 });
 
 describe("renderQqForumCaption", () => {
@@ -576,23 +463,5 @@ describe("shouldWaitForQZoneAttempt", () => {
     expect(shouldWaitForQZoneAttempt({ status: "succeeded" })).toBe(false);
     expect(shouldWaitForQZoneAttempt({ status: "failed", nextRunAt: null })).toBe(false);
     expect(shouldWaitForQZoneAttempt({ status: "skipped" })).toBe(false);
-  });
-});
-
-describe("publish preflight qzone cookie freshness", () => {
-  const now = Date.parse("2026-11-28T12:00:00.000Z");
-
-  it("只看被判定可用的会话：失效、未检测或没有会话都不做预防性刷新", () => {
-    const refreshedAt = new Date(now - 24 * 60 * 60 * 1000);
-    expect(shouldRefreshQZoneCookiesBeforePublish(null, now)).toBe(false);
-    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "invalid", refreshedAt }, now)).toBe(false);
-    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "unchecked", refreshedAt }, now)).toBe(false);
-  });
-
-  it("可用但超过刷新时限的 cookies 会触发发布前刷新", () => {
-    const stale = new Date(now - 6 * 60 * 60 * 1000 - 1);
-    const fresh = new Date(now - 60 * 60 * 1000);
-    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "available", refreshedAt: stale }, now)).toBe(true);
-    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "available", refreshedAt: fresh }, now)).toBe(false);
   });
 });

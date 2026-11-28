@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, LinkIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, InfoIcon, KeyRoundIcon, SparklesIcon, UserRoundIcon, WandSparklesIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { defaultMetadata } from "@/lib/app-model";
 import { getBuiltInServiceEntryAction, isBuiltInServiceEntry, isSafeServiceEntryUrl } from "@/lib/service-entry-editor";
@@ -13,7 +13,6 @@ import { CampaignsPage } from "./CampaignsPage";
 import { AboutPage } from "./AboutPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { OAuthBindingsPanel } from "./OAuthBindingsPanel";
-import { AccountMergeDialog } from "@/features/auth/AccountMergeDialog";
 import { BroadcastsPage } from "@/features/broadcast/BroadcastsPage";
 import { BroadcastIcon } from "@/features/broadcast/BroadcastIcon";
 import { GraduationsPage } from "@/features/graduation/GraduationsPage";
@@ -97,8 +96,6 @@ export function ServicesPage({
   const rules = metadata.postRules.length > 0 ? metadata.postRules : defaultMetadata.postRules;
   const [activeAction, setActiveAction] = useState<ServiceAction>("");
   const panelsRef = useRef<HTMLDivElement>(null);
-  // 服务页也能打开「绑定之前的账号」弹窗（登录时跳过的同学从这补）。
-  const [accountMergeOpen, setAccountMergeOpen] = useState(false);
 
   // 账户设置/第三方登录的按钮点击后，对应面板渲染在页面底部；
   // 自动平滑滚动过去，避免面板出现在视口外。
@@ -297,23 +294,6 @@ export function ServicesPage({
               <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             </button>
             ) : null}
-            {/* 账号合并入口：登录时跳过的同学可以在这里补做。 */}
-            <button
-              type="button"
-              onClick={() => setAccountMergeOpen(true)}
-              className="flex min-h-16 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-none transition hover:border-blue-200 hover:bg-blue-50/35 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border product-accent-sky">
-                <LinkIcon className="size-5" strokeWidth={2.1} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-slate-950 dark:text-slate-100">绑定之前的账号</span>
-                <span className="mt-0.5 block text-sm leading-5 text-slate-600 dark:text-slate-400">
-                  把之前用 QQ 号注册的账号并到当前账号，稿件会合并显示
-                </span>
-              </span>
-              <ChevronRightIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
-            </button>
           </ServiceGroup>
 
           {campusServices.length > 0 ? (
@@ -351,12 +331,6 @@ export function ServicesPage({
           {activeAction === "oauth-bindings" ? <OAuthBindingsPanel /> : null}
         </div>
       </div>
-      <AccountMergeDialog
-        open={accountMergeOpen}
-        currentQqUin={me.user.qqUin}
-        onClose={() => setAccountMergeOpen(false)}
-        onMerged={onProfileSaved}
-      />
     </div>
   );
 }

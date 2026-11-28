@@ -29,8 +29,6 @@ const PLATFORM_FEEDBACK_MIGRATION_NAME = "20261113220000_add_platform_feedback";
 
 const USER_GRADUATION_MIGRATION_NAME = "20260925120000_add_user_graduation";
 const POST_PENDING_TAGS_MIGRATION_NAME = "20261004000000_add_pending_tags";
-const MANUAL_PUBLISH_RECORD_MIGRATION_NAME = "20261122150000_add_manual_publish_record";
-const EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME = "20261122170000_add_email_verification_and_user_merge";
 const AUTO_MODERATION_SCHEDULE_MIGRATION_NAME = "20261024120000_ai_auto_moderation_schedule_quota";
 const PRIVATE_FORWARD_GROUP_MIGRATION_NAME = "20261029120000_add_private_forward_group";
 const TENANT_PUBLISH_QUOTA_MIGRATION_NAME = "20261027120000_durable_tenant_publish_quota_reservations";
@@ -777,129 +775,6 @@ function applyPostPendingTagsSqliteMigration(
   logger.info({ migration: POST_PENDING_TAGS_MIGRATION_NAME }, "sqlite incremental migration applied");
 }
 
-/**
- * Post.manualPublishedAt / manualPublishUrl：无 Bot 模式手动发布留痕。
- * 老库缺列时补齐；新库已包含在 baseline 里。
- */
-function applyManualPublishRecordSqliteMigration(
-  db: Database,
-  doneNames: Set<string>,
-  applied: string[],
-  skipped: string[],
-  logger: SqliteMigrateLogger,
-): void {
-  const postTable = db
-    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'Post'`)
-    .get() as { present: number } | null;
-  if (!postTable) return;
-
-  if (doneNames.has(MANUAL_PUBLISH_RECORD_MIGRATION_NAME)) {
-    skipped.push(MANUAL_PUBLISH_RECORD_MIGRATION_NAME);
-    return;
-  }
-
-  const hasColumn = (name: string) =>
-    (db.query(`SELECT 1 AS present FROM pragma_table_info('Post') WHERE name = ${JSON.stringify(name)}`).get() as { present: number } | null) !== null;
-  const missingColumns = (["manualPublishedAt", "manualPublishUrl"] as const).filter((name) => !hasColumn(name));
-
-  logger.info({ migration: MANUAL_PUBLISH_RECORD_MIGRATION_NAME }, "applying sqlite incremental migration");
-  db.exec("BEGIN");
-  try {
-    for (const name of missingColumns) {
-      db.exec(`ALTER TABLE "Post" ADD COLUMN "${name}" ${name === "manualPublishedAt" ? "DATETIME" : "TEXT"}`);
-    }
-    db.run(
-      `INSERT INTO "_prisma_migrations"
-         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
-      [
-        randomUUID(),
-        checksumOf(`ALTER TABLE "Post" ADD COLUMN "manualPublishedAt" DATETIME, "manualPublishUrl" TEXT`),
-        MANUAL_PUBLISH_RECORD_MIGRATION_NAME,
-      ],
-    );
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  doneNames.add(MANUAL_PUBLISH_RECORD_MIGRATION_NAME);
-  applied.push(MANUAL_PUBLISH_RECORD_MIGRATION_NAME);
-  logger.info({ migration: MANUAL_PUBLISH_RECORD_MIGRATION_NAME }, "sqlite incremental migration applied");
-}
-
-/**
- * User.mergedAt / mergedIntoUserId + UserMerge 表：账号合并留痕。
- * 老库缺列/缺表时补齐；新库已包含在 baseline 里。
- */
-function applyEmailVerifyUserMergeSqliteMigration(
-  db: Database,
-  doneNames: Set<string>,
-  applied: string[],
-  skipped: string[],
-  logger: SqliteMigrateLogger,
-): void {
-  const userTable = db
-    .query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'User'`)
-    .get() as { present: number } | null;
-  if (!userTable) return;
-
-  if (doneNames.has(EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME)) {
-    skipped.push(EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME);
-    return;
-  }
-
-  const hasColumn = (name: string) =>
-    (db.query(`SELECT 1 AS present FROM pragma_table_info('User') WHERE name = ${JSON.stringify(name)}`).get() as { present: number } | null) !== null;
-  const missingColumns = (["mergedAt", "mergedIntoUserId"] as const).filter((name) => !hasColumn(name));
-  const hasMergeTable =
-    db.query(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'UserMerge'`).get() !== null;
-
-  logger.info({ migration: EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME }, "applying sqlite incremental migration");
-  db.exec("BEGIN");
-  try {
-    for (const name of missingColumns) {
-      db.exec(`ALTER TABLE "User" ADD COLUMN "${name}" ${name === "mergedAt" ? "DATETIME" : "TEXT"}`);
-    }
-    if (!hasMergeTable) {
-      db.exec(`CREATE TABLE "UserMerge" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "tenantId" TEXT NOT NULL,
-        "oldUserId" TEXT NOT NULL,
-        "newUserId" TEXT NOT NULL,
-        "oldQqUin" BIGINT NOT NULL,
-        "newQqUin" BIGINT NOT NULL,
-        "oldEmail" TEXT,
-        "migratedPosts" INTEGER NOT NULL DEFAULT 0,
-        "migratedMemberships" INTEGER NOT NULL DEFAULT 0,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`);
-      db.exec(`CREATE INDEX "UserMerge_tenantId_createdAt_idx" ON "UserMerge"("tenantId", "createdAt")`);
-      db.exec(`CREATE INDEX "UserMerge_oldUserId_idx" ON "UserMerge"("oldUserId")`);
-      db.exec(`CREATE INDEX "UserMerge_newUserId_idx" ON "UserMerge"("newUserId")`);
-    }
-    db.run(
-      `INSERT INTO "_prisma_migrations"
-         ("id","checksum","migration_name","started_at","finished_at","applied_steps_count")
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`,
-      [
-        randomUUID(),
-        checksumOf(`ALTER TABLE "User" ADD COLUMN "mergedAt" DATETIME, "mergedIntoUserId" TEXT; CREATE TABLE "UserMerge"`),
-        EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME,
-      ],
-    );
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  doneNames.add(EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME);
-  applied.push(EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME);
-  logger.info({ migration: EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME }, "sqlite incremental migration applied");
-}
-
 function applyTenantPublishQuotaReservationSqliteMigration(db: Database, doneNames: Set<string>, applied: string[], skipped: string[], logger: SqliteMigrateLogger): void {
   if (doneNames.has(TENANT_PUBLISH_QUOTA_MIGRATION_NAME)) { skipped.push(TENANT_PUBLISH_QUOTA_MIGRATION_NAME); return; }
   const hasTable = db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='TenantPublishQuotaReservation'").get() !== null;
@@ -1285,7 +1160,7 @@ export function applySqliteBaseline(
       // When the baseline was just applied fresh, the incremental migrations
       // are already embedded in the baseline schema. Record them as done so
       // they are skipped below.
-      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, PLATFORM_FEEDBACK_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, MANUAL_PUBLISH_RECORD_MIGRATION_NAME, EMAIL_VERIFY_USER_MERGE_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME]) {
+      for (const name of [FIRST_PRIVATE_MESSAGE_MIGRATION_NAME, LAST_PUBLISH_STARTED_AT_MIGRATION_NAME, REVIEW_QUEUE_REMINDER_AT_ALL_MIGRATION_NAME, VOTING_CAMPAIGNS_MIGRATION_NAME, CAMPAIGN_ADMIN_ONLY_MIGRATION_NAME, BROADCAST_NOTIFICATIONS_MIGRATION_NAME, TENANT_FEEDBACK_MIGRATION_NAME, TENANT_FEEDBACK_MESSAGES_MIGRATION_NAME, PLATFORM_FEEDBACK_MIGRATION_NAME, USER_GRADUATION_MIGRATION_NAME, POST_PENDING_TAGS_MIGRATION_NAME, TENANT_PUBLISH_QUOTA_MIGRATION_NAME, SCHOOL_RELATIONS_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTIONS_MIGRATION_NAME, SCHOOL_ENTITY_ALIASES_MIGRATION_NAME, SCHOOL_RELATION_EXTRACTION_CURSOR_MIGRATION_NAME]) {
         if (!doneNames.has(name)) {
           doneNames.add(name);
           skipped.push(name);
@@ -1311,8 +1186,6 @@ export function applySqliteBaseline(
     applyBroadcastNotificationsSqliteMigration(db, doneNames, applied, skipped, logger);
     applyUserGraduationSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPostPendingTagsSqliteMigration(db, doneNames, applied, skipped, logger);
-    applyManualPublishRecordSqliteMigration(db, doneNames, applied, skipped, logger);
-    applyEmailVerifyUserMergeSqliteMigration(db, doneNames, applied, skipped, logger);
     applyAutoModerationScheduleSqliteMigration(db, doneNames, applied, skipped, logger);
     applyPrivateForwardGroupSqliteMigration(db, doneNames, applied, skipped, logger);
     applyTenantPublishQuotaReservationSqliteMigration(db, doneNames, applied, skipped, logger);
