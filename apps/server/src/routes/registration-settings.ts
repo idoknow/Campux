@@ -167,6 +167,11 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
       where: { tenantId_key: { tenantId, key: registrationEmailPolicyKey } },
       select: { value: true, updatedAt: true },
     });
+    // 发件配置只在真正改动时写入；写入前用 updatedAt 条件更新，避免覆盖别人刚保存的新发件人。
+    const storedSenderRow = await prisma.tenantMetadata.findUnique({
+      where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
+      select: { updatedAt: true },
+    });
     const storedPolicy = normalizeRegistrationEmailPolicy(storedPolicyRow?.value);
     const submittedSender = normalizeMailSenderConfig({
       ...body.mailSender,
@@ -209,6 +214,8 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     // 仅调整注册策略（后缀等）而发件配置没动时不必重测，否则每改一次后缀都要再发一封信。
     const senderChanged = mailSenderFingerprint(sender) !== mailSenderFingerprint(stored);
     const staticCheck = validateMailSenderConfig(sender, config);
+    // 记录保存前使用的测试凭据：保存成功后只清理这一份，避免删掉并发完成的新测试结果。
+    const verifiedBeforeSave = senderChanged ? verifiedMailSenderByTenant.get(tenantId) : undefined;
 
     // 发件配置一旦被改动，就必须是完整可用的——即使邮箱验证当前是关的。
     // 这份配置仍被「游客注册」「账号绑定」使用，存进半残配置会让它们静默失败。
@@ -219,7 +226,7 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
       });
     }
     if (senderChanged) {
-      const verified = verifiedMailSenderByTenant.get(tenantId);
+      const verified = verifiedBeforeSave;
       const fingerprint = mailSenderFingerprint(sender);
       const stillValid = verified
         && verified.fingerprint === fingerprint
@@ -271,11 +278,28 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
             create: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
           });
         }
-        await transaction.tenantMetadata.upsert({
-          where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
-          update: { value: sender },
-          create: { tenantId, key: tenantMailSenderKey, value: sender },
-        });
+        if (senderChanged) {
+          if (storedSenderRow) {
+            const senderUpdated = await transaction.tenantMetadata.updateMany({
+              where: { tenantId, key: tenantMailSenderKey, updatedAt: storedSenderRow.updatedAt },
+              data: { value: sender },
+            });
+            if (senderUpdated.count === 0) {
+              throw new RegistrationSettingsConflictError();
+            }
+          } else {
+            try {
+              await transaction.tenantMetadata.create({
+                data: { tenantId, key: tenantMailSenderKey, value: sender },
+              });
+            } catch (error) {
+              if ((error as { code?: string }).code === "P2002") {
+                throw new RegistrationSettingsConflictError();
+              }
+              throw error;
+            }
+          }
+        }
         // 审计与配置同事务：避免「配置已改、审计没记」。
         await writeAuditLog({
           tenantId,
@@ -303,8 +327,13 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
       throw error;
     }
 
-    // 配置变了，之前那次测试不再代表当前配置。
-    verifiedMailSenderByTenant.delete(tenantId);
+    // 只清理本次保存实际使用的那份测试凭据；期间完成的更新测试结果保留。
+    if (senderChanged) {
+      const currentTest = verifiedMailSenderByTenant.get(tenantId);
+      if (!currentTest || (currentTest.fingerprint === verifiedBeforeSave?.fingerprint && currentTest.verifiedAt === verifiedBeforeSave?.verifiedAt)) {
+        verifiedMailSenderByTenant.delete(tenantId);
+      }
+    }
 
     return {
       emailPolicy: nextPolicy,

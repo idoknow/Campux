@@ -1,4 +1,5 @@
-import type { Prisma } from "@campux/db";
+import { Prisma, isTransactionSerializationFailure } from "@campux/db";
+
 import { prisma } from "./prisma";
 import { writeAuditLog } from "./audit";
 
@@ -169,7 +170,11 @@ export async function mergeUserAccounts(input: {
   oldQqUin: string;
   actorId: string;
 }): Promise<{ mergeId: string; migratedPosts: number; migratedMemberships: number; oldQqUin: string }> {
-  return prisma.$transaction(async (tx) => {
+  // 串行化隔离：双向并发合并（A→B 与 B→A）在 READ COMMITTED 下可能都成功，
+  // 结果两个账号互相指向、同时被停用。串行化会让其中一个事务失败，这里重试即可。
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
     const target = await tx.user.findUnique({
       where: { id: input.targetUserId },
       select: { id: true, qqUin: true, email: true, mergedAt: true },
@@ -365,7 +370,18 @@ export async function mergeUserAccounts(input: {
       migratedMemberships,
       oldQqUin: old.qqUin.toString(),
     };
-  }, { maxWait: 15_000, timeout: 60_000 });
+  }, {
+    maxWait: 15_000,
+    timeout: 60_000,
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  });
+    } catch (error) {
+      if (attempt < 3 && isTransactionSerializationFailure(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 /**

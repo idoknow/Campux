@@ -540,13 +540,14 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const code = generateEmailCode();
-    await prisma.emailVerificationCode.create({
+    const codeRecord = await prisma.emailVerificationCode.create({
       data: {
         email,
         codeHash: hashEmailCode(email, code),
         purpose: "operations_admin_register",
         expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
       },
+      select: { id: true },
     });
     // 运营管理员开墙注册属于平台入口，没有租户上下文，统一用官方发件。
     try {
@@ -556,10 +557,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         ...(sent.skipped ? { devCode: code } : {}),
       };
     } catch (error) {
-      // 发送失败：不留可用的验证码，也不回显。
-      await prisma.emailVerificationCode.deleteMany({
-        where: { email, purpose: "operations_admin_register", consumedAt: null },
-      });
+      // 发送失败：只作废本次生成的这条码，不误伤此前已送达的验证码。
+      await prisma.emailVerificationCode.deleteMany({ where: { id: codeRecord.id } });
       return reply.code(502).send({
         message: `验证码发送失败：${error instanceof Error ? error.message : String(error)}`,
       });
@@ -1079,21 +1078,20 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const code = generateEmailCode();
-    await prisma.emailVerificationCode.create({
+    const codeRecord = await prisma.emailVerificationCode.create({
       data: {
         email: user.email,
         codeHash: hashEmailCode(user.email, code),
         purpose: RESET_PASSWORD_PURPOSE,
         expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
       },
+      select: { id: true },
     });
     const sent = await sendRegistrationMail(config, user.email, "Campux 密码重置验证码", code, "重置密码");
 
     if (sent.status === "failed") {
-      // 有邮件服务但发送失败：作废验证码并如实报错，绝不回显。
-      await prisma.emailVerificationCode.deleteMany({
-        where: { email: user.email, purpose: RESET_PASSWORD_PURPOSE, consumedAt: null },
-      });
+      // 有邮件服务但发送失败：只作废本次生成的码，不误伤此前已送达的验证码。
+      await prisma.emailVerificationCode.deleteMany({ where: { id: codeRecord.id } });
       return reply.code(502).send({
         code: "RESET_MAIL_FAILED",
         message: `验证码发送失败：${sent.error}`,
@@ -1179,18 +1177,28 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
     const record = latestRecord;
 
-    await prisma.$transaction([
-      prisma.emailVerificationCode.update({
-        where: { id: record.id },
+    // 验签后到写入之间可能已被并发请求消费、或刚好过期：把过期时间与尝试次数
+    // 一并放进原子条件，避免“哈希耗时”窗口里继续消费一个已失效的码。
+    const newPasswordHash = await hashPassword(body.newPassword);
+    const resetApplied = await prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.emailVerificationCode.updateMany({
+        where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: 5 } },
         data: { consumedAt: new Date(), attempts: { increment: 1 } },
-      }),
-      prisma.user.update({
+      });
+      if (consumed.count === 0) {
+        return false;
+      }
+      await transaction.user.update({
         where: { id: user.id },
-        data: { passwordHash: await hashPassword(body.newPassword), passwordChangeRequired: false },
-      }),
+        data: { passwordHash: newPasswordHash, passwordChangeRequired: false },
+      });
       // 重置密码后让旧会话失效，避免残留登录态继续使用。
-      prisma.accountSession.deleteMany({ where: { userId: user.id } }),
-    ]);
+      await transaction.accountSession.deleteMany({ where: { userId: user.id } });
+      return true;
+    });
+    if (!resetApplied) {
+      return reply.code(409).send({ code: "CODE_STALE", message: "验证码已失效，请重新获取" });
+    }
 
     return { ok: true };
   });

@@ -16,6 +16,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
  * 2. 改过发件配置 = 必须先发测试邮件成功，才能保存。
  */
 export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string; busy: boolean }) {
+  // 切换校园墙时组件不会重新挂载：用 ref 记住当前墙，迟到的测试结果不能记到新墙上。
+  const tenantIdRef = useRef(tenantId);
+  useEffect(() => {
+    tenantIdRef.current = tenantId;
+  }, [tenantId]);
   const [settings, setSettings] = useState<RegistrationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -105,14 +110,17 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
       return;
     }
     setTesting(true);
+    const requestTenantId = tenantId;
     try {
       await api("/api/admin/registration-settings/test-mail", {
         method: "POST",
         body: JSON.stringify({ to: testTo.trim(), mailSender: senderPayload }),
       });
+      if (tenantIdRef.current !== requestTenantId) return;
       setVerifiedFingerprint(fingerprint);
       toast.success(`测试邮件已发送到 ${testTo.trim()}，请确认收到后再保存。`);
     } catch (caught) {
+      if (tenantIdRef.current !== requestTenantId) return;
       setVerifiedFingerprint(null);
       toast.error(caught instanceof Error ? caught.message : "测试邮件发送失败");
     } finally {
