@@ -6,6 +6,7 @@ import { writeAuditLog } from "../lib/audit";
 import { prisma } from "../lib/prisma";
 import {
   COMMON_EMAIL_SUFFIXES,
+  COMMON_WILDCARD_DOMAINS,
   MAX_ALLOWED_SUFFIXES,
   normalizeAllowedSuffixes,
   normalizeRegistrationEmailPolicy,
@@ -101,6 +102,7 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
       emailPolicy: policy,
       mailSender: maskMailSenderConfig(sender),
       commonSuffixes: [...COMMON_EMAIL_SUFFIXES],
+      commonWildcardDomains: [...COMMON_WILDCARD_DOMAINS],
       officialMailerAvailable: officialMailerAvailable(config),
       /** 官方发件模式下的实际发件地址，展示给运营者。 */
       officialFromEmail: config.resend.fromEmail,
@@ -157,6 +159,7 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     const tenantId = context.selectedTenant.id;
 
     const stored = await readTenantMailSenderConfig(prisma, tenantId);
+    const storedPolicy = await readRegistrationEmailPolicy(prisma, tenantId);
     const submittedSender = normalizeMailSenderConfig({
       ...body.mailSender,
       smtpHost: body.mailSender.smtpHost ?? stored.smtpHost,
@@ -172,11 +175,15 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     }
     const sender = restored.config;
 
-    const submittedSuffixes = body.emailPolicy.allowedSuffixes ?? [];
+    // 未提交该字段 = 保持原样；显式提交空数组 = 清空（改为不限制）。
+    // 不能写成 `?? []`：那样「只改 required」的请求会把已有白名单悄悄清空。
+    const submittedSuffixes = body.emailPolicy.allowedSuffixes;
+    const normalizedSuffixes = submittedSuffixes === undefined
+      ? storedPolicy.allowedSuffixes
+      : normalizeAllowedSuffixes(submittedSuffixes);
     // 显式提交了后缀但全部非法时，规范化会得到空数组（= 不限制），
     // 那等于把「配错」悄悄变成「放开所有域名」。这里拒绝并指出具体条目。
-    const normalizedSuffixes = normalizeAllowedSuffixes(submittedSuffixes);
-    if (submittedSuffixes.length > 0 && normalizedSuffixes.length === 0) {
+    if (submittedSuffixes && submittedSuffixes.length > 0 && normalizedSuffixes.length === 0) {
       return reply.code(400).send({
         message: `邮箱后缀格式不正确：${submittedSuffixes.join("、")}。请填写形如 qq.com 的后缀，或清空列表表示不限制。`,
         code: "INVALID_EMAIL_SUFFIX",
@@ -194,16 +201,16 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     // 仅调整注册策略（后缀等）而发件配置没动时不必重测，否则每改一次后缀都要再发一封信。
     const senderChanged = mailSenderFingerprint(sender) !== mailSenderFingerprint(stored);
     const staticCheck = validateMailSenderConfig(sender, config);
-    // 「已配置好」的判定：官方可用，或 SMTP 字段齐全。
-    const senderUsable = sender.mode === "official" ? officialMailerAvailable(config) : staticCheck.ok;
 
-    if (nextPolicy.required && !staticCheck.ok) {
+    // 发件配置一旦被改动，就必须是完整可用的——即使邮箱验证当前是关的。
+    // 这份配置仍被「游客注册」「账号绑定」使用，存进半残配置会让它们静默失败。
+    if (senderChanged && !staticCheck.ok) {
       return reply.code(400).send({
-        message: `开启邮箱验证前请先配置好发件服务：${staticCheck.problems.join("；")}`,
+        message: `发件配置不完整：${staticCheck.problems.join("；")}`,
         code: "MAIL_SENDER_INCOMPLETE",
       });
     }
-    if (senderChanged && senderUsable) {
+    if (senderChanged) {
       const verified = verifiedMailSenderByTenant.get(tenantId);
       const fingerprint = mailSenderFingerprint(sender);
       const stillValid = verified
@@ -215,6 +222,12 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
           code: "MAIL_SENDER_UNVERIFIED",
         });
       }
+    } else if (nextPolicy.required && !staticCheck.ok) {
+      // 策略要求邮箱验证、但（未改动的）历史配置本身不完整：同样拒绝。
+      return reply.code(400).send({
+        message: `开启邮箱验证前请先配置好发件服务：${staticCheck.problems.join("；")}`,
+        code: "MAIL_SENDER_INCOMPLETE",
+      });
     }
 
     await prisma.$transaction(async (transaction) => {

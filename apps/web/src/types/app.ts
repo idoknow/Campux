@@ -515,7 +515,10 @@ export type RegistrationMailSender = {
 export type RegistrationSettings = {
   emailPolicy: RegistrationEmailPolicy;
   mailSender: RegistrationMailSender;
+  /** 常用精确域名（如 qq.com）。 */
   commonSuffixes: string[];
+  /** 常用通配域树（如 edu.cn，放开其下所有子域）。 */
+  commonWildcardDomains?: string[];
   officialMailerAvailable: boolean;
   officialFromEmail: string;
   effectiveFromEmail: string;

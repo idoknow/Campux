@@ -708,10 +708,10 @@ export function AdminPage({
     }
   }
 
-  /** 没有游客投稿/聚合登录建号时，切换 manual 需要运营者明确确认。 */
+  /** 没有开启游客投稿时，切换 manual 需要运营者明确确认。 */
   async function confirmOperateModeWithoutIngress() {
     const confirmed = window.confirm(
-      "这个校园墙还没有开启任何用户自助进站通道（游客投稿 / 聚合登录自动建号）。\n"
+      "这个校园墙还没有开启「游客投稿」，这是新同学自助注册的唯一通道。\n"
       + "无 Bot 模式没有「私聊墙号自动建号」，普通同学将无法注册进入本墙，管理员也无法代为创建账号。\n\n"
       + "仍然切换到无 Bot 模式吗？（建议先去「插件配置」开启游客投稿）",
     );
@@ -2163,7 +2163,7 @@ function MetadataPanel({
   form: TenantSettingsForm;
   imageMaxSizeDraft: string;
   busy: boolean;
-  /** 是否已开启任一自助进站通道（游客投稿 / 聚合登录自动建号）。 */
+  /** 是否已开启游客投稿（唯一可自助注册的进站通道）。 */
   hasIngress: boolean;
   onFormChange: (form: TenantSettingsForm) => void;
   onImageMaxSizeDraftChange: (value: string) => void;
@@ -2356,7 +2356,9 @@ function MetadataPanel({
             title="注册与邮箱验证"
             description="控制同学怎么注册进墙：是否需要邮箱验证码、接受哪些邮箱后缀、用哪套发件服务。"
           >
-            <RegistrationSettingsPanel tenantId={tenantId} busy={busy} />
+            {/* 按 tenantId 重挂载：切墙时彻底丢弃上一个墙的表单与测试状态，
+                避免迟到的测试结果写进新墙。 */}
+            <RegistrationSettingsPanel key={tenantId} tenantId={tenantId} busy={busy} />
           </SettingsSection>
 
           <SettingsSection title="发布与通知" description="审核通过后怎么发到 QQ 空间、自动发布节奏和通知开关。">
@@ -2375,7 +2377,7 @@ function MetadataPanel({
               {form.operateMode === "manual" ? (
                 <div className="grid gap-3 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-3 dark:border-sky-900 dark:bg-sky-950/30">
                   <p className="text-xs font-bold leading-5 text-sky-900 dark:text-sky-100">
-                    无 Bot 模式补充设置。普通同学靠「游客投稿」或「聚合登录自动建号」进站，
+                    无 Bot 模式补充设置。普通同学靠「游客投稿」自助注册进站，
                     审核通过后管理员在「稿件 · 待发布」渲染图片、复制文案、手动发到 QQ 空间再回来确认。
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">

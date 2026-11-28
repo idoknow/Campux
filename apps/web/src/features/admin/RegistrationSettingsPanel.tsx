@@ -154,21 +154,34 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
   }
 
   function addCustomSuffix() {
-    const normalized = customSuffix.trim().toLowerCase().replace(/^[@.]+/, "");
+    // 允许 `*.` 前缀表示「放开整棵子树」，与后端 parseEmailDomainRule 保持一致。
+    const raw = customSuffix.trim().toLowerCase().replace(/^[@.]/, "").replace(/\.+$/, "");
+    const wildcard = raw.startsWith("*.");
+    const normalized = (wildcard ? raw.slice(2) : raw);
     if (!normalized) return;
     if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(normalized)) {
-      toast.error("后缀格式不正确，例如 qq.com");
+      toast.error("域名格式不正确，例如 qq.com 或 *.edu.cn");
       return;
     }
-    if (suffixes.includes(normalized)) {
-      toast.error("这个后缀已经在列表里了");
+    const value = wildcard ? `*.${normalized}` : normalized;
+    if (suffixes.includes(value)) {
+      toast.error("这个域名已经在列表里了");
       return;
     }
     if (settings && suffixes.length >= settings.maxAllowedSuffixes) {
-      toast.error(`最多只能配置 ${settings.maxAllowedSuffixes} 个后缀`);
+      toast.error(`最多只能配置 ${settings.maxAllowedSuffixes} 条`);
       return;
     }
-    setSuffixes((current) => [...current, normalized]);
+    if (wildcard) {
+      const ok = window.confirm(
+        `你正在放开整个 ${normalized} 域树。\n`
+        + `这意味着任何 @任意前缀.${normalized} 的邮箱都能注册。\n\n`
+        + `如果只想收某个具体学校/组织，请改用精确域名（如 tsinghua.${normalized}）。\n\n`
+        + `确定要放开 *.${normalized} 吗？`,
+      );
+      if (!ok) return;
+    }
+    setSuffixes((current) => [...current, value]);
     setCustomSuffix("");
   }
 
@@ -196,7 +209,20 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
   }
 
   const officialUnavailable = mode === "official" && !settings.officialMailerAvailable;
-  const needsRetest = required && verifiedFingerprint !== fingerprint;
+  // 只比发件配置本身：仅调整邮箱后缀/开关时不该被迫再发一封测试邮件。
+  // 与后端 mailSenderFingerprint 的口径保持一致。
+  const senderFingerprint = [mode, smtpHost, smtpPort, smtpUser, smtpPass, fromEmail, fromName].join("|");
+  const loadedSenderFingerprint = settings ? [
+    settings.mailSender.mode,
+    settings.mailSender.smtpHost,
+    String(settings.mailSender.smtpPort),
+    settings.mailSender.smtpUser,
+    settings.mailSender.smtpPass,
+    settings.mailSender.fromEmail,
+    settings.mailSender.fromName,
+  ].join("|") : "";
+  const senderChanged = senderFingerprint !== loadedSenderFingerprint;
+  const needsRetest = required && senderChanged && verifiedFingerprint !== fingerprint;
 
   return (
     <div className="grid gap-4">
@@ -222,14 +248,16 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
       {required ? (
         <div className="grid gap-3 rounded-md border border-slate-200 px-3 py-3 dark:border-slate-800">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">允许的邮箱后缀</p>
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">允许的邮箱域名</p>
             <Badge variant="outline" className="shrink-0">
-              {suffixes.length === 0 ? "不限制后缀" : `已选 ${suffixes.length} 个`}
+              {suffixes.length === 0 ? "不限制" : `已选 ${suffixes.length} 条`}
             </Badge>
           </div>
           <p className="rounded-md bg-amber-50 px-2.5 py-2 text-xs font-semibold leading-5 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-            不勾选任何后缀 = <strong>不限制邮箱后缀</strong>，任意合法邮箱都能注册。
-            只勾选需要的后缀则会拒绝其他域名（如只勾 <code>@qq.com</code> 就只接受 QQ 邮箱）。
+            不勾选任何条目 = <strong>不限制邮箱域名</strong>，任意合法邮箱都能注册。
+            <br />
+            下面的条目默认<strong>精确匹配</strong>：勾 <code>qq.com</code> 只接受 <code>@qq.com</code>，
+            不含任何子域。
           </p>
           <div className="flex flex-wrap gap-1.5">
             {settings.commonSuffixes.map((suffix) => {
@@ -251,7 +279,7 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
               );
             })}
             {/* 自定义后缀（不在常用列表里的）也要能取消。 */}
-            {suffixes.filter((s) => !settings.commonSuffixes.includes(s)).map((suffix) => (
+            {suffixes.filter((s) => !settings.commonSuffixes.includes(s) && !(settings.commonWildcardDomains ?? []).some((d) => s === `*.${d}`)).map((suffix) => (
               <button
                 key={suffix}
                 type="button"
@@ -264,11 +292,48 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
               </button>
             ))}
           </div>
+
+          {/* 通配域树：单独一组，明确「放开整棵树」。 */}
+          {(settings.commonWildcardDomains ?? []).length > 0 ? (
+            <div className="grid gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                开放整棵域树（谨慎使用）
+              </p>
+              <p className="text-xs font-semibold leading-5 text-rose-700 dark:text-rose-300">
+                勾选下面任一项，会放开该域及其<strong>所有子域</strong>。
+                例如勾 <code>*.edu.cn</code> 后，任何 <code>@任意前缀.edu.cn</code> 都能注册——
+                其中并不只有学校。若只想收本校，请改用自定义输入填完整域名，
+                如 <code>tsinghua.edu.cn</code>（精确）。确需其下级时才写 <code>*.tsinghua.edu.cn</code>。
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(settings.commonWildcardDomains ?? []).map((domain) => {
+                  const value = `*.${domain}`;
+                  const active = suffixes.includes(value);
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={busy || saving}
+                      onClick={() => toggleSuffix(value)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-bold transition ${
+                        active
+                          ? "bg-rose-600 text-white"
+                          : "bg-rose-50 text-rose-700 ring-1 ring-rose-200 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900"
+                      }`}
+                    >
+                      *.{domain}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-2">
             <Input
               value={customSuffix}
               className="h-9 max-w-56"
-              placeholder="自定义后缀，如 edu.cn"
+              placeholder="如 tsinghua.edu.cn 或 *.edu.cn"
               disabled={busy || saving}
               onChange={(event) => setCustomSuffix(event.target.value)}
               onKeyDown={(event) => {
@@ -279,7 +344,7 @@ export function RegistrationSettingsPanel({ tenantId, busy }: { tenantId: string
               }}
             />
             <Button variant="outline" size="sm" className="h-9" disabled={busy || saving} onClick={addCustomSuffix}>
-              添加后缀
+              添加域名
             </Button>
             {suffixes.length > 0 ? (
               <Button

@@ -69,21 +69,22 @@ describe("normalizeManualWallQq", () => {
 });
 
 describe("readTenantIngressAvailability", () => {
-  it("is unavailable when both channels are off", () => {
+  it("is unavailable when guest submission is off", () => {
     expect(readTenantIngressAvailability({
       guestSubmission: { enabled: false },
       aggregateLogin: { enabled: false, autoCreateAccount: false },
-    })).toEqual({ guestSubmission: false, aggregateLogin: false, available: false });
+    }).available).toBe(false);
   });
 
-  it("treats guest submission alone as available", () => {
+  it("treats guest submission as the only self-service registration channel", () => {
     expect(readTenantIngressAvailability({
       guestSubmission: { enabled: true },
       aggregateLogin: { enabled: false, autoCreateAccount: false },
     }).available).toBe(true);
   });
 
-  it("requires aggregate login to auto-create accounts", () => {
+  it("does not count aggregate login as an ingress channel", () => {
+    // 聚合登录的定位是给已存在的账号绑登录方式，不能用来注册新账号。
     expect(readTenantIngressAvailability({
       guestSubmission: { enabled: false },
       aggregateLogin: { enabled: true, autoCreateAccount: false },
@@ -91,6 +92,11 @@ describe("readTenantIngressAvailability", () => {
     expect(readTenantIngressAvailability({
       guestSubmission: { enabled: false },
       aggregateLogin: { enabled: true, autoCreateAccount: true },
-    }).available).toBe(true);
+    }).available).toBe(false);
+    // 但它的开启状态仍要如实反映出来，供界面提示。
+    expect(readTenantIngressAvailability({
+      guestSubmission: { enabled: false },
+      aggregateLogin: { enabled: true, autoCreateAccount: true },
+    }).aggregateLogin).toBe(true);
   });
 });

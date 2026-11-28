@@ -57,9 +57,25 @@ describe("resolveActiveAccount", () => {
       { id: "b", mergedAt: new Date(), mergedIntoUserId: "a" },
     ]);
     const result = await resolveActiveAccount(client as never, { id: "a", mergedAt: new Date(), mergedIntoUserId: "b" });
-    // 超过追溯上限时退回旧号本身，而不是返回一个未经校验的中间账号。
+    // 成环时退回旧号本身，而不是返回一个未经校验的中间账号。
     expect(result).toEqual({ userId: "a", redirectedFrom: null });
-    expect(calls.length).toBeLessThanOrEqual(5);
+    expect(calls.length).toBeLessThanOrEqual(32);
+  });
+
+  it("follows long merge chains all the way to the active account", async () => {
+    // 10 级链：早期实现只有 5 跳，会把用户登进一个已被停用的中间账号。
+    const users = Array.from({ length: 11 }, (_, index) => ({
+      id: `u${index}`,
+      mergedAt: index === 10 ? null : new Date(),
+      mergedIntoUserId: index === 10 ? null : `u${index + 1}`,
+    }));
+    const { client } = makeClient(users);
+    const result = await resolveActiveAccount(client as never, {
+      id: "u0",
+      mergedAt: new Date(),
+      mergedIntoUserId: "u1",
+    });
+    expect(result).toEqual({ userId: "u10", redirectedFrom: "u0" });
   });
 });
 

@@ -364,10 +364,18 @@ export function PostsPage({
   // 确认发布后记一笔说说链接：批量场景复用同一个输入框，避免每张卡片各填一次。
   const [pendingPublishUrl, setPendingPublishUrl] = useState("");
   const [pendingConfirmAllOpen, setPendingConfirmAllOpen] = useState(false);
+  // 批量确认的强制知悉勾选：未勾选不能提交（系统无法验证说说是否真的发出去了）。
+  const [confirmAllAck, setConfirmAllAck] = useState(false);
   const [pendingRevertBusyId, setPendingRevertBusyId] = useState("");
   // bot 模式下「待发布」不再是独立页签，并入审核板块的「待发布」筛选；
   // manual 模式保留独立页签作为主工作队列。
   const showPendingPublishTab = isAdmin && pendingResidual?.operateMode !== "bot";
+  // 当前运营模式：无 Bot 模式下拒绝必须写理由（用户没有私聊通道可解释）。
+  const operateMode = pendingResidual?.operateMode ?? "bot";
+  // 是否处于任何筛选状态：确认弹窗据此说明「只作用于当前筛选」。
+  const hasPendingFilter = pendingPublishKeywordApplied.trim().length > 0
+    || pendingPublishAnonymous !== "all"
+    || pendingPublishWithImages !== "all";
   const reviewPendingPublishActive = isAdmin && pendingResidual?.operateMode === "bot";
   // 角标在没进过「待发布」页时也要有值（滞留量从 context 预取，列表加载后再用更精确的 total）。
   const pendingPublishBadgeCount = pendingResidual?.residual ?? pendingPublishPagination.total;
@@ -505,6 +513,13 @@ export function PostsPage({
   }
 
   async function confirmManualRecallDone(displayId: number, postId: string) {
+    // 二次确认：这个操作无法被系统验证，也不可撤销。
+    const confirmed = window.confirm(
+      `确认已经到 QQ 空间把稿件 #${displayId} 的说说删除 / 隐藏了吗？\n\n`
+      + "系统无法核对空间里的实际状态。如果并没删除，用户会看到「已撤回」但说说仍在。\n"
+      + "此操作不可撤销。",
+    );
+    if (!confirmed) return;
     setBusyManualRecallKey(postId);
     try {
       await api(`/api/review/posts/${postId}/recall/manual-complete`, { method: "POST" });
@@ -588,11 +603,30 @@ export function PostsPage({
   async function haltInFlightPublishes() {
     setPendingHaltBusy(true);
     try {
-      const result = await api<{ ok: boolean; halted: number; total: number }>("/api/admin/pending-publish/halt-in-flight", { method: "POST" });
+      const result = await api<{
+        ok: boolean;
+        halted: number;
+        haltedDisplayIds?: number[];
+        alreadyPublishing?: number;
+        alreadyPublishingDisplayIds?: number[];
+        total: number;
+      }>("/api/admin/pending-publish/halt-in-flight", { method: "POST" });
+
       if (result.halted > 0) {
         toast.success(`已停止 ${result.halted} 条在途自动发布，稿件回到待发布`);
-      } else {
-        toast.info("没有可停止的在途发布（可能已在发送中，需等它结束后再处理）");
+      }
+      // 正在发送中的稿件停不下来：必须明确告诉运营者，否则他会手动再发一遍造成重复说说。
+      const stillPublishing = result.alreadyPublishing ?? 0;
+      if (stillPublishing > 0) {
+        const ids = (result.alreadyPublishingDisplayIds ?? []).slice(0, 10).map((id) => `#${id}`).join("、");
+        toast.warning(
+          `另外 ${stillPublishing} 条稿件正在发送中，无法中止${ids ? `（${ids}）` : ""}。`
+          + "请等它们发完再决定是否手动处理，避免重复发说说。",
+          { duration: 15000 },
+        );
+      }
+      if (result.halted === 0 && stillPublishing === 0) {
+        toast.info("没有可停止的在途发布");
       }
       setPendingPublishPage(1);
       await refreshPendingPublish();
@@ -759,8 +793,11 @@ export function PostsPage({
         </div>
         {ingressMissing ? (
           <div className="mb-3 rounded-md border border-sky-300 bg-sky-50 p-3 text-xs font-semibold text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100">
-            <p className="font-black">这个墙还没有开放任何进站通道，普通同学注册不进来。</p>
-            <p className="mt-1 leading-5">无 Bot 模式没有「私聊墙号自动建号」这条路，请到「管理 · 插件配置」开启「游客投稿」，或开启「聚合登录」并勾选首次扫码自动建号。</p>
+            <p className="font-black">这个墙还没有开启游客投稿，普通同学注册不进来。</p>
+            <p className="mt-1 leading-5">
+              无 Bot 模式没有「私聊墙号自动建号」这条路，请到「管理 · 插件配置」开启「游客投稿」
+              （QQ 号 + 用户名 + 密码自助注册）。聚合登录只是给已有账号加一种登录方式，不能注册新账号。
+            </p>
           </div>
         ) : null}
         {botMode && pendingResidual && pendingResidual.residual > 0 ? (
@@ -2442,6 +2479,7 @@ export function PostsPage({
                         onRecallReject={(post) => setRecallConfirm({ open: true, mode: "reject", post })}
                         onRecallDirect={(post) => setRecallConfirm({ open: true, mode: "admin", post })}
                         onRecallDirectSilent={(post) => setRecallConfirm({ open: true, mode: "admin-silent", post })}
+                        onRecallManualComplete={(post) => void confirmManualRecallDone(post.displayId, post.id)}
                         onDetail={(post) => openPostDetail(post.id)}
                         onCancelAutoDecision={(post) => void cancelAutoDecision(post)}
                         emptyTitle={pendingRecallPosts.length > 0 ? "当前筛选下没有其他稿件" : "当前筛选下没有稿件"}
@@ -2683,7 +2721,11 @@ export function PostsPage({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>拒绝稿件 {rejectDialog.displayId ? `#${rejectDialog.displayId}` : ""}</DialogTitle>
-            <DialogDescription>填写给投稿人的拒绝理由，系统会尝试通过本校园墙的所有墙号私聊通知。</DialogDescription>
+            <DialogDescription>
+              {operateMode === "manual"
+                ? "无 Bot 模式没有私聊通知：这条理由会直接显示在投稿人自己的稿件列表里，是他唯一能看到的原因，请写清楚。"
+                : "填写给投稿人的拒绝理由，系统会尝试通过本校园墙的所有墙号私聊通知。"}
+            </DialogDescription>
           </DialogHeader>
           <div className="px-5 pb-5">
             <Textarea
@@ -2692,13 +2734,21 @@ export function PostsPage({
               onChange={(event) => setRejectDialog((current) => ({ ...current, reason: event.target.value }))}
               placeholder="例如：信息不完整，请补充时间、地点和联系方式后重新投稿。"
             />
+            {operateMode === "manual" ? (
+              <p className="mt-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                无 Bot 模式下必须填写理由（不接受「无理由」）。
+              </p>
+            ) : null}
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setRejectDialog({ open: false, postId: "", displayId: null, reason: "" })}>
                 取消
               </Button>
-              <Button variant="outline" disabled={busyPostId === rejectDialog.postId} onClick={() => void rejectWithoutReason()}>
-                不填写理由
-              </Button>
+              {/* 无 Bot 模式下隐藏「不填写理由」：那会让用户拿到一条毫无信息量的拒绝。 */}
+              {operateMode === "manual" ? null : (
+                <Button variant="outline" disabled={busyPostId === rejectDialog.postId} onClick={() => void rejectWithoutReason()}>
+                  不填写理由
+                </Button>
+              )}
               <Button disabled={busyPostId === rejectDialog.postId || rejectDialog.reason.trim().length === 0} onClick={() => void submitReject()}>
                 确认拒绝
               </Button>
@@ -2786,27 +2836,60 @@ export function PostsPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog open={pendingConfirmAllOpen} onOpenChange={(open) => { if (!pendingPublishBatchBusy) setPendingConfirmAllOpen(open); }}>
-        <DialogContent className="w-[min(460px,calc(100vw-32px))]">
+      <Dialog open={pendingConfirmAllOpen} onOpenChange={(open) => { if (!pendingPublishBatchBusy) { setPendingConfirmAllOpen(open); if (!open) setConfirmAllAck(false); } }}>
+        <DialogContent className="w-[min(480px,calc(100vw-32px))]">
           <DialogHeader>
-            <DialogTitle>一键确认全部已发布？</DialogTitle>
+            <DialogTitle>确认当前筛选下的 {pendingPublishPagination.total} 条已发布？</DialogTitle>
             <DialogDescription>
-              当前待发布共 {pendingPublishPagination.total} 条稿件，确认后它们会立刻变成「已发布」并出现在已发布列表里。
-              请确认你已经在 QQ 空间把它们都发出去过——这里只是确认状态，系统不会再自动发一次。
-              误点也没关系：确认后仍可在稿件详情里把「手动确认」的稿件退回待发布。
+              确认后这些稿件会立刻变成「已发布」。这里只是确认状态，系统不会再自动发一次。
+              {pendingPublishKeywordApplied || pendingPublishAnonymous !== "all" || pendingPublishWithImages !== "all"
+                ? "（本次只作用于当前筛选结果，不是全量。）"
+                : ""}
             </DialogDescription>
           </DialogHeader>
+          <div className="grid gap-2 px-5 pb-3 text-xs font-semibold leading-5">
+            {hasPendingFilter ? (
+              <p className="rounded-md bg-sky-50 px-2.5 py-2 text-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+                当前筛选：{[
+                  pendingPublishKeywordApplied.trim() ? `关键词「${pendingPublishKeywordApplied.trim()}」` : "",
+                  pendingPublishAnonymous === "anonymous" ? "只看匿名" : pendingPublishAnonymous === "named" ? "只看实名" : "",
+                  pendingPublishWithImages === "images" ? "只看有配图" : pendingPublishWithImages === "text" ? "只看纯文字" : "",
+                ].filter(Boolean).join(" · ")}
+              </p>
+            ) : null}
+            {pendingPublishPagination.total > 20 ? (
+              <p className="rounded-md bg-amber-50 px-2.5 py-2 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+                本次会一次改动 {pendingPublishPagination.total} 条稿件。数量较多时建议先取消、分批勾选确认，
+                出问题时也更容易定位。
+              </p>
+            ) : null}
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-200 px-2.5 py-2 dark:border-slate-700">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4"
+                checked={confirmAllAck}
+                disabled={pendingPublishBatchBusy}
+                onChange={(event) => setConfirmAllAck(event.target.checked)}
+              />
+              <span>
+                我已经把这 {pendingPublishPagination.total} 条稿件<strong>全部</strong>发到 QQ 空间
+                <span className="mt-0.5 block font-semibold text-slate-500">
+                  系统无法验证说说是否真的存在。确认后若发现漏发，可到「已发布」逐条退回。
+                </span>
+              </span>
+            </label>
+          </div>
           <DialogFooter>
-            <Button variant="outline" disabled={pendingPublishBatchBusy} onClick={() => setPendingConfirmAllOpen(false)}>
+            <Button variant="outline" disabled={pendingPublishBatchBusy} onClick={() => { setPendingConfirmAllOpen(false); setConfirmAllAck(false); }}>
               取消
             </Button>
             <Button
               className="font-bold"
-              disabled={pendingPublishBatchBusy}
+              disabled={pendingPublishBatchBusy || !confirmAllAck}
               onClick={() => void confirmAllPendingPublish()}
             >
               {pendingPublishBatchBusy ? <LoaderIcon className="mr-1 size-4 animate-spin" /> : <CheckIcon className="mr-1 size-4" />}
-              确认全部 {pendingPublishPagination.total} 条已发布
+              确认 {pendingPublishPagination.total} 条已发布
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3301,6 +3384,7 @@ function ReviewList({
           onRecallReject={() => onRecallReject(post)}
           onRecallDirect={() => onRecallDirect(post)}
           onRecallDirectSilent={() => onRecallDirectSilent(post)}
+          {...(onRecallManualComplete ? { onRecallManualComplete: () => onRecallManualComplete(post) } : {})}
           onDetail={() => onDetail(post)}
           onCancelAutoDecision={() => onCancelAutoDecision(post)}
         />

@@ -507,6 +507,17 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "只有待审核稿件可以拒绝" });
     }
 
+    // 无 Bot 模式没有私聊通道，用户只能在自己稿件列表里看到这条理由——
+    // 它是唯一的解释来源，所以强制要求填写，不接受「无理由」。
+    const operateModeForReject = await readTenantOperateMode(prisma, context.selectedTenant.id);
+    const rejectReason = body.comment?.trim() ?? "";
+    if (operateModeForReject === "manual" && rejectReason.length === 0) {
+      return reply.code(400).send({
+        code: "REJECT_REASON_REQUIRED",
+        message: "无 Bot 模式下必须填写拒绝理由：用户只能通过这条理由了解为什么被拒。",
+      });
+    }
+
     const rejectedPost = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
       const updated = await transaction.post.updateMany({
         where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
@@ -519,7 +530,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         actorId: context.user.id,
         oldStatus: "pending_approval",
         newStatus: "rejected",
-        comment: body.comment?.trim() || "审核拒绝",
+        comment: rejectReason || "审核拒绝",
       } });
       await cancelPendingAutoDecisions(transaction, context.selectedTenant.id, post.id, context.user.id, "人工审核拒绝，自动决策已被人工覆盖");
       await writeAuditLog({
@@ -712,7 +723,8 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
           actorId: context.user.id,
           oldStatus: post.status,
           newStatus: "recalled",
-          comment: "管理员已到 QQ 空间手动删除说说并确认撤回",
+          // 明确写清这是「运营者声明已删除」，不是系统验证过的结果。
+          comment: "管理员声明已到 QQ 空间手动删除该说说（系统无法验证），据此确认撤回",
         },
       });
       await writeAuditLog({
@@ -721,7 +733,12 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         action: "post.recall.manual_complete",
         targetType: "post",
         targetId: post.id,
-        detail: { displayId: post.displayId, previousStatus: post.status },
+        detail: {
+          displayId: post.displayId,
+          previousStatus: post.status,
+          // 留痕：这是运营者的声明，系统没有、也无法验证空间侧的真实状态。
+          verification: "manual_attestation",
+        },
       }, transaction);
       return true;
     });

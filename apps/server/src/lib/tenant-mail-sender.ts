@@ -240,8 +240,9 @@ export async function sendTenantMail(
       port: sender.smtpPort,
       secure,
       // 465 走隐式 TLS；其余端口要求服务器升级到 STARTTLS 后才发送认证信息，
-      // 否则账号密码会以明文经过网络（评审指出的问题）。
-      // 确实不支持 STARTTLS 的内部中继，请改用 465（隐式 TLS）或免认证中继。
+      // 否则账号密码会以明文经过网络。
+      // 配置本身就要求用户名与密码（见 validateMailSenderConfig），因此不存在
+      // 「免认证中继」这种绕过方式：只支持 STARTTLS（非 465）或隐式 TLS（465）。
       requireTLS: !secure,
       auth: { user: sender.smtpUser, pass: sender.smtpPass },
       greetingTimeout: 10_000,

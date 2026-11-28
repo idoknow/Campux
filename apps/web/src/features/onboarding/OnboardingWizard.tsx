@@ -163,7 +163,7 @@ export function OnboardingWizard({
 （切换后普通同学暂时无法注册，请尽快到「管理 · 插件配置」开启「游客投稿」。）`,
         );
         if (!confirmed) {
-          toast.info("已取消切换。请先在「管理 · 插件配置」开启「游客投稿」或「聚合登录自动建号」。");
+          toast.info("已取消切换。请先在「管理 · 插件配置」开启「游客投稿」。");
           return;
         }
         try {
@@ -545,8 +545,9 @@ export function OnboardingWizard({
                 <div className="grid gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-left dark:border-sky-900 dark:bg-sky-950/40">
                   <p className="text-xs font-black text-sky-900 dark:text-sky-100">下一步：让普通同学能注册进来</p>
                   <p className="text-xs font-semibold leading-5 text-sky-800 dark:text-sky-200">
-                    无 Bot 模式没有「私聊墙号自动建号」。请到「管理 · 插件配置」开启「游客投稿」，让同学用 QQ 号 + 用户名 + 密码自助注册；
-                    或开启「聚合登录」并勾选「首次扫码自动建号」。
+                    无 Bot 模式没有「私聊墙号自动建号」。请到「管理 · 插件配置」开启「游客投稿」，
+                    让同学用 QQ 号 + 用户名 + 密码自助注册。这是唯一的新账号进站通道；
+                    聚合登录只用于给已有账号绑定登录方式，不能注册新账号。
                   </p>
                 </div>
               ) : null}

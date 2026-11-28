@@ -37,17 +37,6 @@ export type MergeCandidate = {
   displayName: string | null;
 };
 
-export type MergePreview = {
-  oldUserId: string;
-  oldQqUin: string;
-  oldEmail: string | null;
-  oldDisplayName: string | null;
-  oldPostCount: number;
-  newUserId: string;
-  newQqUin: string;
-  newEmail: string | null;
-};
-
 /** 找出「可以并入目标账号」的旧账号：未合并、不是自己。 */
 export async function findMergeCandidate(
   client: typeof prisma | Prisma.TransactionClient,
@@ -98,31 +87,62 @@ export async function isMergeScopeSingleTenant(
   return otherMemberships === 0;
 }
 
-/** 生成合并预览，供前端弹窗确认。 */
+export type MergePreview = {
+  oldUserId: string;
+  oldQqUin: string;
+  oldEmail: string | null;
+  oldDisplayName: string | null;
+  oldPostCount: number;
+  newUserId: string;
+  newQqUin: string;
+  newEmail: string | null;
+};
+
+/**
+ * 生成合并预览。
+ *
+ * 跨墙限制在这里就要暴露（而不是等到最后提交）：
+ * 否则用户会走完「查询 → 收验证码 → 填验证码」才被告知不能合并，
+ * 既浪费一次验证码，也把他推向「找运维人工处理」这条绕过安全设计的路。
+ */
 export async function buildMergePreview(input: {
   tenantId: string;
   targetUserId: string;
   oldQqUin: string;
-}): Promise<MergePreview | null> {
+}): Promise<{ ok: true; preview: MergePreview } | { ok: false; reason: string; code: string }> {
   const target = await prisma.user.findUnique({
     where: { id: input.targetUserId },
     select: { id: true, qqUin: true, email: true },
   });
-  if (!target) return null;
+  if (!target) {
+    return { ok: false, reason: "当前账号不存在", code: "NEW_MISSING" };
+  }
   const old = await findMergeCandidate(prisma, input);
-  if (!old) return null;
+  if (!old) {
+    return { ok: false, reason: "没有找到这个 QQ 号对应的可合并旧账号", code: "OLD_NOT_FOUND" };
+  }
+  if (!await isMergeScopeSingleTenant(prisma, { oldQqUin: input.oldQqUin, tenantId: input.tenantId })) {
+    return {
+      ok: false,
+      code: "CROSS_TENANT",
+      reason: "这个旧账号还属于其他校园墙，无法在这里自助合并，请联系系统运维处理",
+    };
+  }
   const oldPostCount = await prisma.post.count({
     where: { tenantId: input.tenantId, authorId: old.id },
   });
   return {
-    oldUserId: old.id,
-    oldQqUin: old.qqUin.toString(),
-    oldEmail: old.email,
-    oldDisplayName: old.displayName,
-    oldPostCount,
-    newUserId: target.id,
-    newQqUin: target.qqUin.toString(),
-    newEmail: target.email,
+    ok: true,
+    preview: {
+      oldUserId: old.id,
+      oldQqUin: old.qqUin.toString(),
+      oldEmail: old.email,
+      oldDisplayName: old.displayName,
+      oldPostCount,
+      newUserId: target.id,
+      newQqUin: target.qqUin.toString(),
+      newEmail: target.email,
+    },
   };
 }
 
@@ -334,14 +354,20 @@ export async function mergeUserAccounts(input: {
   }, { maxWait: 15_000, timeout: 60_000 });
 }
 
-/** 合并链最多向上追溯的层数，防御异常数据造成的环。 */
-const MAX_MERGE_HOPS = 5;
+/**
+ * 合并链的硬上限：只用于防御异常数据（环或畸形链），正常合并不该接近这个数。
+ * 早期实现是 5，长链账号会被判成「未合并」而登录到旧号，所以现在放宽到 32。
+ */
+const MAX_MERGE_HOPS = 32;
 
 /**
  * 把「可能是被合并旧号」的账号解析到最终主账号。
  *
  * 合并后旧号仍占用原 QQ 号与邮箱（用于审计与反查），所以用旧凭据登录会先查到旧号。
  * 这里沿 `mergedIntoUserId` 一直往上找到真正的主账号；主账号没被合并时原样返回。
+ *
+ * 用**环检测**而不是固定跳数来终止：多级合并（A→B→C→…）必须一路追到底，
+ * 否则用户会被登进一个已被停用的中间账号。只有真正成环时才放弃。
  *
  * 返回 `redirectedFrom` 让调用方能提示「该账号已合并到新账号」。
  */
@@ -353,6 +379,7 @@ export async function resolveActiveAccount(
     return { userId: user.id, redirectedFrom: null };
   }
   const firstOldId = user.id;
+  const visited = new Set<string>([user.id]);
   let currentId = user.mergedIntoUserId;
   for (let hop = 0; hop < MAX_MERGE_HOPS; hop += 1) {
     const next = await client.user.findUnique({
@@ -360,16 +387,20 @@ export async function resolveActiveAccount(
       select: { id: true, mergedAt: true, mergedIntoUserId: true },
     });
     if (!next) {
-      // 主账号被删掉了：退回旧号本身，避免把用户彻底挡在门外。
+      // 目标账号被删掉了：退回旧号本身，避免把用户彻底挡在门外。
       return { userId: firstOldId, redirectedFrom: null };
     }
     if (next.mergedAt === null || !next.mergedIntoUserId) {
       return { userId: next.id, redirectedFrom: firstOldId };
     }
+    // 成环（或跳数超限）：放弃解析，让上层按「未合并」处理，
+    // 而不是登进一个未校验的中间账号。
+    if (visited.has(next.id)) {
+      return { userId: firstOldId, redirectedFrom: null };
+    }
+    visited.add(next.id);
     currentId = next.mergedIntoUserId;
   }
-  // 超过追溯上限通常是数据异常（长链或环）。不要返回一个未经校验的中间账号——
-  // 那会把用户登进一个可能已被停用/不属于他的号；退回旧号本身并让上层按未合并处理。
   return { userId: firstOldId, redirectedFrom: null };
 }
 

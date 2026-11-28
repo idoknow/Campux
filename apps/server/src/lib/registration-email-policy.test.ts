@@ -61,9 +61,15 @@ describe("isEmailAllowedByPolicy", () => {
     expect(isEmailAllowedByPolicy("a@gmail.com", policy).ok).toBe(false);
   });
 
-  it("matches subdomains of an allowed suffix", () => {
-    const policy = { required: true, allowedSuffixes: ["edu.cn"] };
-    expect(isEmailAllowedByPolicy("student@mail.tsinghua.edu.cn", policy).ok).toBe(true);
+  it("matches subdomains only when the rule is explicitly a wildcard", () => {
+    // 精确规则：只接受该域名本身。
+    expect(isEmailAllowedByPolicy("student@edu.cn", { required: true, allowedSuffixes: ["edu.cn"] }).ok).toBe(true);
+    expect(isEmailAllowedByPolicy("student@mail.tsinghua.edu.cn", { required: true, allowedSuffixes: ["edu.cn"] }).ok).toBe(false);
+    // 通配规则：放开整棵子树。
+    expect(isEmailAllowedByPolicy("student@mail.tsinghua.edu.cn", { required: true, allowedSuffixes: ["*.edu.cn"] }).ok).toBe(true);
+    expect(isEmailAllowedByPolicy("student@edu.cn", { required: true, allowedSuffixes: ["*.edu.cn"] }).ok).toBe(true);
+    // 通配不应匹配「像但不是」的域名。
+    expect(isEmailAllowedByPolicy("a@notedu.cn", { required: true, allowedSuffixes: ["*.edu.cn"] }).ok).toBe(false);
   });
 
   it("rejects malformed emails", () => {

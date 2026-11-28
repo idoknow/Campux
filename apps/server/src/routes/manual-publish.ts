@@ -592,7 +592,9 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
         tenantId: context.selectedTenant.id,
         status: { in: ["publishing", "partially_failed"] },
         OR: [
-          { publishAttempts: { some: { status: { in: ["queued", "waiting_cookies", "failed"] } } } },
+          // 包含 running：这类稿件停不下来，但必须被识别出来并如实上报，
+          // 否则运营者会以为「全停了」而重复手动发布。
+          { publishAttempts: { some: { status: { in: ["queued", "waiting_cookies", "failed", "running"] } } } },
           { batchItem: { isNot: null } },
         ],
       },
@@ -600,17 +602,21 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
         id: true,
         displayId: true,
         status: true,
-        batchItem: { select: { id: true, batchId: true } },
+        batchItem: { select: { id: true, batchId: true, imageCount: true } },
         publishAttempts: { select: { id: true, status: true } },
       },
     });
 
     const haltedDisplayIds: number[] = [];
+    // 正在发送中的稿件：无法撤销（请求已经发出去了），必须如实告诉运营者，
+    // 否则他会以为「全停了」，随后再手动发一遍 → 空间出现两条一样的说说。
+    const alreadyPublishingDisplayIds: number[] = [];
     for (const post of candidates) {
       // 已经真正发出去的（succeeded/running）不能撤销，只能跳过剩下的排队任务。
       const cancellable = post.publishAttempts.filter((attempt) => ["queued", "waiting_cookies", "failed"].includes(attempt.status));
       const hasRunning = post.publishAttempts.some((attempt) => attempt.status === "running");
       if (hasRunning) {
+        alreadyPublishingDisplayIds.push(post.displayId);
         continue;
       }
       // 没有可取消尝试、也没有批次条目的稿件不需要处理（例如全被 skipped 的残留）。
@@ -618,51 +624,81 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
         continue;
       }
       try {
-        await prisma.$transaction(async (transaction) => {
+        const halted = await prisma.$transaction(async (transaction) => {
+          // 先用条件更新「抢占」这条稿件：状态已变化（别人已处理/已发布）时整体放弃，
+          // 避免把下面的 attempt/batch 写入提交到一条已经不再 publishing 的稿件上。
+          const claimed = await transaction.post.updateMany({
+            where: {
+              id: post.id,
+              tenantId: context.selectedTenant.id,
+              status: { in: ["publishing", "partially_failed"] },
+            },
+            data: { status: "approved" },
+          });
+          if (claimed.count === 0) {
+            return false;
+          }
+
           if (cancellable.length > 0) {
             await transaction.publishAttempt.updateMany({
               where: { id: { in: cancellable.map((attempt) => attempt.id) } },
               data: { status: "skipped", lastError: "切换到无 Bot 模式，管理员已停止在途自动发布", nextRunAt: null },
             });
           }
-          // 退出批量收集：批次条目保留（批次状态由后续 fanout 逻辑处理），稿件本身回到待发布。
+          // 退出批量收集：删条目的同时把批次的图片计数扣掉，
+          // 否则批次会永久多算这些图片，后续成组发布时的判断会失真。
           if (post.batchItem) {
             await transaction.publishBatchItem.deleteMany({ where: { postId: post.id } });
+            await transaction.publishBatch.updateMany({
+              where: { id: post.batchItem.batchId, status: "collecting" },
+              data: { imageCount: { decrement: post.batchItem.imageCount } },
+            });
           }
-          await transaction.post.update({
-            where: { id: post.id },
+          await transaction.postLog.create({
             data: {
-              status: "approved",
-              logs: {
-                create: {
-                  tenantId: context.selectedTenant.id,
-                  actorId: context.user.id,
-                  oldStatus: post.status,
-                  newStatus: "approved",
-                  comment: "切换到无 Bot 模式，已停止在途自动发布，退回待发布",
-                },
-              },
+              tenantId: context.selectedTenant.id,
+              postId: post.id,
+              actorId: context.user.id,
+              oldStatus: post.status,
+              newStatus: "approved",
+              comment: "切换到无 Bot 模式，已停止在途自动发布，退回待发布",
             },
           });
+          return true;
         });
+        if (!halted) {
+          continue;
+        }
         haltedDisplayIds.push(post.displayId);
       } catch (error) {
         request.log.error({ err: error, postId: post.id }, "halt in-flight publish failed");
       }
     }
 
-    if (haltedDisplayIds.length > 0) {
+    if (haltedDisplayIds.length > 0 || alreadyPublishingDisplayIds.length > 0) {
       await writeAuditLog({
         tenantId: context.selectedTenant.id,
         actorId: context.user.id,
         action: "post.manual_publish.halt_in_flight",
         targetType: "post",
         targetId: candidates[0]?.id ?? null,
-        detail: { count: haltedDisplayIds.length, displayIds: haltedDisplayIds.slice(0, 50) },
+        detail: {
+          count: haltedDisplayIds.length,
+          displayIds: haltedDisplayIds.slice(0, 50),
+          alreadyPublishing: alreadyPublishingDisplayIds.slice(0, 50),
+        },
       });
     }
 
-    return { ok: true, halted: haltedDisplayIds.length, haltedDisplayIds, total: candidates.length };
+    return {
+      ok: true,
+      halted: haltedDisplayIds.length,
+      haltedDisplayIds,
+      // 正在发送中、停不下来的稿件：前端必须显式提示，避免运营者重复发布。
+      alreadyPublishing: alreadyPublishingDisplayIds.length,
+      alreadyPublishingDisplayIds,
+      total: candidates.length,
+    };
   });
 
   // 手动发布文案：按稿件的匿名状态拼出可直接粘贴到 QQ 空间的说说文案。
