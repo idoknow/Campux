@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { resolveActiveAccount, shouldPromptAccountMerge } from "./user-merge";
+import { resolveActiveAccount, shouldPromptAccountMerge, UserMergeError } from "./user-merge";
 
 /**
  * `resolveActiveAccount` 接受任意 Prisma 客户端，这里用最小内存桩驱动真实实现，
@@ -90,5 +90,15 @@ describe("shouldPromptAccountMerge", () => {
 
   it("does not prompt for already-merged accounts", () => {
     expect(shouldPromptAccountMerge({ email: null, mergedAt: new Date() })).toBe(false);
+  });
+});
+
+describe("UserMergeError CODE_STALE", () => {
+  it("carries the CODE_STALE code for the transactional consumption guard", () => {
+    // 消费并入合并事务后，验证码失效通过这个错误码回滚整个合并。
+    const error = new UserMergeError("验证码已失效，请重新获取后重试", "CODE_STALE");
+    expect(error.code).toBe("CODE_STALE");
+    expect(error.message).toBe("验证码已失效，请重新获取后重试");
+    expect(error instanceof UserMergeError).toBe(true);
   });
 });

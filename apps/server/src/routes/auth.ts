@@ -1422,32 +1422,24 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(400).send({ message: "验证码不正确" });
     }
 
-    // 验证码在合并成功后才消费：合并可能因 ALREADY_MERGED / CROSS_TENANT / 序列化冲突失败，
-    // 先消费会让用户白收一次码、必须重新获取。这里只做校验，不预先作废。
-    let mergeResult: { mergeId: string; migratedPosts: number; migratedMemberships: number; oldQqUin: string };
-    try {
-      mergeResult = await mergeUserAccounts({
-        tenantId,
-        targetUserId: context.user.id,
-        oldQqUin: body.oldQqUin,
-        actorId: context.user.id,
-      });
-    } catch (error) {
+    // 验证码消费并入合并事务：合并可能因 ALREADY_MERGED / CROSS_TENANT / 序列化冲突失败，
+    // 先消费会让用户白收一次码、必须重新获取；两段写入又会有「合并成功但码已失效」的半程状态。
+    // 这里把 record.id 传进去，由 mergeUserAccounts 在事务内条件消费，两者原子生效。
+    const mergeResult = await mergeUserAccounts({
+      tenantId,
+      targetUserId: context.user.id,
+      oldQqUin: body.oldQqUin,
+      actorId: context.user.id,
+      proofCodeRecordId: record.id,
+    }).catch((error: unknown) => {
       if (error instanceof UserMergeError) {
         return reply.code(409).send({ message: error.message, code: error.code });
       }
       throw error;
-    }
-
-    // 条件消费：并发请求或过期/超限的码不能作废这条记录。
-    // 合并已成功但消费失败时重试会因 ALREADY_MERGED 失败——验证码随 TTL 自然过期，
-    // 危害仅限「同一封邮件的码多等 10 分钟」，比让用户重新收码可接受。
-    const consumed = await prisma.emailVerificationCode.updateMany({
-      where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: 5 } },
-      data: { consumedAt: new Date() },
     });
-    if (consumed.count !== 1) {
-      return reply.code(409).send({ code: "CODE_STALE", message: "验证码已失效，请重新获取后重试" });
+    // reply 已发送（catch 分支）时不再继续。
+    if (typeof mergeResult !== "object" || mergeResult === null || !("mergeId" in mergeResult)) {
+      return mergeResult;
     }
 
     return { ok: true, ...mergeResult };

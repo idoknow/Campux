@@ -24,7 +24,7 @@ import { writeAuditLog } from "./audit";
 export class UserMergeError extends Error {
   constructor(
     message: string,
-    readonly code: "OLD_NOT_FOUND" | "ALREADY_MERGED" | "SAME_USER" | "EMAIL_MISMATCH" | "NEW_MISSING" | "TARGET_MERGED",
+    readonly code: "OLD_NOT_FOUND" | "ALREADY_MERGED" | "SAME_USER" | "EMAIL_MISMATCH" | "NEW_MISSING" | "TARGET_MERGED" | "CODE_STALE",
   ) {
     super(message);
     this.name = "UserMergeError";
@@ -163,12 +163,18 @@ export async function buildMergePreview(input: {
 
 /**
  * 执行合并。调用方负责先做验证码校验与权限校验。
+ *
+ * 传入 `proofCodeRecordId` 时，验证码消费与合并同事务提交——
+ * 避免「合并成功但码被并发消费」的半程状态：那种情况下接口只能报 CODE_STALE，
+ * 而合并其实已完成，用户重试会得到 ALREADY_MERGED，语义割裂。
+ * 不传则不消费任何验证码（便于将来运维/管理员路径复用）。
  */
 export async function mergeUserAccounts(input: {
   tenantId: string;
   targetUserId: string;
   oldQqUin: string;
   actorId: string;
+  proofCodeRecordId?: string;
 }): Promise<{ mergeId: string; migratedPosts: number; migratedMemberships: number; oldQqUin: string }> {
   // 串行化隔离：双向并发合并（A→B 与 B→A）在 READ COMMITTED 下可能都成功，
   // 结果两个账号互相指向、同时被停用。串行化会让其中一个事务失败，这里重试即可。
@@ -332,6 +338,24 @@ export async function mergeUserAccounts(input: {
     if (claimed.count !== 1) {
       // 声明失败 → 抛错让整个事务回滚（包括已迁移的稿件/身份）。
       throw new UserMergeError("这个旧账号刚刚已被合并，请刷新后重试", "ALREADY_MERGED");
+    }
+
+    // 验证码消费与合并同一事务：在 Serializable 事务内抛错会连同已迁移的稿件/身份/
+    // 旧号标记一起回滚，重试循环会重新读取并再次消费，不需要额外加锁或补偿。
+    // 条件谓词挡住「并发抢先消费 / 过期 / 超限」三种情况。
+    if (input.proofCodeRecordId) {
+      const consumed = await tx.emailVerificationCode.updateMany({
+        where: {
+          id: input.proofCodeRecordId,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+          attempts: { lt: 5 },
+        },
+        data: { consumedAt: new Date() },
+      });
+      if (consumed.count !== 1) {
+        throw new UserMergeError("验证码已失效，请重新获取后重试", "CODE_STALE");
+      }
     }
 
     const merge = await tx.userMerge.create({
