@@ -26,6 +26,8 @@ CREATE TABLE "User" (
     "passwordChangeRequired" BOOLEAN NOT NULL DEFAULT false,
     "autoFollowOwnPosts" BOOLEAN NOT NULL DEFAULT true,
     "isTestAccount" BOOLEAN NOT NULL DEFAULT false,
+    "mergedAt" DATETIME,
+    "mergedIntoUserId" TEXT,
     "systemRole" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -75,6 +77,20 @@ CREATE TABLE "OAuthIdentity" (
 );
 
 -- CreateTable
+CREATE TABLE "UserMerge" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "oldUserId" TEXT NOT NULL,
+    "newUserId" TEXT NOT NULL,
+    "oldQqUin" BIGINT NOT NULL,
+    "newQqUin" BIGINT NOT NULL,
+    "oldEmail" TEXT,
+    "migratedPosts" INTEGER NOT NULL DEFAULT 0,
+    "migratedMemberships" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
 CREATE TABLE "EmailVerificationCode" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "email" TEXT NOT NULL,
@@ -87,8 +103,7 @@ CREATE TABLE "EmailVerificationCode" (
 );
 
 -- CreateTable
-CREATE TABLE "SystemSetting" (
-    "key" TEXT NOT NULL PRIMARY KEY,
+CREATE TABLE "SystemSetting" (    "key" TEXT NOT NULL PRIMARY KEY,
     "value" JSONB NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
@@ -223,6 +238,8 @@ CREATE TABLE "Post" (
     "font" TEXT,
     "status" TEXT NOT NULL DEFAULT 'pending_approval',
     "publishSummary" TEXT,
+    "manualPublishedAt" DATETIME,
+    "manualPublishUrl" TEXT,
     "pendingTags" TEXT,
     "recallIgnored" BOOLEAN NOT NULL DEFAULT false,
     "recallIgnoredAt" DATETIME,
@@ -761,6 +778,15 @@ CREATE INDEX "OAuthIdentity_userId_idx" ON "OAuthIdentity"("userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "OAuthIdentity_provider_providerUserId_key" ON "OAuthIdentity"("provider", "providerUserId");
+
+-- CreateIndex
+CREATE INDEX "UserMerge_tenantId_createdAt_idx" ON "UserMerge"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "UserMerge_oldUserId_idx" ON "UserMerge"("oldUserId");
+
+-- CreateIndex
+CREATE INDEX "UserMerge_newUserId_idx" ON "UserMerge"("newUserId");
 
 -- CreateIndex
 CREATE INDEX "EmailVerificationCode_email_purpose_createdAt_idx" ON "EmailVerificationCode"("email", "purpose", "createdAt");

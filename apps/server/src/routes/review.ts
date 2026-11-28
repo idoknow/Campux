@@ -2,11 +2,11 @@ import type { FastifyInstance } from "fastify";
 import type { PostStatus, Prisma } from "@campux/db";
 import { insensitiveContains } from "@campux/db";
 import { z } from "zod";
-import { requireReadyTenant, requireTenantRole } from "../lib/auth";
+import { hasTenantRole, requireReadyTenant, requireTenantRole } from "../lib/auth";
 import { toPostListItem, toPostTimeline } from "../lib/posts";
 import { prisma } from "../lib/prisma";
 import { writeAuditLog } from "../lib/audit";
-import { executePostRecall, PostRecallExecutionError, PostRecallNotSupportedError } from "../lib/post-recall";
+import { executePostRecall, PostRecallExecutionError, PostRecallNoRecordError, PostRecallNotSupportedError } from "../lib/post-recall";
 import { runWithActiveTenantLease } from "../lib/tenant-runtime-lease";
 import { enqueuePublishFanout } from "../runtime/publishing";
 import { addApprovedPostToBatch } from "../runtime/publish-batching";
@@ -418,6 +418,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
 
     return {
       ok: true,
+      operateMode,
     };
   });
 
@@ -485,7 +486,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     for (const postId of approvedIds) {
       events?.emit({ type: "review:approved", tenantId: context.selectedTenant.id, postId, reviewerId: context.user.id });
     }
-    return { ok: true, approved: approvedIds.length };
+    return { ok: true, approved: approvedIds.length, operateMode };
   });
 
   app.post("/api/review/posts/:id/reject", async (request, reply) => {
@@ -506,6 +507,17 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       return reply.code(409).send({ message: "只有待审核稿件可以拒绝" });
     }
 
+    // 无 Bot 模式没有私聊通道，用户只能在自己稿件列表里看到这条理由——
+    // 它是唯一的解释来源，所以强制要求填写，不接受「无理由」。
+    const operateModeForReject = await readTenantOperateMode(prisma, context.selectedTenant.id);
+    const rejectReason = body.comment?.trim() ?? "";
+    if (operateModeForReject === "manual" && rejectReason.length === 0) {
+      return reply.code(400).send({
+        code: "REJECT_REASON_REQUIRED",
+        message: "无 Bot 模式下必须填写拒绝理由：用户只能通过这条理由了解为什么被拒。",
+      });
+    }
+
     const rejectedPost = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
       const updated = await transaction.post.updateMany({
         where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_approval" },
@@ -518,7 +530,7 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         actorId: context.user.id,
         oldStatus: "pending_approval",
         newStatus: "rejected",
-        comment: body.comment?.trim() || "审核拒绝",
+        comment: rejectReason || "审核拒绝",
       } });
       await cancelPendingAutoDecisions(transaction, context.selectedTenant.id, post.id, context.user.id, "人工审核拒绝，自动决策已被人工覆盖");
       await writeAuditLog({
@@ -593,6 +605,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
       if (error instanceof PostRecallNotSupportedError) {
         return reply.code(409).send({ message: error.message });
       }
+      if (error instanceof PostRecallNoRecordError) {
+        // 无 Bot 模式：没有 tid，系统删不了说说，不能假装撤回成功。
+        return reply.code(409).send({
+          message: error.message,
+          code: "RECALL_MANUAL_REQUIRED",
+          manualRequired: true,
+        });
+      }
       if (error instanceof PostRecallExecutionError) {
         oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {
           app.log.warn({ error: caught, postId: post.id }, "failed to notify post recall failure");
@@ -625,23 +645,27 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
 
     const rejected = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
-      await transaction.post.update({
-        where: {
-          id: post.id,
-        },
+      // 条件更新：校验与写入之间稿件可能已被处理（例如被并发确认撤回），
+      // 状态不再是 pending_recall 时放弃，不能把它强行改回 published。
+      const updated = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: "pending_recall" },
         data: {
           status: "published",
           recallIgnored: false,
           recallIgnoredAt: null,
-          logs: {
-            create: {
-              tenantId: context.selectedTenant.id,
-              actorId: context.user.id,
-              oldStatus: post.status,
-              newStatus: "published",
-              comment: body.comment?.trim() || "拒绝撤回申请",
-            },
-          },
+        },
+      });
+      if (updated.count === 0) {
+        return false;
+      }
+      await transaction.postLog.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          postId: post.id,
+          actorId: context.user.id,
+          oldStatus: "pending_recall",
+          newStatus: "published",
+          comment: body.comment?.trim() || "拒绝撤回申请",
         },
       });
 
@@ -661,6 +685,9 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (!rejected.active) {
       return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
+    if (!rejected.value) {
+      return reply.code(409).send({ message: "稿件状态已变化，请刷新后重试" });
+    }
 
     oneBot?.notifyPostRecallRejected(post.id, body.comment?.trim() || "撤回申请未通过").catch((error) => {
       app.log.warn({ error, postId: post.id }, "failed to notify post recall rejection");
@@ -671,8 +698,91 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     };
   });
 
-  app.post("/api/review/posts/:id/recall/ignore", async (request, reply) => {
+  /**
+   * 无 Bot 模式的手动撤回闭环：稿件是管理员手动发到 QQ 空间的，系统没有 tid，
+   * 只能由运营者到空间删除说说后，回来点「已手动删除」把状态推到 recalled。
+   * 只允许处理 `published` / `pending_recall` 的稿件。
+   */
+  app.post("/api/review/posts/:id/recall/manual-complete", async (request, reply) => {
     const context = await requireReadyTenant(request, reply, "reviewer");
+    const params = postParamsSchema.parse(request.params);
+    const post = await prisma.post.findFirst({
+      where: { id: params.id, tenantId: context.selectedTenant.id },
+      select: { id: true, displayId: true, status: true },
+    });
+    if (!post) {
+      return reply.code(404).send({ message: "稿件不存在" });
+    }
+    if (post.status !== "published" && post.status !== "pending_recall") {
+      return reply.code(409).send({ message: "只有已发表或待撤回稿件可以标记为已手动删除" });
+    }
+    // 待撤回请求由审核员处理；但“已发表”稿件没有任何作者/系统撤回请求，
+    // 直接标记删除等于绕过管理员直撤边界，必须要求管理员权限。
+    const isAdmin = hasTenantRole(context.selectedMembership.role, "admin");
+    if (post.status === "published" && !isAdmin) {
+      return reply.code(403).send({ message: "直接完成已发表稿件需要管理员权限" });
+    }
+    const completed = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      // 在租约内重新读取状态：审核员读到 pending_recall 后，批准撤回可能把它改回 published，
+      // 写入和留痕都必须基于本次真正命中的状态，避免记录与事实不一致。
+      const current = await transaction.post.findFirst({
+        where: { id: post.id, tenantId: context.selectedTenant.id },
+        select: { status: true },
+      });
+      if (!current || (current.status !== "published" && current.status !== "pending_recall")) {
+        return { ok: false as const, forbidden: false as const };
+      }
+      if (current.status === "published" && !isAdmin) {
+        return { ok: false as const, forbidden: true as const };
+      }
+      const changed = await transaction.post.updateMany({
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: current.status },
+        data: { status: "recalled", recallIgnored: false, recallIgnoredAt: null },
+      });
+      if (changed.count === 0) return { ok: false as const, forbidden: false as const };
+      await transaction.postLog.create({
+        data: {
+          tenantId: context.selectedTenant.id,
+          postId: post.id,
+          actorId: context.user.id,
+          oldStatus: current.status,
+          newStatus: "recalled",
+          // 明确写清这是「运营者声明已删除」，不是系统验证过的结果。
+          comment: "管理员声明已到 QQ 空间手动删除该说说（系统无法验证），据此确认撤回",
+        },
+      });
+      await writeAuditLog({
+        tenantId: context.selectedTenant.id,
+        actorId: context.user.id,
+        action: "post.recall.manual_complete",
+        targetType: "post",
+        targetId: post.id,
+        detail: {
+          displayId: post.displayId,
+          previousStatus: current.status,
+          // 留痕：这是运营者的声明，系统没有、也无法验证空间侧的真实状态。
+          verification: "manual_attestation",
+        },
+      }, transaction);
+      return { ok: true as const, forbidden: false as const };
+    });
+    if (!completed.active) {
+      return reply.code(409).send({ message: "校园墙已暂停或归档" });
+    }
+    if (!completed.value.ok) {
+      if (completed.value.forbidden) {
+        return reply.code(403).send({ message: "直接完成已发表稿件需要管理员权限" });
+      }
+      return reply.code(409).send({ message: "稿件状态已变化，请刷新后重试" });
+    }
+
+    oneBot?.notifyPostRecalled(post.id, 0).catch((error) => {
+      app.log.warn({ error, postId: post.id }, "failed to notify manual recall completion");
+    });
+    return { ok: true };
+  });
+
+  app.post("/api/review/posts/:id/recall/ignore", async (request, reply) => {    const context = await requireReadyTenant(request, reply, "reviewer");
     const params = postParamsSchema.parse(request.params);
     const post = await prisma.post.findFirst({
       where: {
@@ -769,6 +879,14 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     } catch (error) {
       if (error instanceof PostRecallNotSupportedError) {
         return reply.code(409).send({ message: error.message });
+      }
+      if (error instanceof PostRecallNoRecordError) {
+        // 无 Bot 模式：没有 tid，系统删不了说说，不能假装撤回成功。
+        return reply.code(409).send({
+          message: error.message,
+          code: "RECALL_MANUAL_REQUIRED",
+          manualRequired: true,
+        });
       }
       if (error instanceof PostRecallExecutionError) {
         oneBot?.notifyPostRecallFailed(post.id, error.results).catch((caught) => {

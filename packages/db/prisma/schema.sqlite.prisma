@@ -129,6 +129,10 @@ model User {
   passwordChangeRequired Boolean @default(false)
   autoFollowOwnPosts Boolean       @default(true)
   isTestAccount Boolean           @default(false)
+  // 账号合并留痕：旧账号被并入另一个账号后停用（mergedAt 非空），
+  // mergedIntoUserId 指向合并后的主账号。旧号数据保留，便于审计与反查。
+  mergedAt    DateTime?
+  mergedIntoUserId String?
   systemRole  SystemRole?
   createdAt   DateTime           @default(now())
   memberships TenantMembership[]
@@ -221,6 +225,25 @@ model EmailVerificationCode {
 
   @@index([email, purpose, createdAt])
   @@index([expiresAt])
+}
+
+/// 账号合并留痕（靠私聊 Bot 建的号并入网页注册账号后停用）。
+/// 旧号保留但不参与登录；mergedIntoUserId 指向合并后的主账号。
+model UserMerge {
+  id             String   @id @default(uuid())
+  tenantId       String
+  oldUserId      String
+  newUserId      String
+  oldQqUin       BigInt
+  newQqUin       BigInt
+  oldEmail       String?
+  migratedPosts  Int      @default(0)
+  migratedMemberships Int @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([oldUserId])
+  @@index([newUserId])
 }
 
 model SystemSetting {
@@ -381,6 +404,11 @@ model Post {
   font            String?
   status          PostStatus       @default(pending_approval)
   publishSummary  String?
+  // 无 Bot 模式（operate_mode=manual）下由管理员手动发布到 QQ 空间后记录：
+  // 确认时间与管理员填写的说说链接，便于事后追溯「到底发到哪条说说」。
+  // 自动发布模式下这两个字段保持为空。
+  manualPublishedAt DateTime?
+  manualPublishUrl  String?
   pendingTags     String?
   recallIgnored   Boolean          @default(false)
   recallIgnoredAt DateTime?

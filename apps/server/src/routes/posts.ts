@@ -1617,6 +1617,7 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       bgColor: string | null;
       textColor: string | null;
       font: string | null;
+      manualPublishUrl?: string | null;
       createdAt: Date;
       author: { displayName: string | null; qqUin: bigint } | null;
       tagAssignments?: Parameters<typeof serializeAssignedPostTags>[0];
@@ -1639,6 +1640,8 @@ export function registerPostRoutes(app: FastifyInstance, config: CampuxConfig, q
       post: toRawPost(post),
       publishedAt: post.updatedAt,
       metrics: post.qzonePostMetrics,
+      manualPublishUrl: post.manualPublishUrl ?? null,
+      manualPublishedAt: post.manualPublishedAt,
     }));
 
     const batchInputs: BatchFeedInput[] = batches.map((batch) => {

@@ -1,12 +1,19 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { CampuxConfig } from "@campux/config";
 import { hashPassword, Prisma, verifyPassword } from "@campux/db";
 import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { clearSessionCookie, createSession, findActiveBan, getCookie, getSessionContext, hashToken, requireSession, sessionCookieName, setSessionCookie } from "../lib/auth";
-import { generateEmailCode, hashEmailCode, normalizeEmail, sendVerificationEmail } from "../lib/email";
-import { readTenantOperateMode } from "../lib/tenant-metadata";
+import { generateEmailCode, hashEmailCode, normalizeEmail, sendEmail, sendVerificationEmail } from "../lib/email";
+import { readTenantOperateMode, resolvePasswordResetChannel } from "../lib/tenant-metadata";
 import { readTenantPluginConfig } from "../lib/tenant-plugin-config";
+import {
+  checkQqEmailMatchesQqUin,
+  isEmailAllowedByPolicy,
+  readRegistrationEmailPolicy,
+} from "../lib/registration-email-policy";
+import { officialMailerAvailable, readTenantMailSenderConfig, sendTenantMail } from "../lib/tenant-mail-sender";
+import { buildMergePreview, findMergeCandidate, isMergeScopeSingleTenant, maskEmailForPreview, mergeUserAccounts, resolveActiveAccount, shouldPromptAccountMerge, UserMergeError } from "../lib/user-merge";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
@@ -47,11 +54,19 @@ const registerSchema = z.object({
   password: z.string().min(6).max(128),
 });
 
-// 游客投稿：直接用 QQ 号作账号注册，不要求 QQ 邮箱验证码。
+// 游客投稿：QQ 号 + 用户名 + 密码注册。开启邮箱验证时还需邮箱 + 验证码。
 const tenantRegisterSchema = z.object({
   qqUin: z.string().trim().regex(/^[1-9]\d{4,11}$/, "请输入正确的 QQ 号"),
   displayName: z.string().trim().min(1, "用户名不能为空").max(80, "用户名最多 80 个字符"),
   password: z.string().min(6).max(128),
+  email: z.string().trim().max(255).optional(),
+  code: z.string().trim().max(10).optional(),
+});
+
+// 游客注册时请求邮箱验证码。
+const tenantRegisterCodeSchema = z.object({
+  email: z.string().trim().min(1, "请输入邮箱").max(255),
+  qqUin: z.string().trim().regex(/^[1-9]\d{4,11}$/, "请输入正确的 QQ 号").optional(),
 });
 
 const selectTenantSchema = z.object({
@@ -82,20 +97,167 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(6).max(128),
 });
 
+/**
+ * 决定「重置密码走哪条渠道」时应该看哪个校园墙的运营模式。
+ *
+ * 规则（Web 与 Bot 共用）：
+ * 1. 优先用请求所在入口对应的墙（`requestedTenantId`）——用户在哪个墙的页面操作，
+ *    就按那个墙的规则来。这消除了「A 墙是 bot、B 墙是 manual，用户从 B 墙页面
+ *    却被要求去私聊 A 墙墙号」的错位。
+ * 2. 否则退回该账号最早的成员身份（会话里没有墙上下文时）。
+ *
+ * Bot 侧本来就知道 `bot.tenantId`，直接传进来即可，两者口径一致。
+ */
+async function resolveResetChannelTenantId(
+  userId: string,
+  requestedTenantId?: string | null,
+): Promise<string | null> {
+  if (requestedTenantId) {
+    const membership = await prisma.tenantMembership.findFirst({
+      where: { userId, tenantId: requestedTenantId },
+      select: { tenantId: true },
+    });
+    if (membership) {
+      return membership.tenantId;
+    }
+  }
+  const membership = await prisma.tenantMembership.findFirst({
+    where: { userId },
+    select: { tenantId: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return membership?.tenantId ?? null;
+}
+
 const RESET_PASSWORD_PURPOSE = "password_reset";
+const TENANT_REGISTER_PURPOSE = "tenant_register";
+
+/**
+ * 游客注册验证码的 purpose：带上签发墙 ID。
+ *
+ * 不做这层绑定的话，A 墙签发的码可以在 B 墙使用——只要 B 墙的邮箱策略更宽松，
+ * 用户就能绕过 A 墙的后缀限制。代价是同一个邮箱在不同墙的验证码互不通用，
+ * 这正是我们要的语义。
+ */
+function tenantRegisterPurpose(tenantId: string): string {
+  return `${TENANT_REGISTER_PURPOSE}:${tenantId}`;
+}
+const ACCOUNT_MERGE_PURPOSE = "account_merge";
+
+/**
+ * 发送「注册 / 绑定 / 重置」类验证码，并明确区分三种结果：
+ *
+ * - `sent`：真的投递出去了（租户 SMTP 或平台官方发件）；
+ * - `unconfigured`：本实例**根本没有**任何可用邮件服务（典型是自托管既没配 Resend 也没配 SMTP）。
+ *   这是「部署形态导致发不出信」，调用方可以回显验证码，否则自托管用户永远无法注册/重置。
+ * - `failed`：有邮件服务但发送失败（SMTP 认证/连接错误等）。**绝不能**回显验证码。
+ *
+ * 区分 `unconfigured` 与 `failed` 很关键：把「配置坏了」当成「没配邮件」处理，
+ * 等于让未认证的调用者拿到可用的重置码。
+ */
+type MailOutcome =
+  | { status: "sent" }
+  | { status: "unconfigured" }
+  | { status: "failed"; error: string };
+
+async function sendSignupMail(
+  config: CampuxConfig,
+  tenantId: string | null,
+  message: { to: string; subject: string; html: string; text: string },
+): Promise<MailOutcome> {
+  const officialAvailable = officialMailerAvailable(config);
+  // 有租户上下文时优先用该墙的发件配置（运营者可能自备 SMTP）。
+  if (tenantId) {
+    const sender = await readTenantMailSenderConfig(prisma, tenantId);
+    if (sender.mode === "smtp" || officialAvailable) {
+      const result = await sendTenantMail({ sender, config, ...message });
+      if (result.ok) return { status: "sent" };
+      // 有配置但发失败：官方还可用就回退一次，否则如实报失败（不回显验证码）。
+      if (!officialAvailable) {
+        return { status: "failed", error: result.error };
+      }
+    }
+  }
+
+  if (!officialAvailable) {
+    return { status: "unconfigured" };
+  }
+  try {
+    const result = await sendEmail(config, message);
+    return result.skipped ? { status: "unconfigured" } : { status: "sent" };
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * 只经平台官方发件的发送入口。
+ *
+ * 用于**账号级**凭证（密码重置、账号合并）：同一账号可能属于多个墙，
+ * 让某个墙的 SMTP 经手它的验证码，等于让该墙管理员获得重置/接管全局账号的能力。
+ */
+async function sendOfficialMail(
+  config: CampuxConfig,
+  message: { to: string; subject: string; html: string; text: string },
+): Promise<MailOutcome> {
+  if (!officialMailerAvailable(config)) {
+    return { status: "unconfigured" };
+  }
+  try {
+    const result = await sendEmail(config, message);
+    return result.skipped ? { status: "unconfigured" } : { status: "sent" };
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * 密码重置发信。
+ *
+ * 这是**账号级**操作（同一账号可能属于多个墙），因此不允许租户自控的 SMTP 经手。
+ */
+async function sendRegistrationMail(
+  config: CampuxConfig,
+  to: string,
+  subject: string,
+  code: string,
+  actionLabel: string,
+): Promise<MailOutcome> {
+  const html = `<p>你的 Campux ${actionLabel}验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`;
+  const text = `你的 Campux ${actionLabel}验证码是：${code}\n验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`;
+  return sendOfficialMail(config, { to, subject, html, text });
+}
+
+
+
+// 账号合并：把「之前的账号」并进当前账号。
+const accountMergePreviewSchema = z.object({
+  oldQqUin: z.string().trim().regex(/^[1-9]\d{4,11}$/, "请输入正确的 QQ 号"),
+});
+
+const accountMergeCodeSchema = z.object({
+  oldQqUin: z.string().trim().regex(/^[1-9]\d{4,11}$/, "请输入正确的 QQ 号"),
+  email: z.string().trim().max(255).optional(),
+});
+
+const accountMergeConfirmSchema = z.object({
+  oldQqUin: z.string().trim().regex(/^[1-9]\d{4,11}$/, "请输入正确的 QQ 号"),
+  email: z.string().trim().max(255).optional(),
+  code: z.string().trim().regex(/^\d{6}$/, "验证码格式不正确"),
+});
 // 验证码频率限制：60 秒内只能发一次；同一账号 1 小时最多 5 次。
 const RESET_CODE_COOLDOWN_SECONDS = 60;
 const RESET_CODE_HOURLY_LIMIT = 5;
 const RESET_CODE_TTL_SECONDS = 10 * 60;
 
-/** 频率限制检查：返回需要拒绝时的提示与重试秒数。 */
-async function checkResetCodeRateLimit(emailKey: string) {
+/** 频率限制检查：返回需要拒绝时的提示与重试秒数。按 purpose 分别计数，避免不同用途互相消耗配额。 */
+async function checkResetCodeRateLimit(emailKey: string, purpose: string = RESET_PASSWORD_PURPOSE) {
   const now = Date.now();
   const sinceHour = new Date(now - 60 * 60 * 1_000);
   const recent = await prisma.emailVerificationCode.findMany({
     where: {
       email: emailKey,
-      purpose: RESET_PASSWORD_PURPOSE,
+      purpose,
       createdAt: { gte: sinceHour },
     },
     select: { createdAt: true },
@@ -135,13 +297,20 @@ function maskEmail(email: string) {
 
 export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
   // 游客投稿：单墙部署的租户 host 为空，回退到唯一的单墙租户，否则注册入口永远不可用。
-  async function resolvePublicTenantByRequest(request: FastifyRequest): Promise<{ id: string } | null> {
+  async function resolvePublicTenantByRequest(request: FastifyRequest): Promise<{ id: string; name: string } | null> {
     const hostTenant = await findTenantByRequestHost(request);
     if (hostTenant) {
-      return hostTenant;
+      return { id: hostTenant.id, name: hostTenant.name };
     }
     const singleModeTenantId = await resolveSingleModeTenantId();
-    return singleModeTenantId ? { id: singleModeTenantId } : null;
+    if (!singleModeTenantId) {
+      return null;
+    }
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: singleModeTenantId },
+      select: { id: true, name: true },
+    });
+    return tenant ? { id: tenant.id, name: tenant.name } : null;
   }
 
   app.get("/api/auth/context", async (request) => {
@@ -157,62 +326,52 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     };
   });
 
-  app.post("/api/auth/login", async (request, reply) => {
-    const body = loginSchema.parse(request.body);
-    const account = (body.account ?? body.qqUin ?? "").trim();
-    const email = account.includes("@") ? normalizeEmail(account) : null;
-    const qqUin = /^\d+$/.test(account) ? BigInt(account) : null;
-    if (!email && qqUin === null) {
-      return reply.code(400).send({ message: "请输入 QQ 号或邮箱" });
-    }
-    const user = await prisma.user.findUnique({
-      where: email ? { email } : { qqUin: qqUin! },
+  /** 登录查询的 include：登录与「旧号→主账号」两条路径共用，保证类型一致。 */
+  const loginUserInclude = {
+    memberships: {
       include: {
-        memberships: {
+        tenant: {
           include: {
-            tenant: {
-              include: {
-                metadata: {
-                  where: {
-                    key: "logo_url",
-                  },
-                },
-                aiSettings: {
-                  select: {
-                    enabled: true,
-                  },
-                },
-                _count: {
-                  select: {
-                    botAccounts: true,
-                    posts: {
-                      where: {
-                        status: "pending_approval",
-                      },
-                    },
-                  },
-                },
+            metadata: { where: { key: "logo_url" } },
+            aiSettings: { select: { enabled: true } },
+            _count: {
+              select: {
+                botAccounts: true,
+                posts: { where: { status: "pending_approval" } },
               },
             },
           },
-          orderBy: {
-            createdAt: "asc",
-          },
         },
       },
-    });
+      orderBy: { createdAt: "asc" },
+    },
+  } as const;
 
-    if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
-      return reply.code(401).send({
-        message: "账号或密码错误",
-      });
-    }
+  type LoginUser = Prisma.UserGetPayload<{ include: typeof loginUserInclude }>;
 
+  /**
+   * 登录成功后的共用收尾：按 host / 单墙 / 多墙决定会话与响应。
+   *
+   * `mergedFrom` 非空表示「用户是用已合并旧号的凭据登录的」，已被解析到主账号，
+   * 响应里带上 `mergedAccount` 让前端提示「已用旧账号登录到合并后的账号」。
+   */
+  async function completeLogin(
+    reply: FastifyReply,
+    request: FastifyRequest,
+    user: LoginUser,
+    mergedFrom: { mergedFromQqUin: string } | null,
+  ) {
+    // 测试账号策略必须对「用旧号凭据登录、解析到主账号」的路径同样生效，
+    // 否则拿一个测试账号被合并过去的主账号就能在生产环境登录。
     if (user.isTestAccount && config.nodeEnv !== "development") {
       return reply.code(403).send({
         message: "测试账号只能在开发环境登录",
       });
     }
+
+    const mergedNotice = mergedFrom
+      ? { mergedFromQqUin: mergedFrom.mergedFromQqUin, message: "该账号已合并，已为你登录到合并后的账号" }
+      : null;
 
     const hostTenant = await findTenantByRequestHost(request);
     if (hostTenant) {
@@ -242,6 +401,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         activeBan: hostMembership ? toActiveBan(await findActiveBan(hostTenant.id, user.id)) : null,
         needsTenantSelection: false,
         hostLocked: true,
+        // 靠私聊 Bot 建号、还没绑邮箱的同学：墙域名登录也要提示绑定旧账号（与通用分支一致）。
+        shouldPromptAccountMerge: shouldPromptAccountMerge(user),
+        ...(mergedNotice ? { mergedAccount: mergedNotice } : {}),
       };
     }
 
@@ -286,6 +448,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
         activeBan: toActiveBan(ban),
         needsTenantSelection: false,
         hostLocked: false,
+        // 靠私聊 Bot 建号、且还没绑过邮箱的同学：提示他把之前的网页账号绑过来。
+        shouldPromptAccountMerge: shouldPromptAccountMerge(user),
+        ...(mergedNotice ? { mergedAccount: mergedNotice } : {}),
       };
     }
 
@@ -299,7 +464,54 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       activeBan: onlyMembership ? toActiveBan(await findActiveBan(onlyMembership.tenantId, user.id)) : null,
       needsTenantSelection: !selectedTenantId && (visibleMemberships.length > 1 || systemAccessibleTenants.length > 0),
       hostLocked: false,
+      // 靠私聊 Bot 建号、且还没绑过邮箱的同学：提示他把之前的网页账号绑过来。
+      shouldPromptAccountMerge: shouldPromptAccountMerge(user),
+      ...(mergedNotice ? { mergedAccount: mergedNotice } : {}),
     };
+  }
+
+  app.post("/api/auth/login", async (request, reply) => {
+    const body = loginSchema.parse(request.body);
+    const account = (body.account ?? body.qqUin ?? "").trim();
+    const email = account.includes("@") ? normalizeEmail(account) : null;
+    const qqUin = /^\d+$/.test(account) ? BigInt(account) : null;
+    if (!email && qqUin === null) {
+      return reply.code(400).send({ message: "请输入 QQ 号或邮箱" });
+    }
+    const user = await prisma.user.findUnique({
+      where: email ? { email } : { qqUin: qqUin! },
+      include: loginUserInclude,
+    });
+
+    if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
+      return reply.code(401).send({
+        message: "账号或密码错误",
+      });
+    }
+
+    // 账号合并后，旧号仍占用原 QQ 号/邮箱（用于审计与反查），所以用旧凭据会先查到旧号。
+    // 这里解析到真正的主账号，让「用旧邮箱 + 旧密码登录」也能进到合并后的账号。
+    if (user.mergedAt !== null) {
+      const resolved = await resolveActiveAccount(prisma, user);
+      const activeUser = await prisma.user.findUnique({
+        where: { id: resolved.userId },
+        include: loginUserInclude,
+      });
+      if (!activeUser) {
+        return reply.code(401).send({ message: "账号或密码错误" });
+      }
+      return completeLogin(reply, request, activeUser, {
+        mergedFromQqUin: user.qqUin.toString(),
+      });
+    }
+
+    if (user.isTestAccount && config.nodeEnv !== "development") {
+      return reply.code(403).send({
+        message: "测试账号只能在开发环境登录",
+      });
+    }
+
+    return completeLogin(reply, request, user, null);
   });
 
   app.post("/api/auth/register/request-code", async (request, reply) => {
@@ -330,20 +542,29 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const code = generateEmailCode();
-    await prisma.emailVerificationCode.create({
+    const codeRecord = await prisma.emailVerificationCode.create({
       data: {
         email,
         codeHash: hashEmailCode(email, code),
         purpose: "operations_admin_register",
         expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
       },
+      select: { id: true },
     });
-    const sent = await sendVerificationEmail(config, { to: email, code });
-
-    return {
-      ok: true,
-      ...(sent.skipped ? { devCode: code } : {}),
-    };
+    // 运营管理员开墙注册属于平台入口，没有租户上下文，统一用官方发件。
+    try {
+      const sent = await sendVerificationEmail(config, { to: email, code });
+      return {
+        ok: true,
+        ...(sent.skipped ? { devCode: code } : {}),
+      };
+    } catch (error) {
+      // 发送失败：只作废本次生成的这条码，不误伤此前已送达的验证码。
+      await prisma.emailVerificationCode.deleteMany({ where: { id: codeRecord.id } });
+      return reply.code(502).send({
+        message: `验证码发送失败：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   });
 
   app.post("/api/auth/register", async (request, reply) => {
@@ -437,20 +658,103 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     };
   });
 
-  // 游客投稿：登录页在未登录时查询本墙是否开放 QQ 号自助注册。
+  // 游客投稿：登录页在未登录时查询本墙是否开放 QQ 号自助注册，以及是否需要邮箱验证。
   app.get("/api/auth/tenant-registration", async (request) => {
     const hostTenant = await resolvePublicTenantByRequest(request);
     if (!hostTenant) {
-      return { enabled: false, operateMode: "bot" as const };
+      return { enabled: false, operateMode: "bot" as const, emailRequired: false, allowedEmailSuffixes: [] };
     }
-    const [pluginConfig, operateMode] = await Promise.all([
+    const [pluginConfig, operateMode, emailPolicy] = await Promise.all([
       readTenantPluginConfig(prisma, hostTenant.id),
       readTenantOperateMode(prisma, hostTenant.id),
+      readRegistrationEmailPolicy(prisma, hostTenant.id),
     ]);
-    return { enabled: pluginConfig.guestSubmission.enabled, operateMode };
+    return {
+      enabled: pluginConfig.guestSubmission.enabled,
+      operateMode,
+      emailRequired: emailPolicy.required,
+      // 空数组表示不限制后缀，前端据此提示「任意邮箱均可」。
+      allowedEmailSuffixes: emailPolicy.required ? emailPolicy.allowedSuffixes : [],
+    };
+  });
+
+  // 游客注册：发送邮箱验证码（仅在该墙开启邮箱验证时可用）。
+  app.post("/api/auth/tenant-register/request-code", async (request, reply) => {
+    const hostTenant = await resolvePublicTenantByRequest(request);
+    if (!hostTenant) {
+      return reply.code(404).send({ message: "当前入口不开放注册" });
+    }
+    const pluginConfig = await readTenantPluginConfig(prisma, hostTenant.id);
+    if (!pluginConfig.guestSubmission.enabled) {
+      return reply.code(403).send({ message: "当前校园墙未开放注册，请联系管理员" });
+    }
+    const policy = await readRegistrationEmailPolicy(prisma, hostTenant.id);
+    if (!policy.required) {
+      return reply.code(400).send({ message: "当前校园墙注册不需要邮箱验证" });
+    }
+
+    const body = tenantRegisterCodeSchema.parse(request.body);
+    const email = normalizeEmail(body.email);
+    const allowed = isEmailAllowedByPolicy(email, policy);
+    if (!allowed.ok) {
+      return reply.code(400).send({ message: allowed.reason ?? "邮箱不符合本墙要求" });
+    }
+    if (body.qqUin) {
+      const consistent = checkQqEmailMatchesQqUin(email, body.qqUin);
+      if (!consistent.ok) {
+        return reply.code(400).send({ message: consistent.reason });
+      }
+    }
+
+    // 按签到本墙的 purpose 计数：否则注册发码与密码重置共用同一配额，
+    // 一方被限流会连累另一方。
+    const rateLimit = await checkResetCodeRateLimit(email, tenantRegisterPurpose(hostTenant.id));
+    if (rateLimit) {
+      return reply.code(429).send({
+        message: `发送过于频繁，请 ${rateLimit.retryAfterSeconds} 秒后再试`,
+      });
+    }
+
+    // 不做「邮箱已被注册」的预检：该接口未登录即可调用，409 会变成无限枚举已注册邮箱的探针
+    // （限流只统计验证码记录，409 路径不创建记录，完全不受限流约束）。
+    // 已注册邮箱在这里照常发码，提交注册时 tenant-register 事务内仍会返回 409 EMAIL_TAKEN，
+    // 最终行为不变；攻击者只能看到与正常流程一致的响应。
+    const code = generateEmailCode();
+    const codeRecord = await prisma.emailVerificationCode.create({
+      data: {
+        email,
+        codeHash: hashEmailCode(email, code),
+        // 把签发墙编进 purpose：否则 A 墙发的码能在 B 墙用（B 墙若邮箱策略更宽松，
+        // 等于绕过了 A 墙的后缀限制）。
+        purpose: tenantRegisterPurpose(hostTenant.id),
+        expiresAt: new Date(Date.now() + RESET_CODE_TTL_SECONDS * 1000),
+      },
+      select: { id: true },
+    });
+
+    const sent = await sendSignupMail(config, hostTenant.id, {
+      to: email,
+      subject: `Campux 注册验证码 - ${hostTenant.name}`,
+      html: `<p>你的「${hostTenant.name}」注册验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。</p>`,
+      text: `你的「${hostTenant.name}」注册验证码是：${code}\n验证码 10 分钟内有效。如果不是你本人操作，可以忽略这封邮件。`,
+    });
+    if (sent.status === "failed") {
+      // 有邮件服务但发不出去：只作废本次生成的这条码，不误伤其它未消费的码。
+      await prisma.emailVerificationCode.deleteMany({ where: { id: codeRecord.id } });
+      return reply.code(502).send({ message: `验证码发送失败：${sent.error}` });
+    }
+
+    return {
+      ok: true,
+      email,
+      expiresInSeconds: RESET_CODE_TTL_SECONDS,
+      // 仅当本实例完全没有邮件服务时回显，方便自托管部署注册。
+      ...(sent.status === "unconfigured" ? { devCode: code } : {}),
+    };
   });
 
   // 游客投稿：QQ 号 + 用户名 + 密码注册，注册后直接成为该墙的投稿用户并登录。
+  // 开启邮箱验证时还需要邮箱 + 验证码，并校验后缀与 QQ 号一致性。
   app.post("/api/auth/tenant-register", async (request, reply) => {
     const hostTenant = await resolvePublicTenantByRequest(request);
     if (!hostTenant) {
@@ -472,19 +776,107 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       return reply.code(409).send({ message: "这个 QQ 号已经注册，请直接登录" });
     }
 
-    const user = await prisma.user.create({
-      data: {
-        qqUin,
-        displayName: body.displayName,
-        passwordHash: await hashPassword(body.password),
-        passwordChangeRequired: false,
-        isTestAccount: false,
-        systemRole: null,
-      },
+    const policy = await readRegistrationEmailPolicy(prisma, hostTenant.id);
+    let email: string | null = null;
+    let verificationRecordId: string | null = null;
+    if (policy.required) {
+      const rawEmail = normalizeEmail(body.email ?? "");
+      if (!rawEmail) {
+        return reply.code(400).send({ message: "本墙要求邮箱验证，请填写邮箱" });
+      }
+      const allowed = isEmailAllowedByPolicy(rawEmail, policy);
+      if (!allowed.ok) {
+        return reply.code(400).send({ message: allowed.reason ?? "邮箱不符合本墙要求" });
+      }
+      const consistent = checkQqEmailMatchesQqUin(rawEmail, body.qqUin);
+      if (!consistent.ok) {
+        return reply.code(400).send({ message: consistent.reason });
+      }
+      const code = (body.code ?? "").trim();
+      if (!/^\d{6}$/.test(code)) {
+        return reply.code(400).send({ message: "请输入 6 位邮箱验证码" });
+      }
+      const record = await prisma.emailVerificationCode.findFirst({
+        where: {
+          email: rawEmail,
+          // 只认本墙签发的码。
+          purpose: tenantRegisterPurpose(hostTenant.id),
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!record) {
+        return reply.code(400).send({ message: "验证码不存在或已过期，请重新获取" });
+      }
+      if (record.attempts >= 5) {
+        return reply.code(429).send({ message: "验证码尝试次数过多，请重新获取" });
+      }
+      if (record.codeHash !== hashEmailCode(rawEmail, code)) {
+        await prisma.emailVerificationCode.update({
+          where: { id: record.id },
+          data: { attempts: { increment: 1 } },
+        });
+        return reply.code(400).send({ message: "验证码不正确" });
+      }
+      email = rawEmail;
+      verificationRecordId = record.id;
+    }
+
+    const passwordHash = await hashPassword(body.password);
+    // 建号与验证码消费必须同一个事务：否则并发请求能用同一个验证码建出多个账号。
+    const created = await prisma.$transaction(async (transaction) => {
+      if (verificationRecordId) {
+        // 以「未消费 + 未过期 + 尝试次数未超限」为条件更新：
+        // 并发下只有一个请求能成功；在校验与写入之间过期的码也不会被接受。
+        const consumed = await transaction.emailVerificationCode.updateMany({
+          where: {
+            id: verificationRecordId,
+            consumedAt: null,
+            expiresAt: { gt: new Date() },
+            attempts: { lt: 5 },
+          },
+          data: { consumedAt: new Date() },
+        });
+        if (consumed.count !== 1) {
+          return null;
+        }
+      }
+      if (email) {
+        const emailTaken = await transaction.user.findUnique({ where: { email }, select: { id: true } });
+        if (emailTaken) {
+          // 抛出让事务回滚，验证码消费一并撤销。
+          throw new Error("EMAIL_TAKEN");
+        }
+      }
+      const createdUser = await transaction.user.create({
+        data: {
+          qqUin,
+          email,
+          displayName: body.displayName,
+          passwordHash,
+          passwordChangeRequired: false,
+          isTestAccount: false,
+          systemRole: null,
+        },
+      });
+      const createdMembership = await transaction.tenantMembership.create({
+        data: { tenantId: hostTenant.id, userId: createdUser.id, role: "submitter" },
+      });
+      return { user: createdUser, membership: createdMembership };
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message === "EMAIL_TAKEN") return "EMAIL_TAKEN" as const;
+      throw error;
     });
-    const membership = await prisma.tenantMembership.create({
-      data: { tenantId: hostTenant.id, userId: user.id, role: "submitter" },
-    });
+
+    if (created === "EMAIL_TAKEN") {
+      return reply.code(409).send({ message: "这个邮箱已经注册，请直接登录" });
+    }
+    if (!created) {
+      return reply.code(400).send({ message: "验证码已失效，请重新获取" });
+    }
+    const user = created.user;
+    const membership = created.membership;
 
     const token = await createSession(user.id, hostTenant.id);
     setSessionCookie(reply, token);
@@ -597,12 +989,35 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     if (!key) {
       return reply.code(400).send({ message: "请输入 QQ 号或邮箱" });
     }
-    const user = await prisma.user.findUnique({
+    const found = await prisma.user.findUnique({
       where: key,
-      select: { id: true, email: true },
+      select: { id: true, email: true, mergedAt: true, mergedIntoUserId: true },
     });
+    if (!found) {
+      return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
+    }
+    // 旧号已合并：密码重置应作用在合并后的主账号上，与登录行为保持一致，
+    // 否则用户会把旧号的密码改掉却仍然登不进主账号。
+    const resolved = await resolveActiveAccount(prisma, found);
+    const user = resolved.redirectedFrom === null
+      ? found
+      : await prisma.user.findUnique({ where: { id: resolved.userId }, select: { id: true, email: true } });
     if (!user) {
       return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
+    }
+
+    // 按运营模式决定重置渠道：
+    // - 墙号机器人模式：用户应私聊墙号发「#重置密码」（Bot 会私信新密码）；
+    // - 无 Bot 模式：没有墙号可私聊，走这里的邮箱验证码。
+    // 合并账号已在上面解析到主账号，因此这里判断的是主账号所属墙的模式。
+    // 若请求来自某个具体墙的页面，则按该墙的规则判断（与 Bot 侧口径一致）。
+    const requestTenant = await resolvePublicTenantByRequest(request).catch(() => null);
+    const modeTenantId = await resolveResetChannelTenantId(user.id, requestTenant?.id ?? null);
+    if (modeTenantId && resolvePasswordResetChannel(await readTenantOperateMode(prisma, modeTenantId)) === "bot-private-message") {
+      return reply.code(409).send({
+        code: "USE_BOT_RESET",
+        message: "本墙当前通过墙号机器人重置密码：请私聊墙号发送「#重置密码」，机器人会把新密码私信给你。",
+      });
     }
 
     // 没绑定邮箱的账号（例如游客注册或扫码建号）：给账号名下的第三方身份生成验证码，
@@ -664,23 +1079,33 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
 
     const code = generateEmailCode();
-    await prisma.emailVerificationCode.create({
+    const codeRecord = await prisma.emailVerificationCode.create({
       data: {
         email: user.email,
         codeHash: hashEmailCode(user.email, code),
         purpose: RESET_PASSWORD_PURPOSE,
         expiresAt: new Date(Date.now() + 10 * 60 * 1_000),
       },
+      select: { id: true },
     });
-    const sent = await sendVerificationEmail(config, { to: user.email, code });
+    const sent = await sendRegistrationMail(config, user.email, "Campux 密码重置验证码", code, "重置密码");
+
+    if (sent.status === "failed") {
+      // 有邮件服务但发送失败：只作废本次生成的码，不误伤此前已送达的验证码。
+      await prisma.emailVerificationCode.deleteMany({ where: { id: codeRecord.id } });
+      return reply.code(502).send({
+        code: "RESET_MAIL_FAILED",
+        message: `验证码发送失败：${sent.error}`,
+      });
+    }
 
     return {
       ok: true,
       channel: "email" as const,
       email: maskEmail(user.email),
       expiresInSeconds: RESET_CODE_TTL_SECONDS,
-      // 未配置邮件服务时直接返回验证码，保证自托管环境可用（与注册流程一致）。
-      ...(sent.skipped ? { devCode: code } : {}),
+      // 仅当本实例完全没有邮件服务时才回显验证码（自托管无邮件场景）。
+      ...(sent.status === "unconfigured" ? { devCode: code } : {}),
     };
   });
 
@@ -691,13 +1116,33 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     if (!key) {
       return reply.code(400).send({ message: "请输入 QQ 号或邮箱" });
     }
-    const user = await prisma.user.findUnique({
+    const foundReset = await prisma.user.findUnique({
       where: key,
-      select: { id: true, email: true },
+      select: { id: true, email: true, mergedAt: true, mergedIntoUserId: true },
     });
+    if (!foundReset) {
+      return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
+    }
+    // 与忘记密码第一步保持一致：旧号已合并时，重置作用在合并后的主账号上。
+    const resolvedReset = await resolveActiveAccount(prisma, foundReset);
+    const user = resolvedReset.redirectedFrom === null
+      ? foundReset
+      : await prisma.user.findUnique({ where: { id: resolvedReset.userId }, select: { id: true, email: true } });
     if (!user) {
       return reply.code(400).send({ message: "该账号不存在，请确认 QQ 号或邮箱" });
     }
+
+    // 与第一步一致：机器人模式下网页不提供邮箱重置，避免绕过渠道限制。
+    // 选墙规则也必须一致（优先请求所在墙），否则第一步放行、第二步拦截（或相反）。
+    const resetRequestTenant = await resolvePublicTenantByRequest(request).catch(() => null);
+    const resetModeTenantId = await resolveResetChannelTenantId(user.id, resetRequestTenant?.id ?? null);
+    if (resetModeTenantId && resolvePasswordResetChannel(await readTenantOperateMode(prisma, resetModeTenantId)) === "bot-private-message") {
+      return reply.code(409).send({
+        code: "USE_BOT_RESET",
+        message: "本墙当前通过墙号机器人重置密码：请私聊墙号发送「#重置密码」。",
+      });
+    }
+
     const resetEmailKey = user.email ?? `identity:${user.id}`;
 
     const latestRecord = await prisma.emailVerificationCode.findFirst({
@@ -733,18 +1178,28 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
     }
     const record = latestRecord;
 
-    await prisma.$transaction([
-      prisma.emailVerificationCode.update({
-        where: { id: record.id },
+    // 验签后到写入之间可能已被并发请求消费、或刚好过期：把过期时间与尝试次数
+    // 一并放进原子条件，避免“哈希耗时”窗口里继续消费一个已失效的码。
+    const newPasswordHash = await hashPassword(body.newPassword);
+    const resetApplied = await prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.emailVerificationCode.updateMany({
+        where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: 5 } },
         data: { consumedAt: new Date(), attempts: { increment: 1 } },
-      }),
-      prisma.user.update({
+      });
+      if (consumed.count === 0) {
+        return false;
+      }
+      await transaction.user.update({
         where: { id: user.id },
-        data: { passwordHash: await hashPassword(body.newPassword), passwordChangeRequired: false },
-      }),
+        data: { passwordHash: newPasswordHash, passwordChangeRequired: false },
+      });
       // 重置密码后让旧会话失效，避免残留登录态继续使用。
-      prisma.accountSession.deleteMany({ where: { userId: user.id } }),
-    ]);
+      await transaction.accountSession.deleteMany({ where: { userId: user.id } });
+      return true;
+    });
+    if (!resetApplied) {
+      return reply.code(409).send({ code: "CODE_STALE", message: "验证码已失效，请重新获取" });
+    }
 
     return { ok: true };
   });
@@ -773,6 +1228,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       activeBan: toActiveBan(context.activeBan),
       needsTenantSelection,
       hostLocked: Boolean(context.hostTenant),
+      // 首次登录引导：刷新页面后仍需恢复这个提示，所以放在 /api/me 里一起下发。
+      shouldPromptAccountMerge: shouldPromptAccountMerge(context.user) && context.selectedMembership !== null,
     };
   });
 
@@ -790,6 +1247,202 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       data: { autoFollowOwnPosts: body.autoFollowOwnPosts },
     });
     return { user: toPublicUser(user) };
+  });
+
+  // ── 账号合并（绑定之前的账号）───────────────────────────────
+  // 场景：管理员切换运营模式后，原本靠私聊 Bot 建号的同学首次登录，
+  // 手里其实还有一个无 Bot 期用网页注册的账号。这里让他把旧账号并进来。
+
+  // 查询当前账号是否需要提示合并、以及是否存在可合并的旧账号。
+  app.get("/api/me/account-merge", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const tenantId = context.selectedTenant?.id ?? null;
+    if (!tenantId) {
+      return { shouldPrompt: false, candidate: null };
+    }
+    const shouldPrompt = shouldPromptAccountMerge(context.user) && context.selectedMembership !== null;
+    return { shouldPrompt, candidate: null, email: context.user.email ?? null };
+  });
+
+  // 校验「之前账号的 QQ 号」并给出预览（不落库）。
+  app.post("/api/me/account-merge/preview", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const tenantId = context.selectedTenant?.id;
+    if (!tenantId) {
+      return reply.code(400).send({ message: "请先选择校园墙" });
+    }
+    const body = accountMergePreviewSchema.parse(request.body ?? {});
+    const result = await buildMergePreview({
+      tenantId,
+      targetUserId: context.user.id,
+      oldQqUin: body.oldQqUin,
+    });
+    if (!result.ok) {
+      // 跨墙在这里就拒绝，不浪费用户一次验证码。
+      const status = result.code === "CROSS_TENANT" ? 409 : 404;
+      return reply.code(status).send({ message: result.reason, code: result.code });
+    }
+    return { preview: result.preview };
+  });
+
+  // 发送验证码到「旧账号绑定的邮箱」——只有它能证明操作者控制的就是 oldQqUin 指向的那个账号。
+  // 不接受 body.email，也不回退到当前账号邮箱：那只能证明「你控制自己的账号」，
+  // 攻击者登录自己的账号后知道某人 QQ 号就能把对方账号吞掉。
+  app.post("/api/me/account-merge/request-code", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const tenantId = context.selectedTenant?.id;
+    if (!tenantId) {
+      return reply.code(400).send({ message: "请先选择校园墙" });
+    }
+    const body = accountMergeCodeSchema.parse(request.body ?? {});
+
+    const candidate = await findMergeCandidate(prisma, {
+      targetUserId: context.user.id,
+      oldQqUin: body.oldQqUin,
+    });
+    if (!candidate) {
+      return reply.code(404).send({ message: "没有找到这个 QQ 号对应的可合并旧账号" });
+    }
+    // 跨墙的旧号不能自助合并：在发码前就拒绝，避免用户白收一次验证码。
+    if (!await isMergeScopeSingleTenant(prisma, { oldQqUin: body.oldQqUin, tenantId })) {
+      return reply.code(409).send({
+        code: "CROSS_TENANT",
+        message: "这个旧账号还属于其他校园墙，无法在这里自助合并，请联系系统运维处理",
+      });
+    }
+    // 凭证地址只能是旧账号的邮箱；没有邮箱就无法证明归属，直接拒绝。
+    const email = normalizeEmail(candidate.email ?? "");
+    if (!email) {
+      return reply.code(400).send({
+        code: "MERGE_PROOF_UNAVAILABLE",
+        message: "旧账号没有绑定邮箱，无法验证归属，请联系管理员处理",
+      });
+    }
+    if (!/^[^\s@]+@[^\s@]+$/.test(email)) {
+      return reply.code(400).send({ message: "邮箱格式不正确" });
+    }
+
+    const rateLimit = await checkResetCodeRateLimit(email, ACCOUNT_MERGE_PURPOSE);
+    if (rateLimit) {
+      return reply.code(429).send({ message: `发送过于频繁，请 ${rateLimit.retryAfterSeconds} 秒后再试` });
+    }
+
+    const code = generateEmailCode();
+    const codeRecord = await prisma.emailVerificationCode.create({
+      data: {
+        email,
+        codeHash: hashEmailCode(email, code),
+        purpose: ACCOUNT_MERGE_PURPOSE,
+        expiresAt: new Date(Date.now() + RESET_CODE_TTL_SECONDS * 1000),
+      },
+      select: { id: true },
+    });
+
+    // 合并是账号级操作：验证码只经平台官方发件，不经租户 SMTP
+    // （否则该墙管理员可读到验证码，从而接管这个账号）。
+    const sent = await sendOfficialMail(config, {
+      to: email,
+      subject: "Campux 账号绑定验证码",
+      html: `<p>你正在把之前的账号绑定到当前 Campux 账号，验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件并尽快修改密码。</p>`,
+      text: `你正在把之前的账号绑定到当前 Campux 账号，验证码是：${code}\n验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件并尽快修改密码。`,
+    });
+    if (sent.status !== "sent") {
+      // 发送失败或平台没有配发件服务：都作废验证码，且不回显。
+      // 账号合并是接管他人的高危操作，不能像自托管注册那样把码交给调用者。
+      await prisma.emailVerificationCode.deleteMany({
+        where: { id: codeRecord.id },
+      });
+      return reply.code(502).send({
+        code: "MERGE_MAIL_UNAVAILABLE",
+        message: sent.status === "unconfigured"
+          ? "平台未配置发件服务，无法发送验证码。请联系系统运维处理账号合并。"
+          : `验证码发送失败：${sent.error}`,
+      });
+    }
+
+    return {
+      ok: true,
+      // 与合并预览一致只回显脱敏地址：验证码发出前后都不能把旧账号完整邮箱交给调用者。
+      email: maskEmailForPreview(email) ?? "",
+      expiresInSeconds: RESET_CODE_TTL_SECONDS,
+    };
+  });
+
+  // 确认合并。
+  app.post("/api/me/account-merge/confirm", async (request, reply) => {
+    const context = await getSessionContext(request);
+    if (!context) {
+      return reply.code(401).send({ message: "请先登录" });
+    }
+    const tenantId = context.selectedTenant?.id;
+    if (!tenantId) {
+      return reply.code(400).send({ message: "请先选择校园墙" });
+    }
+    const body = accountMergeConfirmSchema.parse(request.body ?? {});
+
+    const candidate = await findMergeCandidate(prisma, {
+      targetUserId: context.user.id,
+      oldQqUin: body.oldQqUin,
+    });
+    if (!candidate) {
+      return reply.code(404).send({ message: "没有找到这个 QQ 号对应的可合并旧账号" });
+    }
+    const email = normalizeEmail(candidate.email ?? "");
+    if (!email) {
+      return reply.code(400).send({
+        code: "MERGE_PROOF_UNAVAILABLE",
+        message: "旧账号没有绑定邮箱，无法验证归属，请联系管理员处理",
+      });
+    }
+
+    const record = await prisma.emailVerificationCode.findFirst({
+      where: { email, purpose: ACCOUNT_MERGE_PURPOSE, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!record) {
+      return reply.code(400).send({ message: "验证码不存在或已过期，请重新获取" });
+    }
+    if (record.attempts >= 5) {
+      return reply.code(429).send({ message: "验证码尝试次数过多，请重新获取" });
+    }
+    if (record.codeHash !== hashEmailCode(email, body.code)) {
+      await prisma.emailVerificationCode.update({
+        where: { id: record.id },
+        data: { attempts: { increment: 1 } },
+      });
+      return reply.code(400).send({ message: "验证码不正确" });
+    }
+
+    // 验证码消费并入合并事务：合并可能因 ALREADY_MERGED / CROSS_TENANT / 序列化冲突失败，
+    // 先消费会让用户白收一次码、必须重新获取；两段写入又会有「合并成功但码已失效」的半程状态。
+    // 这里把 record.id 传进去，由 mergeUserAccounts 在事务内条件消费，两者原子生效。
+    const mergeResult = await mergeUserAccounts({
+      tenantId,
+      targetUserId: context.user.id,
+      oldQqUin: body.oldQqUin,
+      actorId: context.user.id,
+      proofCodeRecordId: record.id,
+    }).catch((error: unknown) => {
+      if (error instanceof UserMergeError) {
+        return reply.code(409).send({ message: error.message, code: error.code });
+      }
+      throw error;
+    });
+    // reply 已发送（catch 分支）时不再继续。
+    if (typeof mergeResult !== "object" || mergeResult === null || !("mergeId" in mergeResult)) {
+      return mergeResult;
+    }
+
+    return { ok: true, ...mergeResult };
   });
 
   app.post("/api/session/tenant", async (request, reply) => {

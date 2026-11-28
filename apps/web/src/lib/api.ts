@@ -1,6 +1,20 @@
 import { isDefaultFont } from "@campux/domain";
 import type { PostItem } from "../types/app";
 
+/** 携带服务端错误码的请求异常：调用方据此判断业务分支，而不是匹配提示文案。 */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    if (code) {
+      this.code = code;
+    }
+  }
+}
+
 export async function api<T>(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
   // Action endpoints still need valid JSON when proxies forward an empty POST.
@@ -18,9 +32,9 @@ export async function api<T>(path: string, options: RequestInit = {}) {
     credentials: "include",
     headers,
   });
-  const data = (await response.json().catch(() => ({}))) as T & { message?: string };
+  const data = (await response.json().catch(() => ({}))) as T & { message?: string; code?: string };
   if (!response.ok) {
-    throw new Error(data.message || `请求失败：${response.status}`);
+    throw new ApiError(data.message || `请求失败：${response.status}`, response.status, data.code);
   }
   return data as T;
 }

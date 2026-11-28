@@ -206,6 +206,21 @@ export function formatPublishFailed(displayId: number, needsLogin: boolean, styl
 
 export const publishFailedLoginHint = "请在群内发送 #登录 或 #扫码登录 重新登录后，再重试发布。";
 
+// ── 发布自动刷新后重试 ────────────────────────────────
+
+const publishRetryScheduledDefault = (id: number) => `已自动刷新 QZone cookies，将自动重试发布：#${id}`;
+
+const publishRetryScheduledStylish = [
+  (id: number) => `🔄 稿件 #${id} 已自动刷新 QZone cookies，稍后自动重试。`,
+  (id: number) => `♻️ #${id} 的 QZone cookies 已自动刷新，马上重新发布~`,
+  publishRetryScheduledDefault,
+];
+
+export function formatPublishRetryScheduled(displayId: number, stylishEnabled = false): string {
+  if (!stylishEnabled) return publishRetryScheduledDefault(displayId);
+  return pick(publishRetryScheduledStylish)(displayId);
+}
+
 // ── 发布等待 cookies ──────────────────────────────────
 
 const publishWaitingDefault = (id: number) => `发表等待：#${id}`;
@@ -399,6 +414,32 @@ const cookiesRefreshedStylish = [
 export function formatCookiesRefreshed(count: number, stylishEnabled = false): string {
   if (!stylishEnabled) return cookiesRefreshedDefault(count);
   return pick(cookiesRefreshedStylish)(count);
+}
+
+const cookiesRefreshedInvalidDefault = (count: number, reason: string) =>
+  `QZone cookies 已刷新（${count} 项），但登录态检测仍未通过：${reason}。请尝试 #扫码登录 或检查墙号登录状态。`;
+
+const cookiesRefreshedInvalidStylish = [
+  (count: number, reason: string) => `😥 cookies 刷新了（${count} 项），但 QZone 那边还是说没登录（${reason}）。试试 #扫码登录 或检查墙号登录状态吧。`,
+  cookiesRefreshedInvalidDefault,
+];
+
+export function formatCookiesRefreshedInvalid(count: number, reason: string, stylishEnabled = false): string {
+  if (!stylishEnabled) return cookiesRefreshedInvalidDefault(count, reason);
+  return pick(cookiesRefreshedInvalidStylish)(count, reason);
+}
+
+const cookiesRefreshedUnverifiedDefault = (count: number) =>
+  `QZone cookies 已刷新（${count} 项），但登录态检测暂时没有给出明确结果，系统会继续自动复查。`;
+
+const cookiesRefreshedUnverifiedStylish = [
+  (count: number) => `🍪 cookies 已刷新（${count} 项），不过检测接口这次没给出明确结果，稍后会继续自动复查~`,
+  cookiesRefreshedUnverifiedDefault,
+];
+
+export function formatCookiesRefreshedUnverified(count: number, stylishEnabled = false): string {
+  if (!stylishEnabled) return cookiesRefreshedUnverifiedDefault(count);
+  return pick(cookiesRefreshedUnverifiedStylish)(count);
 }
 
 const cookiesAutoRefreshedDefault = () => `QZone cookies 已通过协议自动刷新。`;
