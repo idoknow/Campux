@@ -715,11 +715,10 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       });
     }
 
-    const taken = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-    if (taken) {
-      return reply.code(409).send({ message: "这个邮箱已经注册，请直接登录" });
-    }
-
+    // 不做「邮箱已被注册」的预检：该接口未登录即可调用，409 会变成无限枚举已注册邮箱的探针
+    // （限流只统计验证码记录，409 路径不创建记录，完全不受限流约束）。
+    // 已注册邮箱在这里照常发码，提交注册时 tenant-register 事务内仍会返回 409 EMAIL_TAKEN，
+    // 最终行为不变；攻击者只能看到与正常流程一致的响应。
     const code = generateEmailCode();
     const codeRecord = await prisma.emailVerificationCode.create({
       data: {
@@ -1422,22 +1421,36 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
       });
       return reply.code(400).send({ message: "验证码不正确" });
     }
-    await prisma.emailVerificationCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
 
+    // 验证码在合并成功后才消费：合并可能因 ALREADY_MERGED / CROSS_TENANT / 序列化冲突失败，
+    // 先消费会让用户白收一次码、必须重新获取。这里只做校验，不预先作废。
+    let mergeResult: { mergeId: string; migratedPosts: number; migratedMemberships: number; oldQqUin: string };
     try {
-      const result = await mergeUserAccounts({
+      mergeResult = await mergeUserAccounts({
         tenantId,
         targetUserId: context.user.id,
         oldQqUin: body.oldQqUin,
         actorId: context.user.id,
       });
-      return { ok: true, ...result };
     } catch (error) {
       if (error instanceof UserMergeError) {
         return reply.code(409).send({ message: error.message, code: error.code });
       }
       throw error;
     }
+
+    // 条件消费：并发请求或过期/超限的码不能作废这条记录。
+    // 合并已成功但消费失败时重试会因 ALREADY_MERGED 失败——验证码随 TTL 自然过期，
+    // 危害仅限「同一封邮件的码多等 10 分钟」，比让用户重新收码可接受。
+    const consumed = await prisma.emailVerificationCode.updateMany({
+      where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: 5 } },
+      data: { consumedAt: new Date() },
+    });
+    if (consumed.count !== 1) {
+      return reply.code(409).send({ code: "CODE_STALE", message: "验证码已失效，请重新获取后重试" });
+    }
+
+    return { ok: true, ...mergeResult };
   });
 
   app.post("/api/session/tenant", async (request, reply) => {

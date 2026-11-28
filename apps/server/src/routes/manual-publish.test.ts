@@ -1,7 +1,36 @@
 import { describe, expect, it } from "bun:test";
-import { renderManualPublishCaption } from "./manual-publish";
+import { classifyHaltCandidate, renderManualPublishCaption } from "./manual-publish";
 import { normalizeManualPublishTemplate, normalizeManualWallQq, manualPublishTemplateDefaults } from "../lib/tenant-metadata";
 import { readTenantIngressAvailability } from "../lib/tenant-ingress";
+
+describe("classifyHaltCandidate", () => {
+  it("treats a post with any succeeded attempt as in-flight-or-done", () => {
+    // A 目标已成功、B 目标仍在排队：稿件不能退回 approved——
+    // pendingPublishWhere 会因存在 succeeded 尝试把它挡在待发布外，
+    // 已发布列表又只查 published，稿件会从两个界面同时消失。
+    expect(classifyHaltCandidate([
+      { id: "a", status: "succeeded" },
+      { id: "b", status: "queued" },
+    ])).toBe("in-flight-or-done");
+  });
+
+  it("treats a running attempt as in-flight-or-done", () => {
+    expect(classifyHaltCandidate([{ id: "a", status: "running" }])).toBe("in-flight-or-done");
+  });
+
+  it("marks cancellable attempts for halting", () => {
+    expect(classifyHaltCandidate([
+      { id: "a", status: "queued" },
+      { id: "b", status: "failed" },
+    ])).toBe("has-cancellable");
+    expect(classifyHaltCandidate([{ id: "a", status: "waiting_cookies" }])).toBe("has-cancellable");
+  });
+
+  it("reports nothing to halt for skipped-only leftovers", () => {
+    expect(classifyHaltCandidate([{ id: "a", status: "skipped" }])).toBe("nothing-to-halt");
+    expect(classifyHaltCandidate([])).toBe("nothing-to-halt");
+  });
+});
 
 describe("renderManualPublishCaption", () => {
   const baseTemplate = { customText: "", suffixText: "", includePostId: true, includeAuthorQq: false };

@@ -6,6 +6,7 @@ import {
   isRecoverableOrphanPublishingPost,
   interruptedPublishAttemptRecoveryData,
   isIncompleteBatchFanout,
+  manualModeHaltSkipReason,
   publishTargetIntervalSeconds,
   readExpectedBatchFanoutCount,
   resolveEarliestPublishDispatchAt,
@@ -386,6 +387,69 @@ describe("deriveAggregateStatus", () => {
       status: "failed",
       comment: "发布目标失败，请在管理页查看详情",
     });
+  });
+
+  it("returns null when every required attempt was halted by manual mode", () => {
+    // 必需目标全被 halt 拦下时 requiredAttempts 为空集，完成校验会“空集恒真”通过；
+    // 只要还剩一个成功的可选目标就会误判 published。这里必须返回 null，
+    // 让 refreshAggregatePostStatus 保留稿件现状（不会写回 publishing）。
+    const result = deriveAggregateStatus([
+      {
+        status: "skipped",
+        lastError: manualModeHaltSkipReason,
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+      {
+        status: "succeeded",
+        nextRunAt: null,
+        publishTarget: { required: false },
+      },
+    ]);
+
+    expect(result).toBeNull();
+  });
+
+  it("does not let a halted attempt mask an otherwise complete publication", () => {
+    // 对照组：必需目标成功、可选目标被 halt —— 稿件确实发过了，仍是 published。
+    const result = deriveAggregateStatus([
+      {
+        status: "succeeded",
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+      {
+        status: "skipped",
+        lastError: manualModeHaltSkipReason,
+        nextRunAt: null,
+        publishTarget: { required: false },
+      },
+    ]);
+
+    expect(result).toEqual({
+      status: "published",
+      comment: "所有发布目标已完成",
+    });
+  });
+
+  it("returns null for an all-skipped batch halted by manual mode", () => {
+    // 恢复路径的安全网：全部 skipped 且带 halt 标记的批次不能被重启恢复判成已发布。
+    const result = deriveAggregateStatus([
+      {
+        status: "skipped",
+        lastError: manualModeHaltSkipReason,
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+      {
+        status: "skipped",
+        lastError: manualModeHaltSkipReason,
+        nextRunAt: null,
+        publishTarget: { required: false },
+      },
+    ]);
+
+    expect(result).toBeNull();
   });
 });
 

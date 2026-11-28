@@ -299,8 +299,8 @@ async function markPublishAttemptSkipped(attemptId: string, attempt: { postId: s
  *    保留原状态，否则稿件会从「已发布」和「待发布」里同时消失。
  */
 /** 无 Bot 模式切换导致的中止标记：聚合状态推导不能把它当成“发布完成”。 */
-const manualModeHaltSkipPrefix = "manual_mode_halt:";
-const manualModeHaltSkipReason = `${manualModeHaltSkipPrefix} 校园墙已切换到无 Bot 模式，自动发布已停止`;
+export const manualModeHaltSkipPrefix = "manual_mode_halt:";
+export const manualModeHaltSkipReason = `${manualModeHaltSkipPrefix} 校园墙已切换到无 Bot 模式，自动发布已停止`;
 
 function isManualModeHaltSkip(attempt: { status: string; lastError?: string | null }) {
   return attempt.status === "skipped" && (attempt.lastError ?? "").startsWith(manualModeHaltSkipPrefix);
@@ -329,9 +329,9 @@ async function reconcilePostsWithSuccessfulSibling(
     select: { postId: true, status: true, nextRunAt: true, lastError: true, publishTarget: { select: { required: true } } },
   });
   for (const id of postIds) {
-    // 该稿件相关的 attempts（批量 attempt 挂在锚点 postId 上，覆盖整批成员）。
-    const related = attempts.filter((attempt) => attempt.postId === postIds[0] || batchId);
-    const aggregate = deriveAggregateStatus(related);
+    // 批量 attempt 都挂在锚点 postId 上、覆盖整批成员，直接用整批结果推导；
+    // 单稿模式的查询已按 postId 过滤，无需再筛。
+    const aggregate = deriveAggregateStatus(attempts);
     if (!aggregate) {
       continue;
     }
@@ -350,7 +350,7 @@ async function reconcilePostsWithSuccessfulSibling(
         logs: {
           create: {
             tenantId,
-            postId: id,
+            // 嵌套 create 由父级 post.update 提供 postId，不能再显式传入（Prisma 类型不允许）。
             oldStatus: post.status,
             newStatus: aggregate.status,
             comment: "切到无 Bot 模式，其余发布目标已停止；按已完成的目标对账稿件状态",
@@ -2720,6 +2720,18 @@ async function markAttemptWaitingForCookies({
   // 留在等待态的稿件要等 cookies 恢复才有机会被作废。这里先按当前模式拦下。
   if ((await readTenantOperateMode(prisma, tenantId)) === "manual") {
     await prisma.$transaction(async (transaction) => {
+      // 先把当前 attempt 置为终态再收尾：finalize 统计兄弟时排除 attemptId，
+      // 若 attempt 仍是 running，稿件会被退回 approved，但调用方随后的
+      // refreshAttemptPostStatuses 仍看到 running，推导出 publishing 写回——
+      // 稿件从此卡死（队列排除 running、孤儿回收只管零尝试、halt-in-flight 又拒绝 running）。
+      const skipped = await transaction.publishAttempt.updateMany({
+        where: { id: attemptId, status: { in: ["queued", "running", "waiting_cookies"] } },
+        data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
+      });
+      if (skipped.count === 0) {
+        // 已被并发处理（完成/已作废）：不改任何状态，交给既有流程。
+        return;
+      }
       await finalizeManualModeHalt(transaction, {
         attemptId,
         tenantId,

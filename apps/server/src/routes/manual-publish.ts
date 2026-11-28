@@ -72,6 +72,29 @@ const revertBodySchema = z.object({
 });
 
 /**
+ * 判定一条稿件在「停止在途自动发布」时该如何处理。
+ *
+ * - `in-flight-or-done`：有目标正在发送或已成功发出——稿件动不得，
+ *   改成 approved 会让它同时从「已发布」（只查 published）和「待发布」
+ *   （pendingPublishWhere 排除在途/成功尝试）里消失，运营者还会再手动发一次。
+ * - `nothing-to-halt`：没有可作废的尝试（例如全被 skipped 的残留）。
+ * - `has-cancellable`：存在 queued/waiting_cookies/failed 的尝试，可以作废。
+ */
+export function classifyHaltCandidate(
+  attempts: Array<{ id: string; status: string }>,
+): "in-flight-or-done" | "nothing-to-halt" | "has-cancellable" {
+  const hasRunning = attempts.some((attempt) => attempt.status === "running");
+  // 有任何目标已成功 = 说说已发出（多目标稿件可能只发了第一个目标）。
+  const hasSucceeded = attempts.some((attempt) => attempt.status === "succeeded");
+  if (hasRunning || hasSucceeded) {
+    return "in-flight-or-done";
+  }
+  const hasCancellable = attempts.some((attempt) =>
+    attempt.status === "queued" || attempt.status === "waiting_cookies" || attempt.status === "failed");
+  return hasCancellable ? "has-cancellable" : "nothing-to-halt";
+}
+
+/**
  * 仍占着「自动发布流程」的尝试状态。
  *
  * 待发布的判定不能用「没有任何尝试」：bot → manual 切换时被停下的稿件会留下
@@ -608,19 +631,17 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
     });
 
     const haltedDisplayIds: number[] = [];
-    // 正在发送中的稿件：无法撤销（请求已经发出去了），必须如实告诉运营者，
+    // 正在发送中或已有目标发出的稿件：无法撤销（请求已经发出去了），必须如实告诉运营者，
     // 否则他会以为「全停了」，随后再手动发一遍 → 空间出现两条一样的说说。
     const alreadyPublishingDisplayIds: number[] = [];
     for (const post of candidates) {
-      // 已经真正发出去的（succeeded/running）不能撤销，只能跳过剩下的排队任务。
-      const cancellable = post.publishAttempts.filter((attempt) => ["queued", "waiting_cookies", "failed"].includes(attempt.status));
-      const hasRunning = post.publishAttempts.some((attempt) => attempt.status === "running");
-      if (hasRunning) {
+      const decision = classifyHaltCandidate(post.publishAttempts);
+      if (decision === "in-flight-or-done") {
         alreadyPublishingDisplayIds.push(post.displayId);
         continue;
       }
       // 没有可取消尝试、也没有批次条目的稿件不需要处理（例如全被 skipped 的残留）。
-      if (cancellable.length === 0 && !post.batchItem) {
+      if (decision === "nothing-to-halt" && !post.batchItem) {
         continue;
       }
       try {
@@ -639,9 +660,9 @@ export function registerManualPublishRoutes(app: FastifyInstance, queue: Runtime
             return false;
           }
 
-          if (cancellable.length > 0) {
+          if (decision === "has-cancellable") {
             await transaction.publishAttempt.updateMany({
-              where: { id: { in: cancellable.map((attempt) => attempt.id) } },
+              where: { id: { in: post.publishAttempts.filter((attempt) => ["queued", "waiting_cookies", "failed"].includes(attempt.status)).map((attempt) => attempt.id) } },
               data: { status: "skipped", lastError: "切换到无 Bot 模式，管理员已停止在途自动发布", nextRunAt: null },
             });
           }
