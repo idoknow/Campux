@@ -87,11 +87,14 @@ import {
   formatPublishSuccessWithTarget,
   formatPublishFailed,
   publishFailedLoginHint,
+  formatPublishRetryScheduled,
   formatPublishWaiting,
   publishWaitingResumeHint,
   formatCookiesInvalid,
   formatCookiesAutoRefreshed,
   formatCookiesRefreshed,
+  formatCookiesRefreshedInvalid,
+  formatCookiesRefreshedUnverified,
   formatSubmissionSuccess,
   formatRegisterAlready,
   formatFirstPrivateMessageRegistrationNotice,
@@ -1250,6 +1253,40 @@ export class OneBotRuntime {
     }
   }
 
+  async notifyPublishRetryScheduled(postId: string, targetId: string, message: string, options?: { nextRunAt?: Date | null }) {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+      include: {
+        tenant: true,
+      },
+    });
+    const target = await prisma.publishTarget.findUnique({
+      where: {
+        id: targetId,
+      },
+      include: {
+        botAccount: true,
+      },
+    });
+    if (!post) {
+      return;
+    }
+    const stylishEnabled = await this.resolveStylishEnabled(post.tenantId);
+    const lines = [
+      formatPublishRetryScheduled(post.displayId, stylishEnabled),
+      target ? `目标：${target.displayName}（${target.botAccount.displayName} / QQ ${target.botAccount.qqUin.toString()}）` : null,
+      `原因：${message}`,
+      options?.nextRunAt ? `下次重试：${formatDateTime(options.nextRunAt)}` : null,
+    ].filter((line): line is string => Boolean(line));
+    if (target) {
+      await this.sendBotReviewGroupMessage(target.botAccount, lines.join("\n"), "failed to notify publish retry scheduled");
+    } else {
+      await this.sendTenantReviewNotification(post.tenantId, lines.join("\n"));
+    }
+  }
+
   async notifyPublishWaitingForCookies(postId: string, targetId: string, message: string) {
     const post = await prisma.post.findUnique({
       where: {
@@ -1308,7 +1345,7 @@ export class OneBotRuntime {
     });
   }
 
-  async refreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid") {
+  async refreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid" | "publish_preflight_stale") {
     const cachedFailure = this.qzoneProtocolAutoRefreshFailures.get(botAccountId);
     if (cachedFailure) {
       const remainingMs = qzoneProtocolAutoRefreshFailureCooldownMs - (Date.now() - cachedFailure.failedAt);
@@ -1332,7 +1369,7 @@ export class OneBotRuntime {
     }
   }
 
-  private async doRefreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid") {
+  private async doRefreshQZoneCookiesByProtocol(botAccountId: string, reason: "heartbeat_invalid" | "publish_login_required" | "publish_preflight_invalid" | "publish_preflight_stale") {
     const bot = await prisma.botAccount.findUnique({
       where: {
         id: botAccountId,
@@ -1360,7 +1397,11 @@ export class OneBotRuntime {
         throw new BotWorkflowError(`协议自动刷新后 cookies 仍不可用：${checked.healthMessage ?? "未知错误"}`, 502);
       }
       this.qzoneProtocolAutoRefreshFailures.delete(bot.id);
-      await this.notifyQZoneCookiesAutoRefreshed(bot.id, reason, result.cookieNames.length, checked?.healthMessage ?? null);
+      // 发布链路会自己发“已自动刷新并安排重试”的通知；这里只保留心跳触发的成功通知，
+      // 避免同一件事在群里连发两条语义冲突的消息（“后台一切正常”紧接着“发表失败”）。
+      if (reason === "heartbeat_invalid") {
+        await this.notifyQZoneCookiesAutoRefreshed(bot.id, reason, result.cookieNames.length, checked?.healthMessage ?? null);
+      }
       await this.resumeWaitingPublishAttemptsForBot(bot.id);
       return result;
     } catch (caught) {
@@ -4245,7 +4286,14 @@ export class OneBotRuntime {
         if (checked?.healthStatus === "available") {
           await this.resumeWaitingPublishAttemptsForBot(result.bot.id);
         }
-        await this.sendGroupMessage(botQqUin, groupId, formatCookiesRefreshed(result.cookieNames.length, stylishEnabled));
+        // 回复必须和刚做的检测结果一致：不能 cookies 已刷新却告诉用户“刷新成功”，
+        // 随后心跳又播报“cookies 已失效”。
+        const reply = checked?.healthStatus === "available"
+          ? formatCookiesRefreshed(result.cookieNames.length, stylishEnabled)
+          : checked?.healthStatus === "invalid"
+            ? formatCookiesRefreshedInvalid(result.cookieNames.length, checked.healthMessage ?? "登录态检测失败", stylishEnabled)
+            : formatCookiesRefreshedUnverified(result.cookieNames.length, stylishEnabled);
+        await this.sendGroupMessage(botQqUin, groupId, reply);
         return;
       }
 

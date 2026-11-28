@@ -14,6 +14,7 @@ import {
   formatPrivatePostModeSelected,
   formatPrivatePostDraftStarted,
   formatPublishSuccess,
+  formatPublishRetryScheduled,
   formatRecallRequestNotification,
   formatRecallSuccess,
   formatRegisterAlready,
@@ -411,5 +412,24 @@ describe("撤回申请审核群通知", () => {
     expect(message).toContain("理由：发错图了");
     expect(message).toContain("#撤回通过 42");
     expect(message).toContain("#撤回拒绝 <理由> 42");
+  });
+});
+
+describe("发布自动刷新后的重试通知", () => {
+  test("文案表达的是“已自动刷新、稍后重试”，不能出现失败字样", () => {
+    const originalRandom = Math.random;
+    try {
+      for (const stylishEnabled of [false, true]) {
+        for (const randomValue of [0, 0.4, 0.8, 0.99]) {
+          Math.random = () => randomValue;
+          const message = formatPublishRetryScheduled(7079, stylishEnabled);
+          expect(message).toContain("7079");
+          expect(message).toContain("自动刷新");
+          expect(message).not.toContain("失败");
+        }
+      }
+    } finally {
+      Math.random = originalRandom;
+    }
   });
 });

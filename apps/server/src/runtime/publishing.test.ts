@@ -25,6 +25,7 @@ import {
   shouldReleasePublishQuotaReservation,
   releaseTenantPublishQuota,
   queuedAttemptDeferral,
+  shouldRefreshQZoneCookiesBeforePublish,
 } from "./publishing";
 
 describe("tenant publish rate limit deferral", () => {
@@ -37,7 +38,7 @@ describe("tenant publish rate limit deferral", () => {
       { postId: "other-period", periodType: "daily", periodStart: start, status: "reserved" },
     ];
     expect(countDistinctQuotaManuscripts(["overlap", "log-only", "log-only"], rows, "hourly", start)).toBe(3);
-    expect(countDistinctQuotaManuscripts(["overlap", "log-only"], rows, "hourly", start, ["overlap"])).toBe(1);
+    expect(countDistinctQuotaManuscripts(["overlap", "log-only"], rows, "hourly", start, ["overlap"])).toBe(2);
     expect(countDistinctQuotaManuscripts([], [rows[1]!], "hourly", start)).toBe(1);
     expect(countDistinctQuotaManuscripts([], [rows[1]!], "hourly", start, ["consumed-only"])).toBe(0);
     expect(countDistinctQuotaManuscripts([], [rows[1]!, { postId: "another", periodType: "hourly", periodStart: start, status: "reserved" }], "hourly", start)).toBe(2);
@@ -68,6 +69,7 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
+      tenantPublishQuotaReservation: { findMany: async () => [] },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
   });
@@ -77,6 +79,7 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 0, daily: 1 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
+      tenantPublishQuotaReservation: { findMany: async () => [] },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", now, client)).resolves.toEqual(new Date("2026-07-24T16:00:00.000Z"));
   });
@@ -86,10 +89,12 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [{ postId: "p1" }] },
-      tenantPublishQuotaReservation: { findMany: async (args: any) => { calls.push(args); return [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }]; } },
+      tenantPublishQuotaReservation: { findMany: async (args: any) => { calls.push(args); return [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z"), status: "reserved" }]; } },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T05:42:00.000Z"), client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
-    expect(calls).toHaveLength(1);
+    // 小时额度与天额度各查一次，避免把两种周期混在一次查询里。
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.where.periodType)).toEqual(["hourly", "daily"]);
     expect(calls[0].where.status.in).toEqual(["reserved", "consumed"]);
   });
 
@@ -97,7 +102,7 @@ describe("tenant publish rate limit deferral", () => {
     const client = {
       tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [] },
-      tenantPublishQuotaReservation: { findMany: async () => [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z") }] },
+      tenantPublishQuotaReservation: { findMany: async () => [{ postId: "p1", periodType: "hourly", periodStart: new Date("2026-07-24T05:00:00.000Z"), status: "reserved" }] },
     } as never;
     await expect(resolveTenantPublishQuotaDeferral("tenant", new Date("2026-07-24T05:42:00.000Z"), client)).resolves.toEqual(new Date("2026-07-24T06:00:00.000Z"));
   });
@@ -162,7 +167,7 @@ describe("tenant publish rate limit deferral", () => {
     const queries: any[] = [];
     const now = new Date("2026-07-24T05:42:00.000Z");
     const client = {
-      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [] },
       tenantPublishQuotaReservation: { findMany: async (args: any) => { queries.push(args); return []; } },
     } as never;
@@ -171,7 +176,7 @@ describe("tenant publish rate limit deferral", () => {
 
     const unrelatedReservationQueries: any[] = [];
     const cappedElsewhere = {
-      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 1 } }) },
+      tenantMetadata: { findUnique: async () => ({ value: { hourly: 1, daily: 12 } }) },
       postLog: { findMany: async () => [] },
       tenantPublishQuotaReservation: { findMany: async (args: any) => {
         unrelatedReservationQueries.push(args);
@@ -463,5 +468,23 @@ describe("shouldWaitForQZoneAttempt", () => {
     expect(shouldWaitForQZoneAttempt({ status: "succeeded" })).toBe(false);
     expect(shouldWaitForQZoneAttempt({ status: "failed", nextRunAt: null })).toBe(false);
     expect(shouldWaitForQZoneAttempt({ status: "skipped" })).toBe(false);
+  });
+});
+
+describe("publish preflight qzone cookie freshness", () => {
+  const now = Date.parse("2026-11-28T12:00:00.000Z");
+
+  it("只看被判定可用的会话：失效、未检测或没有会话都不做预防性刷新", () => {
+    const refreshedAt = new Date(now - 24 * 60 * 60 * 1000);
+    expect(shouldRefreshQZoneCookiesBeforePublish(null, now)).toBe(false);
+    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "invalid", refreshedAt }, now)).toBe(false);
+    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "unchecked", refreshedAt }, now)).toBe(false);
+  });
+
+  it("可用但超过刷新时限的 cookies 会触发发布前刷新", () => {
+    const stale = new Date(now - 6 * 60 * 60 * 1000 - 1);
+    const fresh = new Date(now - 60 * 60 * 1000);
+    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "available", refreshedAt: stale }, now)).toBe(true);
+    expect(shouldRefreshQZoneCookiesBeforePublish({ healthStatus: "available", refreshedAt: fresh }, now)).toBe(false);
   });
 });

@@ -95,17 +95,28 @@ export async function checkQZoneCookieHealth(cookies: Record<string, string>, fa
       ? payload.message
       : typeof payload?.msg === "string" ? payload.msg : "";
     const code = typeof payload?.code === "number" ? payload.code : null;
-    if (code !== null && code !== 0 && !isQZoneLoginFailureMessage(message)) {
-      // QZone 返回了可解析的业务错误负载（限流/风控等）：不能证明登录态失效，按检测暂时不可用处理。
-      // 只有 message 命中登录失效特征（实测如 code: -87998, "login error"）才判定失效。
+    if (isQZoneLoginFailureMessage(message)) {
       return {
-        status: "transient",
-        message: `登录态检测暂时不可用：QZone 返回业务错误码 ${code}${message ? `（${message}）` : ""}`,
+        status: "invalid" as const,
+        message: message || "QZone 登录态已失效",
       };
     }
+    if (code === 0) {
+      // 实测部分账号（含 NapCat 协议取到的 cookies）检测接口会返回 {"code":0,"message":"succ"}
+      // 而不带访客统计。code 0 说明请求本身通过了 QZone 登录校验（真正失效会返回 login error），
+      // 因此直接判可用，只是本次没有访客数据可记录。
+      return {
+        status: "available" as const,
+        message: `可用（本次未返回访客统计${message ? `：${message}` : ""}）`,
+      };
+    }
+    // 非 0 的业务错误码（限流/风控等）与无法识别的响应：不能证明登录态失效，按暂时不可用处理，
+    // 不累计失败次数，也不会触发误导性的失效告警。
     return {
-      status: "invalid" as const,
-      message: message || "QZone 没有返回有效访客数据",
+      status: "transient",
+      message: code === null
+        ? `登录态检测暂时不可用：QZone 返回了无法识别的数据${message ? `（${message}）` : ""}`
+        : `登录态检测暂时不可用：QZone 返回 code ${code}${message ? `（${message}）` : ""}`,
     };
   } catch (caught) {
     // 超时/网络异常属于检测本身的失败，不能据此判定登录态失效。

@@ -39,6 +39,11 @@ export const republishFailureRetryDelayMs = 12 * 60 * 60 * 1000;
 export const republishFailureSweepIntervalMs = 15 * 60 * 1000;
 export const orphanPublishingPostRecoveryAgeMs = 10 * 60 * 1000;
 export const interruptedPublishAttemptMessage = "发布进程中断，远端结果不确定；为避免重复发布，系统未自动重试";
+/**
+ * cookies 距上次协议刷新超过这个时长时，发布前主动刷新一次。
+ * 心跳只验证访客接口，长时间不发稿后图片上传接口可能先失效，靠这个兜底避免第一单必踩 -100。
+ */
+export const qzoneCookiePreflightRefreshAgeMs = 6 * 60 * 60 * 1000;
 const ambiguousPublishNoRetryMarker = "远端可能已接收，为避免重复发布未自动重试";
 const batchFanoutAuditPrefix = "批量发布：已生成 ";
 const incompleteBatchFanoutAuditComment = "历史批量发布任务落库不完整，系统已安全终止剩余任务；请人工核对后再决定是否重发";
@@ -129,9 +134,10 @@ export function assignedQuotaAt(reservations: Array<{ periodType: string; period
 type PublishingNotifier = {
   notifyPublishSucceeded(postId: string, targetId: string, externalId: string): Promise<void>;
   notifyPublishFailed(postId: string, targetId: string, message: string, options?: { needsLogin?: boolean; nextRunAt?: Date | null }): Promise<void>;
+  notifyPublishRetryScheduled?(postId: string, targetId: string, message: string, options?: { nextRunAt?: Date | null }): Promise<void>;
   notifyPublishWaitingForCookies?(postId: string, targetId: string, message: string): Promise<void>;
   notifyQZoneCookiesInvalid?(botAccountId: string, message: string, options?: { autoRefreshError?: string | null }): Promise<void>;
-  refreshQZoneCookiesByProtocol?(botAccountId: string, reason: "publish_login_required" | "publish_preflight_invalid"): Promise<{ cookieNames: string[] }>;
+  refreshQZoneCookiesByProtocol?(botAccountId: string, reason: "publish_login_required" | "publish_preflight_invalid" | "publish_preflight_stale"): Promise<{ cookieNames: string[] }>;
 };
 
 type ImagePayload = {
@@ -2299,7 +2305,12 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           },
         });
         enqueueAttempt(queue, attempt.tenantId, attempt.id, nextRunAt);
-        await notifier.notifyPublishFailed(attempt.postId, attempt.publishTargetId, `QZone cookies 已通过协议自动刷新，将自动重试发布。原始错误：${message}`, { nextRunAt }).catch((error) => {
+        // 这里是“已自动刷新、稍后重试”，不是终态失败：用重试通知而不是失败通知，
+        // 否则群里会先看到“后台一切正常”，紧接着又看到“稿件发表失败”。
+        const retryNotification = notifier.notifyPublishRetryScheduled
+          ? notifier.notifyPublishRetryScheduled(attempt.postId, attempt.publishTargetId, message, { nextRunAt })
+          : notifier.notifyPublishFailed(attempt.postId, attempt.publishTargetId, `QZone cookies 已通过协议自动刷新，将自动重试发布。原始错误：${message}`, { nextRunAt });
+        await retryNotification.catch((error) => {
           logger.warn({ error, postId: attempt.postId, publishTargetId: attempt.publishTargetId }, "failed to notify publish auto refresh retry");
         });
         await refreshAttemptPostStatuses(attempt);
@@ -2404,24 +2415,42 @@ async function resolveCookiesForPublish({
     cookies: Prisma.JsonValue;
     healthStatus: string;
     healthMessage: string | null;
+    refreshedAt: Date;
   } | null;
   logger: FastifyBaseLogger;
   notifier: PublishingNotifier | undefined;
 }) {
   const checkedSession = await ensureSessionChecked(session);
   const checkedCookies = getAvailableCookies(checkedSession);
-  if (checkedCookies) {
+  // 心跳依赖的访客接口会把“图片上传已失效”的 cookies 仍判为可用。发布前若 cookies
+  // 距上次刷新过久，主动刷新一次，避免长时间不发稿后第一单必然踩到上传 -100。
+  const shouldRefreshStaleCookies = Boolean(
+    checkedCookies
+    && qzoneRefreshMode === "protocol"
+    && notifier?.refreshQZoneCookiesByProtocol
+    && shouldRefreshQZoneCookiesBeforePublish(checkedSession),
+  );
+  if (checkedCookies && !shouldRefreshStaleCookies) {
     return checkedCookies;
   }
 
   let autoRefreshError: string | null = null;
   if (qzoneRefreshMode === "protocol" && notifier?.refreshQZoneCookiesByProtocol) {
     try {
-      await notifier.refreshQZoneCookiesByProtocol(botAccountId, "publish_preflight_invalid");
+      await notifier.refreshQZoneCookiesByProtocol(
+        botAccountId,
+        shouldRefreshStaleCookies ? "publish_preflight_stale" : "publish_preflight_invalid",
+      );
       const refreshedSession = await findLatestQZoneSession(botAccountId);
       const refreshedCookies = getAvailableCookies(refreshedSession);
       if (refreshedCookies) {
         return refreshedCookies;
+      }
+      if (checkedCookies) {
+        // 主动刷新拿到的 cookies 没通过检测，但旧 cookies 仍被判定可用：继续用它发布，
+        // 不要把本来可发的任务挂起；真实失效会在发布结果里再暴露一次。
+        logger.warn({ botAccountId, postId, publishTargetId }, "qzone cookies refresh produced unusable session before publish; falling back to existing available cookies");
+        return checkedCookies;
       }
       autoRefreshError = refreshedSession?.healthMessage ? `协议自动刷新后 cookies 仍不可用：${refreshedSession.healthMessage}` : "协议自动刷新后没有拿到可用 cookies";
     } catch (error) {
@@ -2435,9 +2464,18 @@ async function resolveCookiesForPublish({
         logger.info({ botAccountId, postId, publishTargetId, error: error instanceof Error ? error.message : String(error) }, "qzone cookies protocol auto refresh skipped before publish: onebot connection transiently unavailable");
       } else {
         autoRefreshError = error instanceof Error ? error.message : "协议自动刷新失败";
-        await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
-          logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
-        });
+        // 只有“确实没有可用 cookies、发布被阻断”才发失效告警；
+        // 预防性刷新失败但旧 cookies 仍可用时，最多记日志，不制造告警。
+        if (!checkedCookies) {
+          await notifier.notifyQZoneCookiesInvalid?.(botAccountId, checkedSession?.healthMessage ?? "QZone cookies 不可用", { autoRefreshError }).catch((notifyError) => {
+            logger.warn({ error: notifyError, botAccountId }, "failed to notify qzone cookies auto refresh failure before publish");
+          });
+        }
+      }
+      if (checkedCookies) {
+        // 只是“预防性刷新”失败，旧 cookies 仍判定可用：照常发布，不把任务挂起。
+        logger.warn({ botAccountId, postId, publishTargetId }, "qzone cookies refresh failed before publish; falling back to existing available cookies");
+        return checkedCookies;
       }
     }
   }
@@ -2463,6 +2501,7 @@ async function ensureSessionChecked(
     cookies: Prisma.JsonValue;
     healthStatus: string;
     healthMessage: string | null;
+    refreshedAt: Date;
   } | null,
 ) {
   if (!session) {
@@ -2472,6 +2511,17 @@ async function ensureSessionChecked(
     return session;
   }
   return checkAndUpdateQZoneSession(session.id);
+}
+
+/** 发布前是否需要为一个“看起来可用但很久没刷新”的 cookies 做预防性刷新。 */
+export function shouldRefreshQZoneCookiesBeforePublish(
+  session: { healthStatus: string; refreshedAt: Date } | null,
+  now = Date.now(),
+) {
+  if (!session || session.healthStatus !== "available") {
+    return false;
+  }
+  return now - session.refreshedAt.getTime() >= qzoneCookiePreflightRefreshAgeMs;
 }
 
 function getAvailableCookies(session: { cookies: Prisma.JsonValue; healthStatus: string } | null) {
