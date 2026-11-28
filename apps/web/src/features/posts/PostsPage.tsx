@@ -508,7 +508,12 @@ export function PostsPage({
     // 独立读取运营模式：决定「待发布」是独立页签还是审核筛选，不能等面板刷新才拿到。
     let cancelled = false;
     void loadPendingPublishContext().then((context) => {
-      if (cancelled || !context) return;
+      if (cancelled) return;
+      if (!context) {
+        setPendingPublishContext(null);
+        return;
+      }
+      setPendingPublishContext(context);
       setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
     });
     return () => { cancelled = true; };
@@ -524,12 +529,9 @@ export function PostsPage({
 
   async function loadPendingPublishContext() {
     try {
-      const context = await api<PendingPublishContext>("/api/admin/pending-publish/context");
-      setPendingPublishContext(context);
-      setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
-      return context;
+      // 只负责取数，状态由调用方在确认请求归属后写入，避免旧响应覆盖新模式的页签/计数。
+      return await api<PendingPublishContext>("/api/admin/pending-publish/context");
     } catch {
-      setPendingPublishContext(null);
       return null;
     }
   }
@@ -601,8 +603,11 @@ export function PostsPage({
       setPendingPublishSelected(new Set());
       // 滞留量与在途发布量、进站通道一起刷新：切回 bot 模式后要提示补队列。
       const context = await loadPendingPublishContext();
-      if (context && requestId === pendingPublishRequestRef.current) {
-        setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
+      if (requestId === pendingPublishRequestRef.current) {
+        setPendingPublishContext(context);
+        if (context) {
+          setPendingResidual({ operateMode: context.operateMode, residual: context.residual, inFlight: context.inFlight });
+        }
       }
     } catch (caught) {
       if (requestId === pendingPublishRequestRef.current) {

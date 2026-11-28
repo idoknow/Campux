@@ -99,13 +99,17 @@ export type MergePreview = {
   newEmail: string | null;
 };
 
-/** 只回显邮箱首两字符与域名，避免用完整邮箱做账号枚举。 */
-function maskEmailForPreview(email: string | null): string | null {
+/** 只回显邮箱首部与域名，避免用完整邮箱做账号枚举。 */
+export function maskEmailForPreview(email: string | null): string | null {
   if (!email) return null;
   const [name = "", domain = ""] = email.split("@");
   if (!domain) return null;
-  const head = name.slice(0, Math.min(2, name.length));
-  return `${head}${name.length > 2 ? "***" : ""}@${domain}`;
+  // 即使本地部分只有 1~2 个字符也至少隐藏一个字符，不能把短邮箱原样回显。
+  if (name.length <= 1) {
+    return `***@${domain}`;
+  }
+  const head = name.slice(0, name.length > 2 ? 2 : 1);
+  return `${head}***@${domain}`;
 }
 
 /**

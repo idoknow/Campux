@@ -711,13 +711,20 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     }
     // 待撤回请求由审核员处理；但“已发表”稿件没有任何作者/系统撤回请求，
     // 直接标记删除等于绕过管理员直撤边界，必须要求管理员权限。
-    if (post.status === "published" && !hasTenantRole(context.selectedMembership.role, "admin")) {
+    const isAdmin = hasTenantRole(context.selectedMembership.role, "admin");
+    if (post.status === "published" && !isAdmin) {
       return reply.code(403).send({ message: "直接完成已发表稿件需要管理员权限" });
     }
+    // 写入只允许命中“已经通过授权判断”的状态：
+    // 审核员若在校验后、写入前遇到 recall/ignore 把 pending_recall 改回 published，
+    // 这里会因状态不匹配而失败，不会再借道完成已发表稿件。
+    const allowedStatuses: Array<"published" | "pending_recall"> = isAdmin
+      ? ["published", "pending_recall"]
+      : ["pending_recall"];
 
     const completed = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
       const changed = await transaction.post.updateMany({
-        where: { id: post.id, tenantId: context.selectedTenant.id, status: { in: ["published", "pending_recall"] } },
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: { in: allowedStatuses } },
         data: { status: "recalled", recallIgnored: false, recallIgnoredAt: null },
       });
       if (changed.count === 0) return false;

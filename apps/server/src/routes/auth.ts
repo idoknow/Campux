@@ -13,7 +13,7 @@ import {
   readRegistrationEmailPolicy,
 } from "../lib/registration-email-policy";
 import { officialMailerAvailable, readTenantMailSenderConfig, sendTenantMail } from "../lib/tenant-mail-sender";
-import { buildMergePreview, findMergeCandidate, isMergeScopeSingleTenant, mergeUserAccounts, resolveActiveAccount, shouldPromptAccountMerge, UserMergeError } from "../lib/user-merge";
+import { buildMergePreview, findMergeCandidate, isMergeScopeSingleTenant, maskEmailForPreview, mergeUserAccounts, resolveActiveAccount, shouldPromptAccountMerge, UserMergeError } from "../lib/user-merge";
 import { prisma } from "../lib/prisma";
 import { toMembership, toPublicUser, toTenantSummary } from "../lib/serializers";
 import { resolveEffectiveTenantMembership } from "../lib/tenant-access";
@@ -1362,7 +1362,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: CampuxConfig) {
 
     return {
       ok: true,
-      email,
+      // 与合并预览一致只回显脱敏地址：验证码发出前后都不能把旧账号完整邮箱交给调用者。
+      email: maskEmailForPreview(email) ?? "",
       expiresInSeconds: RESET_CODE_TTL_SECONDS,
     };
   });

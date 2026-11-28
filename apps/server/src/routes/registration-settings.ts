@@ -252,9 +252,17 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
               throw new RegistrationSettingsConflictError();
             }
           } else {
-            await transaction.tenantMetadata.create({
-              data: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
-            });
+            try {
+              await transaction.tenantMetadata.create({
+                data: { tenantId, key: registrationEmailPolicyKey, value: nextPolicy },
+              });
+            } catch (error) {
+              // 两个“首次保存”并发时，后到的 create 会撞唯一键：按并发冲突返回，而不是 500。
+              if ((error as { code?: string }).code === "P2002") {
+                throw new RegistrationSettingsConflictError();
+              }
+              throw error;
+            }
           }
         } else {
           await transaction.tenantMetadata.upsert({

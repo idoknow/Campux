@@ -298,6 +298,74 @@ async function markPublishAttemptSkipped(attemptId: string, attempt: { postId: s
  * 3. 只有在「所有目标都确实没发出去」时才能把稿件退回 `approved`。若已有目标成功或在跑，
  *    保留原状态，否则稿件会从「已发布」和「待发布」里同时消失。
  */
+/** 无 Bot 模式切换导致的中止标记：聚合状态推导不能把它当成“发布完成”。 */
+const manualModeHaltSkipPrefix = "manual_mode_halt:";
+const manualModeHaltSkipReason = `${manualModeHaltSkipPrefix} 校园墙已切换到无 Bot 模式，自动发布已停止`;
+
+function isManualModeHaltSkip(attempt: { status: string; lastError?: string | null }) {
+  return attempt.status === "skipped" && (attempt.lastError ?? "").startsWith(manualModeHaltSkipPrefix);
+}
+
+/**
+ * 在“作废 attempt”的同一事务里完成切到无 Bot 模式的收尾，避免第二步失败后稿件永远停在发布中：
+ * - 已有目标成功或在跑：保留现状，交给它刷新聚合状态；
+ * - 还有目标待发：等它自己收尾，避免抢先退回后又被改回；
+ * - 全部结束且没有成功：稿件退回待发布；批次置失败终态，
+ *   避免重启恢复时把全部 skipped 的批次误判成已发布。
+ */
+async function finalizeManualModeHalt(
+  transaction: Prisma.TransactionClient,
+  input: { attemptId: string; tenantId: string; postId: string; batchId: string | null },
+) {
+  const { attemptId, tenantId, postId, batchId } = input;
+  // 批量发布的所有目标 attempt 共用 anchor postId，必须按 batchId 查兄弟目标，
+  // 否则非 anchor 稿件会漏掉“已有目标成功/在跑”的保护，被退回后重复发布。
+  const siblings = await transaction.publishAttempt.findMany({
+    where: batchId ? { batchId, id: { not: attemptId } } : { postId, id: { not: attemptId } },
+    select: { status: true, nextRunAt: true },
+  });
+  if (siblings.some((sibling) => sibling.status === "running" || sibling.status === "succeeded")) {
+    return;
+  }
+  const stillPending = siblings.some((sibling) =>
+    sibling.status === "queued"
+    || sibling.status === "running"
+    || sibling.status === "waiting_cookies"
+    || (sibling.status === "failed" && sibling.nextRunAt !== null));
+  if (stillPending) {
+    return;
+  }
+
+  const postIds = batchId
+    ? (await transaction.publishBatchItem.findMany({ where: { batchId }, select: { postId: true } })).map((item) => item.postId)
+    : [postId];
+  for (const id of postIds) {
+    const updated = await transaction.post.updateMany({
+      where: { id, tenantId, status: { in: ["publishing", "partially_failed", "failed"] } },
+      data: { status: "approved" },
+    });
+    if (updated.count === 0) {
+      continue;
+    }
+    // 日志单独写：updateMany 不支持嵌套关系写入。
+    await transaction.postLog.create({
+      data: {
+        tenantId,
+        postId: id,
+        oldStatus: "publishing",
+        newStatus: "approved",
+        comment: "校园墙已切换到无 Bot 模式，自动发布已停止，稿件退回待发布",
+      },
+    });
+  }
+  if (batchId) {
+    await transaction.publishBatch.updateMany({
+      where: { id: batchId, status: { in: ["publishing", "partially_failed", "failed"] } },
+      data: { status: "failed" },
+    });
+  }
+}
+
 async function haltAttemptForManualMode(
   logger: FastifyBaseLogger,
   attemptId: string,
@@ -310,43 +378,13 @@ async function haltAttemptForManualMode(
       // 条件更新：只有仍未被认领的任务才作废。
       const updated = await transaction.publishAttempt.updateMany({
         where: { id: attemptId, status: { in: ["queued", "failed", "waiting_cookies"] } },
-        data: { status: "skipped", lastError: "校园墙已切换到无 Bot 模式，自动发布已停止", nextRunAt: null },
+        data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
       });
       if (updated.count === 0) {
         // 已被 worker 认领或已结束：不改任何状态，交给它自己按新模式复查。
         return;
       }
-      if (batchId) {
-        return;
-      }
-
-      // 还有别的目标成功或在跑时，不能把稿件退回待发布。
-      const siblings = await transaction.publishAttempt.findMany({
-        where: { postId, id: { not: attemptId } },
-        select: { status: true },
-      });
-      const hasLiveOrDoneSibling = siblings.some((s) => s.status === "running" || s.status === "succeeded");
-      if (hasLiveOrDoneSibling) {
-        return;
-      }
-
-      const postUpdated = await transaction.post.updateMany({
-        where: { id: postId, tenantId, status: { in: ["publishing", "partially_failed", "failed"] } },
-        data: { status: "approved" },
-      });
-      if (postUpdated.count === 0) {
-        return;
-      }
-      // 日志单独写：updateMany 不支持嵌套关系写入。
-      await transaction.postLog.create({
-        data: {
-          tenantId,
-          postId,
-          oldStatus: "publishing",
-          newStatus: "approved",
-          comment: "校园墙已切换到无 Bot 模式，自动发布已停止，稿件退回待发布",
-        },
-      });
+      await finalizeManualModeHalt(transaction, { attemptId, tenantId, postId, batchId });
     });
     logger.info({ attemptId, tenantId, postId }, "publish attempt halted because tenant switched to manual mode");
     return true;
@@ -354,56 +392,6 @@ async function haltAttemptForManualMode(
     logger.warn({ error, attemptId, tenantId }, "failed to halt publish attempt for manual mode");
     // 交给调用方重新入队：纯日志会丢掉当前 job，attempt 永远停在 queued。
     return false;
-  }
-}
-
-/**
- * 租约内发现已切到无 Bot 模式时，attempt 已在同一事务里标成 skipped。
- * 这里负责把稿件从“发布中”退回“待发布”，否则调用方直接 return 会绕过状态回收，
- * 稿件会永远停在发布中，管理员在工作台也看不到它。
- */
-async function revertHaltedAttemptPosts(
-  logger: FastifyBaseLogger,
-  attemptId: string,
-  tenantId: string,
-  postId: string,
-  batchId: string | null,
-) {
-  try {
-    await prisma.$transaction(async (transaction) => {
-      const posts = batchId
-        ? await transaction.publishBatchItem.findMany({ where: { batchId }, select: { postId: true } })
-        : [{ postId }];
-      for (const item of posts) {
-        // 同一稿件还有其他目标成功或正在发送时，不能把稿件退回待发布。
-        const siblings = await transaction.publishAttempt.findMany({
-          where: { postId: item.postId, id: { not: attemptId } },
-          select: { status: true },
-        });
-        if (siblings.some((sibling) => sibling.status === "running" || sibling.status === "succeeded")) {
-          continue;
-        }
-        const updated = await transaction.post.updateMany({
-          where: { id: item.postId, tenantId, status: { in: ["publishing", "partially_failed", "failed"] } },
-          data: { status: "approved" },
-        });
-        if (updated.count === 0) {
-          continue;
-        }
-        await transaction.postLog.create({
-          data: {
-            tenantId,
-            postId: item.postId,
-            oldStatus: "publishing",
-            newStatus: "approved",
-            comment: "校园墙已切换到无 Bot 模式，自动发布已停止，稿件退回待发布",
-          },
-        });
-      }
-    });
-    logger.info({ attemptId, tenantId, postId }, "publish attempt halted inside lease; posts returned to approved");
-  } catch (error) {
-    logger.warn({ error, attemptId, tenantId, postId }, "failed to revert posts after publish halt for manual mode");
   }
 }
 
@@ -2069,7 +2057,14 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
           if ((await readTenantOperateMode(transaction, attempt.tenantId)) === "manual") {
             await transaction.publishAttempt.updateMany({
               where: { id: attempt.id, status: "running" },
-              data: { status: "skipped", lastError: "校园墙已切换到无 Bot 模式，自动发布已停止", nextRunAt: null },
+              data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
+            });
+            // 与作废 attempt 同事务收尾，避免第二步失败后稿件永远停在“发布中”。
+            await finalizeManualModeHalt(transaction, {
+              attemptId: attempt.id,
+              tenantId: attempt.tenantId,
+              postId: attempt.postId,
+              batchId: attempt.batchId,
             });
             return null;
           }
@@ -2119,9 +2114,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
       const result = publication.value;
       if (result === null) {
         // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功；
-        // 但必须把稿件退回待发布，不能让它停在“发布中”。
+        // 稿件已在同一事务里退回待发布。
         logger.info(attemptLogContext, "personal QQ publish halted inside lease: tenant switched to manual mode");
-        await revertHaltedAttemptPosts(logger, attempt.id, attempt.tenantId, attempt.postId, attempt.batchId);
         return;
       }
 
@@ -2240,7 +2234,14 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
         if ((await readTenantOperateMode(transaction, attempt.tenantId)) === "manual") {
           await transaction.publishAttempt.updateMany({
             where: { id: attempt.id, status: "running" },
-            data: { status: "skipped", lastError: "校园墙已切换到无 Bot 模式，自动发布已停止", nextRunAt: null },
+            data: { status: "skipped", lastError: manualModeHaltSkipReason, nextRunAt: null },
+          });
+          // 与作废 attempt 同事务收尾，避免第二步失败后稿件永远停在“发布中”。
+          await finalizeManualModeHalt(transaction, {
+            attemptId: attempt.id,
+            tenantId: attempt.tenantId,
+            postId: attempt.postId,
+            batchId: attempt.batchId,
           });
           return null;
         }
@@ -2285,9 +2286,8 @@ async function handlePublishAttempt(queue: RuntimeQueue, logger: FastifyBaseLogg
     const result = publication.value;
     if (result === null) {
       // 租约内复查发现已切到无 Bot 模式：本次不发布，也不通知成功；
-      // 但必须把稿件退回待发布，不能让它停在“发布中”。
+      // 稿件已在同一事务里退回待发布。
       logger.info(attemptLogContext, "publish attempt halted inside lease: tenant switched to manual mode");
-      await revertHaltedAttemptPosts(logger, attempt.id, attempt.tenantId, attempt.postId, attempt.batchId);
       return;
     }
 
@@ -2675,6 +2675,7 @@ function isQZoneLoginRequiredError(message: string) {
 
 type AggregateAttempt = {
   status: string;
+  lastError?: string | null;
   nextRunAt: Date | null;
   publishTarget: { required: boolean };
 };
@@ -2683,7 +2684,10 @@ type AggregateAttempt = {
  * 纯逻辑：根据一组发布 attempt 推导稿件/批次的聚合状态。
  * 单稿模式 attempts = 该 post 的 attempts；批量模式 attempts = 该 batch 的 attempts。
  */
-export function deriveAggregateStatus(attempts: AggregateAttempt[]): { status: PostStatus; comment: string } | null {
+export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status: PostStatus; comment: string } | null {
+  // “切到无 Bot 模式”造成的中止不算发布完成：
+  // 否则重启恢复/后续刷新会把没发出去的稿件或批次标记成已发布。
+  const attempts = rawAttempts.filter((attempt) => !isManualModeHaltSkip(attempt));
   if (attempts.length === 0) {
     return null;
   }
