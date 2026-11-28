@@ -432,6 +432,50 @@ describe("deriveAggregateStatus", () => {
     });
   });
 
+  it("does not mark published when another required target was halted", () => {
+    // 两个必需目标：一个成功、另一个被切换到无 Bot 模式中止。
+    // 被中止的目标从未发布，不能因为剩余目标都“完成”就判 published。
+    const result = deriveAggregateStatus([
+      {
+        status: "succeeded",
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+      {
+        status: "skipped",
+        lastError: manualModeHaltSkipReason,
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+    ]);
+
+    expect(result).toEqual({
+      status: "partially_failed",
+      comment: "部分必需发布目标因切换到无 Bot 模式中止，请在管理页查看详情",
+    });
+  });
+
+  it("keeps the post out of published when a halted required target sits beside an ordinary skip", () => {
+    const result = deriveAggregateStatus([
+      {
+        status: "skipped",
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+      {
+        status: "skipped",
+        lastError: manualModeHaltSkipReason,
+        nextRunAt: null,
+        publishTarget: { required: true },
+      },
+    ]);
+
+    expect(result).toEqual({
+      status: "partially_failed",
+      comment: "部分必需发布目标因切换到无 Bot 模式中止，请在管理页查看详情",
+    });
+  });
+
   it("returns null for an all-skipped batch halted by manual mode", () => {
     // 恢复路径的安全网：全部 skipped 且带 halt 标记的批次不能被重启恢复判成已发布。
     const result = deriveAggregateStatus([

@@ -2805,6 +2805,10 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
 
   // 原始集合里的必需目标数（含被 halt 的）：用于识别「必需目标全被 halt」的空集场景。
   const rawRequiredCount = rawAttempts.filter((attempt) => attempt.publishTarget.required).length;
+  // 被本次 halt 中止的必需目标：它从未发布成功，不能让其余目标把它抵消成“完成”。
+  const haltedRequiredCount = rawAttempts.filter(
+    (attempt) => isManualModeHaltSkip(attempt) && attempt.publishTarget.required,
+  ).length;
   const requiredAttempts = attempts.filter((attempt) => attempt.publishTarget.required);
   const optionalAttempts = attempts.filter((attempt) => !attempt.publishTarget.required);
   const completedRequiredAttempts = requiredAttempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "skipped");
@@ -2819,7 +2823,10 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
     if (requiredAttempts.length === 0 && rawRequiredCount > 0) {
       return null;
     }
-    return { status: "published", comment: allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成" };
+    // 仍有必需目标被 halt 时不能判完成：该目标没有发布过，其余必需目标成功也不等于全部完成。
+    if (haltedRequiredCount === 0) {
+      return { status: "published", comment: allAttemptsCompleted ? "所有发布目标已完成" : "必需发布目标已完成" };
+    }
   }
 
   const hasPendingAttempt = requiredAttempts.some(
@@ -2836,6 +2843,14 @@ export function deriveAggregateStatus(rawAttempts: AggregateAttempt[]): { status
       status: hasCompletedAttempt ? "partially_failed" : "failed",
       comment: "发布目标失败，请在管理页查看详情",
     };
+  }
+
+  if (haltedRequiredCount > 0) {
+    // 必需目标被 halt、其余目标都已结束：有成功发布就不能退回待发布（会重复发布），
+    // 判 partially_failed 留在管理页，避免误算成 published。
+    return completedAttempts.length > 0
+      ? { status: "partially_failed", comment: "部分必需发布目标因切换到无 Bot 模式中止，请在管理页查看详情" }
+      : null;
   }
 
   // 剩余只有可选目标（必需目标全被 halt）：既不能判 published，也不能判 publishing；

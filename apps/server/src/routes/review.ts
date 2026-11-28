@@ -722,25 +722,30 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
     if (post.status === "published" && !isAdmin) {
       return reply.code(403).send({ message: "直接完成已发表稿件需要管理员权限" });
     }
-    // 写入只允许命中“已经通过授权判断”的状态：
-    // 审核员若在校验后、写入前遇到 recall/ignore 把 pending_recall 改回 published，
-    // 这里会因状态不匹配而失败，不会再借道完成已发表稿件。
-    const allowedStatuses: Array<"published" | "pending_recall"> = isAdmin
-      ? ["published", "pending_recall"]
-      : ["pending_recall"];
-
     const completed = await runWithActiveTenantLease(prisma, context.selectedTenant.id, async (transaction) => {
+      // 在租约内重新读取状态：审核员读到 pending_recall 后，批准撤回可能把它改回 published，
+      // 写入和留痕都必须基于本次真正命中的状态，避免记录与事实不一致。
+      const current = await transaction.post.findFirst({
+        where: { id: post.id, tenantId: context.selectedTenant.id },
+        select: { status: true },
+      });
+      if (!current || (current.status !== "published" && current.status !== "pending_recall")) {
+        return { ok: false as const, forbidden: false as const };
+      }
+      if (current.status === "published" && !isAdmin) {
+        return { ok: false as const, forbidden: true as const };
+      }
       const changed = await transaction.post.updateMany({
-        where: { id: post.id, tenantId: context.selectedTenant.id, status: { in: allowedStatuses } },
+        where: { id: post.id, tenantId: context.selectedTenant.id, status: current.status },
         data: { status: "recalled", recallIgnored: false, recallIgnoredAt: null },
       });
-      if (changed.count === 0) return false;
+      if (changed.count === 0) return { ok: false as const, forbidden: false as const };
       await transaction.postLog.create({
         data: {
           tenantId: context.selectedTenant.id,
           postId: post.id,
           actorId: context.user.id,
-          oldStatus: post.status,
+          oldStatus: current.status,
           newStatus: "recalled",
           // 明确写清这是「运营者声明已删除」，不是系统验证过的结果。
           comment: "管理员声明已到 QQ 空间手动删除该说说（系统无法验证），据此确认撤回",
@@ -754,17 +759,20 @@ export function registerReviewRoutes(app: FastifyInstance, queue: RuntimeQueue, 
         targetId: post.id,
         detail: {
           displayId: post.displayId,
-          previousStatus: post.status,
+          previousStatus: current.status,
           // 留痕：这是运营者的声明，系统没有、也无法验证空间侧的真实状态。
           verification: "manual_attestation",
         },
       }, transaction);
-      return true;
+      return { ok: true as const, forbidden: false as const };
     });
     if (!completed.active) {
       return reply.code(409).send({ message: "校园墙已暂停或归档" });
     }
-    if (!completed.value) {
+    if (!completed.value.ok) {
+      if (completed.value.forbidden) {
+        return reply.code(403).send({ message: "直接完成已发表稿件需要管理员权限" });
+      }
       return reply.code(409).send({ message: "稿件状态已变化，请刷新后重试" });
     }
 

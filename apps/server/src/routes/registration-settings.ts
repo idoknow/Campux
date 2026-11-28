@@ -161,16 +161,16 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     const body = patchSettingsSchema.parse(request.body ?? {});
     const tenantId = context.selectedTenant.id;
 
-    const stored = await readTenantMailSenderConfig(prisma, tenantId);
-    // 同时取出 updatedAt：未提交后缀时要靠它做条件更新，避免覆盖其他管理员的并发修改。
+    // 发件配置与 updatedAt 必须来自同一次读取：
+    // 分两次读会在并发保存时拿到「旧值 + 新令牌」，从而悄悄覆盖别人的修改。
+    const storedSenderRow = await prisma.tenantMetadata.findUnique({
+      where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
+      select: { value: true, updatedAt: true },
+    });
+    const stored = normalizeMailSenderConfig(storedSenderRow?.value);
     const storedPolicyRow = await prisma.tenantMetadata.findUnique({
       where: { tenantId_key: { tenantId, key: registrationEmailPolicyKey } },
       select: { value: true, updatedAt: true },
-    });
-    // 发件配置只在真正改动时写入；写入前用 updatedAt 条件更新，避免覆盖别人刚保存的新发件人。
-    const storedSenderRow = await prisma.tenantMetadata.findUnique({
-      where: { tenantId_key: { tenantId, key: tenantMailSenderKey } },
-      select: { updatedAt: true },
     });
     const storedPolicy = normalizeRegistrationEmailPolicy(storedPolicyRow?.value);
     const submittedSender = normalizeMailSenderConfig({
@@ -330,7 +330,8 @@ export function registerRegistrationSettingsRoutes(app: FastifyInstance, config:
     // 只清理本次保存实际使用的那份测试凭据；期间完成的更新测试结果保留。
     if (senderChanged) {
       const currentTest = verifiedMailSenderByTenant.get(tenantId);
-      if (!currentTest || (currentTest.fingerprint === verifiedBeforeSave?.fingerprint && currentTest.verifiedAt === verifiedBeforeSave?.verifiedAt)) {
+      // 按对象身份比较：并发的同值测试会创建新对象，不能因为指纹/时间相同就把它删掉。
+      if (!currentTest || currentTest === verifiedBeforeSave) {
         verifiedMailSenderByTenant.delete(tenantId);
       }
     }
